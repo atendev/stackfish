@@ -597,7 +597,7 @@ pub enum AbilityEffect {
     /// `ScriptRuntime::invoke_operation`, so `Game.ChooseN`,
     /// `Game.SelectTargets`, `Game.Ops.SacrificeChosen` and `DiscardChosen`
     /// compose inside the wrapped function. The actions happen simultaneously
-    /// (CR 101.4): each invocation's `sacrifice_chosen` and `discard_chosen`
+    /// (CR 101.4): each invocation's `SacrificeChosen` and `DiscardChosen`
     /// ids (`OperationOutcome::PendingZoneMoves`) accumulate into one batch per
     /// verb, and the zone moves run after the last player's choice, so a
     /// mid-loop replacement or later choice still sees everything about to

@@ -148,24 +148,25 @@ return Game.Ops.GainLife(1)   -- controller gains exactly 1 life
 ```
 
 **Custom function** (general case) — a custom operation never mutates anything itself. It returns
-a plain table describing *intent*, and the engine applies it:
+a `Game.Ops.*` value describing *intent* (or `nil` for no further effect), and the engine applies it:
 
 ```lua
 return function(source, controller)
-    return { gain_life = 1 }
+    return Game.Ops.GainLife(1)
 end
 ```
 
 Called with `(source, controller)` — no `event` parameter (an operation isn't re-checking whether
-it should run; that's the condition's job). Recognized keys on the returned table: `gain_life`,
-`draw_cards`, `deal_damage`, `add_counters`, `sacrifice_chosen`/`discard_chosen` (see
+it should run; that's the condition's job). A function can return `GainLife`, `DrawCards`,
+`DealDamageTo`, `AddCountersTo`, `SacrificeChosen`, `DiscardChosen` (see
 [Choosing N objects/cards mid-resolution](targeting-and-choices.md#choosing-n-objectscards-mid-resolution)),
-and `cast_spell` (see [Casting a spell from a script](targeting-and-choices.md)). `draw_cards`/
-`deal_damage`/`add_counters` go through the exact same replacement-checked/prevention/lifelink
-pipeline the `Game.Ops.*` primitive forms use — see
-[Drawing, dealing damage, and adding counters](targeting-and-choices.md#drawing-dealing-damage-and-adding-counters)
-for the full table shapes. Pump/type-changing effects are still reachable only via the `Game.Ops.*`
-primitive form — see [not-available-yet.md](not-available-yet.md).
+`CastSpell` (see [Casting a spell from a script](targeting-and-choices.md)), or a
+`Game.Ops.Chain(...)` of them. `DrawCards`/`DealDamageTo`/`AddCountersTo` go through the exact same
+replacement-checked/prevention/lifelink pipeline the other `Game.Ops.*` forms use — see
+[Drawing, dealing damage, and adding counters](targeting-and-choices.md#drawing-dealing-damage-and-adding-counters).
+Other declared ops (`Destroy`, `Damage`, ...) can't be returned from a custom function. A raw-key
+table such as `{ gain_life = 1 }` raises an error. Pump/type-changing effects are still reachable
+only via the `Game.Ops.*` primitive form — see [not-available-yet.md](not-available-yet.md).
 
 ## Full worked example
 
@@ -203,7 +204,7 @@ function s.register_abilities(c)
            and event.object == source and event.to == "battlefield"
     end)
     e:SetOperation(function(source, controller)
-        return { gain_life = 1 }
+        return Game.Ops.GainLife(1)
     end)
     e:Register()
 end

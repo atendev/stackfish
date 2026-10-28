@@ -199,7 +199,7 @@ impl Engine {
                         events.extend(new_events);
                         ControlFlow::Continue(events)
                     }
-                    // `draw_cards` with no `ForEachPlayer` context.
+                    // `DrawCards` with no `ForEachPlayer` context.
                     Ok(OperationOutcome::PendingDraw { amount }) => {
                         self.process_state = self.continue_draw_cards(amount, top.controller, top.stack_id, events);
                         ControlFlow::Break(StepStatus::Progressed)

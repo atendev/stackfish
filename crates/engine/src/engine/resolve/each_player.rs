@@ -119,7 +119,7 @@ impl Engine {
                 events_so_far.extend(new_events);
                 self.advance_or_finish_each_player(stack_id, events_so_far, each_player)
             }
-            // `draw_cards`
+            // `DrawCards`
             // TODO: not `ForEachPlayer`-aware; `continue_draw_cards` finishes the whole resolution when its queue drains
             OperationOutcome::PendingDraw { amount } => match each_player {
                 None => self.continue_draw_cards(amount, controller, stack_id, events_so_far),

@@ -223,7 +223,7 @@ e:SetOperation(function(source, controller)
     local target = Game.SelectTargets({ card_types = { "Creature" } })
     -- target is available here exactly as if the call had returned
     -- synchronously
-    return { gain_life = 1 }
+    return Game.Ops.GainLife(1)
 end)
 ```
 
@@ -240,9 +240,9 @@ choice:
 ```lua
 e:SetOperation(function(source, controller)
     if Game.MayChoose() then
-        return { gain_life = 4 }
+        return Game.Ops.GainLife(4)
     end
-    return { gain_life = 1 }
+    return Game.Ops.GainLife(1)
 end)
 ```
 
@@ -302,54 +302,56 @@ e:SetOperation(function(source, controller)
 end)
 ```
 
-A single return table can set both `sacrifice_chosen` and `discard_chosen` — build one manually if an
-operation needs to do both in the same turn (see `Game.Ops.ForEachPlayer`'s own example below).
+To do both in the same turn, return `Game.Ops.Chain(Game.Ops.SacrificeChosen(a), Game.Ops.DiscardChosen(b))`
+(see `Game.Ops.ForEachPlayer`'s own example below). A raw-key table such as `{ sacrifice_chosen = ... }`
+raises an error.
 
 ## Drawing, dealing damage, and adding counters
 
-A custom operation function can return `draw_cards`, `deal_damage`, and/or `add_counters` on its
-result table — the same "describe what happened, the engine applies it for real" split every other
-key on this page already uses:
+A custom operation function returns a `Game.Ops.*` value, or `nil` for no further effect — the same
+"describe what happened, the engine applies it for real" split every other value on this page uses:
 
 ```lua
 e:SetOperation(function(source, controller)
-    return { draw_cards = 2 }
+    return Game.Ops.DrawCards(2)
 end)
 ```
 
-`draw_cards = N` goes through the exact same replaceable draw pipeline `Game.Ops.DrawCards(n)`'s
-primitive form uses (CR 121/616.1) — a redirect effect ("draw a card instead") still applies, and
-two or more competing replacement effects on the same draw still pause for a real ordering choice.
-Always draws for `controller` — there's no way for an operation to make a *different* player draw.
+`Game.Ops.DrawCards(n)` goes through the exact same replaceable draw pipeline as its primitive form
+(CR 121/616.1) — a redirect effect ("draw a card instead") still applies, and two or more competing
+replacement effects on the same draw still pause for a real ordering choice. Always draws for
+`controller` — there's no way for an operation to make a *different* player draw.
 
 ```lua
 e:SetOperation(function(source, controller)
     local chosen = Game.SelectTargets({ card_types = { "Creature" } })
-    return { deal_damage = { { target = chosen, amount = 3 } } }
+    return Game.Ops.DealDamageTo(chosen, 3)
 end)
 ```
 
-`deal_damage`'s value is a list of `{ target = { kind = "object"|"player", id = n }, amount = N }`
-entries — `target` is the exact same tagged-table shape `Game.SelectTargets`/`Game.ChooseN` already
-return, so a picked target can be passed straight through with no reshaping. Each entry becomes a
-real `DamageDealt` event, going through the normal replacement/prevention pipeline (CR 615/616) and
-applying Deathtouch/Wither/Infect/Lifelink exactly like combat damage or `Game.Ops.Damage` already
-do — not just a marker. CR 601.2d "divide as you choose" still isn't modeled — each listed target
-takes its full `amount` independently.
+`Game.Ops.DealDamageTo(pick, amount)` takes a `{ kind = "object"|"player", id = n }` pick, the exact
+shape `Game.SelectTargets`/`Game.ChooseN` return, so a picked target passes straight through. It
+becomes a real `DamageDealt` event, going through the normal replacement/prevention pipeline
+(CR 615/616) and applying Deathtouch/Wither/Infect/Lifelink exactly like combat damage or
+`Game.Ops.Damage`. CR 601.2d "divide as you choose" still isn't modeled — each `DealDamageTo` deals its
+full `amount` independently.
 
 ```lua
 e:SetOperation(function(source, controller)
-    return { add_counters = { { target = { kind = "object", id = some_id }, counter = "PlusOnePlusOne", amount = 1 } } }
+    return Game.Ops.AddCountersTo({ kind = "object", id = some_id }, "PlusOnePlusOne", 1)
 end)
 ```
 
-`add_counters`'s value is a list of `{ target, counter, amount }` entries — `counter` is a counter
-kind name (`"PlusOnePlusOne"`, `"MinusOneMinusOne"`, `"Loyalty"`, `"Poison"`, `"Energy"`,
-`"Experience"`, `"Charge"`, or any other string for a custom counter kind). Object targets only — a
-player target is silently skipped, same as every other CR 613 counter-adding shape in this engine.
+`Game.Ops.AddCountersTo(pick, counter, amount)` — `counter` is a counter kind name
+(`"PlusOnePlusOne"`, `"MinusOneMinusOne"`, `"Loyalty"`, `"Poison"`, `"Energy"`, `"Experience"`,
+`"Charge"`, or any other string for a custom counter kind). Object targets only — a player pick is
+silently skipped, same as every other CR 613 counter-adding shape in this engine.
 
-All three keys can be combined in one return table alongside `gain_life`/`sacrifice_chosen`/
-`discard_chosen` — every key is read unconditionally, not an `if`/`else if`.
+To return several of these, use `Game.Ops.Chain(a, b, ...)`. A chain inside a custom function may hold
+`GainLife` (applied directly) plus at most one pending kind: zone moves (`SacrificeChosen` and
+`DiscardChosen` together are fine), `DrawCards`, events (`DealDamageTo` and `AddCountersTo` together are
+fine), or `CastSpell`. Mixing two pending kinds raises an error. TODO: carry several requests in one
+operation outcome. Other declared ops (`Destroy`, `Damage`, ...) can't be returned from a custom function.
 
 ## Sacrificing/discarding at random
 
@@ -387,8 +389,8 @@ count-only per CR 400.2/402.3). This is how a `ForEachPlayer` body computes some
 own "the fewest lands any player controls" before ever asking a question — see
 [card-script-basics.md](card-script-basics.md) for the full snapshot shape.
 
-CR 101.4's "then the actions happen simultaneously": every player's own `sacrifice_chosen`/
-`discard_chosen` answer is accumulated, not applied immediately — the real zone moves happen only
+CR 101.4's "then the actions happen simultaneously": every player's own `SacrificeChosen`/
+`DiscardChosen` answer is accumulated, not applied immediately — the real zone moves happen only
 once every player (including one whose own body never asked anything, because they were already at
 the minimum) has been invoked. A replacement effect reading the battlefield mid-loop still sees every
 permanent that's *about to* leave, not one that already has.

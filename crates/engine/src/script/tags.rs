@@ -7,10 +7,13 @@ use mlua::UserData;
 use crate::types::ability::{AbilityEffect, ConditionPrimitive, InterveningIfPrimitive, TokenSpec};
 use crate::types::cost::AdditionalCost;
 use crate::types::effect::{ConsumptionPolicy, EffectDuration, EffectPrimitive, Layer, ReplacementPayload};
-use crate::types::ids::ScriptHandle;
+use crate::types::counter::CounterKind;
+use crate::types::ids::{ObjectId, ScriptHandle, Target};
 use crate::types::mana::ManaCost;
 use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect, LandPlayAffected};
 use crate::types::zone::ZoneKind;
+
+use super::types::ScriptZoneMoveKind;
 
 /// Wraps `ConditionPrimitive` so `Game.Conditions.Enters` and `Always` are Lua
 /// values a condition script can `return`, decoded by `decode_condition_value`.
@@ -42,6 +45,48 @@ impl UserData for OncePerTurnTag {}
 #[derive(Clone)]
 pub(crate) struct OperationTag(pub(crate) AbilityEffect);
 impl UserData for OperationTag {}
+
+/// One step of a `:SetOperation` callback's return value, built by the
+/// `Game.Ops.*` constructors that act on picks the script gathered itself.
+/// `handle_operation_result` turns the steps into an `OperationOutcome`.
+#[derive(Clone)]
+pub(crate) enum ResultItem {
+    GainLife(i32),
+    DrawCards(u32),
+    ZoneMove(ScriptZoneMoveKind, Vec<ObjectId>),
+    CastSpell { card: ObjectId, modes: Vec<u32>, targets: Vec<Target>, x_value: Option<u32>, free: bool },
+    DealDamage { target: Target, amount: u32 },
+    AddCounters { target: Target, counter: CounterKind, amount: i32 },
+}
+
+/// A `:SetOperation` callback's return value: `Game.Ops.SacrificeChosen`,
+/// `DiscardChosen`, `CastSpell`, `DealDamageTo`, `AddCountersTo`, or a
+/// `Game.Ops.Chain` holding any of them. Plain `OperationTag`s for `GainLife`
+/// and `DrawCards` are accepted too and read through `ResultItem`.
+#[derive(Clone)]
+pub(crate) struct OperationResultTag(pub(crate) Vec<ResultItem>);
+impl UserData for OperationResultTag {}
+
+/// The steps of a value a callback returns or a `Game.Ops.Chain` receives.
+/// Only `GainLife` and `DrawCards` exist in both the declared and the
+/// script-pick families; any other `OperationTag` needs the ability's own
+/// targets and has no runtime form. The error is a message for the caller to
+/// wrap.
+pub(crate) fn result_items(value: &mlua::Value) -> Result<Vec<ResultItem>, String> {
+    match value {
+        mlua::Value::UserData(ud) if ud.is::<OperationResultTag>() => {
+            Ok(ud.borrow::<OperationResultTag>().map_err(|e| e.to_string())?.0.clone())
+        }
+        mlua::Value::UserData(ud) if ud.is::<OperationTag>() => {
+            match ud.borrow::<OperationTag>().map_err(|e| e.to_string())?.0.clone() {
+                AbilityEffect::GainLife(amount) => Ok(vec![ResultItem::GainLife(amount)]),
+                AbilityEffect::DrawCards(amount) => Ok(vec![ResultItem::DrawCards(amount)]),
+                _ => Err("this Game.Ops value acts on the ability's targets and can't be returned from a custom operation or mixed with Game.Ops.SacrificeChosen, DiscardChosen, CastSpell, DealDamageTo or AddCountersTo".to_string()),
+            }
+        }
+        other => Err(format!("expected a Game.Ops.* value, got {}", other.type_name())),
+    }
+}
 
 /// `Game.Ops.ForEachPlayer(x)`'s return value (CR 101.4). `x` is a per-card
 /// Lua function or a bare tag, so this can't be an `OperationTag`, whose

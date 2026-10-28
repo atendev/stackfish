@@ -19,7 +19,7 @@ end
 
 const OPERATION_GAIN_LIFE_1: &str = r#"
 return function(source, controller)
-    return { gain_life = 1 }
+    return Game.Ops.GainLife(1)
 end
 "#;
 

@@ -30,7 +30,7 @@ function s.register_abilities(c)
            and event.to == "battlefield"
     end)
     e:SetOperation(function(source, controller)
-        return { gain_life = 1 }
+        return Game.Ops.GainLife(1)
     end)
     e:Register()
 end

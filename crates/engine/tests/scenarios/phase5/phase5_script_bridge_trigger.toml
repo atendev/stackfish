@@ -18,7 +18,7 @@ end
 """
 trigger_operation = """
 return function(source, controller)
-    return { gain_life = 1 }
+    return Game.Ops.GainLife(1)
 end
 """
 

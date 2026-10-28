@@ -474,7 +474,7 @@ pub enum ProcessState {
     /// `request` are the suspended coroutine and its ask. `stack_id`, `controller` and
     /// `events_so_far` are the popped resolution's progress. `each_player` is set only
     /// inside a `ForEachPlayer` invocation. `source` is kept because a resumed
-    /// coroutine needs it to build `deal_damage` and `add_counters` events.
+    /// coroutine needs it to build `DealDamageTo` and `AddCountersTo` events.
     AwaitingScriptChoice {
         thread: ScriptHandle,
         request: ScriptChoiceRequest,

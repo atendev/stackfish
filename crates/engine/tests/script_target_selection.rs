@@ -12,7 +12,7 @@ function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ card_types = { "Creature" } })
-        return { gain_life = target.id }
+        return Game.Ops.GainLife(target.id)
     end)
     e:Register()
 end
@@ -26,9 +26,9 @@ function s.register_abilities(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ type = "player" })
         if target.kind == "player" then
-            return { gain_life = 100 + target.id }
+            return Game.Ops.GainLife(100 + target.id)
         end
-        return { gain_life = target.id }
+        return Game.Ops.GainLife(target.id)
     end)
     e:Register()
 end
@@ -42,9 +42,9 @@ function s.register_abilities(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ type = "any" })
         if target.kind == "player" then
-            return { gain_life = 100 + target.id }
+            return Game.Ops.GainLife(100 + target.id)
         end
-        return { gain_life = target.id }
+        return Game.Ops.GainLife(target.id)
     end)
     e:Register()
 end
@@ -56,7 +56,7 @@ local s = {}
 function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
-        return { gain_life = 1 }
+        return Game.Ops.GainLife(1)
     end)
     e:Register()
 end
@@ -398,7 +398,7 @@ fn a_script_that_never_yields_still_resolves_synchronously() {
 fn invoke_operation_finishes_synchronously_when_the_script_never_yields() {
     use stackfish_engine::script::ScriptRuntime;
     let mut runtime = ScriptRuntime::new();
-    let handle = runtime.load_function("return function(source, controller) return { gain_life = 1 } end").unwrap();
+    let handle = runtime.load_function("return function(source, controller) return Game.Ops.GainLife(1) end").unwrap();
     let mut state = base_state();
     let outcome = runtime.invoke_operation(handle, &mut state, ObjectId(0), PlayerId(0));
     assert!(matches!(outcome, Ok(stackfish_engine::script::OperationOutcome::Finished)), "outcome: {outcome:?}");

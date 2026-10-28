@@ -291,7 +291,7 @@ fn game_effects_remove_all_abilities_self_registers_and_strips_printed_flying() 
 fn effect_decodes_remove_all_abilities_from_a_script_backed_function() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime
-        .load_function("return function(source, controller) return { remove_all_abilities = true } end")
+        .load_function("return function(source, controller) return Game.Effects.RemoveAllAbilities end")
         .unwrap();
 
     let state = combat_state();

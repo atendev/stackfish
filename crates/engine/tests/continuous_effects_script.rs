@@ -86,7 +86,7 @@ fn affects_predicate_erroring_script_is_an_error_not_a_panic() {
 fn effect_decodes_modify_pt() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime
-        .load_function("return function(source, controller) return { modify_pt = { power = 2, toughness = 3 } } end")
+        .load_function("return function(source, controller) return Game.Effects.ModifyPT(2, 3) end")
         .unwrap();
 
     let state = base_state();
@@ -98,7 +98,7 @@ fn effect_decodes_modify_pt() {
 fn effect_decodes_add_keyword() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime
-        .load_function("return function(source, controller) return { add_keyword = { \"Flying\", \"Vigilance\" } } end")
+        .load_function("return function(source, controller) return Game.Effects.AddKeyword({ \"Flying\", \"Vigilance\" }) end")
         .unwrap();
 
     let state = base_state();
@@ -110,7 +110,7 @@ fn effect_decodes_add_keyword() {
 fn effect_decodes_remove_keyword() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime
-        .load_function("return function(source, controller) return { remove_keyword = { \"Defender\" } } end")
+        .load_function("return function(source, controller) return Game.Effects.RemoveKeyword(\"Defender\") end")
         .unwrap();
 
     let state = base_state();
@@ -122,7 +122,7 @@ fn effect_decodes_remove_keyword() {
 fn effect_decodes_ignore_keyword() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime
-        .load_function("return function(source, controller) return { ignore_keyword = { \"Defender\" } } end")
+        .load_function("return function(source, controller) return Game.Effects.IgnoreKeyword(\"Defender\") end")
         .unwrap();
 
     let state = base_state();
@@ -134,7 +134,7 @@ fn effect_decodes_ignore_keyword() {
 fn effect_decodes_switch_pt() {
     let mut runtime = ScriptRuntime::new();
     let handle =
-        runtime.load_function("return function(source, controller) return { switch_pt = true } end").unwrap();
+        runtime.load_function("return function(source, controller) return Game.Effects.SwitchPT end").unwrap();
 
     let state = base_state();
     let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
@@ -145,7 +145,7 @@ fn effect_decodes_switch_pt() {
 fn effect_decodes_double_pt() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime
-        .load_function("return function(source, controller) return { double_pt = { power = true, toughness = false } } end")
+        .load_function("return function(source, controller) return Game.Effects.DoublePT(true, false) end")
         .unwrap();
 
     let state = base_state();
@@ -154,13 +154,37 @@ fn effect_decodes_double_pt() {
 }
 
 #[test]
-fn effect_with_no_recognized_key_resolves_to_none() {
+fn effect_returning_nil_resolves_to_none() {
     let mut runtime = ScriptRuntime::new();
-    let handle = runtime.load_function("return function(source, controller) return {} end").unwrap();
+    let handle = runtime.load_function("return function(source, controller) return nil end").unwrap();
 
     let state = base_state();
     let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
-    assert_eq!(decoded, None, "an empty table has no recognized shape - skip rather than guess");
+    assert_eq!(decoded, None, "nil means no effect this call");
+}
+
+#[test]
+fn effect_returning_a_raw_table_is_an_error() {
+    let mut runtime = ScriptRuntime::new();
+    let handle = runtime
+        .load_function("return function(source, controller) return { modify_pt = { power = 1, toughness = 1 } } end")
+        .unwrap();
+
+    let state = base_state();
+    let error = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).expect_err("raw table");
+    assert!(format!("{error:?}").contains("Game.Effects"), "error: {error:?}");
+}
+
+#[test]
+fn add_keyword_takes_a_string_or_a_list_and_rejects_other_types() {
+    let mut runtime = ScriptRuntime::new();
+    let state = base_state();
+    for (body, ok) in [("\"Flying\"", true), ("{ \"Flying\", \"Vigilance\" }", true), ("7", false)] {
+        let source = format!("return function(source, controller) return Game.Effects.AddKeyword({body}) end");
+        let handle = runtime.load_function(&source).unwrap();
+        let result = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None);
+        assert_eq!(result.is_ok(), ok, "{body}: {result:?}");
+    }
 }
 
 #[test]
@@ -190,7 +214,7 @@ local s = {}
 function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
-    e:SetEffect(function(source, controller) return { modify_pt = { power = 1, toughness = 1 } } end)
+    e:SetEffect(function(source, controller) return Game.Effects.ModifyPT(1, 1) end)
     e:SetAffected({ self_only = true })
     e:Register()
 end
@@ -265,7 +289,7 @@ fn script_backed_effect_payload_applies_through_effective_characteristics() {
 
     let mut script_runtime = ScriptRuntime::new();
     let handle = script_runtime
-        .load_function("return function(source, controller) return { add_keyword = { \"Flying\" } } end")
+        .load_function("return function(source, controller) return Game.Effects.AddKeyword(\"Flying\") end")
         .unwrap();
     state.continuous_effects.push(script_effect(
         source,
@@ -288,7 +312,7 @@ fn mismatched_layer_and_decoded_shape_is_skipped_not_applied() {
     let mut script_runtime = ScriptRuntime::new();
     // The declared layer is PowerToughnessModifying but the script decodes to AddKeyword. validate_layer_effect_pairing can catch that only for a Primitive effect at :Register() time.
     let handle = script_runtime
-        .load_function("return function(source, controller) return { add_keyword = { \"Flying\" } } end")
+        .load_function("return function(source, controller) return Game.Effects.AddKeyword(\"Flying\") end")
         .unwrap();
     state.continuous_effects.push(script_effect(
         source,

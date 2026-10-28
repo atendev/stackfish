@@ -252,9 +252,9 @@ pub fn proof_cards() -> FixtureCardSource {
     e:SetCondition(Game.Conditions.Enters)
     e:SetOperation(function(source, controller)
         if Game.MayChoose() then
-            return { draw_cards = 1 }
+            return Game.Ops.DrawCards(1)
         end
-        return {}
+        return nil
     end)
     e:Register()"#,
     );

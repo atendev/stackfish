@@ -62,7 +62,7 @@ pub enum ScriptChoiceRequest {
 
 /// Which zone-move verb a script operation's returned table asked for
 /// (`Game.Ops.SacrificeChosen`, `DiscardChosen`), decoded from the
-/// `sacrifice_chosen` and `discard_chosen` keys by
+/// `Game.Ops.SacrificeChosen` and `DiscardChosen` steps by
 /// `ScriptRuntime::handle_operation_result`. A small local enum and not
 /// `ScriptedZoneMoveKind`, because `script` doesn't depend on `engine`
 /// internals. The consumers in `engine::resolve::misc_effects` and
@@ -77,30 +77,28 @@ pub enum ScriptZoneMoveKind {
 /// produced. For the request variants "outcome describes, engine acts":
 /// `ScriptRuntime` can't reach the engine pipelines, so it hands the request
 /// up.
-/// - `Finished`: the operation ran to completion, with any recognized effect
-///   key applied. A script that never calls `Game.SelectTargets` only
+/// - `Finished`: the operation ran to completion, with any `GainLife` applied. A script that never calls `Game.SelectTargets` only
 ///   produces this.
 /// - `NeedsChoice`: the script yielded a request and must be resumed with
 ///   `resume_operation`. Only `Engine::submit_script_choice` should call it.
-/// - `PendingZoneMoves`: the `sacrifice_chosen` and `discard_chosen` result
-///   keys, one entry per distinct verb (at most two today, as a Balance-style
+/// - `PendingZoneMoves`: the `SacrificeChosen` and `DiscardChosen` steps, one
+///   entry per distinct verb (at most two today, as a Balance-style
 ///   body can ask for both). A zone move needs the replacement-checked
 ///   `Engine::continue_scripted_zone_move`, unlike a direct `GameState`
-///   mutation such as `gain_life`.
-/// - `PendingCast`: `Game.Ops.CastSpell(card, opts)`'s `{ cast_spell = {...} }`
+///   mutation such as `GainLife`.
+/// - `PendingCast`: `Game.Ops.CastSpell(card, opts)`
 ///   (CR 601.2, 702.85a-style). Casting needs `commands::execute_command`'s
 ///   full pipeline, so `engine::resolve::misc_effects::resolve_misc_or_script_effect`,
 ///   the only consumer, builds a synthetic `CastSpell` like
 ///   `Engine::submit_cascade_cast` and `submit_madness_cast`. `free`
 ///   (CR 702.85a) reuses `GameState::pending_free_cast`, which hardcodes
 ///   `from_zone: Exile`.
-/// - `PendingDraw`: `draw_cards = N`, the custom-function equivalent of
-///   `Game.Ops.DrawCards(n)`. `Engine::continue_draw_cards` needs `&mut Engine`
-///   and can pause for a CR 616.1 ordering choice (a Words of Wind redirect).
+/// - `PendingDraw`: `Game.Ops.DrawCards(n)` returned from a custom function.
+///   `Engine::continue_draw_cards` needs `&mut Engine` and can pause for a CR 616.1 ordering choice (a Words of Wind redirect).
 ///   `player` is the call's `controller`, since a custom function can't make a
 ///   different player draw.
-/// - `PendingEvents`: `deal_damage` and `add_counters`. `resolve_damage_effect`
-///   and `resolve_counters_effect` only build `DamageDealt` and `CounterAdded`,
+/// - `PendingEvents`: `Game.Ops.DealDamageTo` and `AddCountersTo`.
+///   `resolve_damage_effect` and `resolve_counters_effect` only build `DamageDealt` and `CounterAdded`,
 ///   and the existing `ReplacementCheck` and `CommitEvents` apply CR 615 and
 ///   616 prevention and replacement, deathtouch, wither, infect and lifelink.
 ///   This hands back events and not a request, with no pause, so the caller

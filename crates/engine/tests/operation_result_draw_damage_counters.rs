@@ -1,6 +1,6 @@
-//! A custom `s.operation()` may return `draw_cards`, `deal_damage` and `add_counters` on its result table, the gap named by the TODO in `ScriptRuntime::handle_operation_result`.
-//! `draw_cards` yields `OperationOutcome::PendingDraw` through `continue_draw_cards`, including its CR 616.1 ordering pause. `deal_damage` and `add_counters` yield `PendingEvents` through `ReplacementCheck` and `CommitEvents`, so prevention, lifelink, deathtouch and counter application apply.
-//! `AwaitingScriptChoice` carries a `source: ObjectId`, proven by a script that yields on `Game.SelectTargets` and then returns `deal_damage`.
+//! A custom `s.operation()` may return `Game.Ops.DrawCards`, `DealDamageTo` and `AddCountersTo`, the gap named by the TODO in `ScriptRuntime::handle_operation_result`.
+//! `DrawCards` yields `OperationOutcome::PendingDraw` through `continue_draw_cards`, including its CR 616.1 ordering pause. `DealDamageTo` and `AddCountersTo` yield `PendingEvents` through `ReplacementCheck` and `CommitEvents`, so prevention, lifelink, deathtouch and counter application apply.
+//! `AwaitingScriptChoice` carries a `source: ObjectId`, proven by a script that yields on `Game.SelectTargets` and then returns `DealDamageTo`.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -122,7 +122,7 @@ const DRAW_TWO_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
     return function(source, controller)
-        return { draw_cards = 2 }
+        return Game.Ops.DrawCards(2)
     end
 end
 return s
@@ -172,7 +172,7 @@ const DRAW_ONE_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
     return function(source, controller)
-        return { draw_cards = 1 }
+        return Game.Ops.DrawCards(1)
     end
 end
 return s
@@ -220,7 +220,7 @@ const DEAL_DAMAGE_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
     return function(source, controller)
-        return { deal_damage = { { target = { kind = "object", id = %TARGET% }, amount = 3 } } }
+        return Game.Ops.DealDamageTo({ kind = "object", id = %TARGET% }, 3)
     end
 end
 return s
@@ -257,7 +257,7 @@ const ADD_COUNTERS_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
     return function(source, controller)
-        return { add_counters = { { target = { kind = "object", id = %TARGET% }, counter = "PlusOnePlusOne", amount = 2 } } }
+        return Game.Ops.AddCountersTo({ kind = "object", id = %TARGET% }, "PlusOnePlusOne", 2)
     end
 end
 return s
@@ -290,17 +290,18 @@ const DEAL_DAMAGE_AND_ADD_COUNTERS_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
     return function(source, controller)
-        return {
-            deal_damage = { { target = { kind = "object", id = %TARGET% }, amount = 1 } },
-            add_counters = { { target = { kind = "object", id = %TARGET% }, counter = "PlusOnePlusOne", amount = 1 } },
-        }
+        local target = { kind = "object", id = %TARGET% }
+        return Game.Ops.Chain(
+            Game.Ops.DealDamageTo(target, 1),
+            Game.Ops.AddCountersTo(target, "PlusOnePlusOne", 1)
+        )
     end
 end
 return s
 "#;
 
 #[test]
-fn a_single_return_table_can_combine_deal_damage_and_add_counters() {
+fn a_chain_can_combine_deal_damage_and_add_counters() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -328,7 +329,7 @@ local s = {}
 function s.operation()
     return function(source, controller)
         local chosen = Game.SelectTargets({ card_types = { "Creature" } })
-        return { deal_damage = { { target = chosen, amount = 2 } } }
+        return Game.Ops.DealDamageTo(chosen, 2)
     end
 end
 return s

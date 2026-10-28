@@ -10,7 +10,7 @@ use crate::types::ability::{
     AbilityEffect, ConditionPrimitive, CreatureTokenSpec, EntryControl, InterveningIfPrimitive, NamedToken, SearchDestination,
     TokenSpec, UnlessPaidConsequence,
 };
-use crate::types::card::{CardTypeSet, Subtype};
+use crate::types::card::{CardTypeSet, KeywordSet, Subtype};
 use crate::types::cost::{AdditionalCost, CostModifierTarget, CostSpec, FilterController};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, EffectDuration, EffectFilter, EffectPrimitive, Layer, ReplacementPayload,
@@ -27,7 +27,8 @@ use super::builders::{
 };
 use super::decode::{
     decode_card_type_names, decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table,
-    decode_filter_table, decode_landwalk_quality, decode_subtypes, parse_card_type_name, parse_color_letter,
+    decode_filter_table, decode_landwalk_quality, decode_subtypes, decode_target_pick, parse_card_type_name,
+    parse_color_letter,
     parse_color_string, parse_counter_kind_name, parse_filter_controller_name, parse_keyword_name,
     parse_mana_unit_letter, parse_supertype_name, parse_zone_kind_name,
 };
@@ -35,9 +36,10 @@ use super::tags::{
     ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DrawLimitAffectedTag, DurationTag,
     EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, ForEachPlayerTag, HandRevealAffectedTag,
     HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LandPlayAffectedTag, LayerTag, OncePerTurnTag,
-    OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, TokenTag,
+    OperationResultTag, OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, ResultItem, TokenTag,
+    result_items,
 };
-use super::types::{to_lua_err, ScriptError, ScriptRegistry};
+use super::types::{to_lua_err, ScriptError, ScriptRegistry, ScriptZoneMoveKind};
 
 /// Builds `Game.Conditions`, `Ops`, `Costs`, `Layers`, `Effects` and the
 /// `Create*Ability` sugar and binds it into `lua`'s globals. It is not all of
@@ -329,11 +331,21 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 "Game.Ops.Chain needs at least one Game.Ops.* value".to_string(),
             ));
         }
+        // A chain holding a script-pick result (`SacrificeChosen`, `CastSpell`, `DealDamageTo`, ...) is a callback return value and not a declared ability effect, so it builds an `OperationResultTag`. Only `GainLife` and `DrawCards` mix in from the declared family.
+        if args.iter().any(|arg| matches!(arg, Value::UserData(ud) if ud.is::<OperationResultTag>())) {
+            let mut items = Vec::new();
+            for (index, arg) in args.iter().enumerate() {
+                items.extend(result_items(arg).map_err(|message| {
+                    mlua::Error::RuntimeError(format!("Game.Ops.Chain argument {}: {message}", index + 1))
+                })?);
+            }
+            return lua.create_userdata(OperationResultTag(items));
+        }
         let mut entries = Vec::with_capacity(args.len());
         for (index, arg) in args.into_iter().enumerate() {
             entries.push(chain_entry(lua, "Chain", index + 1, arg)?);
         }
-        Ok(OperationTag(AbilityEffect::Chain { entries, words: None }))
+        lua.create_userdata(OperationTag(AbilityEffect::Chain { entries, words: None }))
     })?;
     ops.set("Chain", chain)?;
     // `Game.Ops.ChainEach({ op, words }, ...)`: the same, but entry i owns `words` consecutive target words (0 for an entry that acts on its controller). `check_chain_words` verifies the counts when the ability registers or the spell loads, because the operation and the target requirement are declared separately.
@@ -555,8 +567,21 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     )?;
     effects.set(
         "AddKeyword",
-        lua.create_function(|_, name: String| {
-            let set = parse_keyword_name(&name).map_err(to_lua_err)?;
+        lua.create_function(|_, names: Value| {
+            let names = match names {
+                Value::String(name) => vec![name.to_str()?.to_string()],
+                Value::Table(list) => list.sequence_values::<String>().collect::<mlua::Result<Vec<_>>>()?,
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "Game.Effects.AddKeyword expects a keyword name or a list of names, got {}",
+                        other.type_name()
+                    )))
+                }
+            };
+            let mut set = KeywordSet::empty();
+            for name in names {
+                set |= parse_keyword_name(&name).map_err(to_lua_err)?;
+            }
             Ok(EffectPrimitiveTag(EffectPrimitive::AddKeyword(set)))
         })?,
     )?;
@@ -660,6 +685,13 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     effects.set(
         "AddSubtype",
         lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddSubtype(vec![Subtype(name)]))))?,
+    )?;
+    // CR 613.8a: `Game.Effects.DoublePT(power, toughness)` takes two booleans for which values double. It is a distinct primitive so `layers::depends_on` can see it.
+    effects.set(
+        "DoublePT",
+        lua.create_function(|_, (power, toughness): (bool, bool)| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::DoublePT { power, toughness }))
+        })?,
     )?;
     effects.set("SwitchPT", EffectPrimitiveTag(EffectPrimitive::SwitchPT))?;
     effects.set("RemoveAllAbilities", EffectPrimitiveTag(EffectPrimitive::RemoveAllAbilities))?;
@@ -1043,57 +1075,52 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         )
         .eval()?;
 
-    // `Game.Ops.SacrificeChosen(list)` and `DiscardChosen(list)` (CR 701.21, 701.9): take `Game.ChooseN`'s return shape and build the `sacrifice_chosen` or `discard_chosen` result key that `ScriptRuntime::handle_operation_result` decodes into `OperationOutcome::PendingZoneMoves` (see it for why this can't mutate `GameState` as `{ gain_life = n }` does). Plain functions and not yields, so `e:SetOperation(function(...) ... return Game.Ops.SacrificeChosen(ids) end)` returns normally.
-    let sacrifice_chosen: Function = lua
-        .load(
-            r#"
-            function(list)
-                local ids = {}
-                for _, v in ipairs(list) do
-                    if v.kind == "object" then table.insert(ids, v.id) end
-                end
-                return { sacrifice_chosen = ids }
-            end
-            "#,
-        )
-        .eval()?;
-    ops.set("SacrificeChosen", sacrifice_chosen)?;
-    let discard_chosen: Function = lua
-        .load(
-            r#"
-            function(list)
-                local ids = {}
-                for _, v in ipairs(list) do
-                    if v.kind == "object" then table.insert(ids, v.id) end
-                end
-                return { discard_chosen = ids }
-            end
-            "#,
-        )
-        .eval()?;
-    ops.set("DiscardChosen", discard_chosen)?;
-
-    // `Game.Ops.CastSpell(card, opts)` (CR 601.2, 702.85a-style "cast this without paying its mana cost"), reshaped into a result-table key that `handle_operation_result` decodes into an `OperationOutcome` the engine acts on, like `SacrificeChosen` (see `OperationOutcome::PendingCast`). `opts.targets` takes `Game.SelectTargets` or `Game.ChooseN` picks (`{kind, id}` tables) for the cast spell's targets, gathered by the calling script first. `opts.free` (default `false`) is CR 702.85a's "without paying its mana cost".
-    // TODO: `opts.free` hardcodes casting from exile (see `OperationOutcome::PendingCast`), so only Cascade-shaped "free from exile" works, not an arbitrary zone
-    let cast_spell: Function = lua
-        .load(
-            r#"
-            function(card, opts)
-                opts = opts or {}
-                return {
-                    cast_spell = {
-                        card = card,
-                        free = opts.free or false,
-                        modes = opts.modes or {},
-                        targets = opts.targets or {},
-                        x_value = opts.x_value,
-                    }
+    // CR 701.21, 701.9: `Game.Ops.SacrificeChosen(list)` and `DiscardChosen(list)` take `Game.ChooseN`'s return shape. They hand the ids up as `OperationOutcome::PendingZoneMoves` because a zone move needs the replacement-checked pipeline, unlike `GainLife`, which mutates `GameState` directly.
+    for (name, kind) in [("SacrificeChosen", ScriptZoneMoveKind::Sacrifice), ("DiscardChosen", ScriptZoneMoveKind::Discard)] {
+        let ctor = lua.create_function(move |_, list: Table| {
+            let mut ids = Vec::new();
+            for pick in list.sequence_values::<Table>() {
+                let pick = pick?;
+                let pick_kind: String = pick.get("kind")?;
+                if pick_kind == "object" {
+                    let id: u64 = pick.get("id")?;
+                    ids.push(ObjectId(id));
                 }
-            end
-            "#,
-        )
-        .eval()?;
+            }
+            Ok(OperationResultTag(vec![ResultItem::ZoneMove(kind, ids)]))
+        })?;
+        ops.set(name, ctor)?;
+    }
+
+    // CR 601.2, 702.85a: `Game.Ops.CastSpell(card, opts)`. `opts.targets` takes `Game.SelectTargets` or `Game.ChooseN` picks for the cast spell. `opts.free` (default false) casts without paying the mana cost.
+    // TODO: `opts.free` hardcodes casting from exile (see `OperationOutcome::PendingCast`), so only Cascade-shaped "free from exile" works, not an arbitrary zone
+    let cast_spell = lua.create_function(|_, (card, opts): (u64, Option<Table>)| {
+        let (mut free, mut modes, mut targets, mut x_value) = (false, Vec::new(), Vec::new(), None);
+        if let Some(opts) = opts {
+            free = opts.get::<_, Option<bool>>("free")?.unwrap_or(false);
+            modes = opts.get::<_, Option<Vec<u32>>>("modes")?.unwrap_or_default();
+            x_value = opts.get::<_, Option<u32>>("x_value")?;
+            if let Some(picks) = opts.get::<_, Option<Vec<Table>>>("targets")? {
+                for pick in &picks {
+                    targets.push(decode_target_pick(pick).map_err(to_lua_err)?);
+                }
+            }
+        }
+        Ok(OperationResultTag(vec![ResultItem::CastSpell { card: ObjectId(card), modes, targets, x_value, free }]))
+    })?;
     ops.set("CastSpell", cast_spell)?;
+
+    // `Game.Ops.DealDamageTo(pick, amount)` and `AddCountersTo(pick, counter, amount)` act on one `{ kind, id }` pick from `Game.SelectTargets` or `Game.ChooseN`. They hand back events (`OperationOutcome::PendingEvents`) so CR 615 and 616 prevention and replacement still apply.
+    let deal_damage_to = lua.create_function(|_, (pick, amount): (Table, u32)| {
+        let target = decode_target_pick(&pick).map_err(to_lua_err)?;
+        Ok(OperationResultTag(vec![ResultItem::DealDamage { target, amount }]))
+    })?;
+    ops.set("DealDamageTo", deal_damage_to)?;
+    let add_counters_to = lua.create_function(|_, (pick, counter, amount): (Table, String, i32)| {
+        let target = decode_target_pick(&pick).map_err(to_lua_err)?;
+        Ok(OperationResultTag(vec![ResultItem::AddCounters { target, counter: parse_counter_kind_name(&counter), amount }]))
+    })?;
+    ops.set("AddCountersTo", add_counters_to)?;
 
     // `Game.RegisterKeyword(source, name)`: sugar for the layer-6 (`AbilityAdding`) self-only static ability every printed keyword needs (CR 613.1f). Equivalent to:
     //   local e = Game.CreateStaticAbility(source)

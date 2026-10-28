@@ -1,4 +1,4 @@
-//! CR 603: a real Lua condition and operation, invoked through `ScriptRuntime`, power an ETB "gain 1 life" trigger. The operation returns a plain table (`{ gain_life = 1 }`) that `invoke_operation` decodes, so Lua asks and Rust decides.
+//! CR 603: a real Lua condition and operation, invoked through `ScriptRuntime`, power an ETB "gain 1 life" trigger. The operation returns a plain table (`Game.Ops.GainLife(1)`) that `invoke_operation` decodes, so Lua asks and Rust decides.
 //! Registration is Rust-side, and only `GameEventKind::ZoneChange` is bridged into Lua (`script::event_to_lua`).
 
 use stackfish_engine::engine::{Engine, StepStatus};
@@ -20,7 +20,7 @@ end
 
 const OPERATION_GAIN_LIFE_1: &str = r#"
 return function(source, controller)
-    return { gain_life = 1 }
+    return Game.Ops.GainLife(1)
 end
 "#;
 
@@ -254,7 +254,7 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     assert!(engine.state().stack.is_empty(), "both the spell and its triggered ability have resolved");
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "the operation script's gain_life = 1 applied");
+    assert_eq!(engine.state().player(p0).unwrap().life, 21, "the operation script's GainLife(1) applied");
 
     let resolved_count = engine
         .state()

@@ -192,9 +192,9 @@ fn continuous_effect_payload_can_read_state_to_decide_its_own_shape() {
 
     let source = "return function(source, controller, state) \
         if state.life[controller] <= 5 then \
-            return { modify_pt = { power = 1, toughness = 1 } } \
+            return Game.Effects.ModifyPT(1, 1) \
         end \
-        return {} \
+        return nil \
         end";
     let handle = runtime.load_function(source).unwrap();
 

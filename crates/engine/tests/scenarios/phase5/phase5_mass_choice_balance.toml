@@ -80,8 +80,7 @@ function s.operation()
 
         if my_hand > min_hand then
             local chosen_cards = Game.ChooseN({ zone = "Hand", controller = "you" }, my_hand - min_hand)
-            local discarded = Game.Ops.DiscardChosen(chosen_cards)
-            result.discard_chosen = discarded.discard_chosen
+            result = Game.Ops.Chain(result, Game.Ops.DiscardChosen(chosen_cards))
         end
 
         return result

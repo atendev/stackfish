@@ -157,8 +157,8 @@ fn invoke_continuous_effect_receives_the_enchanted_argument() {
     let handle = runtime
         .load_function(
             "return function(source, controller, state, enchanted) \
-                if enchanted ~= nil then return { modify_pt = { power = 9, toughness = 9 } } end \
-                return { modify_pt = { power = 0, toughness = 0 } } \
+                if enchanted ~= nil then return Game.Effects.ModifyPT(9, 9) end \
+                return Game.Effects.ModifyPT(0, 0) \
             end",
         )
         .unwrap();

@@ -1,9 +1,8 @@
 # Script-backed continuous effects slice (backlog item 3a): AffectedFilter::Script/
 # EffectPayload::Script are real now. The anthem land below self-registers via
 # Game.CreateStaticAbility, same as phase5_static_ability_self_registration.toml,
-# except :SetEffect is a custom function decoding { modify_pt = {...} } (the
-# "Lua asks, Rust decides" table convention) instead of a Game.Effects.ModifyPT
-# tag. Proven via real combat damage: the vanilla bear's effective power
+# except :SetEffect is a custom function returning a Game.Effects.ModifyPT
+# value instead of passing the tag directly. Proven via real combat damage: the vanilla bear's effective power
 # (layer 7c) reflects the script-decoded boost, dealing 3 damage instead of
 # its printed 2 - same real-consumer bar every prior layer-engine slice held
 # itself to.
@@ -34,7 +33,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(function(source, controller)
-        return { modify_pt = { power = 1, toughness = 1 } }
+        return Game.Effects.ModifyPT(1, 1)
     end)
     e:SetAffected({ controller = "you", card_types = { "Creature" } })
     e:Register()

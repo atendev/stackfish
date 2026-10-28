@@ -165,7 +165,7 @@ fn scripted_double_pt_waits_for_a_later_timestamp_modify_it_depends_on() {
 
     let mut script_runtime = ScriptRuntime::new();
     let handle = script_runtime
-        .load_function("return function(source, controller) return { double_pt = { power = true, toughness = true } } end")
+        .load_function("return function(source, controller) return Game.Effects.DoublePT(true, true) end")
         .unwrap();
     state.continuous_effects.push(scripted(bear, handle, 0));
     state.continuous_effects.push(modify(bear, 2, 2, 1));
@@ -186,7 +186,7 @@ fn primitive_double_pt_waits_for_a_scripted_modify_it_depends_on() {
 
     let mut script_runtime = ScriptRuntime::new();
     let handle = script_runtime
-        .load_function("return function(source, controller) return { modify_pt = { power = 2, toughness = 2 } } end")
+        .load_function("return function(source, controller) return Game.Effects.ModifyPT(2, 2) end")
         .unwrap();
     state.continuous_effects.push(double(bear, true, true, 0));
     state.continuous_effects.push(scripted(bear, handle, 1));
@@ -207,7 +207,7 @@ fn scripted_non_double_pt_shape_introduces_no_spurious_dependency() {
 
     let mut script_runtime = ScriptRuntime::new();
     let handle = script_runtime
-        .load_function("return function(source, controller) return { switch_pt = true } end")
+        .load_function("return function(source, controller) return Game.Effects.SwitchPT end")
         .unwrap();
     // A later timestamp than the modify. The assertion is only that this resolves without hanging or panicking and the modify still applies.
     state.continuous_effects.push(modify(bear, 1, 1, 0));

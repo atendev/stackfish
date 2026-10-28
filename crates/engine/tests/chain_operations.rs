@@ -50,7 +50,7 @@ fn an_uncalled_constructor_is_a_load_error_that_names_it() {
 
 #[test]
 fn a_custom_function_is_a_load_error() {
-    let error = decode("Game.Ops.Chain(Game.Ops.Destroy, function() return { gain_life = 1 } end)").expect_err("function");
+    let error = decode("Game.Ops.Chain(Game.Ops.Destroy, function() return Game.Ops.GainLife(1) end)").expect_err("function");
     assert!(error.contains("custom function"), "{error}");
 }
 

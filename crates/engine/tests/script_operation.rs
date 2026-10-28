@@ -42,7 +42,7 @@ fn operation_function_decodes_a_custom_function_to_a_real_handle() {
         local s = {}
         function s.operation()
             return function(source, controller)
-                return { gain_life = 1 }
+                return Game.Ops.GainLife(1)
             end
         end
         return s
@@ -60,6 +60,49 @@ fn operation_function_decodes_a_custom_function_to_a_real_handle() {
     );
 }
 
+fn run_custom_operation(body: &str) -> Result<OperationOutcome, stackfish_engine::script::ScriptError> {
+    let runtime = ScriptRuntime::new();
+    let source = format!("local s = {{}}\nfunction s.operation()\n  return function(source, controller)\n{body}\n  end\nend\nreturn s");
+    let (_, handle) = runtime.build_operation(&source).expect("script should load").expect("declares an operation");
+    runtime.invoke_operation(handle, &mut two_player_state(Vec::new()), ObjectId(0), PlayerId(0))
+}
+
+#[test]
+fn custom_operation_returning_a_raw_table_is_an_error() {
+    let error = run_custom_operation("return { gain_life = 1 }").expect_err("raw-key tables are no longer accepted");
+    assert!(format!("{error:?}").contains("Game.Ops"), "error: {error:?}");
+}
+
+#[test]
+fn custom_operation_returning_nothing_finishes() {
+    let outcome = run_custom_operation("return nil").expect("nil is no further effect");
+    assert!(matches!(outcome, OperationOutcome::Finished), "got {outcome:?}");
+}
+
+#[test]
+fn custom_operation_rejects_a_declared_op_that_needs_the_abilitys_targets() {
+    let error = run_custom_operation("return Game.Ops.Destroy").expect_err("Destroy has no runtime form");
+    assert!(format!("{error:?}").contains("targets"), "error: {error:?}");
+}
+
+#[test]
+fn chain_applies_gain_life_with_one_pending_request() {
+    let outcome = run_custom_operation(
+        "return Game.Ops.Chain(Game.Ops.GainLife(2), Game.Ops.DealDamageTo({ kind = \"player\", id = 1 }, 3))",
+    )
+    .expect("a direct mutation and one pending kind combine");
+    assert!(matches!(outcome, OperationOutcome::PendingEvents(ref events) if events.len() == 1), "got {outcome:?}");
+}
+
+#[test]
+fn chain_mixing_two_pending_kinds_is_an_error_and_not_a_silent_drop() {
+    let error = run_custom_operation(
+        "return Game.Ops.Chain(Game.Ops.DrawCards(1), Game.Ops.DealDamageTo({ kind = \"player\", id = 1 }, 3))",
+    )
+    .expect_err("a draw and damage events can't both be handed up yet");
+    assert!(format!("{error:?}").contains("only one of"), "error: {error:?}");
+}
+
 const GAIN_THREE_LIFE_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
@@ -72,7 +115,7 @@ const CUSTOM_GAIN_ONE_LIFE_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
     return function(source, controller)
-        return { gain_life = 1 }
+        return Game.Ops.GainLife(1)
     end
 end
 return s
@@ -259,7 +302,7 @@ fn casting_a_script_declared_custom_function_operation_spell_resolves_via_the_sc
     assert_eq!(
         engine.state().player(p0).unwrap().life,
         21,
-        "the custom function's {{gain_life = 1}} intent table should have been invoked via the script bridge"
+        "the custom function's Game.Ops.GainLife(1) should have been invoked via the script bridge"
     );
 }
 

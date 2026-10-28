@@ -31,6 +31,8 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 050: Audited `crates/engine/src/script/`. Every table decoder ignores unknown keys except `decode_entry_options`; strict validation touches about 12 call sites plus one helper. Operation results and effect shapes each have a tag and a raw-key spelling, three method names take different argument families, and several decoders swallow wrong-typed values. `cards/` is absent from this checkout, so no card script was read. [closed/050-audit-lua-api-surface.md]
 - 051: Audited the 25 active Lua scripts in the sibling `stackfish-db` database. Eleven basic-land scripts repeat the mana-ability builder, target tables repeat too little to hide, and Balance's custom counting is card-specific. [closed/051-audit-card-script-idioms.md]
 - 052: Decided on canonical Lua API forms and strict validation: require `Game.Ops.*` and `Game.Effects.*` constructors (remove raw-key return tables, use `Ops.Chain` for multi-op results, allow string or list in `Effects.AddKeyword`); unify `InterveningIf` into `Game.Conditions` and the 4 `*Affected` tables into `Game.Affected` with explicit `Game.Filter({...})` for filter tables; use flat filter keys in target tables with one shared filter schema; reject unknown keys, wrong-typed values, and unknown counter strings at both load time and game time; remove `Conditions.Always` and `Tokens.ArtifactCreature`, keep `RegisterKeyword`/`RegisterWard` and explicit `ManaAbility.New()`; standardize parameter names (`count`, `amount`, `counter`), casing, `"C"` colorless, and `AddMana`/`AddManaChoice` argument order; migrate both `crates/` inline scripts and the 25 active scripts in `../stackfish-db/stackfish.db`. [closed/052-decide-lua-api-canonical-forms.md]
+- 053: Callbacks return `Game.Ops.*` and `Game.Effects.*` values or `nil`, raw-key tables error, `DealDamageTo`, `AddCountersTo` and `DoublePT` added, and a returned value holds at most one pending kind. [closed/053-constructor-only-ops-and-effects.md]
+- 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
 ## Tracks
@@ -70,8 +72,11 @@ Make the Lua surface area small, documented, and strict before scaling up card s
   - Scan existing Lua scripts for multi-line workarounds, repeated filter tables, or boilerplate that a small Lua helper or engine primitive would replace.
 - 052 Decide on Lua API removals, canonical forms, and strict key validation. Type grilling, HITL. Blocked by 050 and 051. Closed.
   - Pick the single canonical spelling for each concept, decide which aliases to cut, and agree on how unknown table keys fail at load time.
-- 053 Enforce strict table key validation and canonical Lua API in `crates/engine/src/script/` and migrate inline and active `stackfish-db` card scripts. Type build, HITL. Blocked by 052.
-- 054 Document the canonical Lua API in `docs/LUA_API.md`. Type task, HITL. Blocked by 053.
+- 053 Constructor-only operation and effect results (`Ops.Chain`, `AddKeyword` list). Type build, HITL. Blocked by 052. Closed.
+- 061 Unify `Conditions`, `Affected` and `Filter` namespaces, flat target filters, one filter decoder, remove `Conditions.Always` and `Tokens.ArtifactCreature`. Type build, HITL. Blocked by 053.
+- 062 Strict key, type and counter-name validation in Lua decoders. Type build, HITL. Blocked by 061.
+- 063 Standardize parameter names, casing and mana argument order, fix stub drift, migrate the 25 `stackfish-db` scripts. Type build, HITL. Blocked by 062.
+- 054 Document the canonical Lua API in `docs/LUA_API.md`. Type task, HITL. Blocked by 063.
 
 ### D. Architecture and housekeeping
 
@@ -81,16 +86,16 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 - 056 Audit workspace `Cargo.toml` dependencies, lints, and formatting. Type research, AFK.
   - Check shared `[workspace.dependencies]`, unused dependencies, `cargo clippy` warnings, and `cargo fmt --check` status across all crates.
 - 057 Tighten visibility, remove dead helpers, and apply workspace lints. Type task, HITL. Blocked by 055 and 056.
-- 058 Update `docs/DESIGN.md` to reflect the new module layout. Type task, HITL. Blocked by 038, 040, 041, 046, 053.
+- 058 Update `docs/DESIGN.md` to reflect the new module layout. Type task, HITL. Blocked by 038, 040, 041, 046, 063.
 - 059 Decide on a pre-commit or CI check for `fmt`, `clippy`, and `comment_diff.py`. Type grilling, HITL. Blocked by 057.
 
 ## Frontier
 
 Open and unblocked:
 
-- 053, 055, 056, 060
+- 061, 055, 056, 060
 
-Suggested order. Start with 053 (or run research tickets 055 and 056 and grilling 060 in parallel).
+Suggested order. Work 061, 062, 063 in sequence; they edit the same script files. Research tickets 055 and 056 and grilling 060 can run in parallel.
 
 ## Not yet specified
 

@@ -77,26 +77,11 @@
 ---@alias ConditionFn fun(source: ObjectId, controller: PlayerId, event: ZoneChangeEvent|nil): boolean
 ---@alias InterveningIfFn fun(source: ObjectId, controller: PlayerId): boolean
 ---@alias AffectsPredicateFn fun(object: ObjectId, source: ObjectId, controller: PlayerId, state: StateSnapshot, enchanted: ObjectId|nil): boolean
----@alias EffectShapeFn fun(source: ObjectId, controller: PlayerId, state: StateSnapshot, enchanted: ObjectId|nil): EffectShapeTable
+---@alias EffectShapeFn fun(source: ObjectId, controller: PlayerId, state: StateSnapshot, enchanted: ObjectId|nil): GameEffectsValue|nil
 
--- Only key recognized on a custom operation function's returned table today.
--- Everything else (damage/counters/draw/...) must be a `Game.Ops.*` value returned directly.
----@class OperationResultTable
----@field gain_life? integer
-
----@alias OperationFn fun(source: ObjectId, controller: PlayerId, state: StateSnapshot): OperationResultTable|GameOpsValue
-
----@class EffectShapeTable
----@field set_pt? { power: integer, toughness: integer }
----@field modify_pt? { power: integer, toughness: integer }
----@field add_keyword? string[]
----@field remove_keyword? string[]
----@field ignore_keyword? string[]
----@field add_card_type? string[]
----@field add_color? string       -- color-letter string, e.g. "WU"
----@field switch_pt? boolean
----@field remove_all_abilities? boolean
----@field double_pt? { power: boolean, toughness: boolean }
+-- A custom operation function returns a `Game.Ops.*` value or nil (nil = no further effect).
+-- Raw-key tables such as `{ gain_life = 1 }` raise an error.
+---@alias OperationFn fun(source: ObjectId, controller: PlayerId, state: StateSnapshot): GameOpsValue|nil
 
 ---@class BecomeCopyExceptions
 ---@field power? integer          -- must set with toughness
@@ -130,7 +115,7 @@
 ---@class CardScript
 ---@field register_abilities? fun(c: ObjectId)
 ---@field target_requirement? fun(): TargetRequirementTable|TargetRequirementTable[]  -- an array declares one entry per "target" word, in card order (Prey Upon)
----@field operation? fun(): OperationResultTable|GameOpsValue
+---@field operation? fun(): GameOpsValue|nil
 ---@field alternative_costs? fun(): AlternativeCostEntry[]
 ---@field buyback_cost? fun(): string    -- a mana-cost string, e.g. "{2}" — parsed via Game.Costs.Mana's grammar
 
@@ -144,6 +129,9 @@
 ---@class GameInterveningIfValue
 ---@class GameOpsValue
 ---@class GameOpsAddManaValue : GameOpsValue  -- only AddMana/AddManaChoice/AddRestrictedMana results
+---@class GameOpsSacrificeChosenValue : GameOpsValue  -- only SacrificeChosen results
+---@class GameOpsDiscardChosenValue : GameOpsValue    -- only DiscardChosen results
+---@class GameOpsCastSpellValue : GameOpsValue        -- only CastSpell results
 ---@class GameCostsValue
 ---@class GameLayersValue
 ---@class GameEffectsValue
@@ -660,12 +648,12 @@ function GameOpsTable.UntapAll(filter) end
 
 --- CR 701.21, pairs with Game.ChooseN(...) then SacrificeChosen(chosen).
 ---@param list TargetResult[]
----@return GameOpsValue
+---@return GameOpsSacrificeChosenValue
 function GameOpsTable.SacrificeChosen(list) end
 
 --- CR 701.9, pairs with Game.ChooseN(...) then DiscardChosen(chosen).
 ---@param list TargetResult[]
----@return GameOpsValue
+---@return GameOpsDiscardChosenValue
 function GameOpsTable.DiscardChosen(list) end
 
 --- CR 701.21 + "at random," no player input. Fewer than count if fewer candidates.
@@ -687,7 +675,7 @@ function GameOpsTable.Discard(count) end
 function GameOpsTable.DiscardRandom(filter, count) end
 
 --- CR 101.4 (APNAP), active player first. `x` may be a function or a bare SacrificeRandom/DiscardRandom/Mill/LoseLife value.
----@param x (fun(source: ObjectId, controller: PlayerId, state: StateSnapshot): OperationResultTable|GameOpsValue)|GameOpsValue
+---@param x (fun(source: ObjectId, controller: PlayerId, state: StateSnapshot): GameOpsValue|nil)|GameOpsValue
 ---@return GameOpsValue
 function GameOpsTable.ForEachPlayer(x) end
 
@@ -723,6 +711,29 @@ function GameOpsTable.GainControl(duration) end
 ---@param amount integer
 ---@return GameOpsValue
 function GameOpsTable.DrawCards(amount) end
+
+--- CR 120.3, "deals `amount` damage to `pick`". `pick` is one entry from Game.SelectTargets / Game.ChooseN. Goes through the
+--- same replacement/prevention/lifelink path as Ops.Damage. Only valid as a custom operation function's return value
+--- (or inside Chain there); at most one pending kind per Chain.
+---@param pick TargetResult
+---@param amount integer
+---@return GameOpsValue
+function GameOpsTable.DealDamageTo(pick, amount) end
+
+--- CR 122.1, puts `amount` counters of `counter` on `pick` (an object pick from Game.SelectTargets / Game.ChooseN).
+--- Only valid as a custom operation function's return value (or inside Chain there).
+---@param pick TargetResult
+---@param counter string  e.g. "PlusOnePlusOne"
+---@param amount integer
+---@return GameOpsValue
+function GameOpsTable.AddCountersTo(pick, counter, amount) end
+
+--- CR 601.2, casts `card` for the resolving ability's controller. `opts`: `{ free?, modes?, targets?, x_value? }`.
+--- Only valid as a custom operation function's return value.
+---@param card ObjectId
+---@param opts? { free?: boolean, modes?: integer[], targets?: TargetResult[], x_value?: integer }
+---@return GameOpsCastSpellValue
+function GameOpsTable.CastSpell(card, opts) end
 
 --- `count` default 1.
 ---@param spec GameTokensValue
@@ -832,9 +843,15 @@ function GameEffectsTable.SetPT(power, toughness) end
 ---@return GameEffectsValue
 function GameEffectsTable.ModifyPT(power, toughness) end
 
----@param name KeywordName|string
+---@param name KeywordName|string|(KeywordName|string)[]
 ---@return GameEffectsValue
 function GameEffectsTable.AddKeyword(name) end
+
+--- Doubles power and/or toughness. Usable as a continuous-effect function's return value.
+---@param power boolean
+---@param toughness boolean
+---@return GameEffectsValue
+function GameEffectsTable.DoublePT(power, toughness) end
 
 ---@param name KeywordName|string
 ---@return GameEffectsValue

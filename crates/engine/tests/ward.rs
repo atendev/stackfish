@@ -462,7 +462,7 @@ function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ card_types = { "Creature" } })
-        return { gain_life = 1 }
+        return Game.Ops.GainLife(1)
     end)
     e:Register()
 end

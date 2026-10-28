@@ -5,12 +5,16 @@
 Real, named gaps — don't spend time trying these, they aren't silently working under a different
 name.
 
-- **Custom operation functions don't support pump/type-changing effect shapes.** `gain_life`,
-  `draw_cards`, `deal_damage`, `add_counters`, `sacrifice_chosen`/`discard_chosen`, and `cast_spell`
-  are all real return-table keys now — see
+- **Custom operation functions don't support pump/type-changing effects.** A custom function can
+  return `GainLife`, `DrawCards`, `DealDamageTo`, `AddCountersTo`, `SacrificeChosen`,
+  `DiscardChosen`, `CastSpell`, or a `Chain` of them — see
   [targeting-and-choices.md](targeting-and-choices.md#drawing-dealing-damage-and-adding-counters).
   A P/T pump or a type/color-changing effect is still only reachable through the `Game.Ops.*`/
-  `Game.Effects.*` tag form, not a custom function's return table.
+  `Game.Effects.*` tag form.
+- **A custom operation's `Chain` holds at most one pending kind.** It may hold `GainLife` plus one
+  of: zone moves (`SacrificeChosen` and `DiscardChosen` together are fine), `DrawCards`, events
+  (`DealDamageTo` and `AddCountersTo` together are fine), or `CastSpell`. Mixing two pending kinds
+  raises an error. TODO: let one operation outcome carry several requests.
 - **Restricted mana beyond a card-type filter** — `Game.Ops.AddRestrictedMana` covers CR 106.11's
   "spend this mana only to cast [card type] spells" (Mishra's Workshop) only. Object-specific
   restrictions ("only to cast the exiled card") and ability-activation restrictions aren't modeled —

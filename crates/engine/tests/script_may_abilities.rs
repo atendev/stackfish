@@ -12,9 +12,9 @@ function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         if Game.MayChoose() then
-            return { gain_life = 4 }
+            return Game.Ops.GainLife(4)
         end
-        return { gain_life = 1 }
+        return Game.Ops.GainLife(1)
     end)
     e:Register()
 end
@@ -26,7 +26,7 @@ local s = {}
 function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
-        return { gain_life = 1 }
+        return Game.Ops.GainLife(1)
     end)
     e:Register()
 end
@@ -185,7 +185,7 @@ function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ type = "player" })
-        return { gain_life = target.id }
+        return Game.Ops.GainLife(target.id)
     end)
     e:Register()
 end

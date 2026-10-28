@@ -115,33 +115,17 @@ end)
 -- An effect whose shape is decided by a function instead of a Game.Effects.*
 -- tag.
 e:SetEffect(function(source, controller, state, enchanted)
-    return { modify_pt = { power = 1, toughness = 1 } }
+    return Game.Effects.ModifyPT(1, 1)
 end)
 ```
 
 An affects-predicate is invoked once per candidate object and must return a plain boolean. An
-effect-shape function is invoked once per query and must return a table with exactly one of these
-keys:
-
-| Key | Shape | Same as |
-|---|---|---|
-| `set_pt` | `{ power = N, toughness = N }` | `Game.Effects.SetPT` |
-| `modify_pt` | `{ power = N, toughness = N }` | `Game.Effects.ModifyPT` |
-| `add_keyword` | `{ "Flying", ... }` | `Game.Effects.AddKeyword` |
-| `remove_keyword` | `{ "Defender", ... }` | `Game.Effects.RemoveKeyword` |
-| `ignore_keyword` | `{ "Defender", ... }` | `Game.Effects.IgnoreKeyword` |
-| `add_card_type` | `{ "Creature", ... }` | `Game.Effects.AddCardType` |
-| `set_card_types` | `{ "Creature", ... }` | `Game.Effects.SetCardTypes` |
-| `add_color` | a color-letter string, e.g. `"WU"` | `Game.Effects.AddColor` |
-| `set_colors` | a color-letter string, e.g. `"WU"` | `Game.Effects.SetColors` |
-| `add_supertype` | `{ "Legendary", ... }` | `Game.Effects.AddSupertype` |
-| `add_subtype` | `"Elemental"` or `{ "Elf", "Warrior" }` | `Game.Effects.AddSubtype` |
-| `switch_pt` | `true` | `Game.Effects.SwitchPT` |
-| `remove_all_abilities` | `true` | `Game.Effects.RemoveAllAbilities` |
-| `double_pt` | `{ power = true/false, toughness = true/false }` | no `Game.Effects.*` tag exists for this yet — the function form is currently the only way to double power and/or toughness |
-
-An empty or unrecognized table, or a function that errors, is treated as "no effect this call"
-rather than a hard failure.
+effect function is invoked once per query and must return a single `Game.Effects.*` value, such as
+`SetPT`, `ModifyPT`, `DoublePT(power, toughness)`, `AddKeyword` (one keyword string or a Lua list),
+`RemoveKeyword`, `IgnoreKeyword`, `SwitchPT`, `RemoveAllAbilities`, or any of the type, color,
+supertype and subtype constructors. Return `nil` for no effect this call. A raw-key table such as
+`{ modify_pt = ... }` or `{ switch_pt = true }` raises an error, and a function that errors is
+treated as "no effect this call" rather than a hard failure.
 
 Both functions receive a **state snapshot** as a trailing argument — real, public board state, not
 just object identity — plus `enchanted` (CR 303.4m): whatever object `source` is currently
@@ -151,7 +135,7 @@ attached to, or `nil` if nothing. `object == enchanted` is the function-form equ
 
 Note: because a function-backed effect's real shape isn't known until it actually runs, a
 layer/effect mismatch here (e.g. `SetLayer(PowerToughnessModifying)` whose function returns
-`add_keyword`) is silently skipped rather than raised as a `:Register()`-time error — a real, but
+`Game.Effects.AddKeyword(...)`) is silently skipped rather than raised as a `:Register()`-time error — a real, but
 narrower, safety net than the tag form gets.
 
 ## Protection worked examples

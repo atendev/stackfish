@@ -7,7 +7,7 @@ use std::rc::Rc;
 use mlua::{Function, Lua, Table, Thread, ThreadStatus, Value};
 
 use crate::types::ability::{AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility};
-use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, Subtype, SupertypeSet};
+use crate::types::card::{CardDefinition, ScriptReference};
 use crate::types::cost::{AlternativeCost, CostModifier};
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::event::GameEventKind;
@@ -20,11 +20,11 @@ use crate::types::target::TargetSpec;
 
 use super::decode::{
     decode_alternative_cost_table, decode_condition_value, decode_operation_value, decode_script_choice_request,
-    decode_subtypes, decode_target_pick, decode_target_spec_table, parse_card_type_name, parse_color_string,
-    parse_counter_kind_name, parse_keyword_name, parse_supertype_name,
+    decode_target_spec_table,
 };
 use super::encode::{event_to_lua, state_to_lua};
 use super::globals::bind_game_globals;
+use super::tags::{result_items, EffectPrimitiveTag, ResultItem};
 use super::types::{OperationOutcome, ScriptContext, ScriptError, ScriptRegistry, ScriptZoneMoveKind};
 
 /// Owns the embedded Lua VM and every loaded card script. One per engine
@@ -512,35 +512,14 @@ impl ScriptRuntime {
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
-    /// `EffectPayload::Script`'s body, the "Lua asks, Rust decides" table
-    /// convention of `invoke_operation`, generalized to the `EffectPrimitive`
-    /// shapes a continuous effect can take. Expects
-    /// `function(source, controller, state) -> table`, with a `state_to_lua`
-    /// snapshot as the trailing 3rd argument as in `invoke_cda`. Each recognized
-    /// key is checked in a fixed order, and the first match wins:
-    /// - `set_name = "..."` -> `SetName`
-    /// - `set_pt = {power=.., toughness=..}` -> `SetPT`
-    /// - `modify_pt = {power=.., toughness=..}` -> `ModifyPT`
-    /// - `add_keyword = {"Flying", ...}` -> `AddKeyword`
-    /// - `add_card_type = {"Creature", ...}` -> `AddCardType`
-    /// - `set_card_types = {"Creature", ...}` -> `SetCardTypes`
-    /// - `add_color = "WU"` -> `AddColor`
-    /// - `set_colors = "WU"` -> `SetColors`
-    /// - `add_supertype = {"Legendary", ...}` -> `AddSupertype`
-    /// - `add_subtype = "Elemental"` or `{"Elf", "Warrior"}` -> `AddSubtype`
-    /// - `switch_pt = true` -> `SwitchPT`
-    /// - `remove_all_abilities = true` -> `RemoveAllAbilities`
-    /// - `double_pt = {power=.., toughness=..}` (bools) -> `DoublePT`, which
-    ///   lets a scripted effect take part in the one CR 613.8a rule of
-    ///   `layers::depends_on` (`DoublePT` against `ModifyPT` or `DoublePT`).
+    /// `EffectPayload::Script`'s body. Expects
+    /// `function(source, controller, state, enchanted) -> Game.Effects.* | nil`,
+    /// with a `state_to_lua` snapshot as the 3rd argument as in `invoke_cda`.
+    /// `nil` is no effect this call. Any other value, or a script error, is an
+    /// `Err`.
     ///
-    /// An empty or unrecognized table, or a script error, resolves to `None`,
-    /// skipped and not guessed. The caller (`layers::resolve_primitive`) doesn't
-    /// tell "no effect this call" from "script errored", as with `invoke_cda`.
-    /// CR 303.4m: `enchanted` is a trailing 4th argument, appended after `state`
-    /// as in `invoke_continuous_affects`, so a dynamic value ("equal to the
-    /// enchanted creature's power") can reference it.
-    // TODO: a `Game.Effects.DoublePT` tag factory; the script-backed `double_pt` table is the only way to author one from Lua
+    /// CR 303.4m: `enchanted` is a trailing 4th argument, so a dynamic value
+    /// ("equal to the enchanted creature's power") can reference it.
     pub fn invoke_continuous_effect(
         &self,
         handle: ScriptHandle,
@@ -551,101 +530,20 @@ impl ScriptRuntime {
     ) -> Result<Option<EffectPrimitive>, ScriptError> {
         let function = self.function(handle)?;
         let state_value = state_to_lua(&self.lua, state)?;
-        let result: Table = function
+        let result: Value = function
             .call((source.0, controller.0, state_value, enchanted.map(|id| id.0)))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-
-        if let Some(new_name) = result.get::<_, Option<String>>("set_name").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            return Ok(Some(EffectPrimitive::SetName(new_name)));
-        }
-        if let Some(t) = result.get::<_, Option<Table>>("set_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let power: i32 = t.get("power").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let toughness: i32 = t.get("toughness").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            return Ok(Some(EffectPrimitive::SetPT { power, toughness }));
-        }
-        if let Some(t) = result.get::<_, Option<Table>>("modify_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let power: i32 = t.get("power").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let toughness: i32 = t.get("toughness").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            return Ok(Some(EffectPrimitive::ModifyPT { power, toughness }));
-        }
-        if let Some(t) = result.get::<_, Option<Table>>("add_keyword").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let mut set = KeywordSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let Ok(kw) = parse_keyword_name(&name) else { return Ok(None) };
-                set |= kw;
+        match result {
+            Value::Nil => Ok(None),
+            Value::UserData(ud) if ud.is::<EffectPrimitiveTag>() => {
+                let tag = ud.borrow::<EffectPrimitiveTag>().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                Ok(Some(tag.0.clone()))
             }
-            return Ok(Some(EffectPrimitive::AddKeyword(set)));
+            other => Err(ScriptError::RuntimeError(format!(
+                "a continuous effect must return a Game.Effects.* value or nil, got {}",
+                other.type_name()
+            ))),
         }
-        if let Some(t) = result.get::<_, Option<Table>>("remove_keyword").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let mut set = KeywordSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let Ok(kw) = parse_keyword_name(&name) else { return Ok(None) };
-                set |= kw;
-            }
-            return Ok(Some(EffectPrimitive::RemoveKeyword(set)));
-        }
-        if let Some(t) = result.get::<_, Option<Table>>("ignore_keyword").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let mut set = KeywordSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let Ok(kw) = parse_keyword_name(&name) else { return Ok(None) };
-                set |= kw;
-            }
-            return Ok(Some(EffectPrimitive::IgnoreKeyword(set)));
-        }
-        if let Some(t) = result.get::<_, Option<Table>>("add_card_type").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let mut set = CardTypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let Ok(ct) = parse_card_type_name(&name) else { return Ok(None) };
-                set |= ct;
-            }
-            return Ok(Some(EffectPrimitive::AddCardType(set)));
-        }
-        if let Some(t) = result.get::<_, Option<Table>>("set_card_types").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let mut set = CardTypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let Ok(ct) = parse_card_type_name(&name) else { return Ok(None) };
-                set |= ct;
-            }
-            return Ok(Some(EffectPrimitive::SetCardTypes(set)));
-        }
-        if let Some(letters) = result.get::<_, Option<String>>("add_color").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let Ok(set) = parse_color_string(&letters) else { return Ok(None) };
-            return Ok(Some(EffectPrimitive::AddColor(set)));
-        }
-        if let Some(letters) = result.get::<_, Option<String>>("set_colors").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let Ok(set) = parse_color_string(&letters) else { return Ok(None) };
-            return Ok(Some(EffectPrimitive::SetColors(set)));
-        }
-        if let Some(t) = result.get::<_, Option<Table>>("add_supertype").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let mut set = SupertypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let Ok(st) = parse_supertype_name(&name) else { return Ok(None) };
-                set |= st;
-            }
-            return Ok(Some(EffectPrimitive::AddSupertype(set)));
-        }
-        if let Some(v) = result.get::<_, Option<Value>>("add_subtype").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let Ok(names) = decode_subtypes(v) else { return Ok(None) };
-            return Ok(Some(EffectPrimitive::AddSubtype(names.into_iter().map(Subtype).collect())));
-        }
-        if let Some(true) = result.get::<_, Option<bool>>("switch_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            return Ok(Some(EffectPrimitive::SwitchPT));
-        }
-        if let Some(true) = result.get::<_, Option<bool>>("remove_all_abilities").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            return Ok(Some(EffectPrimitive::RemoveAllAbilities));
-        }
-        if let Some(t) = result.get::<_, Option<Table>>("double_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
-            let power: bool = t.get("power").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let toughness: bool = t.get("toughness").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            return Ok(Some(EffectPrimitive::DoublePT { power, toughness }));
-        }
-        Ok(None)
     }
 
     pub fn invoke_cost(&self, handle: ScriptHandle, ctx: &ScriptContext) -> Result<(), ScriptError> {
@@ -787,12 +685,11 @@ impl ScriptRuntime {
 
     /// Shared tail of `invoke_operation` and `resume_operation`. `thread` either
     /// yielded again (a `Game.SelectTargets` ask, decoded into a
-    /// `ScriptChoiceRequest` and stashed in the registry for a later
-    /// `resume_operation`) or finished, and then `result` is the operation's
-    /// intent table with the `gain_life` decode `invoke_operation` always had. A
-    /// non-table return from a finished operation is a real error. `draw_cards`,
-    /// `deal_damage` and `add_counters` are decoded into
-    /// `OperationOutcome::PendingDraw` and `PendingEvents`.
+    /// `ScriptChoiceRequest` and stashed for a later `resume_operation`) or
+    /// finished, and then `result` is `nil` or a `Game.Ops.*` value. `GainLife`
+    /// mutates `GameState` directly. The other steps are handed up as one
+    /// pending `OperationOutcome` kind, and a value holding two kinds is an
+    /// error because the outcome carries one request.
     fn handle_operation_result(
         &self,
         thread: Thread,
@@ -812,83 +709,63 @@ impl ScriptRuntime {
             let thread_handle = self.stash_thread(thread)?;
             return Ok(OperationOutcome::NeedsChoice { thread: thread_handle, request });
         }
-        let Value::Table(result) = result else {
-            return Err(ScriptError::RuntimeError(format!(
-                "operation must return a table, got {}",
-                result.type_name()
-            )));
+        let items = match result {
+            Value::Nil => Vec::new(),
+            other => result_items(&other).map_err(|message| {
+                ScriptError::RuntimeError(format!("operation must return a Game.Ops.* value or nil: {message}"))
+            })?,
         };
-        let gain_life: Option<i32> =
-            result.get("gain_life").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        if let Some(amount) = gain_life {
-            if let Some(player) = state.player_mut(controller) {
-                player.gain_life(amount);
+        let mut zone_moves: Vec<(ScriptZoneMoveKind, Vec<ObjectId>)> = Vec::new();
+        let mut events = Vec::new();
+        let mut draw = None;
+        let mut cast = None;
+        for item in items {
+            match item {
+                // `GainLife` mutates `GameState` directly. The pending kinds below need pipelines this layer can't reach.
+                ResultItem::GainLife(amount) => {
+                    if let Some(player) = state.player_mut(controller) {
+                        player.gain_life(amount);
+                    }
+                }
+                ResultItem::DrawCards(amount) => draw = Some(amount),
+                ResultItem::ZoneMove(kind, ids) => match zone_moves.iter_mut().find(|(k, _)| *k == kind) {
+                    Some((_, existing)) => existing.extend(ids),
+                    None => zone_moves.push((kind, ids)),
+                },
+                ResultItem::DealDamage { target, amount } => {
+                    events.push(GameEventKind::DamageDealt { source, target, amount, is_combat_damage: false });
+                }
+                ResultItem::AddCounters { target, counter, amount } => {
+                    // CR 122.1: counters sit only on an object, so a player pick is skipped, as `resolve_counters_effect` does.
+                    if let Target::Object(object) = target {
+                        events.push(GameEventKind::CounterAdded { object, kind: counter, amount });
+                    }
+                }
+                ResultItem::CastSpell { card, modes, targets, x_value, free } => {
+                    cast = Some(OperationOutcome::PendingCast { card, modes, targets, x_value, free });
+                }
             }
         }
-        // `Game.Ops.SacrificeChosen(list)` and `DiscardChosen(list)` (hand-written Lua helpers in `globals.rs`) return `{ sacrifice_chosen = {ids...} }` and `{ discard_chosen = {ids...} }` and don't mutate `GameState` as `gain_life` does, since a zone move needs `Engine::continue_scripted_zone_move`'s replacement-checked pipeline, which this layer can't reach (see `OperationOutcome::PendingZoneMoves`). Both keys can be set on one returned table (a `ForEachPlayer` body sacrificing and discarding in one turn), so both are read unconditionally and not as `else if`.
-        let sacrifice_chosen: Option<Vec<i64>> =
-            result.get("sacrifice_chosen").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        let discard_chosen: Option<Vec<i64>> =
-            result.get("discard_chosen").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        let mut moves = Vec::new();
-        if let Some(ids) = sacrifice_chosen {
-            moves.push((ScriptZoneMoveKind::Sacrifice, ids.into_iter().map(|id| ObjectId(id as u64)).collect()));
+        // TODO: one returned value that mixes a draw, a cast, zone moves and events needs an `OperationOutcome` that carries several requests
+        let pending = [!zone_moves.is_empty(), draw.is_some(), !events.is_empty(), cast.is_some()];
+        if pending.iter().filter(|present| **present).count() > 1 {
+            return Err(ScriptError::RuntimeError(
+                "an operation can return only one of: zone moves (SacrificeChosen, DiscardChosen), DrawCards, \
+                 events (DealDamageTo, AddCountersTo) or CastSpell"
+                    .to_string(),
+            ));
         }
-        if let Some(ids) = discard_chosen {
-            moves.push((ScriptZoneMoveKind::Discard, ids.into_iter().map(|id| ObjectId(id as u64)).collect()));
+        if !zone_moves.is_empty() {
+            return Ok(OperationOutcome::PendingZoneMoves(zone_moves));
         }
-        if !moves.is_empty() {
-            return Ok(OperationOutcome::PendingZoneMoves(moves));
-        }
-        // `draw_cards = N` -> `OperationOutcome::PendingDraw`; see it for why this isn't a direct `&mut GameState` mutation like `gain_life`.
-        let draw_cards: Option<u32> =
-            result.get("draw_cards").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        if let Some(amount) = draw_cards {
+        if let Some(amount) = draw {
             return Ok(OperationOutcome::PendingDraw { amount });
         }
-        // `deal_damage = { { target = {kind=.., id=..}, amount = N }, ... }` and `add_counters = { { target = {kind=.., id=..}, counter = "...", amount = N }, ... }` -> `OperationOutcome::PendingEvents`. Both keys are read unconditionally and can combine, like `sacrifice_chosen` and `discard_chosen`. Neither pauses, since these are pure event builders (see `PendingEvents`).
-        let mut pending_events = Vec::new();
-        let deal_damage: Option<Vec<Table>> =
-            result.get("deal_damage").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        if let Some(entries) = deal_damage {
-            for entry in entries {
-                let target_table: Table = entry.get("target").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let target = decode_target_pick(&target_table)?;
-                let amount: u32 = entry.get("amount").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                pending_events.push(GameEventKind::DamageDealt { source, target, amount, is_combat_damage: false });
-            }
+        if !events.is_empty() {
+            return Ok(OperationOutcome::PendingEvents(events));
         }
-        let add_counters: Option<Vec<Table>> =
-            result.get("add_counters").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        if let Some(entries) = add_counters {
-            for entry in entries {
-                let target_table: Table = entry.get("target").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let Target::Object(object) = decode_target_pick(&target_table)? else {
-                    // CR 613: counters sit only on an object, so skip a `Target::Player`, as `resolve_counters_effect` (the primitive-tag fast path) does.
-                    continue;
-                };
-                let counter: String = entry.get("counter").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                let amount: i32 = entry.get("amount").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                pending_events.push(GameEventKind::CounterAdded { object, kind: parse_counter_kind_name(&counter), amount });
-            }
-        }
-        if !pending_events.is_empty() {
-            return Ok(OperationOutcome::PendingEvents(pending_events));
-        }
-        // `Game.Ops.CastSpell(card, opts)` (`globals.rs`) returns `{ cast_spell = { card, free, modes, targets, x_value } }`, handed back up as `sacrifice_chosen` and `discard_chosen` are, since casting needs `commands::execute_command`'s full pipeline (see `OperationOutcome::PendingCast`). It is checked after, and not combined with, the zone-move keys, because no real card needs "cast a spell and also sacrifice something" in one operation, so this takes priority.
-        let cast_spell: Option<Table> =
-            result.get("cast_spell").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        if let Some(cast_spell) = cast_spell {
-            let card: u64 = cast_spell.get("card").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let free: bool = cast_spell.get("free").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let modes: Vec<u32> = cast_spell.get("modes").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let x_value: Option<u32> =
-                cast_spell.get("x_value").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let target_picks: Vec<Table> =
-                cast_spell.get("targets").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let targets =
-                target_picks.iter().map(decode_target_pick).collect::<Result<Vec<Target>, ScriptError>>()?;
-            return Ok(OperationOutcome::PendingCast { card: ObjectId(card), modes, targets, x_value, free });
+        if let Some(outcome) = cast {
+            return Ok(outcome);
         }
         Ok(OperationOutcome::Finished)
     }

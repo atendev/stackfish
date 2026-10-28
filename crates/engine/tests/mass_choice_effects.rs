@@ -156,7 +156,7 @@ local s = {}
 function s.operation()
     return function(source, controller)
         local chosen = Game.ChooseN({ card_types = { "Creature" } }, 2)
-        return { gain_life = #chosen }
+        return Game.Ops.GainLife(#chosen)
     end
 end
 return s
@@ -194,7 +194,7 @@ fn choose_n_asks_twice_excluding_the_first_pick_and_rejects_a_repeat() {
 
     engine.submit_script_choice(Target::Object(bear_b)).expect("bear_b is still unchosen");
     let status = drain(&mut engine);
-    assert_eq!(engine.state().player(p0).unwrap().life, 22, "gain_life = #chosen = 2, from a 20 starting life");
+    assert_eq!(engine.state().player(p0).unwrap().life, 22, "GainLife(#chosen) = 2, from a 20 starting life");
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
 
@@ -203,7 +203,7 @@ local s = {}
 function s.operation()
     return function(source, controller)
         local chosen = Game.ChooseN({ card_types = { "Creature" } }, 2, { up_to = true })
-        return { gain_life = #chosen }
+        return Game.Ops.GainLife(#chosen)
     end
 end
 return s
@@ -234,7 +234,7 @@ fn choose_n_up_to_can_stop_before_reaching_n() {
     assert!(matches!(status, StepStatus::AwaitingScriptChoice { request: ScriptChoiceRequest::MayChoose, .. }));
     engine.submit_script_may_choice(false).expect("decline the second pick");
     let status = drain(&mut engine);
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "gain_life = #chosen = 1, stopped early");
+    assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(#chosen) = 1, stopped early");
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
 
@@ -243,7 +243,7 @@ local s = {}
 function s.operation()
     return function(source, controller)
         local chosen = Game.ChooseN({ card_types = { "Creature" } }, 1, { at_least = true })
-        return { gain_life = #chosen }
+        return Game.Ops.GainLife(#chosen)
     end
 end
 return s
@@ -283,7 +283,7 @@ fn choose_n_at_least_is_mandatory_then_unbounded() {
     assert!(matches!(status, StepStatus::AwaitingScriptChoice { request: ScriptChoiceRequest::MayChoose, .. }));
     engine.submit_script_may_choice(false).expect("stop here, bear_c never touched");
     let status = drain(&mut engine);
-    assert_eq!(engine.state().player(p0).unwrap().life, 22, "gain_life = #chosen = 2");
+    assert_eq!(engine.state().player(p0).unwrap().life, 22, "GainLife(#chosen) = 2");
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().object(bear_c).unwrap().zone, ZoneKind::Battlefield, "never asked, never touched");
 }
@@ -304,7 +304,7 @@ function s.operation()
             end
             return false
         end, 1)
-        return { gain_life = chosen[1].id }
+        return Game.Ops.GainLife(chosen[1].id)
     end
 end
 return s
@@ -335,7 +335,7 @@ fn choose_n_accepts_a_scripted_predicate_filter() {
     assert!(matches!(err, ScriptChoiceError::InvalidCandidate));
     engine.submit_script_choice(Target::Object(big_bear)).expect("power 4 >= 4");
     drain(&mut engine);
-    assert_eq!(engine.state().player(p0).unwrap().life, 20 + big_bear.0 as i32, "gain_life = the chosen object's own id");
+    assert_eq!(engine.state().player(p0).unwrap().life, 20 + big_bear.0 as i32, "GainLife(the chosen object's own id)");
 }
 
 const CHOOSE_ONE_CREATURE_THEN_SACRIFICE_IT: &str = r#"
