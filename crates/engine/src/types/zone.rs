@@ -55,3 +55,82 @@ impl Zone {
         self.contents.front().copied()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_zone_has_kind_owner_and_empty_contents() {
+        let owner = PlayerId(0);
+        let zone = Zone::new(ZoneKind::Hand, Some(owner));
+        assert_eq!(zone.kind, ZoneKind::Hand);
+        assert_eq!(zone.owner, Some(owner));
+        assert!(zone.contents.is_empty());
+    }
+
+    #[test]
+    fn push_top_adds_to_front() {
+        let mut zone = Zone::new(ZoneKind::Library, Some(PlayerId(0)));
+        let a = ObjectId(0);
+        let b = ObjectId(1);
+        zone.push_top(a);
+        zone.push_top(b);
+        assert_eq!(zone.contents, VecDeque::from([b, a]));
+    }
+
+    #[test]
+    fn push_bottom_adds_to_back() {
+        let mut zone = Zone::new(ZoneKind::Graveyard, Some(PlayerId(0)));
+        let a = ObjectId(0);
+        let b = ObjectId(1);
+        zone.push_bottom(a);
+        zone.push_bottom(b);
+        assert_eq!(zone.contents, VecDeque::from([a, b]));
+    }
+
+    #[test]
+    fn remove_returns_object_and_shifts_others() {
+        let mut zone = Zone::new(ZoneKind::Hand, Some(PlayerId(0)));
+        let a = ObjectId(0);
+        let b = ObjectId(1);
+        let c = ObjectId(2);
+        zone.push_bottom(a);
+        zone.push_bottom(b);
+        zone.push_bottom(c);
+
+        assert_eq!(zone.remove(b), Some(b));
+        assert_eq!(zone.contents, VecDeque::from([a, c]));
+    }
+
+    #[test]
+    fn remove_missing_object_returns_none() {
+        let mut zone = Zone::new(ZoneKind::Hand, Some(PlayerId(0)));
+        zone.push_bottom(ObjectId(0));
+        assert_eq!(zone.remove(ObjectId(99)), None);
+    }
+
+    #[test]
+    fn contains_and_len_track_contents() {
+        let mut zone = Zone::new(ZoneKind::Battlefield, None);
+        let a = ObjectId(0);
+        assert!(!zone.contains(a));
+        assert_eq!(zone.len(), 0);
+
+        zone.push_top(a);
+        assert!(zone.contains(a));
+        assert_eq!(zone.len(), 1);
+    }
+
+    #[test]
+    fn top_returns_front_or_none() {
+        let mut zone = Zone::new(ZoneKind::Library, Some(PlayerId(0)));
+        assert_eq!(zone.top(), None);
+
+        let a = ObjectId(0);
+        let b = ObjectId(1);
+        zone.push_bottom(a);
+        zone.push_top(b);
+        assert_eq!(zone.top(), Some(b));
+    }
+}

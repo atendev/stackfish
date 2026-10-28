@@ -59,3 +59,62 @@ impl CounterSet {
         self.counters.iter().filter(move |(k, _, _)| *k == kind).map(|(_, n, ts)| (*n, *ts))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ids::SequenceNo;
+
+    #[test]
+    fn new_counter_set_is_empty() {
+        let set = CounterSet::new();
+        assert!(set.totals().is_empty());
+        assert_eq!(set.count(&CounterKind::PlusOnePlusOne), 0);
+    }
+
+    #[test]
+    fn count_sums_entries_of_one_kind() {
+        let mut set = CounterSet::new();
+        set.add(CounterKind::PlusOnePlusOne, 1, SequenceNo(0));
+        set.add(CounterKind::PlusOnePlusOne, 1, SequenceNo(1));
+        set.add(CounterKind::MinusOneMinusOne, 1, SequenceNo(2));
+        assert_eq!(set.count(&CounterKind::PlusOnePlusOne), 2);
+        assert_eq!(set.count(&CounterKind::MinusOneMinusOne), 1);
+    }
+
+    #[test]
+    fn negative_amount_reduces_count() {
+        let mut set = CounterSet::new();
+        set.add(CounterKind::PlusOnePlusOne, 3, SequenceNo(0));
+        set.add(CounterKind::PlusOnePlusOne, -1, SequenceNo(1));
+        assert_eq!(set.count(&CounterKind::PlusOnePlusOne), 2);
+    }
+
+    #[test]
+    fn totals_groups_by_kind_in_first_seen_order() {
+        let mut set = CounterSet::new();
+        set.add(CounterKind::Energy, 2, SequenceNo(0));
+        set.add(CounterKind::Charge, 1, SequenceNo(1));
+        set.add(CounterKind::Energy, 1, SequenceNo(2));
+        let totals = set.totals();
+        assert_eq!(totals, vec![(CounterKind::Energy, 3), (CounterKind::Charge, 1)]);
+    }
+
+    #[test]
+    fn totals_returns_zero_for_kinds_with_only_removals() {
+        let mut set = CounterSet::new();
+        set.add(CounterKind::PlusOnePlusOne, 1, SequenceNo(0));
+        set.add(CounterKind::PlusOnePlusOne, -1, SequenceNo(1));
+        assert_eq!(set.totals(), vec![(CounterKind::PlusOnePlusOne, 0)]);
+    }
+
+    #[test]
+    fn batches_filters_by_kind_and_preserves_timestamps() {
+        let mut set = CounterSet::new();
+        set.add(CounterKind::Poison, 1, SequenceNo(5));
+        set.add(CounterKind::Poison, 2, SequenceNo(7));
+        set.add(CounterKind::Loyalty, 3, SequenceNo(6));
+        let batches: Vec<_> = set.batches(&CounterKind::Poison).collect();
+        assert_eq!(batches, vec![(1, SequenceNo(5)), (2, SequenceNo(7))]);
+    }
+}

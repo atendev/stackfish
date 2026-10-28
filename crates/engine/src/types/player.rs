@@ -275,3 +275,110 @@ pub fn cards_drawn_this_turn(state: &GameState, player: PlayerId) -> u32 {
         })
         .count() as u32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ids::ObjectId;
+
+    #[test]
+    fn player_state_new_initializes_fields() {
+        let p = PlayerState::new(PlayerId(0), 20);
+        assert_eq!(p.player_id, PlayerId(0));
+        assert_eq!(p.life, 20);
+        assert_eq!(p.mana_pool, ManaPool::default());
+        assert_eq!(p.counters.count(&crate::types::counter::CounterKind::Poison), 0);
+        assert!(p.emblems.is_empty());
+        assert!(p.commander_damage_taken.is_empty());
+        assert!(!p.eliminated);
+        assert_eq!(p.mulligans_taken, 0);
+        assert!(!p.hand_kept);
+    }
+
+    #[test]
+    fn lose_life_and_gain_life_adjust_life() {
+        let mut p = PlayerState::new(PlayerId(0), 20);
+        p.lose_life(3);
+        assert_eq!(p.life, 17);
+        p.gain_life(5);
+        assert_eq!(p.life, 22);
+    }
+
+    #[test]
+    fn commander_damage_from_reads_entry_or_zero() {
+        let mut p = PlayerState::new(PlayerId(0), 20);
+        p.commander_damage_taken.push(("K commanders".to_string(), 7));
+        assert_eq!(p.commander_damage_from("K commanders"), 7);
+        assert_eq!(p.commander_damage_from("Other"), 0);
+    }
+
+    #[test]
+    fn emblem_new_stores_fields() {
+        let e = Emblem::new(ObjectId(0), ObjectId(1), "Test emblem");
+        assert_eq!(e.emblem_id, ObjectId(0));
+        assert_eq!(e.source, ObjectId(1));
+        assert_eq!(e.ability_text, "Test emblem");
+    }
+
+    #[test]
+    fn effective_draw_limit_latest_timestamp_wins() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let modifiers = vec![
+            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::You), limit: 5, timestamp: SequenceNo(1) },
+            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::You), limit: 2, timestamp: SequenceNo(2) },
+        ];
+        assert_eq!(effective_draw_limit(&modifiers, p0), Some(2));
+    }
+
+    #[test]
+    fn effective_draw_limit_filters_by_controller_relation() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let modifiers = vec![
+            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::You), limit: 1, timestamp: SequenceNo(0) },
+            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::Opponent), limit: 2, timestamp: SequenceNo(0) },
+            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::Any), limit: 3, timestamp: SequenceNo(0) },
+        ];
+        // Latest among You (1) and Any (3) is 3.
+        assert_eq!(effective_draw_limit(&modifiers, p0), Some(3));
+        // Latest among Opponent (2) and Any (3) is 3.
+        assert_eq!(effective_draw_limit(&modifiers, p1), Some(3));
+    }
+
+    #[test]
+    fn effective_draw_limit_none_when_no_match() {
+        assert_eq!(effective_draw_limit(&[], PlayerId(0)), None);
+    }
+
+    #[test]
+    fn effective_land_play_limit_sums_additional_land_plays() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let modifiers = vec![
+            LandPlayModifier { source, controller: p0, affected: LandPlayAffected::Filter(FilterController::You), additional: 1 },
+            LandPlayModifier { source, controller: p0, affected: LandPlayAffected::Filter(FilterController::You), additional: 2 },
+            LandPlayModifier { source, controller: p0, affected: LandPlayAffected::Filter(FilterController::Opponent), additional: 5 },
+        ];
+        // CR 305.2: base 1 plus all applicable additional plays for the player.
+        assert_eq!(effective_land_play_limit(&modifiers, p0), 4);
+        assert_eq!(effective_land_play_limit(&modifiers, p1), 6);
+    }
+
+    #[test]
+    fn effective_land_play_limit_any_applies_to_every_player() {
+        let source = ObjectId(0);
+        let modifiers = vec![
+            LandPlayModifier { source, controller: PlayerId(0), affected: LandPlayAffected::Filter(FilterController::Any), additional: 3 },
+        ];
+        assert_eq!(effective_land_play_limit(&modifiers, PlayerId(0)), 4);
+        assert_eq!(effective_land_play_limit(&modifiers, PlayerId(1)), 4);
+    }
+
+    #[test]
+    fn effective_land_play_limit_default_is_one() {
+        assert_eq!(effective_land_play_limit(&[], PlayerId(0)), 1);
+    }
+}

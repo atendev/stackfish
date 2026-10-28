@@ -357,5 +357,117 @@ impl CardDefinition {
             None => self.mana_cost.colors(),
         }
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ids::SequenceNo;
+    use crate::types::mana::ManaCost;
+
+    fn minimal_definition() -> CardDefinition {
+        CardDefinition {
+            definition_id: 1,
+            name: "Test".to_string(),
+            mana_cost: ManaCost { symbols: Vec::new() },
+            color_indicator: None,
+            supertypes: SupertypeSet::empty(),
+            card_types: CardTypeSet::CREATURE,
+            subtypes: Vec::new(),
+            oracle_text: String::new(),
+            power: Some(PTValue::Fixed(1)),
+            toughness: Some(PTValue::Fixed(1)),
+            loyalty: None,
+            defense: None,
+            script_ref: ScriptReference::ByKey("test".to_string()),
+            keywords: KeywordSet::empty(),
+            target_requirement: None,
+            alternative_costs: Vec::new(),
+            buyback_cost: None,
+            effect: None,
+            modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
+        }
+    }
+
+    #[test]
+    fn pt_value_as_fixed_returns_some_for_fixed() {
+        assert_eq!(PTValue::Fixed(3).as_fixed(), Some(3));
+        assert_eq!(
+            PTValue::CharacteristicDefining { display: "*".to_string(), script: None }.as_fixed(),
+            None
+        );
+    }
+
+    #[test]
+    fn pt_value_net_with_counters_applies_plus_and_minus() {
+        // CR 121.3
+        let mut counters = CounterSet::new();
+        counters.add(CounterKind::PlusOnePlusOne, 2, SequenceNo(0));
+        counters.add(CounterKind::MinusOneMinusOne, 1, SequenceNo(1));
+        assert_eq!(PTValue::Fixed(2).net_with_counters(&counters), Some(3));
+    }
+
+    #[test]
+    fn pt_value_net_with_counters_returns_none_for_cda() {
+        let cda = PTValue::CharacteristicDefining { display: "*".to_string(), script: None };
+        assert_eq!(cda.net_with_counters(&CounterSet::new()), None);
+    }
+
+    #[test]
+    fn card_definition_colors_from_mana_cost() {
+        let mut def = minimal_definition();
+        def.mana_cost = ManaCost::parse("{1}{R}{G}").unwrap();
+        assert_eq!(def.colors(), ColorSet::RED | ColorSet::GREEN);
+    }
+
+    #[test]
+    fn card_definition_colors_use_indicator_when_present() {
+        let mut def = minimal_definition();
+        def.mana_cost = ManaCost::parse("{1}{R}").unwrap();
+        def.color_indicator = Some(ColorSet::BLUE);
+        assert_eq!(def.colors(), ColorSet::BLUE);
+    }
+
+    #[test]
+    fn card_definition_colors_empty_for_colorless() {
+        let def = minimal_definition();
+        assert_eq!(def.colors(), ColorSet::empty());
+    }
+
+    #[test]
+    fn mode_choice_bounds() {
+        assert_eq!(ModeChoice::Exactly(2).bounds(), (2, 2, false));
+        assert_eq!(ModeChoice::UpTo(3).bounds(), (1, 3, false));
+        assert_eq!(ModeChoice::ExactlyRepeatable(2).bounds(), (2, 2, true));
+        assert_eq!(ModeChoice::UpToRepeatable(3).bounds(), (1, 3, true));
+        assert_eq!(ModeChoice::ExactlyChosenByOpponent(1).bounds(), (1, 1, false));
+        assert_eq!(ModeChoice::UpToChosenByOpponent(2).bounds(), (1, 2, false));
+        // PawprintBudget uses max as a budget display hint.
+        assert_eq!(ModeChoice::PawprintBudget(5).bounds(), (0, 5, false));
+    }
+
+    #[test]
+    fn card_type_set_operations() {
+        let artifact_creature = CardTypeSet::ARTIFACT | CardTypeSet::CREATURE;
+        assert!(artifact_creature.contains(CardTypeSet::ARTIFACT));
+        assert!(artifact_creature.contains(CardTypeSet::CREATURE));
+        assert!(!artifact_creature.contains(CardTypeSet::LAND));
+        assert!(artifact_creature.intersects(CardTypeSet::CREATURE));
+        assert!(!artifact_creature.intersects(CardTypeSet::LAND | CardTypeSet::SORCERY));
+    }
+
+    #[test]
+    fn supertype_set_operations() {
+        let legendary_basic = SupertypeSet::LEGENDARY | SupertypeSet::BASIC;
+        assert!(legendary_basic.contains(SupertypeSet::LEGENDARY));
+        assert!(legendary_basic.intersects(SupertypeSet::BASIC));
+    }
+
+    #[test]
+    fn keyword_set_operations() {
+        let flying_reach = KeywordSet::FLYING | KeywordSet::REACH;
+        assert!(flying_reach.contains(KeywordSet::FLYING));
+        assert!(!flying_reach.contains(KeywordSet::TRAMPLE));
+    }
 }
