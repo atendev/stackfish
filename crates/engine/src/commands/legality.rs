@@ -12,7 +12,7 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::object::GameObject;
 use crate::types::stack::StackEntryKind;
-use crate::types::target::{ManaValueBound, ManaValueComparison, TargetFilter, TargetRequirement, TargetSpec};
+use crate::types::target::{ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
@@ -571,6 +571,40 @@ pub(crate) fn legal_target_candidates(
     caster: PlayerId,
     source: ObjectId,
 ) -> Vec<Target> {
+    legal_target_candidates_for_x(state, script_runtime, requirement, caster, source, false)
+}
+
+/// Whether the requirement's filter has a `mana_value` bound of `X`, so its
+/// candidates depend on the X the caster has yet to announce.
+pub(crate) fn requirement_depends_on_x(requirement: &TargetRequirement) -> bool {
+    matches!(
+        requirement.filter,
+        TargetFilter::Object { mana_value: Some(ManaValueRequirement { bound: ManaValueBound::X, .. }), .. }
+    )
+}
+
+/// `legal_target_candidates`, or with `any_x` every candidate that is legal
+/// for some announced X: an entry is listed before the caster announces X, so
+/// the `X` bound of a `mana_value` filter is dropped (CR 107.3a, 601.2b-c).
+/// The engine's own check against the announced X rejects a mismatched pair.
+pub(crate) fn legal_target_candidates_for_x(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    requirement: &TargetRequirement,
+    caster: PlayerId,
+    source: ObjectId,
+    any_x: bool,
+) -> Vec<Target> {
+    let mut relaxed;
+    let requirement = if any_x && requirement_depends_on_x(requirement) {
+        relaxed = requirement.clone();
+        if let TargetFilter::Object { mana_value, .. } = &mut relaxed.filter {
+            *mana_value = None;
+        }
+        &relaxed
+    } else {
+        requirement
+    };
     // Sorted by id: `state.objects` is a `HashMap`, and a candidate list that
     // follows its order differs from run to run.
     let mut object_ids: Vec<ObjectId> = state.objects.keys().copied().collect();

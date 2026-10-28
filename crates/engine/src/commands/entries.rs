@@ -23,7 +23,9 @@ use crate::types::mana::Color;
 use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
-use super::legality::{has_summoning_sickness, is_sorcery_speed, legal_target_candidates, solo_only_modes};
+use super::legality::{
+    has_summoning_sickness, is_sorcery_speed, legal_target_candidates_for_x, requirement_depends_on_x, solo_only_modes,
+};
 
 /// Every entry the priority player may take, with `Pass` last.
 pub(crate) fn priority_entries(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<Entry> {
@@ -273,12 +275,13 @@ fn target_slots(
     requirements
         .into_iter()
         .map(|requirement| {
-            let mut candidates = legal_target_candidates(state, script_runtime, requirement, player, source);
+            let mut candidates = legal_target_candidates_for_x(state, script_runtime, requirement, player, source, true);
             candidates.sort_by_key(target_order);
             TargetSlot {
                 candidates,
                 min: if requirement.up_to { 0 } else { requirement.count },
                 max: if requirement.at_least { None } else { Some(requirement.count) },
+                x_dependent: requirement_depends_on_x(requirement),
             }
         })
         .collect()

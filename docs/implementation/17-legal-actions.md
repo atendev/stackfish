@@ -19,7 +19,13 @@ are in `crates/engine/src/decision/entry.rs`. The builders are in `commands/entr
 - An `ActivateEntry` has the source, the `ability_index` (counting every ability on the source, as `find_ability` does),
   target slots, `x`, `mana_ability` and an optional `ColorChoice` for "add one mana of any color".
 - A `TargetSlot` has an explicit candidate list (objects by id, then players, then abilities on the stack), `min`, and
-  `max` (`None` for "N or more").
+  `max` (`None` for "N or more"), and `x_dependent`.
+- A word whose `mana_value` filter mentions X (`ManaValueBound::X`) is `x_dependent`. The entry is listed before the
+  caster announces X (CR 601.2b comes before 601.2c), so such a word lists every candidate legal for some X, by
+  dropping the mana value restriction (`legal_target_candidates_for_x`). The facade's `check_targets` checks only the
+  superset. The engine rejects a pair of X and target that does not match when the Answer reaches it, and the Decision
+  stays open. The wire slot carries `x_dependent` only when true. It ignores whether the caster can pay that X, like
+  every entry. The bot does not yet pick X and targets together (TODO in `bot.rs`).
 - No entry checks affordability.
 
 ## Rules the builders mirror
