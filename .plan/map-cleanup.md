@@ -21,6 +21,8 @@ The codebase has no oversized files and no tirades in comments. The backlog, `DE
 - 041 Comment pass on engine types and script. Comment lines 6,960 to 3,554 across 27 files, no code change, engine tests pass. 33 new one-line TODOs came from prose notes. [closed/041-comment-pass-engine-types-script.md]
 - 042 Comment pass on engine core. `engine/`, `commands/` and `decision/` are done and merged to `master` (5098bbf). No code change, `comment_diff.py` exits 0, and 2,024 engine tests pass. The CR 111.7 token cessation note was removed because `sba.rs` enforces it. [closed/042-comment-pass-engine-core.md]
 
+- 043 Comment pass on engine top-level modules. `sba.rs`, `replacement.rs`, `layers.rs`, `triggers.rs`, `script_api.rs`, `engine_context.rs` and `color_identity.rs` are done and merged to `master` (5a8ab4a). Comment lines 1,631 to 400, no code change, 2,024 engine tests pass. Six new `TODO`s came from prose notes about real gaps. [closed/043-comment-pass-engine-top-level.md]
+
 ## Not yet specified
 
 - Whether repetitive Rust tests should become TOML scenarios. Decide after 046, when the test files are reorganized.
@@ -99,13 +101,13 @@ Ticket types and modes follow `README.md`.
 
 Open tickets, unblocked and unclaimed.
 
-- 043, 044, 045, 050, 053, 054, 055
+- 044, 045, 047, 050, 053, 054, 055
 
-Suggested order. Do 043 and 044 next (038 to 042 are done). Run 045 whenever convenient, since it only measures. Run 047 to 049 after the comment passes. Run the Lua work (050 to 058) in the order 050, 051, 052, with 053 and 054 anywhere before 056. Doing hygiene before Lua keeps comment-pass diffs from overlapping Lua changes.
+Suggested order. Do 044 next (038 to 043 are done). Run 045 whenever convenient, since it only measures. Run 047 to 049 after the comment passes. Run the Lua work (050 to 058) in the order 050, 051, 052, with 053 and 054 anywhere before 056. Doing hygiene before Lua keeps comment-pass diffs from overlapping Lua changes.
 
 Blocked:
 
 - 046 waits on 044 and 045.
-- 047 waits on 043. 048 and 049 wait on 047.
+- 048 and 049 wait on 047.
 - 051 waits on 050. 052 waits on 051.
 - 056 waits on 052 to 055. 057 and 058 wait on 056.
