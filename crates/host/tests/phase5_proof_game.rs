@@ -1,14 +1,11 @@
-//! Phase 5 vertical slice: the proof game. A random bot plays full games over
-//! the byte interface with the proof card set. Every request and response is
-//! JSON bytes, and the bot reads nothing but the Decisions it is sent.
+//! A random bot plays full games over bytes with the proof card set, reading nothing but
+//! the Decisions it is sent.
 
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 use stackfish_host::{Bot, Outcome, Session, proof_cards, proof_setup_request};
 
-/// Answers the bot may give before a game counts as endless. A real game takes
-/// a few thousand.
 const ANSWER_LIMIT: usize = 50_000;
 
 fn create(request: &[u8]) -> Session {
@@ -25,7 +22,6 @@ fn play(players: usize, seed: u64) -> Outcome {
     Bot::new(seed).play(&mut session, ANSWER_LIMIT).unwrap_or_else(|e| panic!("seed {seed}: {e}"))
 }
 
-/// A game with every player Seat's events kept.
 fn play_recorded(players: usize, seed: u64) -> (Outcome, Bot) {
     let mut session = create(&proof_setup_request(players, seed));
     let mut bot = Bot::new(seed).recording(&[]);
@@ -56,7 +52,6 @@ fn a_bot_plays_thirty_two_player_games_to_the_end() {
     assert!(winners.contains(&Some(0)) && winners.contains(&Some(1)), "both players should win some games: {winners:?}");
 }
 
-/// Every card of the set except the lands.
 const SPELLS: [&str; 21] = [
     "Grizzly Bear",
     "Stone Giant",
@@ -87,7 +82,7 @@ fn the_games_cast_every_card_of_the_set_and_play_every_land() {
     let mut lands = HashSet::new();
     for seed in 0..30 {
         let (_, bot) = play_recorded(2, seed);
-        // A `spell_cast` event names the stack object, and the move onto the stack names the card.
+        // A `spell_cast` event names only the stack object; the move onto the stack names the card.
         let mut on_stack = HashMap::new();
         for seat in 0..2 {
             for event in bot.events(seat) {
@@ -120,7 +115,7 @@ fn the_games_cast_every_card_of_the_set_and_play_every_land() {
 
 #[test]
 fn the_same_seeds_give_a_byte_identical_game() {
-    // A `HashMap` walk in the engine shows up as a different order in only some runs, so try several seeds.
+    // A `HashMap` walk differs between runs only some of the time, so try several seeds.
     for seed in 0..8 {
         let first = play(2, seed);
         let second = play(2, seed);
@@ -147,7 +142,7 @@ fn five_hundred_seeds_all_finish_without_a_rejection() {
     }
 }
 
-/// Every id a Seat's events carry. The ledger's own numbers are not object ids.
+// The ledger's own numbers are not object ids.
 fn ids_in(events: &[Value]) -> HashSet<String> {
     fn walk(value: &Value, key: &str, found: &mut HashSet<String>) {
         // Power, toughness, loyalty and defense are digit strings too.
@@ -191,7 +186,7 @@ fn no_seat_receives_a_hidden_id_over_a_whole_proof_game() {
     let mut library = HashSet::new();
     let mut hands = [HashSet::new(), HashSet::new()];
     for event in bot.events(2).iter().filter(|e| e["kind"] == "zone_change") {
-        // `previous` is the id in the zone the card left and `object` the id in the zone it entered.
+        // `previous` is the id in the zone left and `object` the id in the zone entered.
         for (id_field, zone_field) in [("previous", "from"), ("object", "to")] {
             let Some(id) = event.get(id_field).and_then(Value::as_str) else { continue };
             if event[zone_field] == "library" {

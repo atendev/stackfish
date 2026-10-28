@@ -1,6 +1,5 @@
-//! A `CardSource` backed by `stackfish_carddb::CardDb`. This is the thin wrapper
-//! over `CardDb::load_by_oracle_id` that lets a real `setup` request resolve
-//! cards from a card database such as `../stackfish-db/stackfish.db`.
+//! A `CardSource` over `stackfish_carddb::CardDb`, so a `setup` request can resolve cards
+//! from a database such as `../stackfish-db/stackfish.db`.
 
 use std::path::Path;
 
@@ -9,18 +8,13 @@ use stackfish_engine::CardDefinition;
 
 use crate::card_source::{CardSource, CardSourceError};
 
-/// Loads card definitions from the SQLite card database.
-///
-/// The host protocol already sends `oracle_id` UUIDs in decklists, so this
-/// source uses `load_by_oracle_id`. Failures are reported as `CardSourceError`
-/// so the `Session` can include the failing key in its setup refusal.
+/// Loads definitions by `oracle_id`, the key decklists carry. A failure becomes a
+/// `CardSourceError` so the Session can name the key in its setup refusal.
 pub struct CardDbCardSource {
     db: CardDb,
 }
 
 impl CardDbCardSource {
-    /// Opens the database at `path`. Returns an error if the file cannot be
-    /// opened.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CardSourceError> {
         let db = CardDb::open(path).map_err(|e| CardSourceError(format!("{e}")))?;
         Ok(CardDbCardSource { db })

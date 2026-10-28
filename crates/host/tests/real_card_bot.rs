@@ -1,25 +1,13 @@
-//! Phase 5 diagnostic: run the random proof bot against real cards from the
-//! external database.
-//!
-//! This test curates two simple 40-card decks (White/Blue vs Black/Red) made
-//! entirely of cards that load cleanly and use only plain colored/generic mana.
-//! Most cards have no active `card_scripts` row yet, so they resolve as vanilla
-//! permanents or do-nothing instants/sorceries. That is enough to exercise the
-//! card-database loader, the host Session, and the bot's payment logic.
-//!
-//! The test skips if `../stackfish-db/stackfish.db` does not exist, so CI
-//! (which must not depend on the external database) stays green.
+//! The random bot plays two 40-card decks of real cards from `../stackfish-db/stackfish.db`.
+//! The tests skip when the database is absent, so CI stays green without it.
 
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use stackfish_host::{Bot, CardDbCardSource, Outcome, Session};
 
-/// Answers the bot may give before a game counts as endless. A real game takes
-/// a few thousand.
 const ANSWER_LIMIT: usize = 50_000;
 
-/// Two 40-card decks. Each entry is `(oracle_id, count)`.
 struct Deck {
     cards: &'static [(&'static str, u32)],
 }
@@ -54,7 +42,6 @@ const BLACK_RED: Deck = Deck {
 
 fn db_path() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // crates/host -> crates -> repo root -> parent directory -> stackfish-db
     manifest
         .parent()
         .expect("manifest is in crates/host")
@@ -124,7 +111,6 @@ fn real_card_bot_plays_two_player_games() {
         assert_finished(&outcome, 2, seed);
         winners.push(outcome.winner);
     }
-    // Games may all go one way with vanilla cards; just record it.
     println!("winners over 5 seeds: {winners:?}");
 }
 

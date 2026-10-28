@@ -1,7 +1,6 @@
-//! Mirror types for everything that crosses the boundary. The engine has no
-//! serde dependency, so each engine type a message carries has a wire twin
-//! here, with the conversion next to it. Field names are snake_case, every
-//! `u64` is a decimal string, and `PlayerId` is a plain JSON number.
+//! Wire twins of the engine types a message carries, since the engine has no serde. Names
+//! are snake_case, every `u64` is a decimal string and `PlayerId` is a JSON number.
+//! See `docs/DESIGN.md`.
 
 mod decision;
 mod event;

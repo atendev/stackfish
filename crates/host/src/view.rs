@@ -1,15 +1,8 @@
-//! Who may see what (ticket 004). One rule decides it, and it is applied to
-//! each ledger event and to each open Decision.
-//!
-//! A hand is visible to its owner and a library to nobody, so those two zones
-//! are the hidden ones. Every other zone is public. A Seat that is omniscient
-//! sees everything. The engine ids of hidden objects are never sent to a Seat
-//! that cannot see them (ticket 005).
-//!
-//! TODO(snapshot): ticket 004 also wants a `(Seat, state)` view that equals the
-//! fold of the events a Seat may see. No request asks for a state snapshot yet,
-//! so only the event and Decision halves exist. A snapshot would reuse
-//! `sees_object` and `sees_identity`.
+//! The one visibility rule, applied to each ledger event and each open Decision. Hand
+//! and library are hidden, an omniscient Seat sees all, and hidden ids never reach a Seat
+//! that cannot see them. See `docs/DESIGN.md`.
+
+// TODO: a `(Seat, state)` snapshot equal to the fold of the events a Seat may see; it would reuse `sees_object` and `sees_identity`
 
 use std::collections::HashMap;
 
@@ -24,9 +17,9 @@ use crate::wire::{
 /// One Seat's point of view.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Viewer {
-    /// A Seat tied to a player. It is never omniscient.
+    /// A player Seat, never omniscient.
     Player(PlayerId),
-    /// A Seat tied to no player. The host sets `omniscient` when it creates it.
+    /// A spectator Seat; the host sets `omniscient` at creation.
     Spectator { omniscient: bool },
 }
 
@@ -40,7 +33,6 @@ impl Viewer {
     }
 }
 
-/// A zone, and the player whose hand or library it is when that matters.
 #[derive(Clone, Copy, Debug)]
 pub struct Place {
     zone: ZoneKind,
@@ -51,20 +43,17 @@ fn is_hidden(zone: ZoneKind) -> bool {
     matches!(zone, ZoneKind::Hand | ZoneKind::Library)
 }
 
-/// Whether the viewer can see that an object lies at `place`, and so its id.
 fn sees_object(viewer: Viewer, place: Place) -> bool {
     viewer.omniscient()
         || !is_hidden(place.zone)
         || (place.zone == ZoneKind::Hand && viewer.is(place.owner))
 }
 
-/// Whether the viewer can also tell which card it is. Only the controller sees
-/// a face-down object's identity.
+// Only the controller sees a face-down object's identity.
 fn sees_identity(viewer: Viewer, place: Place, face_down: bool, controller: Option<PlayerId>) -> bool {
     sees_object(viewer, place) && (!face_down || viewer.omniscient() || viewer.is(controller))
 }
 
-/// One side of a move: where the object was or went, and how it looked there.
 #[derive(Clone, Copy, Debug)]
 struct Side {
     place: Place,
@@ -72,9 +61,8 @@ struct Side {
     controller: Option<PlayerId>,
 }
 
-/// What the Session learned about a `ZoneChange` while the new object still
-/// existed. The engine event holds only the new id, so the old id, the owner
-/// and the identity come from the state right after the step that made it.
+/// A `ZoneChange` read while the new object still exists. The engine event holds only the
+/// new id, so the old id, owner and identity come from the state right after the step.
 #[derive(Debug)]
 pub struct Move {
     object: ObjectId,
@@ -114,9 +102,7 @@ impl Move {
         }
     }
 
-    /// The rule of ticket 005. Each id is sent where the viewer could see the
-    /// object, and the identity where the viewer could tell the card on either
-    /// side. `owner` is always sent for a hidden move, so a Seat can count.
+    // `owner` is always sent for a hidden move, so a Seat can count the opponent's hand.
     fn kind_for(&self, viewer: Viewer) -> WireEventKind {
         let sees_old = sees_object(viewer, self.from.place);
         let sees_new = sees_object(viewer, self.to.place);
@@ -135,7 +121,7 @@ impl Move {
     }
 }
 
-/// `Cycled` and `MadnessExiled`: a discard whose card now lies in a public zone.
+// `Cycled` and `MadnessExiled`: a discard whose card now lies in a public zone.
 #[derive(Debug)]
 pub struct Marker {
     cycled: bool,
@@ -159,15 +145,14 @@ impl Marker {
     }
 }
 
-/// One ledger event, with the facts a viewer's copy depends on.
+/// One ledger event with the facts each viewer's copy depends on.
 #[derive(Debug)]
 pub enum Observed {
-    /// Nothing in it depends on who looks. Its ids lie in public zones.
+    /// Identical for every viewer; its ids lie in public zones.
     Public(WireEventKind),
-    /// Carries the id of a source that may sit in a hidden zone, such as a
-    /// card in hand with a cycling trigger.
+    /// Names a source that may sit in a hidden zone, such as a card in hand with a cycling trigger.
     Located { kind: WireEventKind, source: Option<Place> },
-    /// Only the player it names, and omniscient Seats, receive it.
+    /// Only the named player and omniscient Seats receive it.
     Controller { player: PlayerId, kind: WireEventKind },
     /// Only omniscient Seats receive it.
     Omniscient(WireEventKind),
@@ -204,8 +189,7 @@ impl Observed {
             Observed::Revealed { player, zone, cards } => Some(WireEventKind::Revealed {
                 player: player.0,
                 zone: WireZone::from(*zone),
-                // A reveal shows the card to everyone. Its id goes only to a
-                // Seat that could already see it where it lies.
+                // The identity goes to everyone; the id only to a Seat that could see the card where it lies.
                 cards: cards
                     .iter()
                     .map(|(id, owner, identity)| WireRevealedCard {
@@ -219,18 +203,15 @@ impl Observed {
     }
 }
 
-/// Reads the ledger one step at a time. It remembers where objects sat in a
-/// hidden zone after they left, because their old ids can still turn up in a
-/// later event (a trigger whose source was the card in hand), and where a
-/// token went when it entered one, because it ceases to exist there.
+/// Reads the ledger one step at a time. It remembers where objects sat in a hidden zone,
+/// because their old ids can still turn up in a later event, such as a trigger whose
+/// source was the card in hand.
 #[derive(Default)]
 pub struct Observer {
     retired: HashMap<ObjectId, Place>,
 }
 
 impl Observer {
-    /// Where `id` sits or sat, when that is a hidden zone. Public objects and
-    /// ids the Observer never saw in a hidden zone give `None`.
     fn hidden_place(&self, state: &GameState, id: ObjectId) -> Option<Place> {
         match state.object(id) {
             Some(object) => Some(Place { zone: object.zone, owner: Some(object.owner) }),
@@ -239,8 +220,8 @@ impl Observer {
         .filter(|place| is_hidden(place.zone))
     }
 
-    /// Reads `event`. Call it once per ledger entry, in order, against the
-    /// state as it is right after the step that wrote the entry.
+    /// Reads `event`. Call it once per ledger entry, in order, against the state right
+    /// after the step that wrote it.
     pub fn observe(&mut self, state: &GameState, event: &GameEvent) -> Observed {
         use GameEventKind as K;
         let plain = || WireEventKind::plain(&event.kind).expect("every event not built in the match below has a plain form");
@@ -252,15 +233,14 @@ impl Observer {
                 {
                     self.retired.insert(previous, mv.from.place);
                 }
-                // A token that moves into a hidden zone ceases there (CR 111.7),
-                // and the event that says so names its id.
+                // CR 111.7
+                // The later cease event names this id, so remember where it went.
                 if is_hidden(*to) && last_known_info.as_ref().is_some_and(|o| o.is_token) {
                     self.retired.insert(*object, mv.to.place);
                 }
                 Observed::Move(mv)
             }
-            // CR 111.7: a token in a hidden zone (a hand, a library) ceases to
-            // exist there. Only its owner and omniscient Seats may be told.
+            // CR 111.7
             K::TokenCeased { object } => match self.hidden_place(state, *object) {
                 Some(Place { owner: Some(owner), .. }) => Observed::Controller { player: owner, kind: plain() },
                 _ => Observed::Public(plain()),
@@ -283,18 +263,16 @@ impl Observer {
                 zone: *zone,
                 cards: cards.iter().map(|c| (c.object, c.snapshot.owner, WireIdentity::from(&c.snapshot))).collect(),
             },
-            // CR 701.22 and 701.25: what a player does with the cards it looked at.
+            // CR 701.22, CR 701.25
             K::CardsScried { player, .. } | K::CardsSurveiled { player, .. } => {
                 Observed::Controller { player: *player, kind: plain() }
             }
-            // Ticket 004: replay only. Drawing from the seeded stream says nothing a live Seat needs.
+            // Only replay needs a draw from the seeded stream.
             K::RngDrawn { .. } => Observed::Omniscient(plain()),
             K::TriggerQueued { source, .. } | K::ReplacementApplied { source, .. } => {
                 Observed::Located { kind: plain(), source: self.hidden_place(state, *source) }
             }
-            // The ids in these events lie on the battlefield, the stack, in a
-            // graveyard or in exile when they happen. Free text in them never
-            // names a hidden card (ticket 004).
+            // These events happen in public zones, and their free text never names a hidden card.
             K::LifeChanged { .. }
             | K::DamageDealt { .. }
             | K::CounterAdded { .. }
@@ -331,9 +309,8 @@ impl Observer {
     }
 }
 
-/// The open Decision as `viewer` sees it. The chooser sees every option, with
-/// the identity of each offered card that lies in a hidden zone. Anyone else
-/// sees the kind of reply and a count, plus the options in public zones.
+/// The open Decision as `viewer` sees it. The chooser sees every option and the identity of
+/// each offered hidden card. Anyone else sees the reply kind, a count and the public options.
 pub fn decision_for(viewer: Viewer, state: &GameState, decision: &Decision) -> WireDecision {
     if viewer.omniscient() || viewer == Viewer::Player(decision.player) {
         let identities = offered_objects(&decision.shape)

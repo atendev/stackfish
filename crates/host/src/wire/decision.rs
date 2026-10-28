@@ -47,10 +47,7 @@ impl From<PartitionRest> for WireRest {
 }
 
 /// An additional cost the payer still has to meet. The plan names the objects.
-///
-/// TODO: `sacrifice`, `discard`, `tap_permanents` and `exile_from_graveyard`
-/// carry no filter, because the engine does not list the eligible objects for
-/// a Payment Decision (ticket 003). A host has to read the cost text itself.
+// TODO: `sacrifice`, `discard`, `tap_permanents` and `exile_from_graveyard` carry no filter; the engine does not list eligible objects for a Payment Decision
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WireAdditionalCost {
@@ -343,9 +340,8 @@ pub enum WireShape {
     DeclareAttackers { attackers: Vec<WireAttacker> },
     DeclareBlockers { blockers: Vec<WireBlocker> },
     AssignDamage { splits: Vec<WireDamageSplit> },
-    /// What a Seat that is not choosing sees: the kind of reply the Decision
-    /// asks for and how many options it offers (ticket 004). `candidates`
-    /// lists the options that lie in public zones, which every Seat may see.
+    /// What a Seat that is not choosing sees: the reply kind and the option count.
+    /// `candidates` lists only the options in public zones.
     Opaque {
         reply: &'static str,
         count: usize,

@@ -1,10 +1,5 @@
-//! The host-facing wrapper around one game. A Session takes request bytes in
-//! and gives response bytes out. Hosts never touch the engine.
-//!
-//! Every Seat has its own view (ticket 004). The Session reads each ledger entry
-//! once, builds that Seat's copy of it and queues the copy in the Seat's outbox.
-//! A response carries the outbox of the Seat that sent the request, so a Seat
-//! gets the events other Seats caused with a `poll`.
+//! The host-facing wrapper around one game: request bytes in, response bytes out. Each
+//! Seat has an outbox of events filtered for its view. See `docs/DESIGN.md`.
 
 use std::any::Any;
 use std::mem;
@@ -43,16 +38,15 @@ enum Outcome {
 enum Phase {
     Playing,
     Over(Option<PlayerId>),
-    /// The engine returned an `Internal` error (035). Every later message but
-    /// `poll` is refused.
+    /// The engine returned an `Internal` error. Every later message but `poll` is refused.
     Halted,
-    /// The engine panicked (035). Every later message, `poll` included, is
-    /// refused, and the engine is never touched again.
+    /// The engine panicked. Every later message, `poll` included, is refused, and the
+    /// engine is never touched again.
     Dead,
 }
 
-/// What a Seat is told when the engine breaks. The detail can name a hidden
-/// card, so it stays in `Session::internal_error` for the host's log.
+// The detail can name a hidden card, so Seats get this text and the host reads
+// `Session::internal_error`.
 const INTERNAL_MESSAGE: &str = "the engine hit an internal error and the game cannot continue";
 
 /// One point of view on the game and the events it has not received yet.
@@ -74,17 +68,14 @@ pub struct Session {
     phase: Phase,
     /// Why the Session halted or died, for the host's log and never for a Seat.
     internal: Option<String>,
-    // TODO(replay export): keep the setup bytes and the accepted Answers in
-    // order, as ticket 001 describes. Not in the B3 or B4 ticket text.
-    // TODO(outbox): a Seat that never sends a request keeps its outbox growing.
+    // TODO: keep the setup bytes and the accepted Answers in order, for replay export
+    // TODO: bound a Seat's outbox; one that never sends a request grows without limit
 }
 
 fn refuse_start(code: ErrorCode, message: impl Into<String>) -> Vec<u8> {
     Response::error(code, message).to_bytes()
 }
 
-/// Parses the envelope and checks the version, so every entry point reports
-/// these two failures alike.
 fn parse_request(bytes: &[u8]) -> Result<Request, Response> {
     let request: Request = serde_json::from_slice(bytes)
         .map_err(|e| Response::error(ErrorCode::MalformedMessage, format!("not a valid request: {e}")))?;
@@ -113,7 +104,6 @@ fn rejection_code(code: RejectionCode) -> ErrorCode {
     }
 }
 
-/// The text of a panic payload, for the host's log.
 fn panic_text(payload: &(dyn Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
@@ -123,14 +113,10 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
 }
 
 impl Session {
-    /// Builds a Session from a `setup` request. Nothing runs yet: the host's
-    /// first `advance` produces the pregame events and the first Decision.
-    /// `Err` holds the error response to send back.
-    ///
-    /// `cards` is read here and not kept.
+    /// Builds a Session from a `setup` request. Nothing runs until the first `advance`.
+    /// `Err` holds the error response to send back. `cards` is read here and not kept.
     pub fn create(request: &[u8], cards: &dyn CardSource) -> Result<(Session, Vec<u8>), Vec<u8>> {
-        // A panic while the game is built (a script that breaks setup, say) is an
-        // error response, like one during play.
+        // A script that panics during setup must give an error response, as it would in play.
         match catch_unwind(AssertUnwindSafe(|| Self::build_session(request, cards))) {
             Ok(result) => result,
             Err(_) => Err(Response::error(ErrorCode::EnginePanic, INTERNAL_MESSAGE).to_bytes()),
@@ -171,17 +157,15 @@ impl Session {
         Ok((session, Response::created(ids).to_bytes()))
     }
 
-    /// Everything a rejected request must leave as it was. Hosts never need
-    /// this: it exists so a test can prove a rejection changes nothing.
+    /// The engine state a rejected request must leave unchanged. Only tests need it.
     pub fn snapshot(&self) -> EngineSnapshot {
         self.engine.snapshot()
     }
 
     /// Handles one `advance`, `answer` or `poll` request.
     ///
-    /// A panic inside the engine is caught here (035). The Session marks itself
-    /// dead, answers this request and every later one with `engine_panic`, and
-    /// never touches the engine again.
+    /// An engine panic is caught here. The Session marks itself dead and answers this
+    /// request and every later one with `engine_panic`.
     pub fn handle(&mut self, request: &[u8]) -> Vec<u8> {
         if matches!(self.phase, Phase::Dead) {
             return Response::error(ErrorCode::EnginePanic, INTERNAL_MESSAGE).to_bytes();
@@ -189,7 +173,6 @@ impl Session {
         self.guarded(|session| session.dispatch(request))
     }
 
-    /// Runs `f` and turns a panic into the dead state and an `engine_panic` response.
     fn guarded(&mut self, f: impl FnOnce(&mut Session) -> Response) -> Vec<u8> {
         match catch_unwind(AssertUnwindSafe(|| f(self).to_bytes())) {
             Ok(bytes) => bytes,
@@ -201,9 +184,8 @@ impl Session {
         }
     }
 
-    /// Why the Session stopped, if it did: the engine's `Internal` text or a
-    /// panic message. For the host's log. It can name a hidden card, so never
-    /// pass it to a player.
+    /// Why the Session stopped, if it did. For the host's log: it can name a hidden card,
+    /// so never pass it to a player.
     pub fn internal_error(&self) -> Option<&str> {
         self.internal.as_deref()
     }
@@ -218,7 +200,7 @@ impl Session {
         {
             return self.refuse_with(None, ErrorCode::UnknownSeat, format!("seat {seat} does not exist"));
         }
-        // A Seat can still collect its last events after a pipeline error.
+        // A halted Session still lets a Seat collect its last events.
         if request.kind == "poll" {
             return self.poll(&request);
         }
@@ -235,10 +217,8 @@ impl Session {
         }
     }
 
-    /// Runs the engine while no Decision is open. The response carries the
-    /// events of the request's Seat. Without a `seat` it carries none and shows
-    /// the Decision as a Seat that is not choosing sees it, so a host that
-    /// drives the Session collects events with `poll`.
+    // Without a `seat` the response carries no events, so a host that drives the Session
+    // collects them with `poll`.
     fn advance(&mut self, request: &Request) -> Response {
         let seat = request.seat;
         let body: AdvanceBody = match parse_body(request) {
@@ -275,8 +255,7 @@ impl Session {
         let player = PlayerId(seat);
         let answer = Answer { decision: DecisionId(body.decision.0), reply: body.reply.into_reply(player) };
         if let Err(Rejection { code, message }) = self.engine.answer(player, answer) {
-            // The engine broke while carrying out the Answer, so unlike every other
-            // refusal this one ends the game.
+            // An `Internal` rejection means the engine broke, which ends the game.
             if code == RejectionCode::Internal {
                 self.observe();
                 let events = self.take_events(Some(seat));
@@ -289,8 +268,6 @@ impl Session {
         self.finish(Some(seat), outcome)
     }
 
-    /// Hands a Seat the events it has not received and shows the game's state:
-    /// the open Decision as that Seat sees it, a finished game or a fatal error.
     fn poll(&mut self, request: &Request) -> Response {
         let _: PollBody = match parse_body(request) {
             Ok(body) => body,
@@ -312,9 +289,7 @@ impl Session {
         }
     }
 
-    /// Steps the engine until a Decision opens, the game ends, an error stops
-    /// it or `budget` steps have run. Each step is read into the outboxes
-    /// before the next one, while the objects it moved still exist.
+    // Each step is observed before the next one, while the objects it moved still exist.
     fn run(&mut self, budget: u64) -> Outcome {
         for _ in 0..budget {
             let status = self.engine.step().status;
@@ -351,15 +326,11 @@ impl Session {
         }
     }
 
-    /// Ends the game after an `Internal` error. The wire text is generic; the
-    /// detail is already in `self.internal`.
     fn halt(&mut self, events: Vec<WireEvent>) -> Response {
         self.phase = Phase::Halted;
         Response::fatal(events, INTERNAL_MESSAGE)
     }
 
-    /// Turns the ledger entries written since the last call into each Seat's
-    /// copy of them.
     fn observe(&mut self) {
         let state = self.engine.state();
         for event in &state.ledger[self.observed..] {
@@ -373,20 +344,17 @@ impl Session {
         self.observed = state.ledger.len();
     }
 
-    /// The events a Seat has not received yet. A request without a seat gets none.
     fn take_events(&mut self, seat: Option<u32>) -> Vec<WireEvent> {
         seat.map(|s| mem::take(&mut self.seats[s as usize].outbox)).unwrap_or_default()
     }
 
-    /// The open Decision as the request's Seat sees it. Without a seat it is
-    /// shown as to a Seat that is not choosing.
+    // Without a seat the Decision is shown as a non-choosing spectator sees it.
     fn open_decision_for(&mut self, seat: Option<u32>) -> Option<WireDecision> {
         let viewer = seat.map_or(Viewer::Spectator { omniscient: false }, |s| self.seats[s as usize].viewer);
         let decision = self.engine.open_decision()?;
         Some(view::decision_for(viewer, self.engine.state(), &decision))
     }
 
-    /// Adds the open Decision, if any, to a refusal, so a host can retry.
     fn refuse(&mut self, seat: Option<u32>, response: Response) -> Response {
         let Some(error) = response.error else { return response };
         self.refuse_with(seat, error.code, error.message)
@@ -427,7 +395,7 @@ mod tests {
         let first: Value = serde_json::from_slice(&session.handle(&advance)).unwrap();
         assert_eq!(first["body"]["status"], "error");
         assert_eq!(first["body"]["error"]["code"], "pipeline_error");
-        // The detail stays on the host side. A Seat only gets the generic text.
+        // A Seat must get only the generic text.
         assert!(!first.to_string().contains("Black Lotus"), "{first}");
         assert_eq!(session.internal_error(), Some("boom names the card Black Lotus"));
 
@@ -442,15 +410,14 @@ mod tests {
         let poll = serde_json::to_vec(&json!({ "v": 1, "kind": "poll", "seat": 0, "body": {} })).unwrap();
         let advance = serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "body": {} })).unwrap();
 
-        // The engine is hard to break from outside, so the closure stands in for a
-        // panic deep inside a step. `handle` runs its request through the same guard.
+        // The engine is hard to break from outside, so a closure stands in for a panic in a step.
         let first: Value = serde_json::from_slice(&session.guarded(|_| panic!("seat 1 holds Black Lotus"))).unwrap();
         assert_eq!(first["body"]["status"], "error");
         assert_eq!(first["body"]["error"]["code"], "engine_panic");
         assert_eq!(session.internal_error(), Some("seat 1 holds Black Lotus"), "the text is kept for the host's log");
         assert!(!first.to_string().contains("Black Lotus"), "a Seat never sees the panic text: {first}");
 
-        // Dead means dead: even a poll is refused, and the engine is not touched again.
+        // A dead Session refuses even a poll.
         for request in [&advance, &poll] {
             let later: Value = serde_json::from_slice(&session.handle(request)).unwrap();
             assert_eq!(later["body"]["error"]["code"], "engine_panic");
@@ -474,7 +441,6 @@ mod tests {
         let refused: Value = serde_json::from_slice(&refused).unwrap();
         assert_eq!(refused["body"]["error"]["code"], "engine_panic");
     }
-    /// A Session past pregame, with seven cards in each hand.
     fn started() -> Session {
         let card = minimal_card_definition(1, "A", "a", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE);
         let cards = FixtureCardSource::new().with("a", card);
@@ -496,7 +462,6 @@ mod tests {
         Viewer::Spectator { omniscient: true },
     ];
 
-    /// The card at the front of player 0's hand.
     fn a_card_in_player_zero_s_hand(session: &Session) -> stackfish_engine::GameObject {
         let state = session.engine.state();
         let id = *state.zone(ZoneKind::Hand, Some(PlayerId(0))).unwrap().contents.front().unwrap();
@@ -540,7 +505,7 @@ mod tests {
             GameEventKind::CardsSurveiled { player: PlayerId(0), kept_on_top: Vec::new(), put_graveyard: Vec::new() },
         );
         let rng = observe(&mut session, GameEventKind::RngDrawn { purpose: "test".to_string(), value: 5 });
-        // Player 0, player 1, a spectator and an omniscient spectator.
+        // Indexes follow VIEWERS.
         let gets_scry = [true, false, false, true];
         let gets_rng = [false, false, false, true];
         for (i, viewer) in VIEWERS.into_iter().enumerate() {
@@ -566,9 +531,8 @@ mod tests {
         assert_eq!(opponent["object"], "9001");
     }
 
-    /// A token returned to its owner's hand has a hand id the opponent never
-    /// received. When the token then ceases to exist (CR 111.7), that event
-    /// would otherwise hand the opponent the id.
+    // CR 111.7
+    // The token's hand id was never sent to the opponent, so the cease event must not leak it.
     #[test]
     fn a_token_that_ceases_in_a_hand_is_reported_only_to_its_owner() {
         let mut session = started();
@@ -583,7 +547,7 @@ mod tests {
                 last_known_info: Some(token),
             },
         );
-        // The token ceases: it is gone from the state by the time the event is read.
+        // The token is already gone from the state when the event is read.
         let state = session.engine.state_mut();
         state.zone_mut(ZoneKind::Hand, Some(PlayerId(0))).unwrap().remove(card.object_id);
         state.objects.remove(&card.object_id);

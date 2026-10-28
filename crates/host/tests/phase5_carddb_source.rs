@@ -1,8 +1,5 @@
-//! End-to-end host test using a real card database as the `CardSource`.
-//!
-//! This test builds a temp SQLite DB with a minimal real schema, constructs a
-//! two-player setup, and confirms the Session resolves cards from it and runs
-//! the first Decision.
+//! A Session resolves cards from a temp SQLite database through `CardDbCardSource` and
+//! reaches its first Decision.
 
 use rusqlite::Connection;
 use stackfish_host::{CardDbCardSource, Session};

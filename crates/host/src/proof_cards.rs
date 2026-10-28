@@ -1,19 +1,7 @@
-//! The proof card set: 25 cards that cover the engine's main paths (mana,
-//! combat, targeting, triggers, modes, auras, equipment, search, tokens and
-//! counterspells), and two 40-card decks built from them. A host can use it to
-//! try the protocol without a card database. CI relies on it, so nothing here
-//! reads `../stackfish-db`.
-//!
-//! Keys are readable slugs, not `oracle_id` UUIDs. A `FixtureCardSource` maps
-//! whatever key it is given.
-//!
-//! Every Lua script uses only primitives that `docs/lua` documents and that an
-//! engine test covers. The modal card is declared in Rust, because a card
-//! script cannot declare modes.
-//!
-//! TODO(proof set): no card in the set asks for a sacrifice, discard, tap or
-//! graveyard-exile payment, because a Payment Decision does not list the
-//! eligible objects (see `.plan/closed/003`).
+//! The proof card set and two 40-card decks, used to play the protocol without a card
+//! database. CI relies on it, so nothing here reads `../stackfish-db`. See `docs/DESIGN.md`.
+
+// TODO: add cards that ask for a sacrifice, discard, tap or graveyard-exile payment; a Payment Decision lists no eligible objects
 
 use serde_json::{Value, json};
 use stackfish_engine::{
@@ -24,10 +12,8 @@ use stackfish_engine::{
 
 use crate::card_source::FixtureCardSource;
 
-/// The key and the number of copies of each card in one deck.
 type Deck = &'static [(&'static str, u32)];
 
-/// Red and green: creatures, burn, a modal spell, land search and tokens.
 const RED_GREEN: Deck = &[
     ("mountain", 9),
     ("forest", 8),
@@ -45,7 +31,6 @@ const RED_GREEN: Deck = &[
     ("iron_blade", 1),
 ];
 
-/// Blue and black: flyers, card draw, counterspells, removal and drain.
 const BLUE_BLACK: Deck = &[
     ("island", 8),
     ("swamp", 9),
@@ -62,8 +47,7 @@ const BLUE_BLACK: Deck = &[
     ("iron_blade", 1),
 ];
 
-/// The script of a card with no abilities of its own. `ByKey` would fail to
-/// load on every zone change, because the engine does not resolve keys.
+// `ByKey` would fail to load on every zone change, because the engine does not resolve keys.
 const NO_ABILITIES: &str = "local s = {}\nreturn s";
 
 fn cost(text: &str) -> ManaCost {
@@ -145,7 +129,6 @@ fn creature(id: u64, name: &str, mana_cost: &str, power: i32, toughness: i32, te
     }
 }
 
-/// A creature or permanent whose only script registers one ability.
 fn with_ability(card: CardDefinition, body: &str) -> CardDefinition {
     scripted(
         card,
@@ -161,7 +144,6 @@ return s
     )
 }
 
-/// A spell whose script gives an optional target and a resolution effect.
 fn spell(card: CardDefinition, target: Option<&str>, operation: &str) -> CardDefinition {
     let target_fn = target.map_or(String::new(), |t| {
         format!("function s.target_requirement()\n    return {t}\nend\n")
@@ -194,8 +176,7 @@ fn creature_filter() -> TargetFilter {
     }
 }
 
-/// "Choose one: 2 damage to target creature, or you gain 3 life." Modes live
-/// on the definition, because a card script cannot declare them.
+// Declared in Rust because a card script cannot declare modes.
 fn fork_in_the_road() -> CardDefinition {
     let damage = SpellMode {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
@@ -228,7 +209,7 @@ fn fork_in_the_road() -> CardDefinition {
     }
 }
 
-/// Every card in the proof set.
+/// Every card in the proof set, keyed by a readable slug rather than an `oracle_id`.
 pub fn proof_cards() -> FixtureCardSource {
     let flying = |card: CardDefinition| CardDefinition { keywords: KeywordSet::FLYING, ..card };
     let first_strike = |card: CardDefinition| CardDefinition { keywords: KeywordSet::FIRST_STRIKE, ..card };
@@ -396,9 +377,8 @@ fn deck_json(deck: Deck) -> Value {
     json!({ "deck": entries })
 }
 
-/// A `setup` request in bytes for `players` players on the standard preset.
-/// The decks alternate between red-green and blue-black. `seed` seeds the
-/// game, and the library shuffle is on.
+/// A `setup` request for `players` players on the standard preset, alternating the
+/// red-green and blue-black decks.
 pub fn proof_setup_request(players: usize, seed: u64) -> Vec<u8> {
     let decks: Vec<Value> =
         (0..players).map(|i| deck_json(if i % 2 == 0 { RED_GREEN } else { BLUE_BLACK })).collect();
