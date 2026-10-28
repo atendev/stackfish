@@ -9,10 +9,10 @@ use crate::types::target::TargetSpec;
 use crate::types::turn::Step;
 use crate::types::zone::ZoneKind;
 
-/// Per ygopro's effect lifecycle (`docs/ygo_pro_reference.md`), generalized
-/// for MTG: condition/cost/target/operation are separate script callbacks
-/// rather than one monolithic function, so the engine can check (e.g.)
-/// condition without committing to cost/target/operation.
+/// Per the ygo-pro effect lifecycle (`docs/ygo_pro_reference.md`),
+/// generalized for MTG: condition, cost, target and operation are separate
+/// script callbacks, so the engine can check a condition without committing
+/// to the rest.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AbilityKind {
     Triggered,
@@ -20,31 +20,23 @@ pub enum AbilityKind {
     Static,
 }
 
-/// CR 118.12/118.12a's "[do something] unless [a player does something
-/// else]" template, shared by every "pay or else" keyword rather than each
-/// getting its own bespoke pause. `AbilityEffect::UnlessPaid`'s `cost` reuses
-/// the ordinary `CostSpec` vocabulary (any real cost shape, not just mana —
-/// CR 118.12 places no such restriction), validated/committed via the exact
-/// same `PaymentPlan`/`commit_payment` machinery `submit_payment` itself
-/// uses. `otherwise` names which of a small, deliberately closed set of
-/// consequences fires once every candidate payer declines in turn
-/// (`ProcessState::AwaitingUnlessPaidChoice`'s own `payer_queue`, built in CR
-/// 101.4 APNAP order — a single-candidate queue for both variants below,
-/// since neither Ward nor Echo ever asks anyone but one fixed player; the
-/// queue shape exists so a future "any player may pay" keyword doesn't need
-/// a second mechanism, not because either real card here needs more than
-/// one candidate) — grown by hand as a real new keyword needs a new shape,
-/// same "narrow now, widen on the next real card" posture this codebase
-/// takes throughout (see `99-backlog.md`).
+/// CR 118.12, 118.12a: "[do something] unless [a player does something
+/// else]", shared by every pay-or-else keyword. `AbilityEffect::UnlessPaid`'s
+/// `cost` is an ordinary `CostSpec`, validated and committed through the same
+/// `PaymentPlan` and `commit_payment` machinery as `submit_payment`.
+/// `otherwise` is a small closed set of consequences that fires once every
+/// candidate payer declines in turn (`AwaitingUnlessPaidChoice`'s
+/// `payer_queue`, in CR 101.4 APNAP order). Ward and Echo each have one fixed
+/// payer, and the queue lets a future "any player may pay" keyword reuse it.
+/// Widen the set when a real card needs a new shape.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UnlessPaidConsequence {
-    /// CR 701.6a/118.12 (Mana Leak, Condescend) + CR 702.21a (Ward): counter
-    /// whatever this ability's own target names — same removal
-    /// (`counter_stack_object`) `AbilityEffect::Counter` already uses.
+    /// CR 701.6a, 118.12 (Mana Leak, Condescend) and CR 702.21a (Ward):
+    /// counters the ability's own target with `counter_stack_object`, as
+    /// `AbilityEffect::Counter` does.
     Counter,
-    /// CR 702.30a (Echo): sacrifice the permanent whose ability this is —
-    /// reuses `resolve_sacrifice_effect` against this ability's own source,
-    /// no target of its own.
+    /// CR 702.30a (Echo): sacrifices the ability's source with
+    /// `resolve_sacrifice_effect`, with no target of its own.
     SacrificeSelf,
 }
 
@@ -57,1047 +49,616 @@ pub enum EntryControl {
     Owner,
 }
 
-/// Structural stand-in for an ability's effect when no script bridge exists
-/// to actually run one (every `RegisteredAbility` still needs `operation` —
-/// this is narrower: just enough to model CR 605's mana abilities, the one
-/// concrete effect shape this engine resolves without a script callback).
-/// `None` on `RegisteredAbility::effect` means "this ability's effect can
-/// only be carried out via the script bridge" — not yet possible, same gap
-/// as `operation` everywhere else.
+/// Structural stand-in for an ability's effect that the engine resolves
+/// without a script callback, starting with CR 605 mana abilities. `None` on
+/// `RegisteredAbility::effect` means only the script bridge can carry the
+/// effect out.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AbilityEffect {
-    /// CR 605: adds exactly these literal units to the activator's mana
-    /// pool. Reuses `ManaUnit` (see `mana.rs`) — same "literal units, not a
-    /// cost shape" vocabulary `CostPayment::Mana` already uses, just added
-    /// instead of spent.
+    /// CR 605: adds exactly these literal units to the activator's mana pool,
+    /// the vocabulary `CostPayment::Mana` uses for spending.
     AddMana(Vec<ManaUnit>),
-    /// CR 605's "add one mana of any color" shape (and its "add N mana,
-    /// each any color among {...}" generalization) — unlike `AddMana` above,
-    /// the color of each of the `count` mana produced isn't fixed on the
-    /// ability itself; it's chosen when the ability is activated (CR
-    /// 602.2b's choice-as-part-of-activation process), carried on
-    /// `PlayerActionKind::ActivateAbility::chosen_colors`. `commands.rs`'s
-    /// `ActivateAbility` arm validates `chosen_colors.len() == count` and
-    /// every entry is a member of `choices` before converting each to
-    /// `ManaUnit::Colored` and adding to the pool, same as `AddMana` does
-    /// for its own fixed units. No `SnowColored` choice variant yet (see
-    /// this slice's own UNRESOLVED note in docs/implementation.md).
+    /// CR 605: "add one mana of any color" and its "add N mana, each any color
+    /// among {...}" form. The colors are chosen at activation (CR 602.2b) and
+    /// carried in `ActivateAbility::chosen_colors`. The `ActivateAbility` arm
+    /// checks `chosen_colors.len() == count` and that every entry is in
+    /// `choices`, then adds `ManaUnit::Colored` units.
+    // TODO: no `SnowColored` choice variant
     AddManaChoice { count: u32, choices: ColorSet },
-    /// The `Game.Ops.GainLife(n)` primitive — gains the controller exactly
-    /// `n` life, no script invocation needed. Mirrors the hand-written
-    /// `{ gain_life = n }` Lua operation table from the prior slice, just
-    /// resolved on the Rust side instead of via `ScriptRuntime::invoke_operation`.
-    ///
-    /// A negative `n` makes the controller lose life (CR 119.3), and that
-    /// still works, but `LoseLife` is the intended spelling: it can target a
-    /// player and it pushes a `LifeChanged` event, which this variant never
-    /// does. TODO: `GainLife` itself pushes no `LifeChanged` event (CR
-    /// 119.9's "gains life" trigger and CR 119.10's replacement have nothing
-    /// to listen to yet).
+    /// `Game.Ops.GainLife(n)`: the controller gains `n` life. A negative `n`
+    /// loses life (CR 119.3), but `LoseLife` is the intended spelling, since
+    /// it can target a player and pushes a `LifeChanged` event.
+    /// TODO: `GainLife` pushes no `LifeChanged` event, so CR 119.9's "gains life" trigger and CR 119.10's replacement have nothing to listen to
     GainLife(i32),
-    /// The `Game.Ops.Damage(n)` primitive — deals exactly `n` damage to the
-    /// resolving `StackObject`'s first chosen target (CR 608.2m). Unlike
-    /// `GainLife` above, this does *not* mutate `GameState` directly —
-    /// `ResolveStackTop` emits a real `GameEventKind::DamageDealt` event and
-    /// lets it flow through the normal `ReplacementCheck`→`CommitEvents`
-    /// pipeline, the same one combat damage already uses, so
-    /// prevention/replacement effects (CR 614-616) and Lifelink/Wither/
-    /// Infect/Deathtouch (`commands::apply_damage_event`) apply for free.
-    /// Single fixed target only — no "divide among any number of targets"
-    /// (Arc Trail-style) or "each opponent" mass-damage shape; matches
-    /// `targeting-basics`'s own existing narrowing (see
-    /// docs/implementation.md).
+    /// `Game.Ops.Damage(n)`: deals `n` damage to the resolving object's first
+    /// chosen target (CR 608.2m). It emits a real `DamageDealt` event through
+    /// `ReplacementCheck` and `CommitEvents`, as combat damage does, so
+    /// prevention and replacement (CR 614-616) and Lifelink, Wither, Infect
+    /// and Deathtouch (`commands::apply_damage_event`) apply. A single fixed
+    /// target only, with no "divide among" or "each opponent" shapes.
     Damage(u32),
-    /// The `Game.Ops.Destroy()` primitive — destroys the resolving
-    /// `StackObject`'s first chosen target (CR 701.8). Unlike `Damage`,
-    /// this can't be modeled as "push a not-yet-applied event and let
-    /// `CommitEvents` retroactively apply it" — every other `ZoneChange`
-    /// event in this codebase describes a move that already happened, so
-    /// `ResolveStackTop` performs the real CR 614.13 `WouldDie` replacement
-    /// check and `sba::commit_death` inline (mirroring `resolve_deaths`'s
-    /// own per-object body), the same way `Engine::submit_payment` already
-    /// does for a Sacrifice cost payment. CR 702.12b: an indestructible
-    /// target is untouched — checked before even proposing the
-    /// replacement-checked event, not a replacement effect itself. No
-    /// fields — a toggle, not a value, same shape as `SwitchPT`.
+    /// `Game.Ops.Destroy()`: destroys the first chosen target (CR 701.8). It
+    /// can't push an unapplied event as `Damage` does, because every
+    /// `ZoneChange` describes a move already made. `ResolveStackTop` instead
+    /// runs the CR 614.13 `WouldDie` replacement check and `sba::commit_death`
+    /// inline, as `Engine::submit_payment` does for a Sacrifice cost. An
+    /// indestructible target is untouched (CR 702.12b), checked before
+    /// proposing the event. A toggle with no fields.
     Destroy,
-    /// CR 509.1h: "target attacking creature becomes blocked" — blocked by
-    /// no specific creature (CR 510.1c: deals no combat damage unless it has
-    /// trample), mutated directly into `CombatState.effect_blocked` via
-    /// `commands::mark_effect_blocked` — no event kind exists for this, same
-    /// "already happened, no `CommitEvents` needed" convention `Pump`/
-    /// `GainControl` already use for their own direct `GameState` mutation.
-    /// CR 702.22i rides along for free: `mark_effect_blocked` itself
-    /// propagates to every other living member of the target's own band.
-    /// No fields — a toggle, not a value, same shape as `Destroy`. Narrowed:
-    /// `target_requirement` can only express "target creature," not "target
-    /// *attacking* creature" (no `TargetFilter` predicate for combat state
-    /// exists, and the Lua state snapshot doesn't expose combat data either)
-    /// — targeting a non-attacking creature is a silent no-op at resolution
-    /// (checked inside `mark_effect_blocked` itself) rather than a real CR
-    /// 608.2b illegal-target fizzle.
+    /// CR 509.1h: "target attacking creature becomes blocked", by no specific
+    /// creature (no combat damage unless trample, CR 510.1c). Mutates
+    /// `CombatState.effect_blocked` through `commands::mark_effect_blocked`
+    /// with no event, like `Pump` and `GainControl`. CR 702.22i propagates to
+    /// the band inside that function. A toggle with no fields.
+    // TODO: `target_requirement` can express "target creature" but not "attacking" (no combat-state `TargetFilter`, and the Lua snapshot has no combat data), so a non-attacking target is a silent no-op and not a CR 608.2b fizzle
     BecomeBlocked,
-    /// The `Game.Ops.DestroyAll(filter)` primitive (CR 701.8, CR 601.2c's
-    /// "all"-effects-don't-target) — destroys every battlefield permanent
-    /// matching `filter` unconditionally, e.g. Armageddon's "Destroy all
-    /// lands." Same `EffectFilter` shape (`controller`/`card_types`/
-    /// `self_only`) `Game.CreateStaticAbility`'s own `:SetAffected` already
-    /// uses — reuses `types::effect::matches_effect_filter` (extracted from
-    /// `ContinuousEffect::applies_to` for exactly this reuse) rather than a
-    /// second copy of the same controller/card_types matching logic.
-    /// `ResolveStackTop` collects every matching battlefield object and
-    /// hands the list to the same `continue_scripted_zone_move(
-    /// ScriptedZoneMoveKind::Destroy, ...)` pipeline `Destroy` above already
-    /// delegates to — CR 702.12b indestructibility, CR 616.1 ordering-choice
-    /// pauses, and the CR 614.13 `WouldDie` replacement check all fall out
-    /// for free, no new destruction logic needed. `subtypes`/`excluded_*`
-    /// aren't part of `EffectFilter` yet, so "destroy all Zombies"/"destroy
-    /// all nonland permanents" aren't expressible this way yet — narrower
-    /// than `TargetFilter::Object`, named as a follow-up if a real card
-    /// needs it.
+    /// `Game.Ops.DestroyAll(filter)` (CR 701.8, 601.2c: "all" effects don't
+    /// target): destroys every matching battlefield permanent (Armageddon).
+    /// Takes the `EffectFilter` of `:SetAffected` and uses
+    /// `matches_effect_filter`. `ResolveStackTop` hands the list to
+    /// `continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, ..)`, so
+    /// indestructibility (CR 702.12b), ordering pauses (CR 616.1) and the
+    /// `WouldDie` check come for free.
     DestroyAll(EffectFilter),
-    /// The `Game.Ops.Counters(kind, n)` primitive — puts `amount` counters
-    /// of `kind` on the resolving `StackObject`'s first chosen target (CR
-    /// 122.1a). Like `Damage`, not `Destroy`: `GameEventKind::CounterAdded`
-    /// already existed as dead code (never constructed, never matched) with
-    /// exactly this shape, so `ResolveStackTop` pushes it unapplied and
-    /// `CommitEvents` retroactively applies it, the same pipeline `Damage`
-    /// uses for `DamageDealt`. Object targets only — no player-facing
-    /// counters (Energy/Experience) this slice, since real "put a counter on
-    /// target creature/artifact" text vastly outnumbers those and
-    /// `CounterAdded` only carries a single `ObjectId`, not a generic
-    /// `Target`. No replacement/prevention modeling for counter placement
-    /// either (no `EventFilter::CounterAdded` shape exists) — same gap
-    /// `GainLife` already has, not fixed here.
+    /// `Game.Ops.Counters(kind, n)`: puts `amount` counters on the first
+    /// chosen target (CR 122.1a). Like `Damage`, `ResolveStackTop` pushes
+    /// `CounterAdded` unapplied and `CommitEvents` applies it. Object targets
+    /// only, because `CounterAdded` carries an `ObjectId`, so Energy and
+    /// Experience are out.
+    // TODO: no `EventFilter::CounterAdded`, so counter placement can't be replaced or prevented
     Counters { kind: CounterKind, amount: i32 },
-    /// The `Game.Ops.Pump(power, toughness, duration)` primitive — "target
-    /// creature gets +X/+Y until <duration>" (e.g. CR 702's fight/pump
-    /// effects). Every legal target independently gets its own
-    /// `ContinuousEffect` (layer 7c, `EffectPrimitive::ModifyPT`) pushed
-    /// straight into `state.continuous_effects` — mutates state immediately,
-    /// same "already happened, no `CommitEvents` needed" convention
-    /// `DrawCards`/`Shuffle` already use, since there's no
-    /// event kind for "a continuous effect was added" (static-ability
-    /// registration isn't ledger-logged either). Each pushed effect's
-    /// `ContinuousEffect.source` is set to the *target's* `ObjectId`, not
-    /// the spell/ability's own source, paired with `EffectFilter::
-    /// self_only: true` — reusing exactly the "self_only pins to
-    /// `ContinuousEffect.source`" mechanism `EffectFilter`'s own doc comment
-    /// already names as its stance for "the affected object is the effect's
-    /// own attachment target," just applied to a spell's chosen target
-    /// instead of an aura's. Free side effect: if the target later leaves
-    /// whatever zone it occupied when this effect was created, its
-    /// `ObjectId` stops resolving (every zone change mints a fresh one) and
-    /// `layers::applicable_effects_in_layer` already treats an unresolvable
-    /// source as inapplicable — the effect can't outlive its own target.
-    /// `duration` is `EffectDuration`'s real drain paths
-    /// (`UntilEndOfTurn`/`UntilYourNextTurn`/`UntilEndOfCombat`/
-    /// `Permanent` — see `phase5/effect-duration-expiration`); a
-    /// non-Object legal target is skipped, same "silent no-op" stance every
-    /// other object-targeted primitive here takes.
+    /// `Game.Ops.Pump(power, toughness, duration)`: "target creature gets
+    /// +X/+Y until <duration>". Each legal target gets its own layer 7c
+    /// `ModifyPT` `ContinuousEffect` pushed straight into
+    /// `state.continuous_effects`, with no `CommitEvents`, since no event kind
+    /// says "a continuous effect was added". `ContinuousEffect.source` is the
+    /// target's `ObjectId` with `self_only: true`, so the effect can't outlive
+    /// its target: a zone change mints a new id, and
+    /// `layers::applicable_effects_in_layer` ignores an unresolvable source.
+    /// `duration` drains through `EffectDuration` (`UntilEndOfTurn`,
+    /// `UntilYourNextTurn`, `UntilEndOfCombat`, `Permanent`). A non-object
+    /// target is skipped silently, as in every object-targeted primitive here.
     Pump { power: i32, toughness: i32, duration: crate::types::effect::EffectDuration },
-    /// The `Game.Ops.GainControl(duration)` primitive — CR 108.4/613.1
-    /// layer 2, e.g. "Gain control of target creature until end of turn"
-    /// (Threaten-style). Same per-target `ContinuousEffect` construction
-    /// `Pump` above uses (`self_only: true` pinned to the *target's* own
-    /// `ObjectId`, mutates `state.continuous_effects` immediately, no
-    /// `CommitEvents` involved), just `Layer::ControlChangingEffects`/
-    /// `EffectPrimitive::GainControl` instead of layer 7c/`ModifyPT`. The
-    /// new controller is always the resolving spell/ability's own
-    /// controller (`StackObject::controller` at resolution time) - no
-    /// separate player argument from Lua, since every real "gain control"
-    /// card gives control to its own caster. A non-Object legal target is
-    /// skipped, same "silent no-op" stance every other object-targeted
-    /// primitive here takes.
-    ///
-    /// Deliberately narrow: only this resolving-spell/ability creation path
-    /// exists. A *static* ability's own "you control enchanted creature"
-    /// (Control Magic-style, CR 303.4h auras) needs real attach/enchant
-    /// machinery this engine doesn't have yet (`GameObject.attached_to`/
-    /// `.attachments` are inert placeholder fields, never written to
-    /// anywhere) - a separate, larger gap, not attempted here. Also,
-    /// `GameObject.controlled_since_turn` isn't updated by this effect
-    /// (CR 302.6 summoning sickness technically restarts for the new
-    /// controller) - deliberately left alone rather than half-fixed, since
-    /// naively stamping it here would leave a stale value behind once the
-    /// effect's duration expires and control reverts via the layer engine,
-    /// a new bug rather than a fix. Named, not guessed at.
+    /// `Game.Ops.GainControl(duration)` (CR 108.4, 613.1 layer 2): "gain
+    /// control of target creature until end of turn". Builds a per-target
+    /// `ContinuousEffect` like `Pump`, but with `Layer::ControlChangingEffects`
+    /// and `EffectPrimitive::GainControl`. The new controller is always
+    /// `StackObject::controller` at resolution. A non-object target is skipped
+    /// silently. This covers only the resolving-spell path.
+    // TODO: `GameObject.controlled_since_turn` is not updated here, though CR 302.6 restarts summoning sickness for the new controller; stamping it would leave a stale value once the effect expires
     GainControl(crate::types::effect::EffectDuration),
-    /// The `Game.Ops.Regenerate()` primitive — CR 701.19a: "Regenerate
-    /// target creature." Every legal target independently gets its own
-    /// one-shot regeneration shield (`ReplacementEffect`, `EventFilter::
-    /// WouldDie` paired with `ReplacementPayload::Regenerate`, pinned via
-    /// `self_only: true` exactly like `Pump` pins its own `ContinuousEffect`)
-    /// pushed straight into `state.replacement_effects` — same "mutates
-    /// state immediately, no event kind for this" convention `Pump` already
-    /// established, since static-ability-sourced shields (CR 701.19b)
-    /// aren't logged either.
-    ///
-    /// CR 701.19c: a target with `KeywordSet::CANT_BE_REGENERATED` gets no
-    /// shield at all - checked at the moment the shield would be created,
-    /// not as a property of the `ReplacementEffect` itself. The ability/
-    /// spell that resolved this primitive still fully resolved (its cost was
-    /// already paid, same as any other primitive here) - only the shield
-    /// silently fails to come into being, matching 701.19c's own wording
-    /// ("doesn't preclude such abilities from being activated... rather,
-    /// causes shields to not be applied"). A non-Object legal target is
-    /// skipped, same "silent no-op" stance every other object-targeted
-    /// primitive here takes.
+    /// `Game.Ops.Regenerate()` (CR 701.19a): each legal target gets its own
+    /// one-shot shield (`EventFilter::WouldDie` with
+    /// `ReplacementPayload::Regenerate`, pinned by `self_only: true` as `Pump`
+    /// does) pushed straight into `state.replacement_effects`, with no event,
+    /// since static-sourced shields (CR 701.19b) aren't logged either.
+    /// CR 701.19c: a target with `CANT_BE_REGENERATED` gets no shield, checked
+    /// when the shield would be created. The ability still resolves. A
+    /// non-object target is skipped silently.
     Regenerate,
-    /// The `Game.Ops.DrawCards(n)` primitive — the resolving `StackObject`'s
-    /// controller draws exactly `n` cards (CR 120.3/121), no target (same
-    /// "always the controller" shape `GainLife` already uses, not `Damage`/
-    /// `Destroy`/`Counters`'s object-target shape — "Draw a card"/"you draw
-    /// two cards" vastly outnumbers "target player draws"). Like every
-    /// other real zone move in this engine, each draw is proposed via
-    /// `commands::propose_draw`, replacement-checked via `apply_replacements`
-    /// (CR 614/616), and committed via `commands::commit_zone_move` — see
-    /// `Engine::continue_draw_cards`. Drawing from an empty library silently
-    /// stops rather than looping past it - CR 704.5b's empty-library-loss SBA
-    /// isn't modeled (same TODO `draw_step` already carries). No `Target::
-    /// Player` "target player draws" variant; replacement effects that
-    /// change *which player* draws (e.g. Notion Thief) are not representable
-    /// because `ReplacementPayload::ReplaceZoneDestination` only rewrites `to`,
-    /// not the destination hand's owner.
+    /// `Game.Ops.DrawCards(n)`: the controller draws `n` cards (CR 120.3,
+    /// 121), with no target. Each draw goes through `commands::propose_draw`,
+    /// `apply_replacements` (CR 614, 616) and `commands::commit_zone_move`;
+    /// see `Engine::continue_draw_cards`. Drawing from an empty library
+    /// silently stops.
+    // TODO: "target player draws", and replacements that change which player draws (Notion Thief), since `ReplaceZoneDestination` rewrites only `to`
     DrawCards(u32),
-    /// The `Game.Ops.Mill(n)` primitive (CR 701.17a) - the affected player puts
-    /// the top `n` cards of their library into their graveyard. One variant
-    /// covers "you mill N" and "target player mills N", chosen by whether the
-    /// ability DECLARED a target spec (`StackObject::target_requirement`):
-    /// - no target spec: the affected player is the ability's controller;
-    /// - a target spec: the affected player is the first legal
-    ///   `Target::Player` at resolution. If the declared player target is
-    ///   gone or illegal, or the spec chose no targets ("up to one target
-    ///   player"), nothing happens. There is never a fallback to the
-    ///   controller.
+    /// `Game.Ops.Mill(n)` (CR 701.17a): the affected player mills the top `n`
+    /// cards. The player is the controller when the ability declared no target
+    /// spec (`StackObject::target_requirement`), otherwise the first legal
+    /// `Target::Player` at resolution. If that target is gone or illegal, or
+    /// the spec chose none ("up to one target player"), nothing happens, with
+    /// no controller fallback.
     ///
-    /// CR 701.17b: milling more cards than the library holds mills as many as
-    /// possible, and an empty library mills nothing. Milling is not drawing,
-    /// so it never sets `drew_from_empty_library` and never causes the CR
-    /// 704.5b loss. The batch is the top `min(n, library size)` cards, read
-    /// once up front (front of the library zone is the top), and moved through
-    /// `ScriptedZoneMoveKind::Mill`: each card is its own proposed
-    /// `ZoneChange { Library -> Graveyard }`, run through `apply_replacements`
-    /// (so a Leyline of the Void style redirect applies, and a CR 616.1
-    /// ordering choice pauses mid-mill) and committed with
-    /// `commands::commit_zone_move`, which gives each card a new `ObjectId`
-    /// (CR 400.7) and the destination zone's own owner lookup.
-    ///
-    /// TODO: no `Game.Conditions.*` entry for "whenever a card is milled" (the
-    /// `ZoneChange` event exists, nothing listens for the Library to
-    /// Graveyard pair).
-    /// TODO: no way to act on "the milled card" (CR 701.17c/d), no mill as a
-    /// cost (CR 701.17b's cost clause), no dredge (CR 702.52) and no rad
-    /// counters (CR 728).
-    /// TODO: a replacement that changes how many cards a mill moves is not
-    /// modeled, since the batch is fixed before the first card moves.
+    /// CR 701.17b: an oversized mill moves as many cards as possible, and an
+    /// empty library mills nothing. Milling is not drawing, so it never sets
+    /// `drew_from_empty_library` or causes the CR 704.5b loss. The batch is
+    /// the top `min(n, library size)` cards, read once up front, and moves
+    /// through `ScriptedZoneMoveKind::Mill`. Each card is its own
+    /// `ZoneChange { Library -> Graveyard }` run through `apply_replacements`
+    /// (so a Leyline of the Void redirect applies and a CR 616.1 ordering
+    /// choice can pause mid-mill) and committed with
+    /// `commands::commit_zone_move`, which mints a new `ObjectId` (CR 400.7).
+    // TODO: no `Game.Conditions.*` entry for "whenever a card is milled"; the `ZoneChange` event exists and nothing listens for Library to Graveyard
+    // TODO: no way to act on "the milled card" (CR 701.17c, 701.17d), mill as a cost (CR 701.17b), dredge (CR 702.52) or rad counters (CR 728)
+    // TODO: a replacement that changes how many cards a mill moves, since the batch is fixed before the first card moves
     Mill(u32),
-    /// The `Game.Ops.LoseLife(n)` primitive (CR 119.3) - the affected player
-    /// loses `n` life. Player selection is the same as `Mill`: the
-    /// controller when the ability declared no target spec, otherwise the
-    /// first legal `Target::Player` (no controller fallback when that target
-    /// is gone). `Player::lose_life` subtracts without clamping, so a total of
-    /// 0 or less is left for the CR 704.5a state-based action. `n == 0`
-    /// changes nothing and pushes no event.
-    ///
-    /// Pushes `GameEventKind::LifeChanged { player, delta: -n }`, already
-    /// applied to state like the `Tapped` events, and is the first
-    /// resolution-time producer of that event (cost payment is the other).
-    ///
-    /// TODO: nothing consumes `LifeChanged` - no "whenever you lose life"
-    /// condition and no "would lose life" replacement event (CR 614).
-    /// TODO: no "can't lose life" restriction (CR 119.8).
-    /// TODO: damage to a player (CR 120.3a), `GainLife` and lifelink do not
-    /// push `LifeChanged`.
-    /// TODO: no "lose life equal to X" computed amount, and no Two-Headed
-    /// Giant team life total (CR 119.4a).
+    /// `Game.Ops.LoseLife(n)` (CR 119.3): the affected player loses `n` life,
+    /// chosen as in `Mill`. `Player::lose_life` subtracts without clamping,
+    /// leaving 0 or less to the CR 704.5a SBA. `n == 0` changes nothing and
+    /// pushes no event. It pushes `LifeChanged { player, delta: -n }`, already
+    /// applied to state like `Tapped`, and is the first resolution-time
+    /// producer of that event (cost payment is the other).
+    // TODO: nothing consumes `LifeChanged`: no "whenever you lose life" condition and no "would lose life" replacement event (CR 614)
+    // TODO: no "can't lose life" restriction (CR 119.8)
+    // TODO: damage to a player (CR 120.3a), `GainLife` and lifelink do not push `LifeChanged`
+    // TODO: no "lose life equal to X" amount and no Two-Headed Giant team life total (CR 119.4a)
     LoseLife(u32),
-    /// The `Game.Ops.Sacrifice()` primitive — sacrifices the resolving
-    /// `StackObject`'s first chosen target from the battlefield (CR 701.21a).
-    /// Unlike `Destroy`, indestructibility does **not** prevent sacrifice (CR
-    /// 702.12b is Destroy-specific). The implementation is identical to the
-    /// `Destroy` arm minus the indestructibility check: proposes
-    /// `Battlefield → Graveyard`, runs `apply_replacements` (CR 614.13's
-    /// "if it would die, exile it instead" applies to sacrifice), then calls
-    /// `sba::commit_death` — which, unlike the `Exile` case, works correctly
-    /// here because the destination is the owner's per-player graveyard
-    /// (`Some(owner)`), not the shared Exile zone. `Dies`/`LeavesBattlefield`
-    /// triggers fire the same way they do off an SBA-driven death.
-    ///
-    /// TODO: "sacrifice a permanent you control" (player chooses at resolution,
-    /// no targeting) requires Lua coroutines — blocked on backlog item 9.
-    /// The untargeted self form is `SacrificeSelf`.
+    /// `Game.Ops.Sacrifice()` (CR 701.21a): sacrifices the first chosen
+    /// target. Indestructibility doesn't stop it (CR 702.12b is
+    /// Destroy-specific). Same as `Destroy` minus that check: it proposes
+    /// Battlefield to graveyard, runs `apply_replacements` (so CR 614.13's
+    /// "exile it instead" applies) and calls `sba::commit_death`, which works
+    /// here because the destination is the owner's per-player graveyard.
+    /// `Dies` and `LeavesBattlefield` triggers fire as for an SBA death.
+    // TODO: "sacrifice a permanent you control" (player chooses at resolution, no targeting) needs Lua coroutines; the untargeted self form is `SacrificeSelf`
     Sacrifice,
-    /// The `Game.Ops.SacrificeSelf` primitive - "sacrifice this permanent"
-    /// (CR 701.21a), the plain effect form of the cost-side
-    /// `AdditionalCost::SacrificeSelf`. No target: the resolving ability's own
-    /// source goes through `ScriptedZoneMoveKind::Sacrifice`, the same
-    /// replacement-checked Battlefield to graveyard move `Sacrifice` uses, so
-    /// indestructible does not stop it, regeneration cannot intercept it and
-    /// Dies/LeavesBattlefield triggers fire.
+    /// `Game.Ops.SacrificeSelf` (CR 701.21a): "sacrifice this permanent", the
+    /// effect form of `AdditionalCost::SacrificeSelf`. The source goes through
+    /// `ScriptedZoneMoveKind::Sacrifice`, the same replacement-checked move
+    /// `Sacrifice` uses, so indestructible doesn't stop it, regeneration
+    /// can't intercept it and Dies and LeavesBattlefield triggers fire.
     ///
     /// CR 701.21a: a player can't sacrifice a permanent they don't control.
-    /// Nothing targeted the source, so the resolver checks it directly: if
-    /// the source is still on the battlefield but its effective controller is
-    /// no longer the ability's controller, nothing happens. A source that
-    /// already left is a new object (CR 400.7), the old id no longer
-    /// resolves, and the effect does nothing.
-    ///
-    /// TODO: `UnlessPaidConsequence::SacrificeSelf` (Echo) goes through
-    /// `resolve_sacrifice_effect` and does not make this controller check.
-    /// TODO: "sacrifice a permanent you control" with a player choice still
-    /// needs a choice pause (see `Sacrifice`).
+    /// Nothing targeted the source, so the resolver checks it: if it is on the
+    /// battlefield under a different effective controller, nothing happens. A
+    /// source that already left is a new object (CR 400.7), so its old id
+    /// doesn't resolve and nothing happens.
+    // TODO: `UnlessPaidConsequence::SacrificeSelf` (Echo) goes through `resolve_sacrifice_effect` and makes no controller check
+    // TODO: "sacrifice a permanent you control" with a player choice needs a choice pause (see `Sacrifice`)
     SacrificeSelf,
-    /// The `Game.Ops.Exile()` primitive — exiles the resolving `StackObject`'s
-    /// first chosen target from the battlefield (CR 701.18). Unlike `Destroy`,
-    /// exile ignores indestructibility entirely (CR 702.12b is Destroy-only).
-    /// Like `Destroy`, a `ZoneChange` always describes a move that already
-    /// happened, so `ResolveStackTop` runs the real `apply_replacements`
-    /// pipeline and then inlines the zone move — but cannot reuse
-    /// `sba::commit_death` because that function hardcodes `Some(owner)` for
-    /// its destination zone lookup, which fails for the shared Exile zone
-    /// (`owner = None`). Battlefield targets only — "exile target
-    /// creature/permanent" vastly outnumbers "exile target card from a
-    /// graveyard," and the latter requires knowing which zone to remove from
-    /// at resolution time; deferred as a named follow-up. No fields — a
-    /// toggle, not a value, same shape as `Destroy`.
+    /// `Game.Ops.Exile()` (CR 701.18): exiles the first chosen battlefield
+    /// target. Exile ignores indestructibility (CR 702.12b is Destroy-only).
+    /// `ResolveStackTop` runs `apply_replacements` and inlines the move,
+    /// because `sba::commit_death` hardcodes `Some(owner)` for the destination
+    /// zone and the shared Exile zone has `owner = None`. Battlefield targets
+    /// only. A toggle with no fields.
     Exile,
-    /// The `Game.Ops.ReturnToHand()` primitive - "return target permanent to
-    /// its owner's hand" (CR 400.3). Same shape as `Exile`: the resolving
-    /// `StackObject`'s chosen battlefield targets are moved through
+    /// `Game.Ops.ReturnToHand()` (CR 400.3): "return target permanent to its
+    /// owner's hand". The chosen targets move through
     /// `continue_scripted_zone_move` (`ScriptedZoneMoveKind::Bounce`), so the
     /// move is replacement-checked (CR 614) and fires leaves-the-battlefield
-    /// triggers. The card goes to its *owner's* hand, and a token that is
-    /// returned ceases to exist (CR 111.7/704.5d, the existing SBA).
-    ///
-    /// The target may sit on the battlefield, in a graveyard or in exile
-    /// (`ScriptedZoneMoveKind::accepts_source_zone`) - the source zone is
-    /// read from the object at resolution, and the target filter's `zone`
-    /// is what lets a script aim at a graveyard card.
-    ///
-    /// The untargeted forms are `ReturnSelfToHand` and `ReturnAllToHand`.
+    /// triggers. The card goes to its owner's hand, and a returned token
+    /// ceases to exist (CR 111.7, 704.5d). The target may be on the
+    /// battlefield, in a graveyard or in exile
+    /// (`ScriptedZoneMoveKind::accepts_source_zone`), read from the object at
+    /// resolution, and the target filter's `zone` lets a script aim at a
+    /// graveyard card. Untargeted forms are `ReturnSelfToHand` and
+    /// `ReturnAllToHand`.
     ReturnToHand,
-    /// The `Game.Ops.ReturnSelfToHand` primitive - "return this card from
-    /// your graveyard to your hand" (CR 400.3). No target: the resolving
-    /// ability's own source is the object moved, through the same
-    /// `ScriptedZoneMoveKind::Bounce` pipeline `ReturnToHand` uses. If the
-    /// source has left the zone it was in when the ability went on the stack
-    /// it is a new object (CR 400.7), the old id no longer resolves, and the
-    /// effect does nothing - not a fizzle, since nothing was targeted.
+    /// `Game.Ops.ReturnSelfToHand`: "return this card from your graveyard to
+    /// your hand" (CR 400.3). The source moves through the same `Bounce`
+    /// pipeline as `ReturnToHand`. If it left the zone it was in, it is a new
+    /// object (CR 400.7) and the effect does nothing, which is not a fizzle
+    /// since nothing was targeted.
     ReturnSelfToHand,
-    /// The `Game.Ops.ReturnAllToHand(filter, zone)` primitive - "return all
-    /// creatures to their owners' hands" / "return all creature cards from
-    /// your graveyard to your hand" (CR 400.3, CR 601.2c's "all"-effects
-    /// don't target). Collects every object in `zone` (Battlefield,
-    /// Graveyard or Exile; across every player's graveyard) matching
-    /// `filter` and hands the list to `ScriptedZoneMoveKind::Bounce`, so the
-    /// moves are simultaneous, replacement-checked and fire departed
-    /// triggers. `filter.controller` is read off the object's controller,
-    /// which equals its owner for any object outside the battlefield.
+    /// `Game.Ops.ReturnAllToHand(filter, zone)` (CR 400.3, 601.2c: "all"
+    /// effects don't target). Collects every object in `zone` (battlefield,
+    /// graveyard across all players, or exile) matching `filter` and moves the
+    /// list through `ScriptedZoneMoveKind::Bounce`, so the moves are
+    /// simultaneous, replacement-checked and fire departed triggers.
+    /// `filter.controller` is read off the object's controller, which equals
+    /// its owner outside the battlefield.
     ReturnAllToHand { filter: EffectFilter, zone: ZoneKind },
-    /// The `Game.Ops.ExileSelf` primitive - "exile this card from your
-    /// graveyard" (CR 406.2). No target: the resolving ability's own source
-    /// goes through `ScriptedZoneMoveKind::Exile`. A source that already
+    /// `Game.Ops.ExileSelf`: "exile this card from your graveyard" (CR 406.2).
+    /// The source goes through `ScriptedZoneMoveKind::Exile`. A source that
     /// changed zones is a new object (CR 400.7), so the effect does nothing.
-    /// TODO: no face-down exile (CR 406.3) yet. The targeted "until it leaves
-    /// the battlefield" form is `ExileUntilSourceLeaves`.
+    /// The targeted "until it leaves the battlefield" form is
+    /// `ExileUntilSourceLeaves`.
+    // TODO: face-down exile (CR 406.3)
     ExileSelf,
-    /// The `Game.Ops.ExileAll(filter, zone)` primitive - "exile all
-    /// creatures" / "exile all cards from graveyards" (CR 406.2, CR 601.2c).
-    /// Collects every object in `zone` (Battlefield or Graveyard; across
-    /// every player's graveyard) matching `filter` and hands the list to
+    /// `Game.Ops.ExileAll(filter, zone)` (CR 406.2, 601.2c): collects every
+    /// object in `zone` (battlefield or graveyard, across all players)
+    /// matching `filter` and moves the list through
     /// `ScriptedZoneMoveKind::Exile`, so the moves are simultaneous,
     /// replacement-checked and fire departed triggers.
-    /// TODO: Hand and Library sources (`accepts_source_zone` rejects them).
+    // TODO: Hand and Library sources (`accepts_source_zone` rejects them)
     ExileAll { filter: EffectFilter, zone: ZoneKind },
-    /// The `Game.Ops.ExileUntilSourceLeaves` primitive - "exile target
-    /// creature until ~ leaves the battlefield" (CR 610.3). Targeted and
-    /// battlefield-only, like `Exile`, but each card that lands in exile is
-    /// linked to the ability's source (`GameState::linked_exiles`). Once the
-    /// source is off the battlefield the card returns under its owner's
-    /// control (CR 610.3c) through `ScriptedZoneMoveKind::Reanimate`, at the
-    /// point `finish_sba_loop` settles. If the source already left before
-    /// this resolves, nothing is exiled (CR 610.3a/b).
-    /// TODO: the cleanup-step SBA check doesn't return linked exiles.
-    /// TODO(CR 610.4): no "phases out until" form.
-    /// TODO: no untargeted form, no graveyard source, no other durations
-    /// (until end of turn, until your next turn) and no Oblivion Ring style
-    /// separate-trigger return (CR 607 linked abilities).
+    /// `Game.Ops.ExileUntilSourceLeaves` (CR 610.3): "exile target creature
+    /// until ~ leaves the battlefield". Targeted and battlefield-only like
+    /// `Exile`, but each exiled card is linked to the ability's source in
+    /// `GameState::linked_exiles`. Once the source is off the battlefield the
+    /// card returns under its owner's control (CR 610.3c) through
+    /// `ScriptedZoneMoveKind::Reanimate`, when `finish_sba_loop` settles. If
+    /// the source left before this resolves, nothing is exiled (CR 610.3a,
+    /// 610.3b).
+    // TODO: the cleanup-step SBA check doesn't return linked exiles
+    // TODO: no "phases out until" form (CR 610.4)
+    // TODO: no untargeted form, graveyard source, other durations (until end of turn, until your next turn) or Oblivion Ring style separate-trigger return (CR 607)
     ExileUntilSourceLeaves,
-    /// The `Game.Ops.ReturnToBattlefield(opts?)` primitive - "return target
-    /// creature card from a graveyard to the battlefield" (Reanimate, Animate
-    /// Dead's non-Aura half, Zombify, Unburial Rites). Every legal object
-    /// target of the resolving ability moves through
-    /// `ScriptedZoneMoveKind::Reanimate`, so each entry is a replacement-
-    /// checked `ZoneChange` (CR 614/616: "if a creature would enter, exile it
-    /// instead", ordering pauses) and then gets the entry treatment a
-    /// resolving permanent spell gets: a fresh CR 400.7 object, summoning
-    /// sick, its card script run so its abilities register, and the
-    /// `apply_enters_battlefield_modifiers` family (enters tapped, enters
-    /// with counters, Bloodthirst, Escape counters). Enters-the-battlefield
-    /// triggers fire off the ledger `ZoneChange`.
+    /// `Game.Ops.ReturnToBattlefield(opts?)`: "return target creature card
+    /// from a graveyard to the battlefield" (Reanimate, Zombify, Unburial
+    /// Rites). Every legal object target moves through
+    /// `ScriptedZoneMoveKind::Reanimate`, so each entry is a replacement-checked
+    /// `ZoneChange` (CR 614, 616) and then gets the entry treatment of a
+    /// resolving permanent spell: a fresh CR 400.7 object, summoning sick, its
+    /// card script run, and `apply_enters_battlefield_modifiers` (enters
+    /// tapped, with counters, Bloodthirst, Escape counters). ETB triggers fire
+    /// off the ledger `ZoneChange`.
     ///
-    /// `control` is CR 110.2a: the permanent enters under the controller of
-    /// the effect ([`EntryControl::You`], the default) unless the effect says
-    /// otherwise ([`EntryControl::Owner`], "under its owner's control").
-    /// `tapped` puts it onto the battlefield tapped. The source zone is read
-    /// from the object at resolution (graveyard or exile).
+    /// `control` is CR 110.2a: the effect's controller by default
+    /// ([`EntryControl::You`]) or the owner ([`EntryControl::Owner`]).
+    /// `tapped` enters it tapped. The source zone (graveyard or exile) is read
+    /// from the object at resolution.
     ///
-    /// An instant or sorcery card stays where it is (CR 400.4a). An Aura
-    /// with exactly one legal host enters attached to it (CR 303.4f); one
-    /// with none stays put (CR 303.4g). Tokens never get here (CR 111.7).
-    ///
-    /// Untargeted sibling: `ReturnAllToBattlefield`. Persist and Undying use
-    /// the separate `ReturnSelfWithCounter`, which skips replacement checks.
-    /// TODO(CR 303.4f): an Aura with two or more legal hosts needs the
-    /// controller to choose one. There is no non-stack entry-attach pause
-    /// yet, so such an Aura stays in the graveyard (the "Aura with several
-    /// hosts" TODO).
-    /// TODO(CR 707.6, 702.82a, 702.38a, 614.12a): Clone-style "enters as a
-    /// copy", Devour and Amplify need a choice pause that isn't tied to a
-    /// stack object. A reanimated card with one of these enters as itself.
-    /// TODO(CR 122.6): no "enters with an additional counter" option.
-    /// TODO(CR 508.4): no "enters attacking" or "enters blocking" option.
-    /// TODO: no "under target opponent's control" and no "may" return.
+    /// An instant or sorcery card stays put (CR 400.4a). An Aura with exactly
+    /// one legal host enters attached to it (CR 303.4f), and with none it
+    /// stays put (CR 303.4g). Tokens never get here (CR 111.7). The untargeted
+    /// sibling is `ReturnAllToBattlefield`. Persist and Undying use
+    /// `ReturnSelfWithCounter`, which skips replacement checks.
+    // TODO: an Aura with two or more legal hosts needs the controller to choose one; there is no non-stack entry-attach pause, so it stays in the graveyard (CR 303.4f)
+    // TODO: Clone-style "enters as a copy", Devour and Amplify need a choice pause not tied to a stack object, so a reanimated card with one enters as itself (CR 707.6, 702.82a, 702.38a, 614.12a)
+    // TODO: no "enters with an additional counter" option (CR 122.6)
+    // TODO: no "enters attacking" or "enters blocking" option (CR 508.4)
+    // TODO: no "under target opponent's control" and no "may" return
     ReturnToBattlefield { control: EntryControl, tapped: bool },
-    /// The `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)` primitive
-    /// - "return all creature cards from all graveyards to the battlefield"
-    /// (Rise of the Dark Realms, Living Death's return half; CR 601.2c: "all"
-    /// effects don't target). Collects every object in `zone` (Graveyard,
-    /// across every player's graveyard, or Exile) matching `filter` and hands
-    /// the list to `ScriptedZoneMoveKind::Reanimate`, so each entry behaves
-    /// exactly as it does for `ReturnToBattlefield`. `filter.controller` is
-    /// read off the object's controller, which is its owner outside the
-    /// battlefield.
-    /// TODO: entries are processed one after another, not as one simultaneous
-    /// event, so an earlier arrival's replacement effect can affect a later
-    /// one's entry (CR 603.6a, 614.12 want one simultaneous batch).
+    /// `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)`: "return all
+    /// creature cards from all graveyards to the battlefield" (Rise of the Dark
+    /// Realms, Living Death; CR 601.2c). Collects every matching object in
+    /// `zone` (graveyard across all players, or exile) and moves the list
+    /// through `ScriptedZoneMoveKind::Reanimate`, each entry behaving as in
+    /// `ReturnToBattlefield`. `filter.controller` is read off the object's
+    /// controller, its owner outside the battlefield.
+    // TODO: entries are processed one after another and not as one simultaneous event, so an earlier arrival's replacement can affect a later one (CR 603.6a, 614.12)
     ReturnAllToBattlefield { filter: EffectFilter, zone: ZoneKind, control: EntryControl, tapped: bool },
-    /// The `Game.Ops.Tap` primitive - "tap target artifact, creature, or
-    /// land" (CR 701.26a). Taps every legal object target of the resolving
-    /// ability. Only an untapped battlefield permanent changes (CR 701.26a,
-    /// CR 110.5d); tapping a tapped permanent does nothing, and no
-    /// `GameEventKind::Tapped` is pushed for it, so a later "becomes tapped"
-    /// trigger can't fire on a no-op (CR 603.2e). The flag is set directly
-    /// and the event pushed as already happened (the convention the
-    /// tap-cost, attack and untap-step producers use), not applied in
-    /// `CommitEvents` like `Counters`. Tapping never touches `CombatState`
-    /// (CR 506.4b). Untargeted siblings: `TapSelf`, `TapAll`.
-    /// TODO(CR 614): no "would become tapped" replacement event exists, so
-    /// the flip is not replacement-checked.
-    /// TODO(CR 603.2e): events are emitted, but there is no Lua
-    /// `becomes tapped` condition yet (`ConditionPrimitive` has none).
+    /// `Game.Ops.Tap` (CR 701.26a): taps every legal object target. Only an
+    /// untapped battlefield permanent changes (CR 110.5d), and a no-op pushes
+    /// no `Tapped` event, so a "becomes tapped" trigger can't fire on it
+    /// (CR 603.2e). The flag is set directly and the event pushed as already
+    /// happened, as the tap-cost, attack and untap-step producers do, and not
+    /// applied in `CommitEvents` like `Counters`. Tapping never touches
+    /// `CombatState` (CR 506.4b). Untargeted siblings are `TapSelf` and
+    /// `TapAll`.
+    // TODO: no "would become tapped" replacement event, so the flip is not replacement-checked (CR 614)
+    // TODO: no Lua `becomes tapped` condition, since `ConditionPrimitive` has none (CR 603.2e)
     Tap,
-    /// The `Game.Ops.Untap` primitive - "untap target creature" (CR
-    /// 701.26b). Mirror of `Tap`: only a tapped battlefield permanent
-    /// changes, and `GameEventKind::Untapped` is pushed only on a real flip.
-    /// TODO(CR 122.1d, CR 614): no stun counters and no "would become
-    /// untapped" replacement event, so an untap always succeeds.
-    /// TODO(CR 603.2e): no Lua `becomes untapped` condition yet.
+    /// `Game.Ops.Untap` (CR 701.26b): the mirror of `Tap`. Only a tapped
+    /// battlefield permanent changes, and `Untapped` is pushed only on a real
+    /// flip.
+    // TODO: no stun counters and no "would become untapped" replacement event, so an untap always succeeds (CR 122.1d, 614)
+    // TODO: no Lua `becomes untapped` condition (CR 603.2e)
     Untap,
-    /// The `Game.Ops.TapSelf` primitive - "tap this permanent" (CR 701.26a).
-    /// No target: the resolving ability's own source. A source that already
-    /// left the battlefield is a new object (CR 400.7), so the old id no
-    /// longer resolves and nothing happens. Same flip rules and TODOs as
-    /// `Tap`.
+    /// `Game.Ops.TapSelf` (CR 701.26a): taps the ability's own source. A
+    /// source that left the battlefield is a new object (CR 400.7), so nothing
+    /// happens. Same flip rules and TODOs as `Tap`.
     TapSelf,
     /// The `Game.Ops.UntapSelf` primitive - "untap this permanent" (CR
     /// 701.26b). Mirror of `TapSelf`; same TODOs as `Untap`.
     UntapSelf,
-    /// The `Game.Ops.TapAll(filter)` primitive - "tap all creatures your
-    /// opponents control" (CR 701.26a, CR 601.2c's "all"-effects don't
-    /// target, so hexproof and protection don't stop it). Collects every
-    /// battlefield object matching `filter` and taps those that are
-    /// untapped. Battlefield only: tapped status exists only there (CR
-    /// 110.5d), so there is no zone argument. `filter.controller` is read
-    /// off the raw `object.controller` like every other `matches_effect_filter`
-    /// caller; the untap step alone resolves the layered controller.
-    /// Same TODOs as `Tap`.
+    /// `Game.Ops.TapAll(filter)` (CR 701.26a, 601.2c): "tap all creatures your
+    /// opponents control". It doesn't target, so hexproof and protection don't
+    /// stop it. Taps the untapped battlefield objects matching `filter`, with
+    /// no zone argument since tapped status exists only there (CR 110.5d).
+    /// `filter.controller` is read off the raw `object.controller`, like every
+    /// `matches_effect_filter` caller. Same TODOs as `Tap`.
     TapAll { filter: EffectFilter },
     /// The `Game.Ops.UntapAll(filter)` primitive - "untap all creatures you
     /// control" (CR 701.26b). Mirror of `TapAll`; same TODOs as `Untap`.
     UntapAll { filter: EffectFilter },
-    /// The `Game.Ops.Counter()` primitive (CR 701.6a) — "counter target
-    /// spell." The target is a `Target::Object` referring to another
-    /// `StackObject`'s own `stack_id` (a spell on the stack already has a
-    /// real `GameObject` at `zone: Stack` sharing that same `ObjectId` — see
-    /// `commands::cast::execute_cast_spell` — so `TargetFilter::Object {
-    /// zone: Some(ZoneKind::Stack), .. }` already targets it correctly with
-    /// no engine change; card_types/controller narrow it the same way any
-    /// other `Object` filter does, e.g. Negate's "target noncreature spell").
+    /// `Game.Ops.Counter()` (CR 701.6a): "counter target spell". The target is
+    /// a `Target::Object` naming another `StackObject`'s `stack_id`. A spell on
+    /// the stack has a `GameObject` at `zone: Stack` with the same id
+    /// (`commands::cast::execute_cast_spell`), so
+    /// `TargetFilter::Object { zone: Some(ZoneKind::Stack), .. }` already
+    /// targets it, narrowed by card types and controller (Negate's "target
+    /// noncreature spell"). Convolute's "mana value X (or less, or greater)"
+    /// uses `TargetFilter::Object::mana_value`, and Stifle or Trickbind's
+    /// "counter target activated or triggered ability" uses `Target::Ability`
+    /// and `TargetFilter::Ability`. `resolve_counter_effect` accepts either.
     ///
-    /// Unlike every other single-target `AbilityEffect` here, the affected
-    /// object is *not* `top.source`/the resolving spell's own target in the
-    /// zone-mutation sense `Destroy`/`Exile`/`Sacrifice` use (those all act
-    /// on a Battlefield object reachable through `continue_scripted_zone_move`)
-    /// — it's a *different*, still-present entry in `state.stack` itself.
-    /// `resolve_counter_effect` finds and removes that `StackObject` by
-    /// matching `stack_id` (a plain `Vec::retain`/position-remove, since
-    /// `state.stack` is a bare `Vec`, not a queue with its own removal
-    /// primitive), then — only if it was a `Spell` (an ability "just stops
-    /// existing," same as a fizzled ability, no `ZoneChange`) — reuses
-    /// `Engine::move_resolving_spell` for the card's own zone move (CR
-    /// 701.6a: owner's graveyard, or exile if *that* spell's own
-    /// `exile_on_leaving_stack` is set, e.g. a flashbacked spell that gets
-    /// countered still ends up exiled per CR 702.34a - not the *countering*
-    /// spell's own flag). No `apply_replacements` call - same "a spell
-    /// leaving the stack for graveyard/exile isn't a `WouldDie`-shaped
-    /// replacement-checked move" stance the CR 608.2b fizzle branch already
-    /// takes for the identical zone-move shape. No CR 616.1 ordering pause
-    /// either - a single stack entry being removed, not several simultaneous
-    /// battlefield deaths.
+    /// Unlike the other single-target effects, the affected object is a
+    /// different, still-present entry in `state.stack`, not a battlefield
+    /// object reachable through `continue_scripted_zone_move`.
+    /// `resolve_counter_effect` finds it by `stack_id` and removes it. Only a
+    /// `Spell` then moves, through `Engine::move_resolving_spell` (CR 701.6a:
+    /// owner's graveyard, or exile if that spell's own `exile_on_leaving_stack`
+    /// is set, as with a flashbacked spell, CR 702.34a). An ability just stops
+    /// existing. There is no `apply_replacements` call, as in the CR 608.2b
+    /// fizzle branch, and no CR 616.1 ordering pause, since one stack entry
+    /// leaves.
     ///
-    /// CR 608.2b already covers "the targeted spell left the stack before
-    /// this resolves" for free: `target_is_legal`'s zone check fails once
-    /// the target's `ObjectId` no longer resolves to a `zone: Stack` object
-    /// (every zone change mints a fresh id), so `legal_targets` comes back
-    /// empty and the *Counterspell itself* fizzles via the ordinary path,
-    /// never reaching this arm at all.
-    ///
-    /// "Counter target spell with mana value X (or less/or greater)"
-    /// (Convolute's fixed-number form, or the X-comparison form) is real now
-    /// too, via `TargetFilter::Object::mana_value` - see that field's own
-    /// doc comment for the full shape (`ManaValueRequirement`/
-    /// `ManaValueBound`, threading the casting/resolving spell's own
-    /// announced `x_value` through `commands::target_is_legal`).
-    ///
-    /// "Counter target activated or triggered ability" (Stifle, Trickbind)
-    /// is real now too, via `Target::Ability`/`TargetFilter::Ability` (CR
-    /// 113.9/701.6a, `phase5/counter-target-ability`) - `resolve_counter_effect`
-    /// accepts either `Target` variant.
-    ///
-    /// "Counter unless that player pays {X}" (Mana Leak, Condescend) is
-    /// `UnlessPaid { otherwise: UnlessPaidConsequence::Counter, .. }`'s own
-    /// shape now — see that type's own doc comment.
+    /// CR 608.2b already covers "the target left the stack": the zone check in
+    /// `target_is_legal` fails once the id no longer resolves to a stack
+    /// object, so `legal_targets` is empty and the Counterspell fizzles before
+    /// reaching this arm. "Counter unless that player pays {X}" (Mana Leak,
+    /// Condescend) is `UnlessPaid` with `UnlessPaidConsequence::Counter`.
     Counter,
-    /// CR 118.12/118.12a's general "[do something] unless [a player does
-    /// something else]" template — see `UnlessPaidConsequence`'s own doc
-    /// comment for the full shape shared across every real keyword built on
-    /// it (`Counter`: CR 701.6a/118.12 Mana Leak/Condescend + CR 702.21a
-    /// Ward; `SacrificeSelf`: CR 702.30a Echo). Same target declaration as
-    /// plain `Counter` above when `otherwise` is `Counter`
-    /// (`s.target_requirement()`, `Target::Object`/`Target::Ability` both
-    /// accepted); `SacrificeSelf` declares no target at all.
+    /// CR 118.12, 118.12a: the "[do something] unless [a player does
+    /// something else]" template. See `UnlessPaidConsequence`. The target
+    /// declaration matches plain `Counter` when `otherwise` is `Counter`
+    /// (`Target::Object` or `Target::Ability`), and `SacrificeSelf` declares
+    /// none.
     ///
-    /// Resolution pauses (`resolve_unless_paid_effect`, `ProcessState::
-    /// AwaitingUnlessPaidChoice`) rather than resolving synchronously like
-    /// plain `Counter` does - CR 118.12's "if [a player] does" is a real
-    /// mid-resolution decision by a player who isn't necessarily this
-    /// ability's own controller (Ward's targeting player, not Ward's own
-    /// controller), same "paused, not guessed at" stance `Cascade`/`Madness`
-    /// already take for their own player decisions. `Engine::submit_
-    /// unless_paid_payment`/`decline_unless_paid` (`choice_answers.rs`) are
-    /// the two answers - paying commits the real cost immediately (the same
-    /// `PaymentPlan`/`commit_payment` machinery `submit_payment` uses, just
-    /// without a full cast/activation's cost-payment pause shape wrapped
-    /// around it, since declining doesn't unwind anything - CR 601.6 never
-    /// applies here); declining advances `payer_queue` and, once it's
-    /// empty, dispatches `otherwise` (`Counter` reuses `counter_stack_object`
-    /// directly; `SacrificeSelf` reuses `resolve_sacrifice_effect` against
-    /// this ability's own source, via the existing `ScriptedZoneMoveThen::
-    /// StackResolution` tail — no new continuation shape needed for either).
-    ///
-    /// TODO: Condescend's own "{X}" (an amount announced when *this* spell
-    /// was cast, not a fixed printed number) isn't representable - `ManaCost`
-    /// has no `{X}` symbol support to parse from a Lua string yet, and this
-    /// variant has no way to read the countering spell's own `top.x_value`
-    /// at resolution time either. Mana Leak's fixed-number shape only, same
-    /// "model the shape that exists" stance this codebase repeatedly takes
-    /// (`HandSizeEffect`'s own doc comment names the same convention).
-    ///
-    /// TODO: `payer_queue` is only ever built as a single-element queue by
-    /// this slice's own two real producers (Ward: the targeted player;
-    /// Echo: the controller) - a real "any player may pay" or "each
-    /// opponent may pay independently" keyword isn't wired from Lua/TOML
-    /// yet, named here rather than guessed at (see `99-backlog.md`).
+    /// Resolution pauses (`resolve_unless_paid_effect`,
+    /// `AwaitingUnlessPaidChoice`) because CR 118.12's "if [a player] does" is
+    /// a decision by a player who may not control this ability (Ward's
+    /// targeting player). `Engine::submit_unless_paid_payment` and
+    /// `decline_unless_paid` (`choice_answers.rs`) answer it. Paying commits
+    /// the real cost at once through `PaymentPlan` and `commit_payment`, with
+    /// no cast-style unwind, since declining unwinds nothing (CR 601.6 doesn't
+    /// apply). Declining advances `payer_queue`, and an empty queue dispatches
+    /// `otherwise`: `Counter` reuses `counter_stack_object`, and
+    /// `SacrificeSelf` reuses `resolve_sacrifice_effect` against the ability's
+    /// source through `ScriptedZoneMoveThen::StackResolution`.
+    // TODO: Condescend's {X} is an amount announced when the countering spell was cast; `ManaCost` can't parse `{X}` from a Lua string and this variant can't read `top.x_value` at resolution, so only Mana Leak's fixed number works
+    // TODO: `payer_queue` has one element for both producers (Ward's targeted player, Echo's controller); an "any player may pay" or "each opponent may pay" keyword isn't wired from Lua or TOML
     UnlessPaid { cost: CostSpec, otherwise: UnlessPaidConsequence },
-    /// The `Game.Ops.CreateToken()` primitive — creates one or more token
-    /// permanents on the battlefield under the controller's control (CR 111).
-    /// Named tokens (Clue, Food, Treasure) are fully implemented. Creature
-    /// tokens support arbitrary subtypes, colors, P/T, keywords, and
-    /// optional additional card types (Artifact, Enchantment) and
-    /// supertypes (Legendary).
-    ///
-    /// CR 111.7 — tokens that leave the battlefield cease to exist, enforced
-    /// via `sba::collect_ceasing_tokens`.
+    /// `Game.Ops.CreateToken()`: creates `count` token permanents under the
+    /// controller's control (CR 111). Named tokens (Clue, Food, Treasure) are
+    /// complete, and creature tokens support arbitrary subtypes, colors, P/T,
+    /// keywords, extra card types (Artifact, Enchantment) and supertypes
+    /// (Legendary). Tokens that leave the battlefield cease to exist
+    /// (CR 111.7, `sba::collect_ceasing_tokens`).
     CreateToken { spec: TokenSpec, count: u32 },
-    /// The `Game.Ops.Shuffle()` primitive — the resolving `StackObject`'s
-    /// controller shuffles their own library (CR 701.19b: "a player who
-    /// shuffles a library shuffles their own unless instructed otherwise").
-    /// No target — same "always the controller" shape `DrawCards`/`GainLife`
-    /// already use, not `Damage`/`Destroy`/`Counters`'s object-target shape.
-    /// Resolved by calling the existing `Engine::shuffle_library` helper
-    /// (previously pregame-setup-only) directly, which already mutates state
-    /// and logs the real `LibraryShuffled`/`RngDrawn` events itself — no
-    /// `CommitEvents` special-case needed, same "commit inline" convention
-    /// `DrawCards` uses. No fields — a toggle, not a value, same shape as
-    /// `Destroy`/`Sacrifice`/`Exile`.
-    ///
-    /// TODO: `Target::Player` "target player shuffles their library" is rare
-    /// but real — deferred as a named follow-up, same precedent `DrawCards`
-    /// itself already set for its own target gap.
+    /// `Game.Ops.Shuffle()`: the controller shuffles their own library
+    /// (CR 701.19b). It calls `Engine::shuffle_library`, which mutates state
+    /// and logs `LibraryShuffled` and `RngDrawn` itself, so `CommitEvents`
+    /// needs no special case. A toggle with no fields.
+    // TODO: `Target::Player` "target player shuffles their library"
     Shuffle,
-    /// The `Game.Ops.Scry(n)` primitive (CR 701.22a) — the resolving
-    /// `StackObject`'s controller looks at the top `n` cards of their own
-    /// library, then puts any number on the bottom (any order) and the rest
-    /// on top (any order). Unlike every other primitive above, this can't
-    /// resolve in one step: `ResolveStackTop` peeks the top `n` ids
-    /// (read-only) and pauses on a new `ProcessState::AwaitingScryChoice`
-    /// rather than mutating anything itself — `Engine::submit_scry_choice`
-    /// carries out the actual reorder once the controller answers. CR
-    /// 701.22b: `n == 0` (or an empty library) is a no-op — no pause, no
-    /// event, same "no scry event occurs" text this rule states explicitly.
-    ///
-    /// TODO: CR 701.22c (simultaneous multi-player scry, APNAP ordering) —
-    /// single-player-effect shape only, same narrowing every prior slice
-    /// takes.
+    /// `Game.Ops.Scry(n)` (CR 701.22a): the controller looks at the top `n`
+    /// cards of their library, then puts any number on the bottom and the rest
+    /// on top, in any order. It can't resolve in one step: `ResolveStackTop`
+    /// peeks the top `n` ids and pauses on `AwaitingScryChoice`, and
+    /// `Engine::submit_scry_choice` does the reorder. `n == 0` or an empty
+    /// library is a no-op with no pause and no event (CR 701.22b).
+    // TODO: simultaneous multi-player scry in APNAP order (CR 701.22c)
     Scry(u32),
-    /// The `Game.Ops.Surveil(n)` primitive (CR 701.25a) — identical to
-    /// `Scry` except the "not kept on top" pile goes to the controller's
-    /// graveyard instead of the bottom of their library. Unlike `Scry`'s
-    /// pure reorder, the graveyard-bound pile is a real zone move (CR 400.7
-    /// new `ObjectId` per card), same convention `submit_discard` already
-    /// established. CR 701.25c: `n == 0` is a no-op, same as `Scry`.
-    ///
-    /// TODO: CR 701.25b ("look at additional cards while you surveil") not
-    /// modeled — always exactly `n` cards.
+    /// `Game.Ops.Surveil(n)` (CR 701.25a): `Scry`, but the pile not kept on
+    /// top goes to the graveyard. That pile is a real zone move with a new
+    /// `ObjectId` per card (CR 400.7), as in `submit_discard`. `n == 0` is a
+    /// no-op (CR 701.25c).
+    // TODO: "look at additional cards while you surveil" (CR 701.25b); it is always exactly `n` cards
     Surveil(u32),
-    /// The `Game.Ops.Search(filter, count, destination, shuffle_after)`
-    /// primitive (CR 701.23a) — the resolving `StackObject`'s controller
-    /// looks through their *entire* library (not just a peeked top-N window
-    /// like `Scry`/`Surveil`) for up to `count` cards matching `filter`,
-    /// puts them into `destination`, then (if `shuffle_after`) shuffles.
-    /// Unlike `Scry`/`Surveil`, no visibility-machinery gap blocks this at
-    /// all — `GameState`/`Zone` already expose full contents freely; the
-    /// only project-wide hidden-info gap (DESIGN.md's open question) is the
-    /// *Lua* callback boundary, which this Rust-native primitive never
-    /// crosses, same as every other `AbilityEffect` here.
+    /// `Game.Ops.Search(filter, count, destination, shuffle_after)`
+    /// (CR 701.23a): the controller looks through their whole library, not a
+    /// peeked window, for up to `count` cards matching `filter`, puts them in
+    /// `destination` and shuffles if `shuffle_after`. `GameState` exposes full
+    /// contents, and the only hidden-information gap is the Lua callback
+    /// boundary, which this primitive never crosses.
     ///
-    /// CR 701.23b: never mandatory for a quality search — the controller may
+    /// CR 701.23b: a quality search is never mandatory, so the controller may
     /// find fewer than `count`, including zero. `ResolveStackTop` pauses on
-    /// `ProcessState::AwaitingSearchChoice` with `candidates` already
-    /// pre-filtered to the ids matching `filter` (evaluated with the
-    /// controller as `viewer`) — `Engine::submit_search_choice` just checks
-    /// the answer is a subset of `candidates` of size <= `count`, no
-    /// re-filtering needed there.
-    ///
-    /// TODO: CR 701.23d (a search for an undefined quality/a bare quantity,
-    /// e.g. "look at the top card" phrasing) is a different, mandatory-find
-    /// shape — not built; this variant is quality-search (701.23a/b) only.
-    /// TODO: CR 701.23e (reveal the found card) — no reveal/visibility-
-    /// transition concept exists in this engine yet; purely cosmetic today
-    /// anyway since hidden info isn't enforced at the Lua boundary either.
-    /// TODO: CR 701.23f (an effect that redirects "search" into "search the
-    /// top N instead") — would need its own `EventFilter::Search`
-    /// replacement shape; doesn't exist.
-    /// TODO: CR 701.23i (simultaneous multiplayer search, APNAP) —
-    /// single-player-effect shape only, same narrowing `Scry`/`Surveil`'s
-    /// own 701.22c/701.25b gaps already took.
+    /// `AwaitingSearchChoice` with `candidates` pre-filtered to matches (the
+    /// controller as `viewer`), and `Engine::submit_search_choice` only checks
+    /// that the answer is a subset of `candidates` of size at most `count`.
+    // TODO: a search for an undefined quality or a bare quantity, a mandatory find (CR 701.23d); this variant is quality-search only
+    // TODO: reveal the found card (CR 701.23e); there is no reveal concept yet
+    // TODO: an effect that redirects "search" to "the top N instead" (CR 701.23f); it needs its own `EventFilter::Search`
+    // TODO: simultaneous multiplayer search in APNAP order (CR 701.23i)
     Search { filter: FilterSpec, count: u32, destination: SearchDestination, shuffle_after: bool },
-    /// The `Game.Ops.BecomeCopy()` primitive (CR 707.2/707.3, layer 1) — the
-    /// resolving `StackObject`'s own source becomes a copy of its first
-    /// chosen target's current copiable values (e.g. Vesuvan Doppelganger's
-    /// "become a copy of target creature"). No fields — a toggle, not a
-    /// value, same shape as `Destroy`/`Sacrifice`/`Exile`/`Shuffle`; the
-    /// target lives on the `StackObject`, not here.
+    /// `Game.Ops.BecomeCopy()` (CR 707.2, 707.3, layer 1): the source becomes
+    /// a copy of its first chosen target's current copiable values (Vesuvan
+    /// Doppelganger). A toggle with no fields, and the target lives on the
+    /// `StackObject`.
     ///
-    /// Unlike `Destroy`/`Sacrifice`/`Exile`, this never moves anything
-    /// between zones — CR 707.4 is explicit that becoming a copy while
-    /// remaining on the battlefield does not trigger ETB/LTB — so
-    /// `ResolveStackTop` just mutates the source `GameObject.
-    /// copiable_override` in place (see that field's own doc comment for
-    /// why layer 1 is a real mutation, not a `ContinuousEffect` query like
-    /// every other layer) and re-runs `run_card_script` against the new
-    /// snapshot after purging whatever the source had self-registered
-    /// under its old identity (CR 707.2a: "doesn't wind up with two values
-    /// of each ability").
-    ///
-    /// CR 707.9's exceptions/modifications, applied to the copied snapshot
-    /// before it's frozen into `copiable_override` - see `CopyExceptions`'
-    /// own doc comment for what's representable. TODO(CR 707.6): "as ~
-    /// enters" choices aren't re-prompted here - out of scope for this path,
-    /// since it never re-enters the battlefield; only relevant once a real
-    /// ETB-replacement "enters as a copy" path (Clone itself) exists, a
-    /// separate follow-up.
+    /// It moves nothing between zones, so no ETB or LTB triggers (CR 707.4).
+    /// `ResolveStackTop` mutates `GameObject.copiable_override` in place
+    /// (layer 1 is a real mutation; see that field) and reruns
+    /// `run_card_script` against the new snapshot, after purging what the
+    /// source self-registered under its old identity (CR 707.2a). CR 707.9
+    /// exceptions are applied to the snapshot before it freezes; see
+    /// `CopyExceptions`.
+    // TODO: "as ~ enters" choices are not re-prompted (CR 707.6); this path never re-enters the battlefield
     BecomeCopy(CopyExceptions),
-    /// The `Game.Ops.Attach` primitive (CR 702.6a, Equip: "`[Cost]`: Attach
-    /// this permanent to target creature you control. Activate only as a
-    /// sorcery.") — attaches the resolving `StackObject`'s own source
-    /// (`top.source`, the Equipment) to its first (only, per CR 702.6a)
-    /// legal target via `commands::attach_permanent`, the same function
-    /// `phase5/aura-attach` built for a resolving Aura's own CR 303.4b
-    /// entry-attach. No fields — a toggle, same shape as `Destroy`/
-    /// `Sacrifice`/`Exile`/`Regenerate`/`BecomeCopy`; the target lives on
-    /// the `StackObject`, not here. Never moves anything between zones -
-    /// `attach_permanent` mutates `attached_to`/`attachments` in place, so
-    /// this logs a `GameEventKind::Attached` alongside the mutation, not a
+    /// `Game.Ops.Attach` (CR 702.6a, Equip): attaches the source Equipment to
+    /// its only legal target through `commands::attach_permanent`, the
+    /// function a resolving Aura's entry-attach uses (CR 303.4b). A toggle with
+    /// no fields. It moves no zones: `attach_permanent` mutates `attached_to`
+    /// and `attachments` in place, and this logs `Attached`, not a
     /// `ZoneChange`.
     ///
-    /// CR 702.6a's "Activate only as a sorcery" restriction is enforced in
-    /// `commands::execute_command`'s `ActivateAbility` arm by matching on
-    /// `effect == Some(AbilityEffect::Attach)` directly, rather than a new
-    /// `RegisteredAbility` field - a generic per-ability timing restriction
-    /// would touch every one of this crate's ~94 existing `RegisteredAbility`
-    /// struct literals for a restriction only this one effect shape needs
-    /// today, and CR 702.6a always bundles Attach with the sorcery
-    /// restriction in every real card's reminder text anyway. Deferred to a
-    /// real field if a second ability shape ever needs the same timing
-    /// restriction independently of its effect.
-    ///
-    /// TODO(CR 702.6c): "Equip [quality]"/"Equip [quality] creature" further
-    /// restrictions beyond the base "creature you control" filter aren't
-    /// modeled - same subtype-filter gap `target.rs` already names for
-    /// Auras' own "Enchant Human"-style restriction. TODO(CR 702.6d):
-    /// multiple equip abilities on one permanent aren't distinguished from
-    /// each other - CR 704.5n's own recheck (`sba::
-    /// collect_illegally_attached_equipment`) doesn't consult *which*
-    /// ability attached it anyway, only whether the attachment is still
-    /// legal per CR 301.5/702.16, so this mostly doesn't matter in
-    /// practice. TODO(CR 702.6e): Equip planeswalker isn't modeled -
-    /// planeswalkers are backlog item 16's own explicit non-goal.
+    /// CR 702.6a's "activate only as a sorcery" is enforced in the
+    /// `ActivateAbility` arm by matching `effect == Some(AbilityEffect::Attach)`,
+    /// not by a new `RegisteredAbility` field, which would touch ~94 literal
+    /// sites for one effect shape. Make it a field if a second ability needs
+    /// the same timing restriction independently of its effect.
+    // TODO: "Equip [quality]" restrictions beyond "creature you control" (CR 702.6c), the same subtype-filter gap as Aura "Enchant Human" in `target.rs`
+    // TODO: multiple equip abilities on one permanent aren't told apart (CR 702.6d); `sba::collect_illegally_attached_equipment` doesn't consult which one attached it
+    // TODO: Equip planeswalker (CR 702.6e), since planeswalkers are a non-goal
     Attach,
-    /// The `Game.Ops.ExchangeTextBoxes` primitive (CR 612.5) — exchanges
-    /// the resolving `StackObject`'s first two chosen targets' "text boxes."
-    /// No fields — a toggle, same shape as `BecomeCopy`/`Attach`; the
-    /// targets live on the `StackObject`, not here.
+    /// `Game.Ops.ExchangeTextBoxes` (CR 612.5): exchanges the first two chosen
+    /// targets' text boxes. A toggle with no fields, and the targets live on
+    /// the `StackObject`.
     ///
-    /// Deliberately *not* a `CopyExceptions`-shaped variant of `BecomeCopy`:
-    /// CR 612.1 scopes text-changing effects to "rules text ... and/or ...
-    /// the type line," and CR 612.5 itself says only "text boxes" - name,
-    /// mana cost, color, P/T, and card types/supertypes/subtypes all stay
-    /// exactly as printed on each permanent. Only `oracle_text`, `keywords`,
-    /// and `script_ref` (this engine's operative stand-in for "rules text" -
-    /// see `ResolveStackTop`'s dispatch for why) cross over. This is
-    /// explicitly not a CR 707 copy effect (CR 612 and CR 707 are separate
-    /// rule families) - no `CopyExceptions` interaction, no "copy of a
-    /// copy" concern.
+    /// Not a `BecomeCopy` variant: CR 612.1 scopes text-changing effects to
+    /// rules text and the type line, and CR 612.5 says only "text boxes", so
+    /// name, mana cost, color, P/T and types stay as printed. Only
+    /// `oracle_text`, `keywords` and `script_ref` (the engine's stand-in for
+    /// rules text) cross over. It isn't a CR 707 copy effect.
     ///
-    /// Same underlying machinery `BecomeCopy` established for changing a
-    /// *live* permanent's actual behavior (not just its displayed
-    /// characteristics): `commands::purge_granted_abilities` then a fresh
-    /// `run_card_script`, done symmetrically for both targets against a
-    /// synthetic definition (each target's own definition, with only the
-    /// three text-box fields swapped in from the other). Like `BecomeCopy`,
-    /// this is a one-time mutation with no duration/reversion - permanent
-    /// until another effect changes it, not a new gap.
+    /// It reuses `BecomeCopy`'s machinery for changing a live permanent's
+    /// behavior: `commands::purge_granted_abilities` then a fresh
+    /// `run_card_script`, for both targets against a synthetic definition with
+    /// the three fields swapped. It is a one-time mutation with no duration.
     ///
-    /// Unlike a uniform multi-word spell (e.g. Plague Spores' "destroy
-    /// target creature and target land," CR 608.2b's own worked example,
-    /// where each surviving legal target is still independently destroyed),
-    /// this is inherently pairwise - if either of the two targets is no
-    /// longer legal by the time this resolves, there's no partner to
-    /// exchange with, so the whole effect is a no-op rather than doing
-    /// something one-sided. `ResolveStackTop` rechecks both targets directly
-    /// against `top.target_requirement`'s two `TargetRequirement`s rather
-    /// than consuming the generic flattened `legal_targets` list (which
-    /// loses the positional pairing a role-differentiated effect like this
-    /// one needs - see `TargetSpec::Multiple`'s own doc comment on why
-    /// role-differentiated multi-word effects need bespoke handling).
+    /// The effect is pairwise: if either target is no longer legal at
+    /// resolution, the whole effect does nothing. `ResolveStackTop` rechecks
+    /// both against `top.target_requirement`'s two `TargetRequirement`s,
+    /// because the flattened `legal_targets` loses the positional pairing (see
+    /// `TargetSpec::Multiple`).
     ExchangeTextBoxes,
-    /// The `Game.Ops.Fight` primitive (CR 701.14) - two creatures each deal
-    /// damage equal to their power to the other. No fields; the creatures
-    /// come from the resolving ability's own target spec, and the spec's
-    /// shape picks who fights whom:
-    ///
-    /// - `TargetSpec::Multiple` with two exact count-1 words ("target
-    ///   creature you control fights target creature you don't control"):
-    ///   the first word's creature fights the second word's creature. The
-    ///   two words may hold the same creature, which then fights itself.
-    /// - one `TargetSpec::Primitive` with count 2 ("two target creatures
-    ///   fight each other"): the two chosen creatures fight.
+    /// `Game.Ops.Fight` (CR 701.14): two creatures each deal damage equal to
+    /// their power to the other. No fields. The target spec picks the pair:
+    /// - `TargetSpec::Multiple` with two exact count-1 words ("target creature
+    ///   you control fights target creature you don't control"): the first
+    ///   word's creature fights the second's, and both words may hold the same
+    ///   creature, which fights itself.
+    /// - one `TargetSpec::Primitive` with count 2 ("two target creatures fight
+    ///   each other").
     /// - one `TargetSpec::Primitive` with count 1 ("it fights target
-    ///   creature"): the ability's own source fights the target.
+    ///   creature"): the ability's source fights the target.
     ///
-    /// Any other shape does nothing. Each creature deals damage as the
-    /// SOURCE of its own `GameEventKind::DamageDealt` (`is_combat_damage:
-    /// false`, CR 701.14d), so deathtouch, lifelink, wither, infect,
-    /// protection, prevention and replacement effects and "deals damage"
-    /// triggers all see the creature, not the spell. Both amounts are read
-    /// through the layer engine and fixed before either event is pushed, so
-    /// the damage is simultaneous and state-based actions run only
-    /// afterward. A creature with power 0 or less deals no damage and
-    /// emits no event. A creature that fights itself takes one event of
-    /// twice its power (CR 701.14c).
+    /// Any other shape does nothing. Each creature is the source of its own
+    /// `DamageDealt` (`is_combat_damage: false`, CR 701.14d), so deathtouch,
+    /// lifelink, wither, infect, protection, prevention, replacement and
+    /// "deals damage" triggers see the creature and not the spell. Both
+    /// amounts are read through the layer engine and fixed before either event
+    /// is pushed, so the damage is simultaneous and SBAs run afterward. A
+    /// creature with power 0 or less deals no damage and emits no event, and a
+    /// self-fight is one event of twice its power (CR 701.14c).
     ///
-    /// CR 701.14b: if either creature is gone, no longer a creature, or an
-    /// illegal target at resolution, neither deals damage. The spell or
-    /// ability still counts as resolved (not fizzled) while at least one
-    /// target is legal.
-    ///
-    /// TODO(CR 608.2h): a self-source fight whose source has left the
-    /// battlefield does nothing instead of using last known information.
-    /// TODO: no "fights up to one target creature" (an `up_to`/`at_least`
-    /// word) and no "fights each creature".
+    /// CR 701.14b: if either creature is gone, no longer a creature or an
+    /// illegal target, neither deals damage. The ability still counts as
+    /// resolved while one target is legal.
+    // TODO: a self-source fight whose source left the battlefield does nothing instead of using last known information (CR 608.2h)
+    // TODO: no "fights up to one target creature" (an `up_to` or `at_least` word) and no "fights each creature"
     Fight,
-    /// The `Game.Ops.Bite` primitive - the one-sided cousin of `Fight`:
-    /// "target creature you control deals damage equal to its power to
-    /// target creature you don't control." Not a fight (CR 701.14 never
-    /// applies), so the first creature takes no damage back. No fields.
-    /// Target shapes: a `TargetSpec::Multiple` of two exact count-1 words
-    /// (first word deals, second word receives), or one count-1
-    /// `TargetSpec::Primitive` (the ability's own source deals the damage
-    /// to the target). A count-2 word has no sensible dealer and does
-    /// nothing. The damage is a single `DamageDealt` event from the first
-    /// creature (`is_combat_damage: false`), so every keyword and
-    /// prevention effect that applies to `Fight` damage applies here too.
-    /// The dealer must still be a creature on the battlefield at
-    /// resolution and power 0 or less deals no damage.
-    ///
-    /// TODO(CR 608.2h): a dealer that has left the battlefield does
-    /// nothing instead of using last known information for its power.
-    /// Same other limits as `Fight`.
+    /// `Game.Ops.Bite`: "target creature you control deals damage equal to its
+    /// power to target creature you don't control". Not a fight (CR 701.14), so
+    /// the dealer takes nothing back. No fields. Targets are a
+    /// `TargetSpec::Multiple` of two exact count-1 words (first deals, second
+    /// receives), or one count-1 `Primitive` (the source deals to the target).
+    /// A count-2 word does nothing. The damage is one `DamageDealt` from the
+    /// first creature (`is_combat_damage: false`), so every effect that
+    /// applies to `Fight` damage applies. The dealer must still be a creature
+    /// on the battlefield, and power 0 or less deals nothing.
+    // TODO: a dealer that left the battlefield does nothing instead of using last known information for its power (CR 608.2h), and the other limits of `Fight`
     Bite,
-    /// CR 700.2d — 2+ chosen modes of a modal spell/ability, combined.
-    /// `commands::execute_command`'s `CastSpell` arm builds this only when
-    /// `modes.len() >= 2`; a single chosen mode still uses that mode's own
-    /// `effect` bare (unwrapped), unchanged from pre-`phase5/modal-
-    /// multi-mode` behavior. One entry per chosen mode, in *card-print*
-    /// order (not the order the player listed them in `modes`) — matches
-    /// Wizards' own ruling that a modal spell's chosen effects happen in
-    /// the order printed on the card. `None` at a slot means that mode has
-    /// no effect of its own (e.g. purely a targeting restriction with no
-    /// resolution-time action) — contributes nothing when `ResolveStackTop`
-    /// walks this list, but its slot must still line up 1:1 with the
-    /// parallel per-mode target chunk `ResolveStackTop` re-derives from
-    /// `StackObject::target_requirement` (always `TargetSpec::Multiple`
-    /// when this variant is used). A mode owns `words[i]` consecutive
-    /// target words of that flat list: one for a mode with no target
-    /// requirement (a `count: 0` placeholder, CR 700.2c) or a single
-    /// `TargetSpec::Primitive`, and n for a mode whose own requirement is
-    /// a `TargetSpec::Multiple` of n words (`phase5/modal-multi-word-
-    /// modes`), so `commands::split_targets_by_requirement` produces one
-    /// chunk per word and mode i reads the chunks of its own range. The
-    /// sum of `words` is the length of the flat list.
+    /// CR 700.2d: 2+ chosen modes of a modal spell or ability, combined. The
+    /// `CastSpell` arm builds it only when `modes.len() >= 2`, and a single
+    /// chosen mode uses its bare `effect`. One entry per chosen mode, in
+    /// card-print order and not the order the player listed them, matching the
+    /// ruling that chosen effects happen as printed. `None` is a mode with no
+    /// effect of its own, contributing nothing at resolution, but its slot
+    /// must line up 1:1 with the per-mode target chunks that `ResolveStackTop`
+    /// re-derives from `StackObject::target_requirement` (always
+    /// `TargetSpec::Multiple` here). Mode i owns `words[i]` consecutive target
+    /// words: one for a mode with no target requirement (a `count: 0`
+    /// placeholder, CR 700.2c) or a single `Primitive`, and n for a `Multiple`
+    /// of n words. `commands::split_targets_by_requirement` gives one chunk per
+    /// word. The sum of `words` is the length of the flat list.
     Modal { effects: Vec<Option<AbilityEffect>>, words: Vec<usize> },
-    /// CR 608.2c — several effects of one spell or ability, followed in the
-    /// order written (`Game.Ops.Chain(a, b, ...)`). Each entry is an effect
-    /// `commands::is_modal_resolvable` accepts, so a chain never nests,
-    /// holds a `ForEachPlayer`, or holds a custom function. Every entry
-    /// sees the ability's one target requirement and its one set of legal
-    /// targets, and an entry that doesn't use a target ignores them. A
-    /// chain runs through the same loop as `Modal`
-    /// (`engine::resolve::modal`), so an entry that pauses (a CR 616.1
-    /// ordering choice, a search, a scry) resumes the rest afterward. An
-    /// entry that can't do anything leaves the next one to run (CR 609.3).
+    /// CR 608.2c: several effects of one spell or ability, in the order
+    /// written (`Game.Ops.Chain(a, b, ...)`). Each entry is accepted by
+    /// `commands::is_modal_resolvable`, so a chain never nests, holds a
+    /// `ForEachPlayer` or holds a custom function. Every entry sees the
+    /// ability's one target requirement and legal targets, and an entry that
+    /// doesn't use a target ignores them. It runs through the loop `Modal`
+    /// uses (`engine::resolve::modal`), so an entry that pauses (a CR 616.1
+    /// ordering choice, a search, a scry) resumes the rest afterward. An entry
+    /// that can't do anything leaves the next to run (CR 609.3).
     ///
     /// `words` is `None` for `Game.Ops.Chain`, where every entry shares the
-    /// ability's whole target set. `Game.Ops.ChainEach` sets it to
-    /// `Some(counts)`, one per entry: entry i owns `counts[i]` consecutive
-    /// target words of the ability's `TargetSpec` (a `Primitive` is one
-    /// word, a `Multiple` is one per requirement), the same `words`
-    /// convention `Modal` uses. An entry that owns none acts on its
-    /// controller. The counts must sum to the number of declared words,
-    /// which `script::decode::check_chain_words` checks when the ability
-    /// registers or the spell loads.
-    ///
-    /// TODO: a word shared by two entries ("destroy target creature, then
-    /// its controller gains 3 life"), and a chain inside `ForEachPlayer` or
-    /// as a mode of a `Modal`.
+    /// whole target set. `Game.Ops.ChainEach` sets `Some(counts)`: entry i owns
+    /// `counts[i]` consecutive target words of the `TargetSpec` (a `Primitive`
+    /// is one word, a `Multiple` one per requirement), as `Modal`'s `words`
+    /// does. An entry that owns none acts on its controller. The counts must
+    /// sum to the declared word count, which `script::decode::check_chain_words`
+    /// checks at registration or spell load.
+    // TODO: a word shared by two entries ("destroy target creature, then its controller gains 3 life"), and a chain inside `ForEachPlayer` or as a mode of a `Modal`
     Chain { entries: Vec<AbilityEffect>, words: Option<Vec<usize>> },
-    /// A plain spell's own resolution effect (CR 608.2m), declared by its
-    /// script's optional `s.operation()` function (a sibling to
-    /// `s.register_abilities(c)`, not a replacement) when that function
-    /// returns a custom Lua function rather than a `Game.Ops.*` primitive
-    /// tag — the same "primitive fast path vs. script fallback" shape
-    /// `RegisteredAbility::effect`/`::operation` already use for triggered/
-    /// activated abilities, folded into this single field since
-    /// `CardDefinition` has no sibling `operation: ScriptHandle` field of
-    /// its own (deliberately not added — see `ScriptRuntime::
-    /// build_operation`'s own doc comment for why a new `CardDefinition`
-    /// field was avoided).
+    /// A plain spell's resolution effect (CR 608.2m), declared by the script's
+    /// optional `s.operation()` (a sibling of `s.register_abilities(c)`) when
+    /// it returns a custom Lua function and not a `Game.Ops.*` tag. It is the
+    /// primitive-or-script split of `RegisteredAbility::effect` and
+    /// `::operation`, folded into one field because `CardDefinition` has no
+    /// `operation` field (see `ScriptRuntime::build_operation`).
     ///
-    /// Never actually reaches `ResolveStackTop`'s or `ActivateAbility`'s own
-    /// `AbilityEffect` dispatch — `commands::execute_command`'s `CastSpell`
-    /// arm unpacks this into `StackObject`'s separate `operation`/`effect`
-    /// fields at push time (`Script(handle)` -> `operation: handle, effect:
-    /// None`), the same shape those two dispatches already treat `None` as
-    /// "invoke `operation` for real." Listed on both anyway for
-    /// exhaustiveness only, same "every variant named, no wildcard"
-    /// convention `Modal` above already established for a similarly
-    /// can't-actually-originate-there case.
+    /// It never reaches the `AbilityEffect` dispatch of `ResolveStackTop` or
+    /// `ActivateAbility`: the `CastSpell` arm unpacks it into `StackObject`'s
+    /// `operation` and `effect` (`Script(handle)` becomes `operation: handle,
+    /// effect: None`). It is listed there only for exhaustiveness, like
+    /// `Modal`.
     Script(ScriptHandle),
-    /// CR 702.79a Persist / 702.93a Undying — "return it to the battlefield
-    /// under its owner's control with a [-1/-1 | +1/+1] counter on it."
-    /// Only ever meaningful on a `Dies`-triggered `RegisteredAbility`
-    /// (`ability.source` is the departed, pre-death `ObjectId` by the time
-    /// this resolves) — `ResolveStackTop` locates the actual graveyard
-    /// object via `ObjectLineage::previous == Some(top.source)` (the same
-    /// link `sba::commit_death` mints for exactly this kind of lookup), a
-    /// no-op if it's no longer there (exiled in response, etc. — matches
-    /// real Magic: nothing to return). Deliberately narrow, same posture
-    /// every other first-proof slice in this file takes: doesn't propose
-    /// the entry through `replacement::apply_replacements` (no CR 616
-    /// "would enter, redirect elsewhere" support for this specific
-    /// producer — no real Persist/Undying card needs it) and doesn't call
-    /// `apply_enters_battlefield_modifiers` (so a card combining this with
-    /// its own Devour/Bloodthirst/EntersTapped text won't compose — also no
-    /// real card). Ordinary "when this creature enters" triggers (this
-    /// card's own or anyone else's) still fire for free, since those are
-    /// driven off the plain `ZoneChange` event this pushes to the ledger,
-    /// not off either of the skipped mechanisms above.
+    /// CR 702.79a Persist and 702.93a Undying: "return it to the battlefield
+    /// under its owner's control with a [-1/-1 | +1/+1] counter on it". Only
+    /// meaningful on a `Dies`-triggered `RegisteredAbility`, whose
+    /// `ability.source` is the pre-death `ObjectId`, so `ResolveStackTop` finds
+    /// the graveyard object through `ObjectLineage::previous == Some(top.source)`,
+    /// the link `sba::commit_death` mints. It does nothing if the card is gone
+    /// (exiled in response).
+    ///
+    /// Narrow: it skips `replacement::apply_replacements` (no CR 616 "would
+    /// enter, redirect") and `apply_enters_battlefield_modifiers`, so a card
+    /// combining it with Devour, Bloodthirst or enters-tapped text won't
+    /// compose. ETB triggers still fire from the plain `ZoneChange` it pushes.
     ReturnSelfWithCounter(CounterKind),
-    /// CR 702.35a's second ability — "you may cast it by paying [cost]
-    /// rather than paying its mana cost. If you don't, put it into your
-    /// graveyard." Only ever meaningful on a `MadnessExiled`-triggered
-    /// `RegisteredAbility` (`ability.source` is the departed, pre-exile
-    /// hand `ObjectId` by the time this resolves, same "trigger's own
-    /// source is stale, look up the live descendant" shape `ReturnSelfWithCounter`
-    /// above already established) — `ResolveStackTop` locates the actual
-    /// exile object via `ObjectLineage::previous == Some(top.source)`, a
-    /// no-op if it's no longer there. Unlike every other `AbilityEffect`
-    /// variant, resolving this doesn't finish synchronously — it always
-    /// pauses (`ProcessState::AwaitingMadnessChoice`) for a real decision,
-    /// same "always pauses" posture `Sacrifice`/`Destroy`/`Exile` already
-    /// take, just with a genuinely new two-way resume (`Engine::
-    /// decline_madness_cast`/`submit_madness_cast`) instead of a zone-move
-    /// queue. See `engine::resolve::madness`'s own doc comment for the full
-    /// shape.
+    /// CR 702.35a's second ability: "you may cast it by paying [cost] rather
+    /// than its mana cost. If you don't, put it into your graveyard." Only
+    /// meaningful on a `MadnessExiled`-triggered `RegisteredAbility`, whose
+    /// `ability.source` is the stale pre-exile hand id, so `ResolveStackTop`
+    /// finds the exile object through `ObjectLineage::previous == Some(top.source)`
+    /// (as `ReturnSelfWithCounter` does) and does nothing if it's gone. It
+    /// always pauses (`AwaitingMadnessChoice`) with a two-way resume
+    /// (`Engine::decline_madness_cast`, `submit_madness_cast`). See
+    /// `engine::resolve::madness`.
     MadnessCastOrDiscard,
-    /// CR 702.85a Cascade — "exile cards from the top of your library until
-    /// you exile a nonland card whose mana value is less than this spell's
-    /// mana value. You may cast that card without paying its mana cost if
-    /// the resulting spell's mana value is less than this spell's mana
-    /// value. Then put all cards exiled this way that weren't cast on the
-    /// bottom of your library in a random order." Only ever meaningful on a
+    /// CR 702.85a Cascade: exile from the top of the library until a nonland
+    /// card with lower mana value, cast it free if its mana value is still
+    /// lower, and bottom the rest in random order. Only meaningful on a
     /// `Cast`-triggered `RegisteredAbility` self-registered on the cascade
-    /// spell itself while it's on the stack — `ability.source`/`top.source`
-    /// is the spell object itself here (unlike `ReturnSelfWithCounter`/
-    /// `MadnessCastOrDiscard`, this trigger's own source is still live, no
-    /// `ObjectLineage` lookup needed). Always pauses (`ProcessState::
-    /// AwaitingCascadeChoice`) once the library walk finds a candidate (or
-    /// exhausts the library) — see `engine::resolve::cascade`'s own doc
-    /// comment for the full shape, including the narrowing this slice takes
-    /// on CR 702.85a's own second "if the resulting spell's mana value is
-    /// less" re-check.
+    /// spell while it is on the stack, so `top.source` is live and needs no
+    /// lineage lookup. It pauses (`AwaitingCascadeChoice`) once the library
+    /// walk finds a candidate or runs out. See `engine::resolve::cascade`,
+    /// including how it narrows CR 702.85a's second mana-value recheck.
     Cascade,
-    /// The `Game.Ops.ForEachPlayer(x)` primitive (`phase5/mass-choice-
-    /// effects`, CR 101.4's APNAP-order "each player ..." shape — the rules
-    /// text's own worked example is literally "each player sacrifices a
-    /// creature"). `x` is either a script function or a bare `SacrificeRandom`/
-    /// `DiscardRandom` tag (`ForEachPlayerTag`'s own doc comment covers both
-    /// shapes and why the Lua binding restricts the tag case to just those
-    /// two) — this field is `None` for the function shape (the real payload
-    /// there is `RegisteredAbility::operation`/`StackObject::operation`, a
-    /// real `ScriptHandle` for once rather than the usual `ScriptHandle(0)`
-    /// placeholder every other static tag pairs with) and `Some(inner)` for
-    /// the bare-tag shape, carrying `inner` directly since there's no
-    /// script handle to stash it under.
+    /// `Game.Ops.ForEachPlayer(x)` (CR 101.4: "each player sacrifices a
+    /// creature" in APNAP order). `x` is a script function or a bare
+    /// `SacrificeRandom`, `DiscardRandom`, `Mill` or `LoseLife` tag (see
+    /// `ForEachPlayerTag`). This field is `None` for the function shape, whose
+    /// payload is `RegisteredAbility::operation` or `StackObject::operation`,
+    /// and `Some(inner)` for a bare tag.
     ///
-    /// Function shape: `engine::resolve::each_player::
-    /// resolve_for_each_player_effect` invokes that same script function
-    /// once per player in CR 101.4 APNAP order (active player, then each
-    /// other player in turn order), rebasing which `PlayerId` counts as
-    /// `controller`/"you" each time rather than adding any new "whose
-    /// perspective" mechanism — `TargetFilter::Object::controller`'s
-    /// "you"/"opponent" already resolves against whatever `controller` was
-    /// passed into `ScriptRuntime::invoke_operation`, not a value hardcoded
-    /// to the spell's original caster, so this composes for free with
-    /// `Game.ChooseN`/`Game.SelectTargets`/`Game.Ops.SacrificeChosen`/
-    /// `DiscardChosen` called from inside the wrapped function. CR 101.4's
-    /// "then the actions happen simultaneously": a per-player invocation's
-    /// own `sacrifice_chosen`/`discard_chosen` result-table keys (see
-    /// `OperationOutcome::PendingZoneMoves`) are *not* applied right after
-    /// that player's own choice — `resolve_for_each_player_effect`
-    /// accumulates every player's ids into one combined batch per verb and
-    /// performs the real zone moves only after the last player's choice, so
-    /// a mid-loop replacement effect (or a later player's own choice) still
-    /// sees every permanent/card that's *about* to leave, not one that
-    /// already has.
+    /// Function shape: `engine::resolve::each_player::resolve_for_each_player_effect`
+    /// invokes the function once per player in CR 101.4 APNAP order, rebasing
+    /// `controller` ("you") each time. `TargetFilter::Object::controller`
+    /// resolves against the `controller` passed to
+    /// `ScriptRuntime::invoke_operation`, so `Game.ChooseN`,
+    /// `Game.SelectTargets`, `Game.Ops.SacrificeChosen` and `DiscardChosen`
+    /// compose inside the wrapped function. The actions happen simultaneously
+    /// (CR 101.4): each invocation's `sacrifice_chosen` and `discard_chosen`
+    /// ids (`OperationOutcome::PendingZoneMoves`) accumulate into one batch per
+    /// verb, and the zone moves run after the last player's choice, so a
+    /// mid-loop replacement or later choice still sees everything about to
+    /// leave.
     ///
-    /// Bare-tag shape: no script involved at all — `resolve_for_each_player_
-    /// effect` draws each player's own random picks directly (`Engine::
-    /// pick_sacrifice_random_ids`/`pick_discard_random_ids`, the same
-    /// `next_rng`-driven helpers `resolve_sacrifice_random_effect`/
-    /// `resolve_discard_random_effect` use for the single-player case), pure
-    /// synchronous Rust with no possibility of pausing mid-computation, then
-    /// merges every player's picks into one queue before the single real
-    /// `continue_scripted_zone_move` call — same "simultaneous" guarantee as
-    /// the function shape, for free, since there's no per-player commit
-    /// point to even consider skipping.
-    ///
-    /// `Mill(n)` and `LoseLife(n)` are accepted as bare tags too ("each player
-    /// mills N", "each player loses N life"): every player's top N library
-    /// ids are merged into one `ScriptedZoneMoveKind::Mill` batch, and life
-    /// loss is applied per player in APNAP order with one `LifeChanged` event
-    /// each. Inside this wrapper they always act on each player and never
-    /// read the ability's own target spec.
-    ///
-    /// TODO: only `SacrificeRandom`/`DiscardRandom`/`Mill`/`LoseLife` are accepted as a bare
-    /// tag (checked in the `Game.Ops.ForEachPlayer` Lua binding itself, a
-    /// loud load-time error otherwise) — no real card needs any other
-    /// `Game.Ops.*` primitive applied per-player without a script function
-    /// wrapping it.
+    /// Bare-tag shape: no script. `resolve_for_each_player_effect` draws each
+    /// player's random picks directly (`Engine::pick_sacrifice_random_ids`,
+    /// `pick_discard_random_ids`, the `next_rng` helpers of the single-player
+    /// case) in synchronous Rust that cannot pause, and merges them into one
+    /// queue before the single `continue_scripted_zone_move` call. `Mill(n)`
+    /// merges every player's top N library ids into one
+    /// `ScriptedZoneMoveKind::Mill` batch, and `LoseLife(n)` applies per player
+    /// in APNAP order with one `LifeChanged` each. In this wrapper they act on
+    /// each player and never read the ability's target spec.
+    // TODO: only `SacrificeRandom`, `DiscardRandom`, `Mill` and `LoseLife` are accepted as a bare tag (a load-time error in the `Game.Ops.ForEachPlayer` binding); no real card needs another per-player primitive without a wrapping function
     ForEachPlayer(Option<Box<AbilityEffect>>),
-    /// The `Game.Ops.SacrificeRandom(filter, count)` primitive (CR 701.21,
-    /// "at random" — a true random procedure, not a player choice, unlike
-    /// `Game.ChooseN`+`Game.Ops.SacrificeChosen`). `filter` matches
-    /// `AbilityEffect::DestroyAll`'s own `EffectFilter` shape (`controller`
-    /// resolved against the resolving `StackObject`'s own controller, same
-    /// "you"/"opponent"/"any" vocabulary), evaluated fresh at resolution —
-    /// no targeting. `count` candidates are drawn without replacement via
-    /// `Engine::next_rng` (same deterministic, ledger-logged source
-    /// `shuffle_library` already uses), fewer than `count` sacrificed if
-    /// fewer than `count` candidates match (mirrors CR 701.17b's mill
-    /// "can't mill more than exist" stance - no real card needs this engine
-    /// to error out instead). Resolved via the same `continue_scripted_
-    /// zone_move(Sacrifice, ...)` pipeline `Sacrifice`/`DestroyAll` already
-    /// use, so CR 616.1 ordering and dies-triggers apply identically.
+    /// `Game.Ops.SacrificeRandom(filter, count)` (CR 701.21, "at random", a
+    /// random procedure and not a choice, unlike `Game.ChooseN` with
+    /// `Game.Ops.SacrificeChosen`). `filter` is the `EffectFilter` of
+    /// `DestroyAll`, with `controller` resolved against the resolving object's
+    /// controller, evaluated at resolution with no targeting. `count`
+    /// candidates are drawn without replacement through `Engine::next_rng` (the
+    /// deterministic, ledger-logged source `shuffle_library` uses), and fewer
+    /// are sacrificed if fewer match, as for mill (CR 701.17b). It runs through
+    /// `continue_scripted_zone_move(Sacrifice, ..)`, so CR 616.1 ordering and
+    /// dies-triggers apply.
     SacrificeRandom { filter: EffectFilter, count: u32 },
-    /// The `Game.Ops.DiscardRandom(filter, count)` primitive (CR 701.9b:
-    /// "some effects... require a random discard"). `filter` matches
-    /// `SacrificeRandom`'s own shape (`phase5/mass-choice-effects` follow-up
-    /// — an empty table matches every card, same "no restriction" default
-    /// every other `EffectFilter` consumer uses) - e.g. "discard a random
-    /// land" is `Game.Ops.DiscardRandom({ card_types = { "Land" } }, 1)`.
-    /// Always the resolving `StackObject`'s own controller's hand. Same
-    /// "fewer than `count` if the hand is smaller" stance as
-    /// `SacrificeRandom`, mirroring CR 701.17b's mill precedent. Resolved
-    /// via `continue_scripted_zone_move(Discard, ...)`.
+    /// `Game.Ops.DiscardRandom(filter, count)` (CR 701.9b, random discard).
+    /// `filter` has `SacrificeRandom`'s shape, and an empty table matches every
+    /// card ("discard a random land" is
+    /// `Game.Ops.DiscardRandom({ card_types = { "Land" } }, 1)`). Always the
+    /// resolving controller's hand, and fewer than `count` if the hand is
+    /// smaller. It runs through `continue_scripted_zone_move(Discard, ..)`.
     DiscardRandom { filter: EffectFilter, count: u32 },
-    /// CR 701.9/701.9b's default shape — "target player discards `count`
-    /// card(s)," where *that player* (not this ability's own controller)
-    /// chooses which. The target itself is declared the ordinary way
-    /// (`s.target_requirement()`, a single `TargetFilter::Player`, same
-    /// vocabulary "target opponent" already uses) — narrowed to a single
-    /// target this slice, same "single word first" posture `Counter`/
-    /// `UnlessPaid` both started with. Distinct from both `DiscardRandom`
-    /// above (no choice at all) and `Game.Ops.DiscardChosen` (a script
-    /// result-table key answered by *this ability's own controller* via
-    /// `Game.ChooseN` — see `engine::resolve::discard`'s own module doc
-    /// comment) - this is the one CR 701.9b shape where the discarding
-    /// player themselves picks, which needed a real new mid-resolution
-    /// pause (`ProcessState::AwaitingDiscardChoice`, `Engine::
-    /// submit_discard_choice`) rather than reusing either existing
-    /// mechanism. One card is asked for, resolved, and (if `count` says
-    /// so) asked for again — hand contents are re-read fresh before each
-    /// ask, same "recompute, don't cache" stance `Game.ChooseN` already
-    /// takes for its own repeated picks. An empty hand at any point ends
-    /// the effect early (CR 701.9's own "nothing to discard" silent case),
-    /// same posture `Counter`/`Sacrifice` already take for a target that's
-    /// no longer there.
-    ///
-    /// TODO: "discard your hand" (an unbounded count, not a fixed number)
-    /// isn't representable - `count: u32` covers Mind Rot's fixed "two
-    /// cards," not this open-ended shape. TODO: multi-target-word ("target
-    /// player discards a card and target player discards a card") isn't
-    /// supported - single target only, same narrowing named above.
+    /// CR 701.9, 701.9b: "target player discards `count` cards", where that
+    /// player chooses which. The target is declared normally
+    /// (`s.target_requirement()`, a single `TargetFilter::Player`). Distinct
+    /// from `DiscardRandom` (no choice) and `Game.Ops.DiscardChosen` (this
+    /// ability's controller answers through `Game.ChooseN`; see
+    /// `engine::resolve::discard`): the discarding player picks here, through a
+    /// mid-resolution pause (`AwaitingDiscardChoice`,
+    /// `Engine::submit_discard_choice`). One card is asked for and resolved,
+    /// then asked again if `count` says so, with the hand re-read before each
+    /// ask. An empty hand ends the effect early (CR 701.9).
+    // TODO: "discard your hand" (an unbounded count); `count: u32` covers only a fixed number such as Mind Rot's two
+    // TODO: several target words ("target player discards a card and target player discards a card"); single target only
     Discard { count: u32 },
 }
 
-/// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
-/// overwhelmingly common real destinations. `Battlefield { tapped, .. }`
-/// covers fetch lands (most enter tapped, some don't); no Graveyard/Exile
-/// destination this slice (rare in practice, deferred).
+/// Where `AbilityEffect::Search`'s found cards go, limited to the two common
+/// real destinations. `Battlefield { tapped, .. }` covers fetch lands (most
+/// enter tapped).
+// TODO: Graveyard and Exile destinations
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SearchDestination {
     Hand,
-    /// CR 303.4f/g/h (`phase5/aura-enters-attached`): `enters_attached`
-    /// applies only to a found Aura card (`commands::is_aura`) — it enters
-    /// already attached, choosing among legal enchant candidates as it
-    /// enters (0 candidates: CR 303.4g, stays in the library instead;
-    /// `false`, the default/common case, is every plain fetch-land-style
-    /// search unaffected by this). A non-Aura card with this set simply
-    /// enters unattached (CR 303.4h) — the field is a no-op for it.
+    /// CR 303.4f, 303.4g, 303.4h: applies only to a found Aura
+    /// (`commands::is_aura`), which enters already attached and chooses among
+    /// legal enchant candidates as it enters. With none, it stays in the
+    /// library (CR 303.4g). A non-Aura with this set enters unattached.
+    /// `false` is the plain fetch-land search.
     Battlefield { tapped: bool, enters_attached: bool },
 }
 
@@ -1109,12 +670,7 @@ pub enum NamedToken {
     /// A Food artifact token with "{2}, Sacrifice this artifact: Gain 3 life."
     Food,
     /// CR 111.10a: a Treasure artifact token with "{T}, Sacrifice this
-    /// artifact: Add one mana of any color." Uses `AbilityEffect::
-    /// AddManaChoice` (`phase5/mana-add-choice`) - the "blocked on
-    /// coroutines" comment this variant used to carry was stale by the time
-    /// it was checked: that effect already resolves synchronously off the
-    /// `ActivateAbility` action's own `chosen_colors` field, no player-pause
-    /// mechanism needed.
+    /// artifact: Add one mana of any color", using `AbilityEffect::AddManaChoice`.
     Treasure,
 }
 
@@ -1140,92 +696,59 @@ pub struct CreatureTokenSpec {
 pub enum TokenSpec {
     Named(NamedToken),
     Creature(CreatureTokenSpec),
-    /// CR 707.10f/111: "create a token that's a copy of [object]" — the
-    /// `ObjectId` being copied. Unlike `Named`/`Creature`, this token's
-    /// `CardDefinition` isn't built from this spec at all (see
-    /// `build_token_definition`'s own doc comment) — `ResolveStackTop`'s
-    /// `CreateToken` arm reads the copied object's *current* copiable
-    /// values (its `copiable_override` if it's itself a copy, per CR
-    /// 707.3, else its own `definition`) instead, and re-runs
-    /// `ScriptRuntime::run_card_script` against that snapshot so the
-    /// token's copied triggered/static abilities actually self-register
-    /// (CR 707.2a: abilities are copiable) — every other `TokenSpec` skips
-    /// that call entirely since a Named/Creature token has no script.
-    /// CR 707.9's exceptions/modifications, applied to the copied snapshot
-    /// before it's frozen as the token's own `definition` - see
-    /// `CopyExceptions`' own doc comment for what's representable.
+    /// CR 707.10f, 111: "create a token that's a copy of [object]", naming the
+    /// object copied. The token's `CardDefinition` isn't built from this spec
+    /// (see `build_token_definition`). The `CreateToken` arm reads the copied
+    /// object's current copiable values (its `copiable_override` if it is
+    /// itself a copy, CR 707.3, else its `definition`) and reruns
+    /// `ScriptRuntime::run_card_script` against that snapshot so copied
+    /// abilities self-register (CR 707.2a). Other `TokenSpec`s skip that call,
+    /// having no script. CR 707.9 exceptions apply to the snapshot before it
+    /// freezes as the token's `definition`; see `CopyExceptions`.
     CopyOf(ObjectId, CopyExceptions),
 }
 
-/// CR 707.9's copy-effect exceptions/modifications, applied to a copy
-/// snapshot at the moment it's taken (by `BecomeCopy`/`CopyOf`) before it's
-/// frozen into `GameObject.copiable_override`/a token's own `definition`.
-/// CR 707.9's real shapes are open-ended (arbitrary card text) - narrowed to
-/// the two overwhelmingly common real ones, matching this codebase's own
-/// precedent everywhere else of modeling a fixed, parametrized primitive
-/// rather than a general text-modification system:
-/// - 707.9b (modify a characteristic): `set_power_toughness`, e.g. "except
-///   it has base power and toughness 1/1" - the single most common real
-///   exception on Clone-variant cards.
-/// - 707.9a (gain an ability as part of copying): `add_keywords`, e.g.
-///   "except it also has flying" - same shape, applied to the snapshot's
-///   `keywords` field directly (union, same "in addition to" convention
-///   `EffectPrimitive::AddKeyword` already uses for continuous effects).
+/// CR 707.9 copy-effect exceptions, applied to a copy snapshot when it is
+/// taken (by `BecomeCopy` or `CopyOf`) before it freezes into
+/// `GameObject.copiable_override` or a token's `definition`. The real shapes
+/// are open-ended card text, so this models fixed, parametrized primitives for
+/// the common ones:
+/// - CR 707.9b (modify a characteristic): `set_power_toughness`, "except it
+///   has base power and toughness 1/1", the most common Clone-variant
+///   exception.
+/// - CR 707.9a (gain an ability while copying): `add_keywords`, "except it
+///   also has flying", unioned into the snapshot's `keywords` as
+///   `EffectPrimitive::AddKeyword` does.
+/// - CR 707.9c, 707.9d (keep original characteristics): `retain_name` and
+///   `retain_color`, "except it retains its own name". CR 707.9d also clears
+///   any color indicator. Narrower than all seven copiable characteristics,
+///   since no real card needs retained P/T, types or subtypes yet.
+/// - CR 707.9a (gain a whole new ability): `grant_recurring_copy_trigger`,
+///   Vesuvan Doppelganger's "except it has 'at the beginning of your upkeep,
+///   you may have this creature become a copy of target creature'". This one
+///   concrete shape stands in for a general ability grant, since no
+///   Lua-authorable ability blueprint exists. See
+///   `commands::grant_linked_copy_ability` for how it is built and why it is
+///   hardcoded Rust.
+/// - CR 707.9e (an "additional effect"): `enters_with_additional_counters`,
+///   Spark Double's "it enters with an additional +1/+1 counter". It differs
+///   from the fields above in being a `GameObject`-level mutation (a counter).
+///   Both copy producers apply it after their `copy_generation` bump as a
+///   `CounterAdded` push through `CommitEvents`. CR 707.9e's second sentence
+///   (it doesn't happen if another copy effect applies first) is handled by
+///   the chain detection and `carry_forward_if_declined` mechanism in
+///   `Engine::submit_copy_choice`. `CounterAmount::X` (Altered Ego, CR 707.9e)
+///   is the variable sibling of `Fixed`, resolved against the entering
+///   object's own `x_value`: captured once at the `AwaitingCopyChoice` raise
+///   site and kept through any chain, like `colors_spent`, `stack_id` and
+///   `controller`, since the X belongs to Altered Ego and not to whichever
+///   creature is copied at a link.
 ///
-/// - 707.9c/d (some characteristics specifically *not* copied, original
-///   retained - the inverse of 9a/9b): `retain_name`/`retain_color`, e.g.
-///   "except it retains its own name" - the two most common real "retains
-///   original X" shapes (CR 707.9d itself singles out color for special
-///   handling, clearing any color indicator too). Narrower than the full
-///   CR 707.9c (any of the seven copiable characteristics) - no real card
-///   combination needs retained P/T/types/subtypes yet, same "no real card"
-///   posture `set_power_toughness`/`add_keywords` themselves were scoped
-///   with originally.
-///
-/// - 707.9a's *other* real shape (gain a whole new ability, not just a
-///   keyword, as part of copying): `grant_recurring_copy_trigger`, Vesuvan
-///   Doppelganger's own "except it has 'at the beginning of your upkeep, you
-///   may have this creature become a copy of target creature'" — narrowed to
-///   this one concrete shape rather than a general "grant an arbitrary
-///   ability" system (no Lua-authorable ability blueprint type exists to
-///   describe one). See `commands::grant_linked_copy_ability`'s own doc
-///   comment for how the granted ability itself is built and why it's a
-///   hardcoded Rust shape rather than something `run_card_script` produces.
-///
-/// `Default`'s all-empty value is a bare copy - unaffected, same result as
-/// before this type existed. CR 707.9e/g's own schema prerequisite — "was
-/// this the most recent copy effect applied to this object" — is real now
-/// too (`phase5/copy-generation`, `GameObject.copy_generation`/`GameState.
-/// linked_ability_generation`); `grant_recurring_copy_trigger`'s own granted
-/// ability is tagged with it, though `commands::purge_granted_abilities`
-/// already deletes the *previous* granted ability outright on every real
-/// re-copy in this engine (both producers call it before re-registering),
-/// so the generation tag's own supersession check stays structurally
-/// unreached through either of this engine's two copy producers — named,
-/// not silently assumed, while building this exception.
-///
-/// - 707.9e (an "additional effect" exception, not a characteristic
-///   modification): `enters_with_additional_counters`, e.g. Spark Double's
-///   "if it's a creature, it enters with an additional +1/+1 counter on it"
-///   - a different shape from every field above, since none of those touch
-///   anything but the copy snapshot's `CardDefinition` fields, while this
-///   one is a real `GameObject`-level mutation (a counter). Applied by both
-///   real copy producers right after their own `copy_generation` bump, as a
-///   plain `GameEventKind::CounterAdded` push - reuses `CommitEvents`'
-///   existing generic counter-apply path, no new event variant needed.
-///   707.9e's own second sentence (the exception's effect doesn't happen if
-///   *another* copy effect applies to the object first) is real now too
-///   (`phase5/chained-copy-effects`) - see `Engine::submit_copy_choice`'s own
-///   doc comment for the chain-detection/`carry_forward_if_declined`
-///   mechanism. `CounterAmount::X` (`phase5/altered-ego-x-counters`, CR
-///   707.9e's own Altered Ego worked example) is the variable-amount sibling
-///   to `Fixed` - resolved against the *entering object's own* `x_value`
-///   (`StackObject.x_value`, captured once at `AwaitingCopyChoice`'s raise
-///   site and carried unchanged through any chain, same invariant-through-
-///   the-chain treatment `colors_spent`/`stack_id`/`controller` already get -
-///   the X belongs to Altered Ego itself, not to whichever creature ends up
-///   copied at any one link), not a per-round value re-derived from whatever
-///   was just copied.
+/// `Default` is a bare copy. CR 707.9e and 707.9g's generation check is real
+/// (`GameObject.copy_generation`, `GameState.linked_ability_generation`), and
+/// `grant_recurring_copy_trigger`'s ability is tagged with it. Both producers
+/// call `commands::purge_granted_abilities` before re-registering, so the
+/// supersession check is unreached through either today.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CopyExceptions {
     pub set_power_toughness: Option<(i32, i32)>,
@@ -1236,13 +759,10 @@ pub struct CopyExceptions {
     pub enters_with_additional_counters: Option<(CounterKind, CounterAmount)>,
 }
 
-/// The amount half of `CopyExceptions::enters_with_additional_counters` -
-/// `Fixed` (Spark Double's "an additional +1/+1 counter") or `X` (Altered
-/// Ego's "X additional +1/+1 counters", resolved against the entering
-/// object's own `StackObject.x_value` at copy-application time - see
-/// `CopyExceptions`'s own doc comment for why that's invariant through a
-/// chain). A single field with a two-shaped amount, not two separate
-/// `Option` fields, so "fixed and X both set at once" isn't representable.
+/// The amount of `CopyExceptions::enters_with_additional_counters`: `Fixed`
+/// (Spark Double) or `X` (Altered Ego), resolved against the entering object's
+/// own `StackObject.x_value` when the copy applies. One field with a
+/// two-shaped amount, so "fixed and X both set" can't be represented.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CounterAmount {
     Fixed(u32),
@@ -1263,16 +783,13 @@ impl Default for CopyExceptions {
 }
 
 impl CopyExceptions {
-    /// Applies these exceptions to `snapshot` in place, right before it's
-    /// frozen - shared by `BecomeCopy` and `CreateToken`'s `CopyOf` arm so
-    /// the two real copy-producing call sites can't drift.
-    ///
-    /// `original` is the copying object's own true, pre-copy
-    /// `CardDefinition` (`GameObject::definition`, never overwritten by any
-    /// copy machinery - distinct from `copiable_override`) - `None` only for
-    /// `TokenSpec::CopyOf`, where a freshly created token has no prior "own
-    /// identity" to retain from at all. `retain_name`/`retain_color` are a
-    /// deliberate, tested no-op in that case, not silently broken.
+    /// Applies these exceptions to `snapshot` in place before it freezes,
+    /// shared by `BecomeCopy` and the `CopyOf` arm of `CreateToken` so the two
+    /// producers can't drift. `original` is the copying object's own pre-copy
+    /// `CardDefinition` (`GameObject::definition`, never overwritten by copy
+    /// machinery), `None` only for `TokenSpec::CopyOf`, where a new token has
+    /// no identity to retain. `retain_name` and `retain_color` are a tested
+    /// no-op in that case.
     pub fn apply(&self, snapshot: &mut crate::types::card::CardDefinition, original: Option<&crate::types::card::CardDefinition>) {
         if let Some((power, toughness)) = self.set_power_toughness {
             snapshot.power = Some(crate::types::card::PTValue::Fixed(power));
@@ -1284,49 +801,34 @@ impl CopyExceptions {
                 snapshot.name = original.name.clone();
             }
             if self.retain_color {
-                // CR 707.9d: an explicit color indicator matching the
-                // original's own resolved color - "any color indicator of
-                // that object is also not copied" is satisfied by this
-                // being the *original's* indicator-or-mana-cost-derived
-                // color, not whatever the copied source's own indicator was.
+                // CR 707.9d: the original's indicator-or-mana-cost color, not the copied source's indicator.
                 snapshot.color_indicator = Some(original.colors());
             }
         }
     }
 }
 
-/// CR 612.5's "text box" - `oracle_text`, `keywords`, and `script_ref` - the
-/// three `CardDefinition` fields that stand in for "rules text" in this
-/// engine (see `AbilityEffect::ExchangeTextBoxes`'s own doc comment for why
-/// exactly these three and not more). Overwrites `snapshot`'s in place with
-/// `other`'s; everything else on `snapshot` (name, mana cost, P/T, card
-/// types/subtypes/supertypes) is left untouched, unlike `CopyExceptions`'
-/// full-copy-by-default shape above.
+/// CR 612.5's "text box": `oracle_text`, `keywords` and `script_ref`, the three
+/// `CardDefinition` fields that stand in for rules text (see
+/// `AbilityEffect::ExchangeTextBoxes`). Overwrites `snapshot`'s with `other`'s
+/// and leaves the rest alone, unlike the full copy of `CopyExceptions`.
 pub fn apply_text_box(snapshot: &mut crate::types::card::CardDefinition, other: &crate::types::card::CardDefinition) {
     snapshot.oracle_text = other.oracle_text.clone();
     snapshot.keywords = other.keywords;
     snapshot.script_ref = other.script_ref.clone();
 }
 
-/// The two condition shapes `Game.Conditions.*` covers this slice — a
-/// Rust-native fast path so common trigger shapes don't need a full Lua
-/// condition function written out.
+/// The condition shapes `Game.Conditions.*` covers, a Rust-native fast path so
+/// common trigger shapes need no Lua condition function.
 ///
-/// `Clone`-only (not `Copy`) since `DiesMatching`/`LeavesBattlefieldMatching`
-/// carry a `FilterSpec`, which owns a `Vec`/`String` — a real, anticipated
-/// consequence of adding those two variants (backlog item 7), not an
-/// oversight. Ripples to `ConditionSpec` below (same reason) and to
-/// `script.rs`'s `ConditionTag`/`OncePerTurnTag` wrappers, which drop their
-/// own `Copy` derive to match. `PartialEq`/`Eq` stay real — `FilterSpec`
-/// gained matching derives alongside this change, since every one of its
-/// own fields already supported them.
+/// `Clone` only, not `Copy`, because `DiesMatching` and
+/// `LeavesBattlefieldMatching` carry a `FilterSpec`. That ripples to
+/// `ConditionSpec` and to the `ConditionTag` and `OncePerTurnTag` wrappers in
+/// `script.rs`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ConditionPrimitive {
-    /// "Whenever this permanent enters the battlefield" (CR 603 ETB
-    /// triggers) — matches a `ZoneChange` event moving `source` to the
-    /// battlefield. Mirrors the hand-written
-    /// `event.object == source and event.to == "battlefield"` Lua condition
-    /// from the prior slice exactly.
+    /// CR 603: "whenever this permanent enters the battlefield", a
+    /// `ZoneChange` moving `source` to the battlefield.
     EntersBattlefield,
     /// CR 702.21a (Ward): "whenever this permanent becomes the target of a
     /// spell or ability an opponent controls" - matches a `BecameTarget`
@@ -1334,204 +836,120 @@ pub enum ConditionPrimitive {
     /// but the trigger's controller. There is no team model, so "opponent"
     /// is any other player.
     BecomesTargetOfOpponent,
-    /// No filter — always matches. A real variant (not just `None`) so a
-    /// Lua author has an explicit, correct spelling for "unconditional";
-    /// see `RegisteredAbility::condition`'s doc for why both spellings
-    /// exist.
+    /// No filter, always matches. An explicit spelling of "unconditional"; see
+    /// `RegisteredAbility::condition`.
     Always,
-    /// "Whenever this deals damage" (CR 603.2, matched against
-    /// `GameEventKind::DamageDealt`) — `source` is the one dealing the
-    /// damage. Reachable today because combat damage (`AssignCombatDamage`)
-    /// already routes its `DamageDealt` events through the real
-    /// `CommitEvents`→`SbaLoop`→`CollectTriggers` pipeline (see the
-    /// `fix-replacement-bypasses` slice) — unlike a phase/step-boundary
-    /// condition, which `AdvanceTurnStep` currently can't reach at all (see
-    /// this file's own TODO note below and docs/implementation.md's backlog).
-    /// No combat-vs-noncombat distinction: `DamageDealt` itself doesn't
-    /// carry one, so this matches any damage this object deals, by whatever
-    /// means eventually produces the event.
+    /// CR 603.2: "whenever this deals damage", matched against `DamageDealt`
+    /// with `source` as the dealer. Reachable because combat damage routes its
+    /// events through `CommitEvents`, `SbaLoop` and `CollectTriggers`.
     DealsDamage,
     /// "Whenever this is dealt damage" — the mirror image of `DealsDamage`,
     /// matching on the event's `target` instead of its `source`. Only
     /// matches a `Target::Object` target (a player being dealt damage isn't
     /// "this" for a permanent's own ability).
     IsDealtDamage,
-    /// "At the beginning of your upkeep" (CR 502.1's most common trigger
-    /// shape) — matches `GameEventKind::StepStarted{step: Step::Upkeep}`
-    /// only when the ability's controller is also the active player.
-    /// Reachable now that `AdvanceTurnStep` (engine.rs) routes its events
-    /// through the real `ReplacementCheck`→`CommitEvents`→`SbaLoop`→
-    /// `CollectTriggers` pipeline instead of `log_events` (see that
-    /// function's own doc comment) — the concrete condition this slice adds
-    /// to prove the plumbing fix actually works, not just the fix itself.
+    /// CR 502.1: "at the beginning of your upkeep", matching
+    /// `StepStarted { step: Step::Upkeep }` only when the ability's controller
+    /// is the active player. `AdvanceTurnStep` routes its events through the
+    /// real `ReplacementCheck`, `CommitEvents`, `SbaLoop` and `CollectTriggers`
+    /// pipeline, so it is reachable.
     BeginningOfYourUpkeep,
     /// "At the beginning of each upkeep" — the less common, controller-
     /// agnostic sibling of `BeginningOfYourUpkeep` (e.g. Waste Not-style
     /// effects). Matches every `Step::Upkeep` `StepStarted` regardless of
     /// whose turn it is.
     BeginningOfEachUpkeep,
-    /// "At the beginning of your untap step" (CR 502.4's own trigger shape —
-    /// genuinely rare on real cards, since the step grants no priority, but
-    /// CR 603.3's last sentence still applies: a trigger whose condition is
-    /// met here just waits to go on the stack until the next time a player
-    /// would receive priority, which `AdvanceTurnStep`'s `Untap` branch now
-    /// achieves by routing through the real pipeline with
-    /// `PipelineExit::AdvanceTurnStep` instead of `BackToPriority` — see
-    /// that branch's own doc comment). Matches
-    /// `GameEventKind::StepStarted{step: Step::Untap}` only when the
-    /// ability's controller is also the active player, same "your" shape
-    /// `BeginningOfYourUpkeep` already established.
+    /// CR 502.4: "at the beginning of your untap step", rare since the step
+    /// grants no priority. CR 603.3 holds the trigger until a player next
+    /// receives priority, which the `Untap` branch of `AdvanceTurnStep`
+    /// achieves with `PipelineExit::AdvanceTurnStep`. Matches
+    /// `StepStarted { step: Step::Untap }` only when the controller is the
+    /// active player.
     BeginningOfYourUntap,
     /// "At the beginning of each untap step" — the controller-agnostic
     /// sibling of `BeginningOfYourUntap`, same relationship
     /// `BeginningOfEachUpkeep` has to `BeginningOfYourUpkeep`.
     BeginningOfEachUntap,
-    /// "When this creature dies" (CR 700.4/603.10) — matches a `ZoneChange`
-    /// event moving `source` from the battlefield to a graveyard. Only ever
-    /// reachable via `collect_triggers`'s CR 603.10 last-known-information
-    /// fallback: by the time this is checked, `source` has already left
-    /// `state.objects`/`state.abilities` (purged by `commands::
-    /// retire_object` as part of the very death this condition is matching)
-    /// - see that function's own doc comment. Matched against `last_known_
-    /// info.object_id`, not the event's own `object` field, because a
-    /// battlefield->graveyard move mints a fresh `ObjectId` for the
-    /// graveyard-side object (CR 400.7) - `object` in the committed event is
-    /// that *new* id, never `source`.
+    /// CR 700.4, 603.10: "when this creature dies", a `ZoneChange` moving
+    /// `source` from the battlefield to a graveyard. Reachable only through
+    /// the last-known-information fallback of `collect_triggers`, because
+    /// `source` is already gone from `state.objects` and `state.abilities`
+    /// (purged by `commands::retire_object`). Matched against
+    /// `last_known_info.object_id`, since the event's own `object` is the new
+    /// graveyard id (CR 400.7).
     Dies,
-    /// "When this leaves the battlefield" (CR 603.10) — the broader sibling
-    /// of `Dies`: matches any `ZoneChange` moving `source` off the
-    /// battlefield, regardless of destination (graveyard, exile, hand,
-    /// library, ...), not just a death. Same last-known-information
-    /// matching shape as `Dies`.
+    /// CR 603.10: "when this leaves the battlefield", the broader sibling of
+    /// `Dies`: any `ZoneChange` of `source` off the battlefield. Same
+    /// last-known-information matching.
     LeavesBattlefield,
-    /// "Whenever you draw a card" (CR 121) — matches a `ZoneChange` event
-    /// moving *any* card from library to hand, filtered to only the ability
-    /// controller's own draws via `last_known_info.controller` (the pre-move
-    /// object clone every `ZoneChange` carries — no live state lookup
-    /// needed). Deliberately not `source`-scoped like `EntersBattlefield`:
-    /// this condition doesn't care what `source` is, only who controls it
-    /// and who drew. Matches by zone-shape only (`Library`→`Hand`) — there's
-    /// no separate "this was a draw" flag on the event, so a hypothetical
-    /// future non-draw Library→Hand effect (CR 121.5 draws a distinction
-    /// real MTG cares about) would false-positive here; no such effect
-    /// exists in this engine yet.
+    /// CR 121: "whenever you draw a card", a `ZoneChange` of any card from
+    /// library to hand, filtered to the controller through
+    /// `last_known_info.controller`. Not `source`-scoped. It matches by zone
+    /// shape because the event has no "this was a draw" flag, so a future
+    /// non-draw Library-to-Hand effect (CR 121.5) would false-positive.
     DrawsCard,
     /// "Whenever a player draws a card" — the controller-agnostic sibling of
     /// `DrawsCard` (e.g. Underworld Dreams-style effects), same relationship
     /// `BeginningOfEachUpkeep` has to `BeginningOfYourUpkeep`.
     EachDrawsCard,
-    /// "Whenever you discard a card" — matches a `ZoneChange` event moving
-    /// *any* card from hand to graveyard, filtered to only the ability
-    /// controller's own discards via `last_known_info.controller`, same
-    /// "zone-shape only" matching `DrawsCard` already established (a
-    /// Hand→Graveyard move is always a discard in this engine today — no
-    /// other effect produces that shape yet, matching `DrawsCard`'s own
-    /// "no separate flag on the event" caveat). Reachable now that
-    /// `Engine::submit_discard` (CR 514.1's cleanup hand-size discard)
-    /// routes its events through `CollectTriggers` instead of committing
-    /// them directly — the same `AdvanceTurnStep`-shaped pipeline-bypass gap
-    /// `upkeep-triggers`/this backlog item's Untap fix already closed
-    /// elsewhere. A cost-payment `Discard` (`commands::
-    /// move_to_graveyard_for_cost`) already reached the real pipeline before
-    /// this fix, so both discard sources are covered.
+    /// "Whenever you discard a card": a `ZoneChange` of any card from hand to
+    /// graveyard, filtered to the controller through
+    /// `last_known_info.controller`. Zone shape only, as `DrawsCard`, since
+    /// nothing else moves hand to graveyard today. Both discard sources reach
+    /// the pipeline: `Engine::submit_discard` (CR 514.1) and a cost-payment
+    /// `Discard` (`commands::move_to_graveyard_for_cost`).
     DiscardsCard,
     /// "Whenever a player discards a card" — the controller-agnostic sibling
     /// of `DiscardsCard` (e.g. Waste Not/Megrim-style effects), same
     /// relationship `EachDrawsCard` has to `DrawsCard`.
     EachDiscardsCard,
-    /// "When this card is discarded" — the self-referential sibling
-    /// `DiscardsCard`/`EachDiscardsCard` don't cover (those are
-    /// player-relative: "whenever you/a player discards *a* card", not
-    /// "whenever *this* card is discarded"). Same CR 603.10 look-back-in-time
-    /// shape `Dies`/`LeavesBattlefield` already use for a battlefield
-    /// departure, extended by symmetry to a hand departure — CR 603.10a's own
-    /// enumerated list doesn't explicitly name "leaves the hand" among its
-    /// categories, but the mechanism (match by `last_known_info.object_id`
-    /// against a source that's already been purged from `state.abilities` by
-    /// the time this is checked) is identical, so this reuses it rather than
-    /// inventing a second one. Reachable via both discard sources today - a
-    /// cost-payment `Discard` (`commands::move_to_graveyard_for_cost`) and
-    /// the cleanup hand-size discard (`Engine::submit_discard`) already stash
-    /// their departed `Triggered` abilities for the `collect_triggers` LKI
-    /// fallback to see (closed by the same fix that added `DiscardsCard`).
+    /// "When this card is discarded": the self-referential sibling of
+    /// `DiscardsCard` and `EachDiscardsCard`, which are player-relative. It
+    /// uses the CR 603.10 look-back mechanism of `Dies`, extended to a hand
+    /// departure: match by `last_known_info.object_id` against a source
+    /// already purged from `state.abilities`. CR 603.10a doesn't list leaving
+    /// the hand, but the mechanism is identical. Reachable from a cost-payment
+    /// `Discard` and the cleanup discard, which stash their departed
+    /// `Triggered` abilities for the `collect_triggers` fallback.
     Discarded,
-    /// "When you cycle this card" (CR 702.29c/f) — narrower self-referential
-    /// sibling of `Discarded`: unlike `Discarded` (matches *any* hand ->
-    /// graveyard departure of this card, whatever the cause), this matches
-    /// only `GameEventKind::Cycled`, a purpose-built marker event logged
-    /// alongside (not instead of) the ordinary `ZoneChange` only when the
-    /// discard specifically paid a `AdditionalCost::DiscardSelf` cost
-    /// (`Engine::continue_cost_zone_moves`'s `cycling_source` parameter) —
-    /// the same discriminator this engine already uses to mean "this is a
-    /// Cycling/Typecycling ability's own cost" (`commands::activate`'s
-    /// hand-zone override). CR 702.29c's own "triggers from whatever zone
-    /// the card winds up in after it's cycled" falls out for free: this
-    /// primitive never reads `to` at all. Reuses the same CR 603.10
-    /// departed/LKI fallback shape `Discarded` itself uses, since the
-    /// cycled card's own abilities are purged the moment it leaves hand,
-    /// same as any other departure.
+    /// CR 702.29c, 702.29f: "when you cycle this card". Narrower than
+    /// `Discarded`: it matches only `Cycled`, a marker event logged beside the
+    /// ordinary `ZoneChange` when the discard paid `AdditionalCost::DiscardSelf`
+    /// (`Engine::continue_cost_zone_moves`'s `cycling_source`, the
+    /// discriminator `commands::activate` uses for a Cycling cost). CR
+    /// 702.29c's "triggers from whatever zone the card ends up in" follows
+    /// because it never reads `to`. It reuses the CR 603.10 departed/LKI
+    /// fallback of `Discarded`.
     Cycled,
-    /// "When this card is exiled this way" (CR 702.35a's second ability) —
-    /// same narrower-self-referential-sibling-of-`Discarded` shape `Cycled`
-    /// above already established, matching only `GameEventKind::
-    /// MadnessExiled`, a purpose-built marker event logged alongside the
-    /// ordinary `ZoneChange` only when a discard's own madness redirect
+    /// CR 702.35a's second ability: "when this card is exiled this way".
+    /// Matches only the `MadnessExiled` marker event, logged beside the
+    /// ordinary `ZoneChange` when a discard's madness redirect
     /// (`ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile)`,
-    /// registered by the card on itself) actually won
-    /// (`replacement::madness_marker_event`). Reuses the same CR 603.10
-    /// departed/LKI fallback shape `Cycled`/`Discarded` both use, since the
-    /// card's own madness triggered ability is purged the moment it leaves
-    /// hand, same as any other departure.
+    /// registered by the card on itself) won (`replacement::madness_marker_event`).
+    /// Same CR 603.10 departed/LKI fallback as `Cycled` and `Discarded`.
     MadnessExiled,
-    /// "When you cast this spell" (CR 601.2i, CR 702.85a Cascade's own first
-    /// clause) — matches `GameEventKind::SpellCast{object} if object ==
-    /// source`. Unlike `Cycled`/`MadnessExiled`/`Discarded`, this is a
-    /// self-referential condition on a still-*live* source (the spell is
-    /// still sitting on the stack when this fires - nothing purges it), so
-    /// it's matched by `triggers::collect_triggers`'s ordinary main loop,
-    /// no CR 603.10 departed/LKI fallback needed at all.
-    ///
-    /// No real self-registration producer exists for this yet - tried
-    /// generically (a `CommandOutcome::stack_entries` field, `Engine::
-    /// handle_pending_action` re-running a card's own `run_card_script` a
-    /// second time once it hits the stack, mirroring `battlefield_entries`)
-    /// but reverted: every existing card's `register_abilities(c)` is
-    /// written assuming it runs *once* per object lifecycle - running it a
-    /// second time at cast time, on top of the *existing* battlefield-entry
-    /// call, double-registers every ordinary ETB trigger too (`commands::
-    /// remap_abilities` carries the cast-time registration forward across
-    /// the stack->battlefield move, and the pre-existing `run_card_script`
-    /// call at battlefield-entry then registers a second, independent copy
-    /// on the same final object) - caught directly by `phase5_escape_
-    /// provenance.rs`'s own pre-existing test regressing into a genuine CR
-    /// 603.3b two-copy ordering-choice pause instead of a single clean
-    /// trigger. Direct `RegisteredAbility` construction only for now, same
-    /// posture other alternative-cost-family slices already take for their
-    /// own Lua-inaccessible pieces.
+    /// CR 601.2i, 702.85a: "when you cast this spell", matching
+    /// `SpellCast { object }` with `object == source`. The spell is still live
+    /// on the stack, so `triggers::collect_triggers` matches it in the
+    /// ordinary main loop with no CR 603.10 departed/LKI fallback.
+    // TODO: a self-registration producer; rerunning a card's `run_card_script` at cast time double-registers every ordinary ETB trigger, since `commands::remap_abilities` carries the cast-time registration across the stack-to-battlefield move, so only direct `RegisteredAbility` construction works today
     Cast,
-    /// "At the beginning of combat on your turn" (CR 507) — matches
-    /// `GameEventKind::StepStarted{step: Step::BeginningOfCombat}` only when
-    /// the ability's controller is also the active player. Same reachability
-    /// story as `BeginningOfYourUpkeep`: `AdvanceTurnStep` already routes
-    /// this step's `StepStarted` through the real pipeline, neither `Untap`
-    /// nor `Cleanup` special-casing applies to it.
+    /// CR 507: "at the beginning of combat on your turn", matching
+    /// `StepStarted { step: Step::BeginningOfCombat }` only when the controller
+    /// is the active player. Reachable as `BeginningOfYourUpkeep` is.
     BeginningOfYourCombat,
     /// "At the beginning of each combat" — the controller-agnostic sibling
     /// of `BeginningOfYourCombat`.
     BeginningOfEachCombat,
-    /// "At the beginning of your end step" (CR 512/513) — matches
-    /// `GameEventKind::StepStarted{step: Step::End}` only when the ability's
-    /// controller is also the active player. Same reachability story as
-    /// `BeginningOfYourUpkeep`.
+    /// CR 512, 513: "at the beginning of your end step", matching
+    /// `StepStarted { step: Step::End }` for the active player. Reachable as
+    /// `BeginningOfYourUpkeep` is.
     BeginningOfYourEndStep,
     /// "At the beginning of each end step" — the controller-agnostic sibling
     /// of `BeginningOfYourEndStep`.
     BeginningOfEachEndStep,
-    /// "Whenever you scry" (CR 701.22d) — matches `GameEventKind::CardsScried`
-    /// with `event.player == controller`. Reachable now that
-    /// `Engine::submit_scry_choice` logs that event (`phase5/scry-surveil`
-    /// slice); this is the deferred trigger-condition half that slice's own
-    /// TODO named.
+    /// CR 701.22d: "whenever you scry", matching `CardsScried` with
+    /// `event.player == controller`, logged by `Engine::submit_scry_choice`.
     Scries,
     /// "Whenever a player scries" — the controller-agnostic sibling of
     /// `Scries`, same relationship `EachDrawsCard` has to `DrawsCard`.
@@ -1542,20 +960,15 @@ pub enum ConditionPrimitive {
     /// "Whenever a player surveils" — the controller-agnostic sibling of
     /// `Surveils`.
     EachSurveils,
-    /// "Whenever a creature you control dies" (CR 700.4/603.10) — the
-    /// filter-scoped sibling of `Dies`: unlike `Dies` (matches only when the
-    /// *ability's own source* is what died), this matches *any* qualifying
-    /// death, checked via `filter.matches(&lki, controller)` — `controller`
-    /// is the ability's own controller, so `FilterSpec { controller:
-    /// Some(FilterController::You), .. }` naturally gives "you control" for
-    /// free (no separate `Each*` sibling needed the way `Dies` never had
-    /// one - `FilterController::Any` already covers that case). The
-    /// ability's `source` here is a separate, still-live permanent watching
-    /// for deaths (Blood Artist-style) - this is checked in
-    /// `collect_triggers`'s ordinary live-source loop, never the CR 603.10
-    /// departed/LKI fallback loop `Dies`/`LeavesBattlefield` themselves rely
-    /// on (that loop explicitly whitelists only those two identity-scoped
-    /// variants).
+    /// CR 700.4, 603.10: "whenever a creature you control dies", the
+    /// filter-scoped sibling of `Dies`. `Dies` matches only when the ability's
+    /// own source died, and this matches any qualifying death through
+    /// `filter.matches(&lki, controller)`, where `controller` is the ability's
+    /// controller, so `FilterController::You` gives "you control" and `Any`
+    /// needs no `Each*` sibling. The source is a separate live permanent
+    /// watching for deaths (Blood Artist), so the ordinary live-source loop of
+    /// `collect_triggers` checks it and not the CR 603.10 fallback, which
+    /// whitelists only `Dies` and `LeavesBattlefield`.
     DiesMatching(FilterSpec),
     /// "Whenever a permanent matching filter leaves the battlefield" — the
     /// filter-scoped sibling of `LeavesBattlefield`, same relationship
@@ -1563,34 +976,14 @@ pub enum ConditionPrimitive {
     LeavesBattlefieldMatching(FilterSpec),
 }
 
-// TODO(backlog item 7, CR 603.10 continued): Dies/LeavesBattlefield are wired
-// for the SBA-driven death path (sba::commit_death) and Sacrifice/Discard
-// cost payment (commands::move_to_graveyard_for_cost, via commit_payment ->
-// Engine::submit_payment) - see move_to_graveyard_for_cost's own doc comment
-// for why the Discard half stays dormant. Two call sites still discard their
-// departed abilities outright: submit_discard's CR 514.1 hand-size discard,
-// and draw_step's library-side retirement - both would be inert to wire
-// today (neither can produce a Battlefield-departure LKI).
-// ~~"Whenever a creature you control dies" (filtered by something other than
-// "is this exact object")~~ - done, DiesMatching/LeavesBattlefieldMatching
-// above (phase5/trigger-completeness-cleanup slice).
-//
-// Once-per-turn (ConditionSpec::PrimitiveOncePerTurn, CR 603.2h) and
-// intervening-if legality (InterveningIfSpec, CR 603.3) are both real now.
-// TODO(trigger system completeness, backlog item 7): untap-step events still
-// can't trigger anything (CR 502.4 grants no priority there, so there's no
-// window to place a trigger before) and Cleanup's own CleanupSbaCheck flow
-// still doesn't run collect_triggers at all (a second, differently-shaped
-// fix, left for its own slice - see docs/implementation.md's backlog item
-// 7a).
+// TODO: `submit_discard`'s CR 514.1 hand-size discard and `draw_step`'s library-side retirement still discard their departed abilities outright; wiring them is inert today, since neither produces a Battlefield-departure LKI (CR 603.10)
+// TODO: untap-step events can't trigger anything (CR 502.4 grants no priority), and Cleanup's `CleanupSbaCheck` flow doesn't run `collect_triggers`
 
 impl ConditionPrimitive {
-    /// Zero Lua VM calls — evaluated directly against the event that's being
-    /// checked. `source` is the registered ability's source object (not
-    /// necessarily the event's own object); `controller` is that source's
-    /// controller and `active_player` is whoever's turn it currently is —
-    /// both needed for `BeginningOfYourUpkeep`'s "your" relativity, which
-    /// `DealsDamage`/`IsDealtDamage`/`EntersBattlefield` never needed.
+    /// Zero Lua VM calls: evaluated against the event being checked. `source`
+    /// is the registered ability's source, not necessarily the event's object.
+    /// `controller` and `active_player` are needed for the "your" relativity of
+    /// `BeginningOfYourUpkeep` and its siblings.
     pub fn matches(
         &self,
         source: ObjectId,
@@ -1701,12 +1094,7 @@ impl ConditionPrimitive {
                 GameEventKind::CardsSurveiled { player, .. } if *player == controller
             ),
             ConditionPrimitive::EachSurveils => matches!(event, GameEventKind::CardsSurveiled { .. }),
-            // CR 700.4/603.10: unlike Dies (matched by identity against
-            // `source` in the departed/LKI fallback loop), this is checked
-            // in the ordinary live-source loop against a separate watching
-            // ability - `controller` here is that ability's own controller,
-            // giving FilterSpec's existing `FilterController::You`/`Any` the
-            // "you control"/"any player controls" distinction for free.
+            // CR 700.4, 603.10: matched in the live-source loop against a separate watching ability, whose `controller` gives `FilterController::You` and `Any` their meaning. `Dies` instead matches by identity in the departed/LKI loop.
             ConditionPrimitive::DiesMatching(filter) => matches!(
                 event,
                 GameEventKind::ZoneChange { from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: Some(lki), .. }
@@ -1721,25 +1109,19 @@ impl ConditionPrimitive {
     }
 }
 
-/// A condition/operation source string resolves to one of these shapes
-/// at load time (`ScriptRuntime::load_condition`) — a recognized
-/// `Game.Conditions.*` tag (`Primitive`, no further Lua calls needed ever
-/// again), a genuine custom Lua function (`Script`, invoked for real via
-/// `ScriptRuntime::invoke_condition` each time, same as before this slice),
-/// or `PrimitiveOncePerTurn` (CR 603.2h: "This ability triggers only once
-/// each turn" layered on top of any `ConditionPrimitive`, via
-/// `Game.Conditions.OncePerTurn(tag)` wrapping any other `Game.Conditions.*`
-/// tag). Matching itself is identical to `Primitive`'s own — the cap is
-/// enforced separately, in `triggers::collect_triggers`/`Engine`'s
-/// `CollectTriggers` stage, against `GameState::once_per_turn_triggered`
-/// (keyed by the ability's own stable `AbilityId`, reset each turn). Not
-/// offered for a `Script` condition this slice - a custom Lua condition
-/// function has no engine-side `AbilityId`-keyed slot to consult without
-/// also threading one through `ScriptContext`, deferred as a named
-/// follow-up.
-/// `Clone`-only (not `Copy`) — see `ConditionPrimitive`'s own doc comment for
-/// why (its `DiesMatching`/`LeavesBattlefieldMatching` variants own a
-/// `FilterSpec`).
+/// A condition or operation source string resolves at load time
+/// (`ScriptRuntime::load_condition`) to a recognized `Game.Conditions.*` tag
+/// (`Primitive`, no further Lua calls), a custom Lua function (`Script`,
+/// invoked each time through `ScriptRuntime::invoke_condition`), or
+/// `PrimitiveOncePerTurn` (CR 603.2h) from `Game.Conditions.OncePerTurn(tag)`
+/// wrapping any other tag. Matching is the same as `Primitive`. The cap is
+/// enforced in `triggers::collect_triggers` and the `CollectTriggers` stage
+/// against `GameState::once_per_turn_triggered`, keyed by the ability's
+/// `AbilityId` and reset each turn. A `Script` condition can't use it, because
+/// a custom Lua function has no `AbilityId`-keyed slot without threading one
+/// through `ScriptContext`.
+///
+/// `Clone` only, because `ConditionPrimitive` owns a `FilterSpec`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConditionSpec {
     Primitive(ConditionPrimitive),
@@ -1747,61 +1129,43 @@ pub enum ConditionSpec {
     PrimitiveOncePerTurn(ConditionPrimitive),
 }
 
-/// CR 603.4's intervening-if clause ("When/Whenever/At X, if Y, Z") is a
-/// pure state predicate, not event-shaped like `ConditionPrimitive` (whose
-/// `matches` always takes a `&GameEventKind`) — checked once when the
-/// trigger event fires (folded into `triggers::collect_triggers`, alongside
-/// but separate from the ability's own trigger-event `condition`) and again
-/// at resolution (`Engine`'s `ResolveStackTop`, CR 608.2a). Reused as-is for
-/// CR 611.2c's conditional continuous effects (`ContinuousEffect::condition`)
-/// — the same "evaluate a live board-state predicate, get a bool" shape both
-/// features need, see that field's own doc comment.
+/// CR 603.4's intervening-if clause ("When/Whenever/At X, if Y, Z") is a pure
+/// state predicate, not event-shaped like `ConditionPrimitive`. It is checked
+/// once when the trigger fires (in `triggers::collect_triggers`, beside the
+/// ability's `condition`) and again at resolution (`ResolveStackTop`,
+/// CR 608.2a). It is reused for CR 611.2c conditional continuous effects
+/// (`ContinuousEffect::condition`).
 ///
-/// `ControllerControlsAtLeast` resolves "you" as `object_controller`, always
-/// the raw `GameObject.controller` field rather than `layers::
-/// effective_controller` — same Layer 2 gap `ContinuousEffect::applies_to`'s
-/// own `FilterController` check already has (see `Layer::ControlChangingEffects`'s
-/// doc comment: nothing in live gameplay resolves effective control yet), and
-/// avoids `applicable_effects_in_layer` recursing into `effective_controller`
-/// (which itself calls `applicable_effects_in_layer`) to evaluate a
-/// condition.
+/// `ControllerControlsAtLeast` resolves "you" as the raw
+/// `GameObject.controller`, not `layers::effective_controller`.
+/// `ContinuousEffect::applies_to` has the same layer 2 gap, and the layered
+/// value would recurse, since `applicable_effects_in_layer` calls
+/// `effective_controller`.
+/// TODO: more shapes, such as hand size and "still on the battlefield"
 ///
-/// TODO: more shapes (hand size, "still on the battlefield") are the same
-/// category of follow-up every other primitive in this file started narrow
-/// before growing.
-///
-/// `Clone`-only (not `Copy`) — `ControllerControlsAtLeast` carries a
-/// `FilterSpec`, same reason `ConditionPrimitive` dropped `Copy` for
-/// `DiesMatching`/`LeavesBattlefieldMatching`. Ripples to `InterveningIfSpec`
-/// below (same reason).
+/// `Clone` only, because `ControllerControlsAtLeast` carries a `FilterSpec`,
+/// which ripples to `InterveningIfSpec`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum InterveningIfPrimitive {
     ControllerAtOrBelowLife(i32),
     /// CR 611.2c's overwhelmingly common real shape: "as long as you
     /// control `count` or more permanents matching `filter`."
     ControllerControlsAtLeast { filter: FilterSpec, count: u32 },
-    /// CR 603.4/702.138b: "if it escaped" — Kroxa/Uro's own real card
-    /// pattern (an ordinary ETB trigger's intervening-if, not CR 702.138c/
-    /// d's own "escapes with [counters/ability]" templates, which are a
-    /// different, narrower shape - see `ReplacementPayload::
-    /// EntersWithCountersEscape` for those). Checked against the ability's
-    /// own `source` object's `GameObject::entered_via_escape` - `false`
-    /// (never holds) if `source` no longer resolves live, same
-    /// conservative default `ControllerControlsAtLeast` already takes for
-    /// an unresolvable state.
+    /// CR 603.4, 702.138b: "if it escaped" (Kroxa, Uro), an ordinary ETB
+    /// trigger's intervening-if. CR 702.138c and 702.138d's "escapes with"
+    /// templates are `ReplacementPayload::EntersWithCountersEscape`. Checked
+    /// against the source's `GameObject::entered_via_escape`, `false` if the
+    /// source no longer resolves, like `ControllerControlsAtLeast`.
     Escaped,
-    /// CR 603.4/702.79a/702.93a: "if it had no [kind] counters on it" —
-    /// checked against the object *as it was the moment it died*, not live
-    /// state (by the time this is ever evaluated, a `Dies`-sourced
-    /// `source` has already been purged/renumbered by `retire_object`, the
-    /// same CR 603.10 problem `ConditionPrimitive::Dies` itself solves with
-    /// a last-known-info fallback). Reads `lki` when the caller has one
-    /// (always true in practice — the only real producer is a departed
-    /// `Dies` trigger, both at collection in `triggers::collect_triggers`'s
-    /// own LKI-fallback loop and at the CR 608.2a resolution recheck via
-    /// `StackObject::source_lki`); falls back to a live `state.object(
-    /// source)` lookup otherwise, same conservative-default shape `Escaped`
-    /// above already takes for its own unresolvable-source case.
+    /// CR 603.4, 702.79a, 702.93a: "if it had no [kind] counters on it",
+    /// checked against the object as it was when it died and not live state,
+    /// since a `Dies` source is already purged by `retire_object` (the CR
+    /// 603.10 problem `ConditionPrimitive::Dies` solves). Reads `lki` when
+    /// given, which the one real producer, a departed `Dies` trigger, always
+    /// has, both at collection (the LKI loop of `triggers::collect_triggers`)
+    /// and at the CR 608.2a recheck (`StackObject::source_lki`). Otherwise it
+    /// looks up `state.object(source)`, with the conservative default of
+    /// `Escaped`.
     HadNoCountersOfKind(CounterKind),
 }
 
@@ -1837,118 +1201,78 @@ impl InterveningIfPrimitive {
     }
 }
 
-/// See `InterveningIfPrimitive`'s own doc comment. Same `Primitive`/`Script`
-/// shape `ConditionSpec` uses. `Script` (backlog item 7,
-/// `phase5/trigger-completeness-cleanup` slice) is checked via
+/// See `InterveningIfPrimitive`. The same `Primitive`/`Script` shape as
+/// `ConditionSpec`. `Script` is checked through
 /// `ScriptRuntime::invoke_intervening_if`, which passes a minimal state
-/// snapshot (`script.rs`'s `state_to_lua` — currently just per-player life
-/// totals, mirroring the one `Primitive` shape above) into the Lua call as
-/// its 3rd argument: `function(source, controller, snapshot)`. No live
-/// object-characteristic queries yet (e.g. "this creature's power") - named
-/// as the next follow-up, not guessed at here.
-/// `Clone`-only (not `Copy`) — see `InterveningIfPrimitive`'s own doc comment.
+/// snapshot (`state_to_lua`, currently per-player life totals) as the third
+/// argument: `function(source, controller, snapshot)`.
+/// TODO: live object-characteristic queries in that snapshot, such as a creature's power
+/// `Clone` only, because `InterveningIfPrimitive` owns a `FilterSpec`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum InterveningIfSpec {
     Primitive(InterveningIfPrimitive),
     Script(ScriptHandle),
 }
 
-/// A card's registered ability, as set up by its script's `Game.
-/// CreateTriggeredAbility`/`Game.CreateActivatedAbility`/`Game.
-/// CreateManaAbility` builder (`script::builders`) - `ScriptRuntime::
-/// run_card_script` drains the builder's queued result into `GameState`
-/// with a real allocated id. Lives in `GameState.abilities` as a flat list
-/// (same pattern as
-/// `continuous_effects`/`replacement_effects`), not nested under
-/// `GameObject`, so the engine can scan all registered abilities against an
-/// event/timing window without walking every object first.
+/// A card's registered ability, from its script's
+/// `Game.CreateTriggeredAbility`, `Game.CreateActivatedAbility` or
+/// `Game.CreateManaAbility` builder (`script::builders`).
+/// `ScriptRuntime::run_card_script` drains the builder's result into
+/// `GameState` with an allocated id. It lives in the flat
+/// `GameState.abilities`, like `continuous_effects`, so the engine can scan
+/// every ability against an event or timing window without walking objects.
 #[derive(Clone, PartialEq, Debug)]
 pub struct RegisteredAbility {
-    /// Stable across this ability's lifetime — see `AbilityId`'s own doc
-    /// comment. Minted via `GameState::allocate_ability_id` at registration
-    /// time; a hand-built test fixture that never goes through real
-    /// self-registration picks its own arbitrary (but ideally
-    /// file-unique) value instead.
+    /// Stable for the ability's lifetime; see `AbilityId`. Minted by
+    /// `GameState::allocate_ability_id` at registration. A hand-built fixture
+    /// picks its own value.
     pub id: AbilityId,
     pub source: ObjectId,
     pub kind: AbilityKind,
-    /// `None` means "no filter, always matches" — same meaning as
-    /// `Some(ConditionSpec::Primitive(ConditionPrimitive::Always))`. Two
-    /// spellings exist on purpose: `None` is what every non-triggered
-    /// (`Activated`/`Static`) ability uses, since it never had a condition
-    /// concept to begin with; `Always` is a real, explicit choice a Lua
-    /// trigger author writes (`return Game.Conditions.Always`) when they
-    /// mean "no filter" deliberately — loading rejects a bare Lua `nil`
-    /// result as an error rather than silently treating a typo'd
-    /// `Game.Conditions.Typo` as unconditional (see
+    /// `None` means no filter, the same as
+    /// `Some(ConditionSpec::Primitive(ConditionPrimitive::Always))`. Both
+    /// spellings exist on purpose: `None` is for `Activated` and `Static`
+    /// abilities, which have no condition concept, and `Always` is an explicit
+    /// choice by a trigger author. Loading rejects a bare Lua `nil` so a
+    /// typo'd `Game.Conditions.Typo` isn't silently unconditional (see
     /// `ScriptRuntime::load_condition`).
     pub condition: Option<ConditionSpec>,
-    /// `None` means "no cost at all" — `ActivateAbility` treats this the
-    /// same as an empty `CostSpec` (mana: None, additional: empty), still
-    /// routing through `AwaitingPayment` for an explicit (even if empty)
-    /// acknowledgment, same CR 118.5a stance `CastSpell`'s mana cost already
-    /// takes. `Some(spec)` is CR 602.2b's real cost — `spec.additional` is
-    /// what `Game.CreateActivatedAbility`'s `:AddCost` accumulates for
-    /// tap/sacrifice/discard/life components; `spec.mana` is set the same
-    /// way from a `Game.Costs.Mana("{1}{R}")` component, parsed via
-    /// `ManaCost::parse` (mana.rs) — no longer always `None`, since the
-    /// ability-mana-cost-strings slice closed that gap.
+    /// `None` means no cost: `ActivateAbility` treats it as an empty
+    /// `CostSpec` and still routes through `AwaitingPayment` for an explicit
+    /// acknowledgment (CR 118.5a). `Some(spec)` is the CR 602.2b cost, with
+    /// `spec.additional` from `:AddCost` (tap, sacrifice, discard, life) and
+    /// `spec.mana` from `Game.Costs.Mana("{1}{R}")`, parsed by
+    /// `ManaCost::parse`.
     pub cost: Option<CostSpec>,
-    /// `None` means "no targets required" — same "cast as though it did
-    /// not require those targets" stance `CardDefinition::target_requirement`
-    /// takes. `Some(TargetSpec::Primitive(req))` is what `ActivateAbility`
-    /// validates non-mana-ability targets against — `req.filter` can itself
-    /// be a `TargetFilter::Script` scripted legality predicate as of
-    /// `phase5/scripted-target-filter`, set via `:SetTarget(function)`.
+    /// `None` means no targets (CR 601.2c), as for
+    /// `CardDefinition::target_requirement`. `ActivateAbility` validates
+    /// non-mana-ability targets against `Some(TargetSpec::Primitive(req))`,
+    /// whose `req.filter` can be a scripted `TargetFilter::Script` set through
+    /// `:SetTarget(function)`.
     pub target: Option<TargetSpec>,
     pub operation: ScriptHandle,
-    /// See `AbilityEffect`'s doc comment — `Some` for an effect shape this
-    /// engine can resolve without a script call at all (CR 605 mana
-    /// abilities' `AddMana`, or a `Game.Ops.*` primitive like `GainLife`
-    /// loaded via `ScriptRuntime::load_operation`). `None` means resolution
-    /// falls back to invoking `operation` for real through the script
-    /// bridge.
+    /// See `AbilityEffect`. `Some` for an effect resolved without a script call
+    /// (a CR 605 mana ability's `AddMana`, or a `Game.Ops.*` primitive loaded
+    /// by `ScriptRuntime::load_operation`). `None` falls back to invoking
+    /// `operation`.
     pub effect: Option<AbilityEffect>,
-    /// CR 603.4's intervening-if clause, orthogonal to `condition` above (the
-    /// trigger-event check) — see `InterveningIfSpec`'s own doc comment.
-    /// `None` for every ability without "if" text, which is most of them —
-    /// same "no concept for this ability" stance `cost`/`target` already
-    /// take when `None`. Checked in `triggers::collect_triggers` at trigger
-    /// time and baked onto the resulting `StackObject` (`PutTriggersApnap`)
-    /// for `ResolveStackTop` to recheck at resolution (CR 608.2a).
+    /// CR 603.4's intervening-if clause, separate from `condition` (the
+    /// trigger-event check). See `InterveningIfSpec`. `None` for abilities
+    /// without "if" text. Checked in `triggers::collect_triggers` and baked
+    /// onto the `StackObject` (`PutTriggersApnap`) for `ResolveStackTop` to
+    /// recheck (CR 608.2a).
     pub intervening_if: Option<InterveningIfSpec>,
-    /// CR 603.3c/700.2b: a modal triggered ability's own mode list — empty
-    /// (the common case) for every non-modal ability, same "empty means
-    /// doesn't apply" stance `CardDefinition::modes` already takes for a
-    /// non-modal spell. Reuses `SpellMode`/`ModeChoice` wholesale rather than
-    /// a parallel type, since the shape (a target requirement + effect per
-    /// option, chosen `mode_choice` of them) is identical to a spell's own —
-    /// only *when* the choice is made differs (CR 603.3c: as the ability is
-    /// put on the stack, via `ProcessState::AwaitingTriggerModeChoice`/
-    /// `Engine::submit_trigger_mode_choice`, since a triggered ability isn't
-    /// initiated by a single synchronous player action the way `CastSpell`
-    /// is). `SpellMode::additional_cost` is never populated on a
-    /// trigger-declared mode and never consulted here — CR 700.2h's
-    /// additional-cost text is tied to *casting* a spell (601.2b/f-h), not to
-    /// a triggered ability going on the stack, so that field stays
-    /// meaningless (not wired) for this ability kind, same "field exists,
-    /// this ability kind just never sets/reads it" stance `cost`/`target`
-    /// already take for a mana ability.
+    /// CR 603.3c, 700.2b: a modal triggered ability's modes, empty for
+    /// non-modal ones. It reuses `SpellMode` and `ModeChoice`, since the shape
+    /// matches a spell's. Only the timing differs: the choice is made as the
+    /// ability goes on the stack (CR 603.3c, `AwaitingTriggerModeChoice` and
+    /// `Engine::submit_trigger_mode_choice`). `SpellMode::additional_cost` is
+    /// never set or read here, since CR 700.2h's cost text belongs to casting
+    /// (CR 601.2b, 601.2f-h).
     pub modes: Vec<SpellMode>,
-    /// Meaningless (but must still be set, `RegisteredAbility` has no
-    /// `Default` impl) when `modes` is empty — same convention
-    /// `CardDefinition::mode_choice` already established.
-    ///
-    /// CR 700.2e "chosen by opponent" is deliberately not supported for a
-    /// triggered ability's own modes this slice — `ModeChoice::
-    /// ExactlyChosenByOpponent`/`UpToChosenByOpponent` exist as variants (the
-    /// enum is shared with `CardDefinition`), but `push_ordered_triggers`
-    /// doesn't special-case them, so they resolve through the same
-    /// caster/controller-chosen path as `Exactly`/`UpTo` — meaning a trigger
-    /// declaring one of those two variants would incorrectly ask its own
-    /// controller instead of the other player. No real card needs this
-    /// combination yet, so it's a named gap, not silently wrong in a way
-    /// anything currently exercises.
+    /// Meaningless when `modes` is empty, but must be set since
+    /// `RegisteredAbility` has no `Default`.
+    // TODO: CR 700.2e opponent-chosen modes for a triggered ability; `push_ordered_triggers` doesn't special-case `ExactlyChosenByOpponent` or `UpToChosenByOpponent`, so the controller would be asked instead of the other player
     pub mode_choice: ModeChoice,
 }
 
@@ -1956,8 +1280,7 @@ pub struct RegisteredAbility {
 mod tests {
     use super::*;
 
-    // DealsDamage/IsDealtDamage/EntersBattlefield/Always never consult
-    // controller/active_player - any two PlayerIds work as filler here.
+    // These conditions never consult controller or active_player, so any two PlayerIds work.
     const CONTROLLER: PlayerId = PlayerId(0);
     const ACTIVE_PLAYER: PlayerId = PlayerId(0);
 
@@ -1997,8 +1320,7 @@ mod tests {
 
     #[test]
     fn is_dealt_damage_does_not_match_a_player_target() {
-        // A player being dealt damage isn't "this" for a permanent's own
-        // ability - IsDealtDamage only ever matches a Target::Object.
+        // A player being dealt damage is never "this" for a permanent's ability.
         let source = ObjectId(0);
         let dealer = ObjectId(1);
         let event = GameEventKind::DamageDealt { source: dealer, target: Target::Player(PlayerId(0)), amount: 3, is_combat_damage: false };
@@ -2095,10 +1417,7 @@ mod tests {
         assert!(!ConditionPrimitive::BeginningOfEachUntap.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
-    // Dies/LeavesBattlefield are only ever matched against last_known_info
-    // (the object itself is already gone by the time these are checked -
-    // see collect_triggers's CR 603.10 fallback) - a minimal GameObject
-    // snapshot stands in for that.
+    // Dies and LeavesBattlefield match only last_known_info, since the object is already gone (CR 603.10).
     fn dummy_last_known_info(object_id: ObjectId) -> crate::types::object::GameObject {
         use crate::types::card::CardDefinition;
         use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
@@ -2182,8 +1501,7 @@ mod tests {
 
     #[test]
     fn dies_does_not_match_a_non_death_departure() {
-        // Battlefield -> Exile (e.g. a CR 614.13 "exile instead" replacement)
-        // is a LeavesBattlefield, not a Dies.
+        // Battlefield to Exile (a CR 614.13 "exile instead") is a LeavesBattlefield, not a Dies.
         let source = ObjectId(0);
         let event = GameEventKind::ZoneChange {
             object: ObjectId(999),
@@ -2393,8 +1711,7 @@ mod tests {
 
     #[test]
     fn discarded_does_not_match_a_battlefield_death() {
-        // Battlefield -> Graveyard is a Dies, not a Discarded - same card
-        // identity, different departure zone.
+        // Dies, not Discarded: the same card departs from a different zone.
         let source = ObjectId(0);
         let event = GameEventKind::ZoneChange {
             object: ObjectId(999),
@@ -2578,9 +1895,7 @@ mod tests {
     }
 
     /// A minimal battlefield permanent for `ControllerControlsAtLeast`
-    /// fixtures - same idea as `dummy_last_known_info` above, parameterized
-    /// on controller/card_types instead of hardcoded to `CONTROLLER`/
-    /// `CREATURE`.
+    /// fixtures, parameterized on controller and card types.
     fn battlefield_object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet) -> crate::types::object::GameObject {
         use crate::types::card::CardDefinition;
         use crate::types::card::{KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
@@ -2679,9 +1994,7 @@ mod tests {
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
         assert!(primitive.holds(&state, p0, ObjectId(0), None), "3 artifacts meets the threshold");
 
-        // Re-derived fresh, no stale state - removing one below the
-        // threshold flips the same query without needing to invalidate a
-        // cache anywhere.
+        // Removing one below the threshold flips the same query, with no cache to invalidate.
         state.objects.remove(&ObjectId(2));
         assert!(!primitive.holds(&state, p0, ObjectId(0), None), "down to 2 artifacts, no longer holds");
     }

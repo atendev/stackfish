@@ -24,9 +24,8 @@ bitflags! {
 }
 
 impl ColorSet {
-    /// Membership test against a single `Color` — used by
-    /// `AbilityEffect::AddManaChoice` to validate a player's chosen color is
-    /// actually among the ability's allowed set.
+    /// Whether `color` is in the set, used by `AddManaChoice` to validate a
+    /// chosen color.
     pub fn contains_color(&self, color: Color) -> bool {
         let bit = match color {
             Color::White => ColorSet::WHITE,
@@ -52,10 +51,8 @@ pub enum AtomicManaSymbol {
 }
 
 impl AtomicManaSymbol {
-    /// CR 202.3/202.3g: this atom's own contribution to mana value — 1 for
-    /// every atom except `Generic(n)`, which contributes `n` (a colored,
-    /// colorless, snow, or Phyrexian pip is still exactly one mana, so each
-    /// counts as 1 regardless of what it costs to pay).
+    /// CR 202.3, 202.3g: this atom's contribution to mana value. `Generic(n)`
+    /// is `n`, and every other atom is 1 however it is paid.
     pub fn mana_value(&self) -> u32 {
         match self {
             AtomicManaSymbol::Generic(n) => *n,
@@ -85,16 +82,11 @@ impl AtomicManaSymbol {
     }
 }
 
-/// One symbol within a mana cost string. Hybrid is always exactly two
-/// atoms, "pay either one" — covers color/color (`{W/U}`), generic/color
-/// (`{2/W}`), and hybrid Phyrexian (`{W/P}` paired with a second color,
-/// e.g. `Hybrid(Phyrexian(Blue), Colored(Green))`) uniformly. The hybrid
-/// Phyrexian case still only needs two slots: `Phyrexian(Color)` already
-/// bundles two payment options (that color, or 2 life) into one atom, so
-/// pairing it with a second atom in a 2-slot `Hybrid` yields three total
-/// ways to pay without needing a third slot. Plain Phyrexian (`{W/P}` on
-/// its own, pay color or 2 life, no second color involved) is a single
-/// `Atom(Phyrexian(_))`, not a hybrid at all.
+/// One symbol in a mana cost. A hybrid is exactly two atoms, "pay either":
+/// color/color (`{W/U}`), generic/color (`{2/W}`) and hybrid Phyrexian
+/// (`Hybrid(Phyrexian(Blue), Colored(Green))`). Two slots suffice because
+/// `Phyrexian(Color)` already bundles two ways to pay. Plain `{W/P}` is
+/// `Atom(Phyrexian(_))`, not a hybrid.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ManaSymbol {
     Atom(AtomicManaSymbol),
@@ -103,14 +95,10 @@ pub enum ManaSymbol {
 }
 
 impl ManaSymbol {
-    /// CR 202.3e/202.3f: this symbol's own contribution to mana value — a
-    /// plain atom's own `mana_value`, the *larger* of a hybrid's two atoms
-    /// (CR 202.3f's explicit "use the largest component" rule — e.g. `{2/W}`
-    /// contributes 2, not 1), and 0 for a raw, still-unresolved `X` (CR
-    /// 202.3e's off-the-stack default; an on-stack spell's own `{X}` should
-    /// already have been substituted via `ManaCost::resolve_x` before this
-    /// is ever called, so this arm is never reached for a real on-stack
-    /// mana value - see `ManaCost::mana_value`'s own doc comment).
+    /// CR 202.3e, 202.3f: this symbol's contribution to mana value. A hybrid
+    /// takes the larger atom (`{2/W}` is 2), and a raw `X` is 0. An on-stack
+    /// `{X}` is substituted first with `ManaCost::resolve_x`; see
+    /// `ManaCost::mana_value`.
     pub fn mana_value(&self) -> u32 {
         match self {
             ManaSymbol::Atom(a) => a.mana_value(),
@@ -119,9 +107,8 @@ impl ManaSymbol {
         }
     }
 
-    /// Union of colors contributed by this symbol's atom(s) — for `Hybrid`,
-    /// a hybrid symbol is all of its component colors (CR 107.4e/f), not
-    /// just one.
+    /// Union of the symbol's atom colors. A hybrid has all its component
+    /// colors (CR 107.4e, 107.4f).
     pub fn colors(&self) -> ColorSet {
         match self {
             ManaSymbol::Atom(a) => a.colors(),
@@ -142,35 +129,26 @@ impl ManaCost {
         self.symbols.iter().fold(ColorSet::empty(), |acc, s| acc | s.colors())
     }
 
-    /// CR 202.3: the total mana value of this cost — sum of every symbol's
-    /// own contribution (CR 202.3g's Phyrexian/202.3f's hybrid rules folded
-    /// into `ManaSymbol::mana_value` itself). CR 202.3a (no mana cost at
-    /// all -> mana value 0) falls out for free: an empty `symbols` sums to
-    /// 0. A raw `{X}` still present contributes 0 (CR 202.3e's off-the-stack
-    /// default) - callers computing an *on-stack* spell's own mana value
-    /// must call `resolve_x` first (`StackObject::x_value`, already
-    /// resolved at cast time) so `{X}` is a real `Generic(x)` by the time
-    /// this sums it; every other caller (a library/hand/graveyard card,
-    /// never on the stack) wants the off-stack default directly. CR
-    /// 202.3b/c/d (DFC back faces, melded permanents, split cards) are all
-    /// explicit DESIGN.md non-goals - not handled here.
+    /// CR 202.3: sum of each symbol's contribution, which folds in the hybrid
+    /// and Phyrexian rules (CR 202.3f, 202.3g). An empty cost is 0
+    /// (CR 202.3a). A raw `{X}` counts 0 (CR 202.3e), so an on-stack spell
+    /// must call `resolve_x` first (`StackObject::x_value`). Back faces,
+    /// melded permanents and split cards (CR 202.3b, 202.3c, 202.3d) are
+    /// non-goals in `DESIGN.md`.
     pub fn mana_value(&self) -> u32 {
         self.symbols.iter().map(|s| s.mana_value()).sum()
     }
 
-    /// Whether this cost has an `{X}` in it (CR 107.3a) — the caller's cue
-    /// that an X value must be announced before this cost can be paid.
+    /// Whether the cost has an `{X}` (CR 107.3a), so an X value must be
+    /// announced before payment.
     pub fn has_x(&self) -> bool {
         self.symbols.iter().any(|s| matches!(s, ManaSymbol::X))
     }
 
-    /// Substitutes the announced value of X for every `{X}` in this cost
-    /// (CR 107.3a/107.3i: X is chosen once and every instance shares that
-    /// same value) — `X` is only ever a bare top-level `ManaSymbol`, never
-    /// nested inside a `Hybrid` (see that type's own doc comment), so this
-    /// is a flat per-symbol substitution, not a recursive one. Once
-    /// resolved, the cost has no `X` symbols left, so `PaymentPlan::validate`
-    /// can treat it exactly like any ordinary cost.
+    /// Substitutes the announced X for every `{X}` (CR 107.3a, 107.3i: one
+    /// shared value). `X` is always a bare top-level symbol, never inside a
+    /// `Hybrid`, so the substitution is flat. The result has no `X` left, so
+    /// `PaymentPlan::validate` treats it like any other cost.
     pub fn resolve_x(&self, x: u32) -> ManaCost {
         ManaCost {
             symbols: self
@@ -184,31 +162,16 @@ impl ManaCost {
         }
     }
 
-    /// CR 601.2f/118.9: applies one cost-modification effect's signed
-    /// `delta` to this cost's generic component only (a plain `Atom(Generic(_))`
-    /// symbol — same "Generic/numeric only, not colored, not inside a
-    /// Hybrid" scope `generic_total`'s own doc comment already draws) —
-    /// negative `delta` reduces, positive increases, and the result is
-    /// clamped at `{0}` (CR 118.9: generic can't go negative; nothing here
-    /// ever removes a colored pip to compensate). If this cost has no bare
-    /// `Generic` symbol yet, a positive `delta` still creates one (a cost
-    /// increase can introduce a generic component where none existed, e.g.
-    /// Thalia taxing an otherwise-`{R}`-only spell) — a non-positive delta
-    /// with nothing to reduce is simply a no-op.
+    /// CR 601.2f, 118.9: applies a signed `delta` to the generic component
+    /// only (a bare `Atom(Generic(_))`, not colored or hybrid), clamped at
+    /// `{0}`. A positive `delta` creates a generic component if none exists
+    /// (Thalia on an `{R}` spell). A non-positive `delta` with nothing to
+    /// reduce is a no-op.
     ///
-    /// `cost.rs`'s `apply_cost_modifiers` calls this exactly once per spell,
-    /// with the *sum* of every matching `CostModifier`'s `amount` — not
-    /// once per modifier. An earlier version of this codebase called it
-    /// once per modifier in registration order instead, on the claim that
-    /// "applying one at a time still gets the common case (at most one
-    /// reduction and one increase interacting) right, since clamping is
-    /// idempotent past zero" — that claim was wrong (`phase5/cost-modifier-
-    /// order`): base `{1}` with deltas `-2` then `+1` clamps to `{1}`,
-    /// while the same two deltas in the opposite order clamp to `{0}` —
-    /// registration order silently changed the result. Summing first and
-    /// clamping once (what this function still does, unchanged — only its
-    /// caller changed) is order-independent by construction, since addition
-    /// commutes and there's only one floor applied at the very end.
+    /// `apply_cost_modifiers` calls this once per spell with the sum of every
+    /// matching modifier's `amount`. Applying them one by one depends on
+    /// order: base `{1}` with `-2` then `+1` gives `{1}`, but `+1` then `-2`
+    /// gives `{0}`. Summing first and clamping once is order-independent.
     pub fn apply_cost_delta(&self, delta: i32) -> ManaCost {
         let current: i32 = self
             .symbols
@@ -232,20 +195,15 @@ impl ManaCost {
         ManaCost { symbols }
     }
 
-    /// CR 118.7b/c: reduces (or, if `delta` is positive, increases — see
-    /// `crate::types::cost::CostModifierTarget`'s own doc comment for why
-    /// that direction is untested/unmodeled beyond "just add the pips," no
-    /// real card needs it) this cost's plain `Colored(color)` component by
-    /// `delta` mana of `color`. Returns the adjusted cost plus a spillover
-    /// delta (always `<= 0`) meant to be folded into the caller's own
-    /// generic-component reduction — CR 118.7b if this cost has none of that
-    /// color at all (the entire `delta` spills), 118.7c if `delta`'s
-    /// magnitude exceeds what's actually there (only the excess spills).
-    /// Only ever matches a bare `Atom(Colored(color))` symbol — a Hybrid or
-    /// Phyrexian symbol of that color doesn't count as "the colored
-    /// component," same narrowing `apply_cost_delta`'s own doc comment
-    /// already draws for Generic ("not inside a Hybrid"); CR 118.7e/f (a
-    /// reduction interacting with those symbol shapes) stays unmodeled.
+    /// CR 118.7b, 118.7c: adjusts the plain `Colored(color)` component by
+    /// `delta` mana of `color`. Returns the cost and a spillover (always
+    /// `<= 0`) for the caller's generic reduction: all of `delta` when the
+    /// cost has none of that color (CR 118.7b), the excess when `delta`
+    /// exceeds it (CR 118.7c). Matches only a bare `Atom(Colored(color))`,
+    /// not a hybrid or Phyrexian symbol, as with `apply_cost_delta`. A
+    /// positive `delta` just adds pips; see `CostModifierTarget`. Reductions
+    /// that interact with hybrid and Phyrexian symbols (CR 118.7e, 118.7f)
+    /// are not modeled.
     pub fn apply_colored_cost_delta(&self, color: Color, delta: i32) -> (ManaCost, i32) {
         self.apply_specific_cost_delta(
             delta,
@@ -254,21 +212,16 @@ impl ManaCost {
         )
     }
 
-    /// CR 118.7d — same shape as `apply_colored_cost_delta` above, but
-    /// against the colorless (`{C}`) component instead of a specific color.
+    /// CR 118.7d: `apply_colored_cost_delta` for the colorless (`{C}`)
+    /// component.
     pub fn apply_colorless_cost_delta(&self, delta: i32) -> (ManaCost, i32) {
         self.apply_specific_cost_delta(delta, |a| matches!(a, AtomicManaSymbol::Colorless), ManaSymbol::Atom(AtomicManaSymbol::Colorless))
     }
 
-    /// Shared removal/spill logic `apply_colored_cost_delta`/
-    /// `apply_colorless_cost_delta` both delegate to, rather than
-    /// duplicating it once per component kind — `matches_atom` picks out
-    /// which bare `Atom` symbols count as "this component," `insert` is the
-    /// symbol a positive `delta` (an increase) appends. A negative `delta`
-    /// removes up to `-delta` matching symbols (order among them doesn't
-    /// matter — CR 118.7 never distinguishes which specific colored source
-    /// is used to pay a reduced-away pip); whatever magnitude is left
-    /// unconsumed once every matching symbol is gone becomes the returned
+    /// Shared removal and spillover logic. `matches_atom` picks the bare
+    /// atoms that count as the component, and `insert` is what a positive
+    /// `delta` appends. A negative `delta` removes up to `-delta` matching
+    /// symbols in any order (CR 118.7). The unconsumed remainder is the
     /// spillover.
     fn apply_specific_cost_delta(
         &self,
@@ -299,31 +252,20 @@ impl ManaCost {
         (ManaCost { symbols }, -(to_remove as i32))
     }
 
-    /// Parses a printed mana-cost string (CR 107.4/202.3's `{...}`-group
-    /// templating, e.g. `"{1}{R}"`, `"{X}{G}"`, `"{W/U}"`, `"{2/W}"`,
-    /// `"{W/P}"`, `"{B/G/P}"`, `"{S}"`) into every symbol shape this engine
-    /// already models (`AtomicManaSymbol`/`ManaSymbol`) — a pure string→data
-    /// parser, no new payment logic: once a real `ManaCost` exists, the
-    /// existing `PaymentPlan`/`ManaCost` machinery (6a's Phyrexian/snow/
-    /// hybrid payment) handles it exactly like a spell's cost, unmodified.
+    /// Parses a printed mana-cost string (CR 107.4, 202.3) such as `"{1}{R}"`,
+    /// `"{X}{G}"`, `"{W/U}"`, `"{2/W}"`, `"{W/P}"`, `"{B/G/P}"` or `"{S}"`. A
+    /// pure string-to-data parser, so payment reuses the existing machinery.
+    /// `CardDefinition.mana_cost` is untouched, since it arrives structured
+    /// from the card database.
     ///
-    /// Closes the "no Lua-facing mana-cost-string parser exists anywhere
-    /// yet" gap `ActivatedAbilityBuilder` (script.rs) previously flagged —
-    /// `CardDefinition.mana_cost` (spells) is untouched by this: it's still
-    /// sourced as a structured `ManaCost` from the external card database,
-    /// never parsed from a string.
-    ///
-    /// Grammar per `{...}` group: digits → `Generic`; a single WUBRG letter →
-    /// `Colored`; `C` → `Colorless` (parses fine, still unpayable — see
-    /// `atom_branches`'s own doc comment, a pre-existing gap this doesn't
-    /// fix); `S` → `Snow`; `X` → bare `ManaSymbol::X`; `<letter>/P` → plain
-    /// `Phyrexian` (not a `Hybrid` — see this type's own doc comment on why);
-    /// `<A>/<B>` (color/color or generic/color) → `Hybrid`; `<A>/<B>/P`
-    /// (both `A`/`B` colors) → hybrid-Phyrexian `Hybrid(Phyrexian(A),
-    /// Colored(B))`, matching the convention `cost.rs`'s own
-    /// `hybrid_phyrexian_offers_three_real_branches` test already documents.
-    /// Anything outside a `{...}` group, an empty/unterminated group, or an
-    /// unrecognized shape inside one is a hard parse error, not guessed at.
+    /// Per `{...}` group: digits are `Generic`, a WUBRG letter is `Colored`,
+    /// `C` is `Colorless` (parses, but is unpayable; see `atom_branches`), `S`
+    /// is `Snow`, `X` is bare `ManaSymbol::X`, `<letter>/P` is plain
+    /// `Phyrexian`, `<A>/<B>` is `Hybrid`, and `<A>/<B>/P` is
+    /// `Hybrid(Phyrexian(A), Colored(B))`, matching the
+    /// `hybrid_phyrexian_offers_three_real_branches` test. Text outside a
+    /// group, an empty or unterminated group, or an unknown shape is a hard
+    /// error.
     pub fn parse(s: &str) -> Result<ManaCost, ManaCostParseError> {
         let mut symbols = Vec::new();
         let mut chars = s.char_indices().peekable();
@@ -351,15 +293,13 @@ impl ManaCost {
     }
 }
 
-/// `ManaCost::parse`'s error type — a plain human-readable message, same
-/// "a String is enough, no fancy variant taxonomy needed" stance this
-/// codebase already takes for script-load errors (`ScriptError::LoadError`).
+/// `ManaCost::parse`'s error type, a plain message like
+/// `ScriptError::LoadError`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManaCostParseError(pub String);
 
-/// Parses one `{...}` group's inner text (already stripped of braces) —
-/// shared by every call `ManaCost::parse` makes per symbol. `whole` is the
-/// original full string, kept only for error messages.
+/// Parses one `{...}` group's inner text. `whole` is the full string, for
+/// error messages.
 fn parse_symbol_group(inner: &str, whole: &str) -> Result<ManaSymbol, ManaCostParseError> {
     if inner.is_empty() {
         return Err(ManaCostParseError(format!("empty \"{{}}\" group in \"{whole}\"")));
@@ -411,9 +351,8 @@ fn parse_symbol_group(inner: &str, whole: &str) -> Result<ManaSymbol, ManaCostPa
     }
 }
 
-/// A 2-part hybrid's own atom: either a generic amount or a single color —
-/// never `P` on its own (plain Phyrexian is handled as its own case in
-/// `parse_symbol_group` before this is ever called on a `/P` pair).
+/// A 2-part hybrid's atom: a generic amount or a single color, never `P`,
+/// which `parse_symbol_group` handles first.
 fn parse_hybrid_atom(part: &str, inner: &str, whole: &str) -> Result<AtomicManaSymbol, ManaCostParseError> {
     if part.chars().all(|c| c.is_ascii_digit()) && !part.is_empty() {
         let n: u32 = part
@@ -426,9 +365,8 @@ fn parse_hybrid_atom(part: &str, inner: &str, whole: &str) -> Result<AtomicManaS
         .map_err(|_| ManaCostParseError(format!("unrecognized hybrid component \"{{{inner}}}\" in \"{whole}\"")))
 }
 
-/// `pub` rather than crate-private — the scenario crate's TOML loader
-/// (`chosen_colors: Vec<String>` on its `ActivateAbility` action spec) reuses
-/// this same WUBRG-letter vocabulary rather than inventing a second parser.
+/// `pub` because the scenario crate's TOML loader reuses this WUBRG-letter
+/// vocabulary for `chosen_colors`.
 pub fn parse_color_letter(s: &str) -> Result<Color, ManaCostParseError> {
     match s {
         "W" => Ok(Color::White),
@@ -440,15 +378,11 @@ pub fn parse_color_letter(s: &str) -> Result<Color, ManaCostParseError> {
     }
 }
 
-/// A player's floating mana pool. Cleared at the end of each step/phase per
-/// CR 106.4. The `snow_*` fields are subcounts, not a seventh mana type —
-/// snow is neither a color nor a type of mana (CR 107.4h), just a tag some
-/// floating mana carries because of what produced it. `snow_white` is always
-/// `<= white`, etc — the snow-tagged mana of a color is part of that color's
-/// total, not separate from it. Needed so a `{S}` cost symbol (payable with
-/// *any* type of mana, as long as it came from a snow source) can be told
-/// apart from an ordinary mana of the same color — see `ManaUnit`'s own doc
-/// comment for the matching per-unit tag.
+/// A player's floating mana pool, emptied at the end of each step and phase
+/// (CR 106.4). The `snow_*` fields are subcounts of the color totals, not a
+/// seventh type (CR 107.4h), so `snow_white <= white`. They let a `{S}`
+/// symbol tell snow-sourced mana from ordinary mana of the same color; see
+/// `ManaUnit`.
 #[derive(Default, Clone, PartialEq, Debug)]
 pub struct ManaPool {
     pub white: u32,
@@ -463,43 +397,26 @@ pub struct ManaPool {
     pub snow_red: u32,
     pub snow_green: u32,
     pub snow_colorless: u32,
-    /// CR 106.11 restricted mana (`ManaUnit::RestrictedColored`/
-    /// `RestrictedColorless`) — a raw multiset, not aggregated into buckets
-    /// like the fields above. Restricted mana is rare enough in practice
-    /// that a flat `Vec` (checked by equality, one entry consumed per unit
-    /// spent) is simpler than inventing a second bucketing scheme keyed by
-    /// restriction shape — see `cost::spend`/`PaymentPlan::validate` for how
-    /// it's consumed.
+    /// CR 106.11 restricted mana, kept as a flat multiset because a
+    /// restriction cannot be bucketed by color. One entry is consumed per unit
+    /// spent; see `cost::spend` and `PaymentPlan::validate`.
     pub restricted: Vec<ManaUnit>,
 }
 
-/// One literal unit of floating mana, as it actually exists in a `ManaPool`
-/// — deliberately a narrower type than `AtomicManaSymbol`: that type also
-/// has a `Generic`/`Phyrexian` variant, which describe *cost shapes* or
-/// *payment choices*, not things that can sit in a pool waiting to be spent.
-/// Used by `CostPayment::Mana` to record exactly which units a `PaymentPlan`
-/// spends — see that type's doc comment in `cost.rs` for why this replaced
-/// an earlier design that only recorded the cost's *shape*, not the payer's
-/// actual choice of units (CR 118.13a).
+/// One literal unit of floating mana. Narrower than `AtomicManaSymbol`,
+/// which also has `Generic` and `Phyrexian` cost shapes that cannot sit in a
+/// pool. `CostPayment::Mana` records the exact units spent (CR 118.13a).
 ///
-/// `SnowColored`/`SnowColorless` are the snow-sourced counterpart of
-/// `Colored`/`Colorless` (CR 107.4h) — a separate pair of variants, not a
-/// `snow: bool` field wrapping the other two, so the 28-or-so existing call
-/// sites building plain non-snow units don't need touching. A snow unit is
-/// still exactly that color for every other purpose (colored pips, generic)
-/// — the tag only matters for paying a `{S}` symbol.
+/// `SnowColored` and `SnowColorless` are the snow-sourced twins of `Colored`
+/// and `Colorless` (CR 107.4h). They are variants, not a `snow` field, so
+/// existing construction sites stay unchanged. A snow unit counts as its
+/// color everywhere, and the tag matters only for paying `{S}`.
 ///
-/// `RestrictedColored`/`RestrictedColorless` are CR 106.11's "spend this
-/// mana only to..." restriction, narrowed to the single most common real
-/// shape — a card-type filter on what the mana can be spent to *cast*
-/// (Mishra's Workshop: "Spend this mana only to cast artifact spells").
-/// Same "separate parameterized variant, not a field on the plain ones"
-/// precedent as the snow pair — the restriction rides along as data on the
-/// unit itself rather than a side lookup table, since `CardTypeSet` is
-/// already a small `Copy` bitset. Unlike every other `ManaUnit` variant,
-/// these can't live in `ManaPool`'s flat per-color counters at all (that
-/// representation can't tell a restricted unit apart from an ordinary one
-/// of the same color) — see `ManaPool::restricted`.
+/// `RestrictedColored` and `RestrictedColorless` are CR 106.11's "spend this
+/// mana only to...", narrowed to a card-type filter on what it can cast
+/// (Mishra's Workshop). The restriction rides on the unit as data. These
+/// cannot live in `ManaPool`'s per-color counters, which cannot tell them from
+/// ordinary mana; see `ManaPool::restricted`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ManaUnit {
     Colored(Color),
@@ -523,19 +440,14 @@ impl ManaUnit {
 }
 
 impl ManaPool {
-    /// CR 500.5/106.4: empties the pool as a step or phase ends. Just resets
-    /// to `Default` - every field (including `restricted`) starts at zero/
-    /// empty there, same as a freshly dealt player.
+    /// CR 500.5, 106.4: empties the pool as a step or phase ends.
     pub fn empty(&mut self) {
         *self = ManaPool::default();
     }
 
-    /// Inverse of `cost::spend` (`cost.rs`) — adds one literal unit instead
-    /// of removing one. Used by CR 605 mana abilities, which add exact
-    /// units to the pool rather than a `ManaCost`-shaped amount (see
-    /// `ManaUnit`'s own doc comment for why this is the narrower vocabulary).
-    /// A snow unit bumps both its color's total and its snow subcount —
-    /// the two always move together, keeping `snow_* <= *` an invariant.
+    /// Adds one literal unit, the inverse of `cost::spend`. CR 605 mana
+    /// abilities add exact units, not a `ManaCost` shape. A snow unit bumps
+    /// both its color total and its snow subcount, keeping `snow_* <= *`.
     pub fn add_unit(&mut self, unit: ManaUnit) {
         match unit {
             ManaUnit::Colored(Color::White) => self.white += 1,
@@ -568,9 +480,7 @@ impl ManaPool {
                 self.colorless += 1;
                 self.snow_colorless += 1;
             }
-            // CR 106.11: a restricted unit never joins the plain aggregate
-            // counts above (those represent freely-spendable mana only) -
-            // it lands in its own side-channel instead.
+            // CR 106.11: restricted units stay out of the aggregate counts, which hold only freely spendable mana.
             unit @ (ManaUnit::RestrictedColored(..) | ManaUnit::RestrictedColorless(..)) => {
                 self.restricted.push(unit);
             }
@@ -596,7 +506,6 @@ mod tests {
 
     #[test]
     fn mana_value_sums_generic_and_colored_pips() {
-        // {1}{R}{R} -> 1 + 1 + 1 = 3.
         let cost = ManaCost {
             symbols: vec![
                 ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
@@ -614,12 +523,11 @@ mod tests {
 
     #[test]
     fn mana_value_hybrid_uses_the_larger_component() {
-        // CR 202.3f: {2/W} contributes 2, not 1.
+        // CR 202.3f
         let cost = ManaCost {
             symbols: vec![ManaSymbol::Hybrid(AtomicManaSymbol::Generic(2), AtomicManaSymbol::Colored(Color::White))],
         };
         assert_eq!(cost.mana_value(), 2);
-        // {W/U} - both atoms are worth 1, so the max is still 1.
         let color_hybrid = ManaCost {
             symbols: vec![ManaSymbol::Hybrid(AtomicManaSymbol::Colored(Color::White), AtomicManaSymbol::Colored(Color::Blue))],
         };
@@ -634,15 +542,15 @@ mod tests {
 
     #[test]
     fn mana_value_unresolved_x_is_zero_off_the_stack() {
-        // CR 202.3e: X is 0 while not on the stack.
+        // CR 202.3e
         let cost = ManaCost { symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Generic(1))] };
         assert_eq!(cost.mana_value(), 1);
     }
 
     #[test]
     fn mana_value_resolved_x_counts_the_announced_value() {
-        // CR 202.3e: X is the chosen value while on the stack - resolve_x
-        // must be applied first.
+        // CR 202.3e
+        // resolve_x must be applied first while on the stack.
         let cost = ManaCost { symbols: vec![ManaSymbol::X] };
         assert_eq!(cost.resolve_x(3).mana_value(), 3);
     }
@@ -664,8 +572,7 @@ mod tests {
 
     #[test]
     fn resolve_x_gives_every_x_the_same_value() {
-        // CR 107.3i: all instances of X in one cost share the same value -
-        // not independently chosen per occurrence.
+        // CR 107.3i
         let cost = ManaCost { symbols: vec![ManaSymbol::X, ManaSymbol::X] };
         let resolved = cost.resolve_x(2);
         assert_eq!(
@@ -679,7 +586,7 @@ mod tests {
 
     #[test]
     fn apply_colored_cost_delta_reduces_an_exact_match_with_no_spillover() {
-        // CR 118.7: {1}{W}{W} reduced by {W} -> {1}{W}.
+        // CR 118.7
         let cost = ManaCost {
             symbols: vec![
                 ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
@@ -700,8 +607,7 @@ mod tests {
 
     #[test]
     fn apply_colored_cost_delta_over_reduction_spills_the_excess() {
-        // CR 118.7c: {W} reduced by 2 -> the {W} is zeroed, one more generic
-        // reduction spills out.
+        // CR 118.7c
         let cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White))] };
         let (adjusted, spillover) = cost.apply_colored_cost_delta(Color::White, -2);
         assert_eq!(spillover, -1);
@@ -710,8 +616,7 @@ mod tests {
 
     #[test]
     fn apply_colored_cost_delta_with_no_matching_color_spills_entirely() {
-        // CR 118.7b: a {W} reduction on a cost with no white pips redirects
-        // the whole amount to generic.
+        // CR 118.7b
         let cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
         let (adjusted, spillover) = cost.apply_colored_cost_delta(Color::White, -1);
         assert_eq!(spillover, -1);

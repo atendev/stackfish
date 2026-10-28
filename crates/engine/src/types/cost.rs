@@ -4,26 +4,19 @@ use crate::{
 };
 use crate::script::ScriptRuntime;
 
-/// Structured stand-in for "filter described in oracle text" — e.g.
-/// "sacrifice a creature", "discard a card at random", "tap an untapped
-/// artifact you control", "search your library for a basic land card".
-/// Covers the common, structurally-expressible shapes; `extra` is a
-/// script-bind-time-refined catch-all for filters that don't reduce to
-/// type/supertype/subtype + controller + count (e.g. "with power 4 or
-/// greater", named-card restrictions).
+/// Structured stand-in for an oracle-text filter such as "sacrifice a
+/// creature" or "search your library for a basic land card". `extra` is a
+/// catch-all refined at script bind time for filters that do not reduce to
+/// type, supertype, subtype, controller and count ("power 4 or greater",
+/// named-card restrictions).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FilterSpec {
     pub card_types: Option<CardTypeSet>,
-    /// CR 205.4a supertypes — e.g. `Some(SupertypeSet::BASIC)` for "basic
-    /// land card". Added alongside backlog item 14b (Search/tutor), since a
-    /// fetch land's own filter is the overwhelmingly common real-world case
-    /// this was missing; every other `FilterSpec` caller (Sacrifice/Discard/
-    /// TapPermanents costs) benefits for free by leaving this `None`.
+    /// CR 205.4a supertypes, such as `Some(SupertypeSet::BASIC)` for "basic
+    /// land card". `None` for every caller that doesn't care.
     pub supertypes: Option<SupertypeSet>,
-    /// CR 205.4b/205.4g subtypes — e.g. `Some(vec![Subtype("Forest")])` for
-    /// "Forest card", or `Some(vec![Subtype("Angel")])` for "Angel card".
-    /// Matches if `object` has *any* subtype in this list (an "or", not an
-    /// "and") — no real card asks a search filter for two subtypes at once.
+    /// CR 205.4b, 205.4g subtypes. Matches if `object` has any listed
+    /// subtype, since no real card asks a search filter for two at once.
     pub subtypes: Option<Vec<Subtype>>,
     pub controller: Option<FilterController>,
     pub random: bool,
@@ -31,18 +24,12 @@ pub struct FilterSpec {
 }
 
 impl FilterSpec {
-    /// Whether `object` satisfies this filter, from `viewer`'s perspective
-    /// (`FilterController::You`/`Opponent` are relative to whoever is paying
-    /// the cost). `object_controller` is `object`'s controller, pre-resolved
-    /// by the caller via `layers::effective_controller` (CR 108.4) rather
-    /// than read off `object.controller` here — this type deliberately never
-    /// depends on `ScriptRuntime` (same boundary `ContinuousEffect::
-    /// applies_to` keeps), so resolving the *live* controller is the
-    /// caller's job. `random` doesn't affect matching itself — only which
-    /// matching object gets picked, irrelevant here. `extra` requires the
-    /// script bridge, not available from this signature — a filter with
-    /// `extra` set is treated as "doesn't match" rather than guessed at (see
-    /// this struct's own doc comment for why `extra` exists at all).
+    /// Whether `object` satisfies this filter from `viewer`'s perspective
+    /// (`You` and `Opponent` are relative to the payer). The caller resolves
+    /// `object_controller` with `layers::effective_controller` (CR 108.4),
+    /// because this type never depends on `ScriptRuntime`. `random` doesn't
+    /// affect matching. A filter with `extra` set never matches, since
+    /// resolving it needs the script bridge.
     pub fn matches(&self, object: &GameObject, object_controller: PlayerId, viewer: PlayerId) -> bool {
         if self.extra.is_some() {
             return false;
@@ -85,38 +72,24 @@ pub enum FilterController {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AdditionalCost {
-    /// CR 602.5a's `{T}` on an activated ability's own source — distinct
-    /// from `TapPermanents`, which taps *other* permanents chosen by the
-    /// payer. Always targets whichever object is activating the ability
-    /// (`PaymentPlan::validate`'s `source` param), never a filter choice.
+    /// CR 602.5a: `{T}` on the ability's own source, as opposed to
+    /// `TapPermanents`, which taps other permanents. Always the activating
+    /// object (`PaymentPlan::validate`'s `source`).
     TapSelf,
     Sacrifice { filter: FilterSpec },
-    /// "Sacrifice this permanent" — the `Sacrifice{filter}` sibling `TapSelf`/
-    /// `DiscardSelf` already are to `TapPermanents`/`Discard{filter}`: always
-    /// the ability's own source, never a filter choice. `Sacrifice{filter}`
-    /// alone can't express this — its `filter` only checks type/supertype/
-    /// subtype/controller, never the paid object's identity, so a "sacrifice
-    /// this artifact" ability built on it could be paid by sacrificing any
-    /// *other* matching permanent instead (the gap Clue/Food's own token
-    /// builder carried until this variant existed).
+    /// Sacrifice the ability's own source. `Sacrifice{filter}` cannot express
+    /// this, because its filter never checks identity and another matching
+    /// permanent could pay.
     SacrificeSelf,
     Discard { filter: FilterSpec },
-    /// CR 702.29a Cycling's "Discard this card" — the `Discard` sibling
-    /// `TapSelf` already is to `TapPermanents`: always the ability's own
-    /// source (`PaymentPlan::validate`'s `source` param), never a filter
-    /// choice, unlike the plain `Discard { filter }` above (which lets the
-    /// payer discard *any* matching hand card, wrong for a card that must
-    /// specifically discard itself to pay its own cycling cost).
+    /// CR 702.29a Cycling's "Discard this card": always the ability's own
+    /// source, unlike `Discard { filter }`, which lets the payer discard any
+    /// matching hand card.
     DiscardSelf,
     TapPermanents { filter: FilterSpec, count: u32 },
-    /// CR 702.138a Escape's "Exile N other cards from your graveyard" — same
-    /// N-distinct-payments shape `TapPermanents` already has, just against
-    /// the graveyard instead of the battlefield. No self-exclusion is
-    /// needed the way `DiscardSelf` needed one for Cycling: by the time this
-    /// cost is paid, the escaping card itself has already moved to the
-    /// stack (CR 601.2a — casting moves the card first, cost is paid after),
-    /// so it's structurally impossible for one of these `count` graveyard
-    /// candidates to be the card being cast.
+    /// CR 702.138a Escape's "Exile N other cards from your graveyard", in the
+    /// `TapPermanents` shape against the graveyard. The escaping card is
+    /// already on the stack (CR 601.2a), so it is never a candidate.
     ExileFromGraveyard { filter: FilterSpec, count: u32 },
     LifePayment { amount: u32 },
     Other { description: String },
@@ -124,40 +97,24 @@ pub enum AdditionalCost {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AlternativeCost {
-    /// e.g. flashback, escape — paying this cost replaces the mana cost
-    /// entirely, and is announced as part of casting (CR 601.2b), not
-    /// decided at payment time (same phase as an `{X}` announcement).
+    /// Flashback, escape and similar: replaces the mana cost entirely and is
+    /// announced as part of casting (CR 601.2b), like `{X}`.
     Replacement {
         description: String,
         cost: CostSpec,
-        /// Which zone the card must actually be in for this alternative to
-        /// apply (flashback: `Graveyard`) — CR 601.2b's alternative-cost
-        /// permission and the zone permission it grants ("you may cast this
-        /// from your graveyard") are the same grant, not two separate
-        /// checks. Named generically, not "flashback-specific", so
-        /// escape/jump-start/aftermath/mayhem can reuse this same shape
-        /// later (all of them are "cast from graveyard/exile, replace the
-        /// normal cost").
+        /// Zone the card must be in for this alternative to apply (flashback:
+        /// `Graveyard`). The cost permission and the zone permission are one
+        /// grant (CR 601.2b). Generic so escape, jump-start and aftermath can
+        /// reuse it.
         from_zone: ZoneKind,
-        /// CR 702.34a: a spell cast this way is exiled instead of going to
-        /// its normal destination (graveyard on resolving or fizzling) when
-        /// it next leaves the stack. Baked onto `StackObject` at push time
-        /// once this alternative is chosen (see `StackObject::exile_on_leaving_stack`).
+        /// CR 702.34a: exile instead of the normal destination when it leaves
+        /// the stack. Copied to `StackObject::exile_on_leaving_stack` at push.
         exile_on_leaving_stack: bool,
-        /// CR 702.138b: `true` only for Escape's own alternative cost -
-        /// `false` for Flashback/every other `Replacement` shape. Both
-        /// share `from_zone: Graveyard`, so this is the only thing that
-        /// structurally distinguishes "cast from a graveyard with an
-        /// escape ability" (CR 702.138b's own definition of "escaped")
-        /// from any other graveyard-cast alternative cost - deliberately
-        /// its own named field rather than inferred from
-        /// `exile_on_leaving_stack` (which happens to anti-correlate with
-        /// it for the two real producers today, but means something
-        /// unrelated: "does this spell get exiled on leaving the stack").
-        /// Baked onto `StackObject` at push time (see
-        /// `StackObject::escaped`), then onto the entering permanent's own
-        /// `GameObject::entered_via_escape` (CR 702.138b/c/d,
-        /// `phase5/escape-provenance`).
+        /// CR 702.138b: Escape's own alternative cost, `false` for Flashback
+        /// and the rest. Both cast from the graveyard, so this is the only
+        /// mark of an "escaped" cast. It is its own field because
+        /// `exile_on_leaving_stack` means something unrelated. Copied to
+        /// `StackObject::escaped`, then to `GameObject::entered_via_escape`.
         escape: bool,
     },
 }
@@ -175,87 +132,51 @@ impl CostSpec {
     }
 }
 
-/// CR 601.2f/118.9: a static "spells [you cast/of some type] cost `{N}`
-/// more/less to cast" effect (Goblin Warchief, Thalia, ...) — deliberately
-/// **not** a `ContinuousEffect`/CR 613 layer: cost modification isn't a
-/// characteristic query, it's a one-time adjustment applied while
-/// determining a spell's total cost (CR 601.2f), so it needs its own
-/// mechanism rather than extending `layers::effective_characteristics`.
+/// CR 601.2f, 118.9: a static "spells cost {N} more or less" effect (Goblin
+/// Warchief, Thalia). Not a CR 613 layer, because it is a one-time adjustment
+/// while determining the total cost and not a characteristic query.
 ///
-/// Scoped to spells only this slice (an activated ability's own cost isn't
-/// touched, same "spells first" narrowing `{X}`/alternative-costs both
-/// took) and to a flat, fixed `amount` — no dynamic/count-dependent amounts
-/// (e.g. Affinity). Colored-pip-specific modification (CR 118.7b/c/d) is
-/// real now too (`phase5/cost-modifier-colored-pip`) — see `target`'s own
-/// doc comment.
+/// Scoped to spells and to a fixed `amount`; ability costs and
+/// count-dependent amounts (Affinity) are not covered. Colored-pip
+/// modification (CR 118.7b-d) is covered; see `target`.
 ///
-/// `filter`/`controller` reuse `cost.rs`'s existing `FilterSpec` rather than
-/// inventing a parallel "which spells" shape: `FilterSpec::matches` already
-/// takes an arbitrary `&GameObject` + a `viewer: PlayerId` and answers
-/// card_types/relative-controller questions, and a spell being cast is
-/// still a plain `GameObject` (with `.controller` = caster) at the point
-/// `commands.rs` needs to ask "does this modifier apply" — no new type
-/// needed, `viewer` is just `self.controller` (whose "You"/"Opponent"
-/// perspective the modifier's own text is written from).
+/// `filter` and `controller` reuse `FilterSpec`, which already answers card
+/// type and relative controller questions for a plain `GameObject`. The
+/// viewer is `self.controller`, whose "you" the text is written from.
 ///
-/// CR 601.2f: "the total cost is the mana cost... plus all... cost
-/// increases, and minus all cost reductions... If multiple cost reductions
-/// apply, the player may apply them in any order." Read as a single
-/// arithmetic formula (sum every increase/reduction, floor once at {0}) —
-/// not "apply each one at a time, flooring after every step" — `phase5/
-/// cost-modifier-order` found the two aren't equivalent whenever an
-/// increase and a reduction both match the same spell (e.g. base `{1}`,
-/// modifiers `-2` then `+1`: stepwise gives `{1}`; the same two modifiers
-/// in the opposite order give `{0}` — registration order silently changed
-/// the resolved cost). `apply_cost_modifiers` below sums first per
-/// component (generic, and separately per color/colorless — see `target`
-/// below), floors once, so registration order in `state.cost_modifiers` no
-/// longer matters. Extending this to colored/colorless components
-/// (`phase5/cost-modifier-colored-pip`) stays provably order-independent by
-/// the same "sum, don't step" reasoning *as long as every colored/colorless
-/// modifier for one color is a reduction* (worked through by hand: summing
-/// same-color reduction magnitudes first and computing CR 118.7c's spillover
-/// once gives the identical result no matter what order they'd be applied
-/// stepwise) — a colored *increase* mixed with a colored *reduction* on the
-/// same color would reintroduce the same order-dependence real Magic's own
-/// "may apply them in any order" line is about, which is exactly why
-/// `target`'s own doc comment narrows `Colored`/`Colorless` to reduction
-/// only (no real card needs the mixed case).
-/// `Game.CreateCostModifier(c)` (script.rs's `CostModifierBuilder`) is a real
-/// self-registering builder now (`phase5/cost-modifier-builder`), mirroring
-/// `Game.CreateStaticAbility`/`Game.CreateReplacementEffect`'s own
-/// queue-and-drain shape — a direct Rust struct literal still works too
-/// (every existing fixture using one is unaffected).
+/// `apply_cost_modifiers` sums every modifier per component (generic, each
+/// color, colorless) and floors once, so registration order does not matter.
+/// Applying them one by one differs when an increase and a reduction both
+/// match: base `{1}` with `-2` then `+1` gives `{1}`, and the reverse gives
+/// `{0}`. The sum stays order-independent for a colored component only while
+/// every modifier of that color is a reduction. A mixed increase and
+/// reduction on one color would bring the order dependence back, which is why
+/// `target` limits `Colored` and `Colorless` to reductions.
+///
+/// `Game.CreateCostModifier` (`CostModifierBuilder`) registers one from a
+/// script, and a Rust struct literal works too.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CostModifier {
     pub source: ObjectId,
-    /// Whose "you"/"opponent" the modifier's own `filter` is relative to —
-    /// e.g. "spells your opponents cast cost {1} more" has `controller` set
-    /// to whoever controls this effect's source, and `filter.controller ==
-    /// Some(FilterController::Opponent)`.
+    /// Whose "you" and "opponent" `filter` is relative to. "Spells your
+    /// opponents cast cost {1} more" sets this to the source's controller and
+    /// `filter.controller` to `Opponent`.
     pub controller: PlayerId,
     pub filter: FilterSpec,
     pub target: CostModifierTarget,
-    /// Negative reduces, positive increases the component `target` names
-    /// (CR 118.9's `{0}` floor is enforced by `ManaCost::apply_cost_delta`/
-    /// `apply_colored_cost_delta`/`apply_colorless_cost_delta`, not here).
+    /// Negative reduces and positive increases the `target` component. The
+    /// `{0}` floor (CR 118.9) is enforced by the `apply_*_cost_delta` methods.
     pub amount: i32,
 }
 
-/// CR 118.7's reduction target — which mana component a `CostModifier`'s
-/// `amount` affects. `Generic` (every modifier before `phase5/cost-modifier-
-/// colored-pip`) is unconditional, both directions, unchanged. `Colored`/
-/// `Colorless` implement CR 118.7b/c/d: if the cost has none of that
-/// component, the whole `amount` redirects to the generic component
-/// instead (118.7b); if `amount` is a reduction exceeding that component,
-/// it's zeroed and the excess spills to generic (118.7c/d). Reduction only
-/// for these two — CR 118.7 itself only ever describes reduction, and no
-/// real card in this engine's test corpus increases a specific colored or
-/// colorless pip (every real "costs more" tax effect this engine models is
-/// generic); a positive `amount` on `Colored`/`Colorless` just adds that
-/// many matching pips directly (well-defined, but untested — see
-/// `apply_cost_modifiers`'s own doc comment for why mixing it with a
-/// same-color reduction would reintroduce order-dependence).
+/// CR 118.7: which mana component a `CostModifier`'s `amount` affects.
+/// `Generic` is unconditional in both directions. `Colored` and `Colorless`
+/// implement CR 118.7b-d: with none of that component, the whole `amount`
+/// goes to generic (CR 118.7b), and a reduction larger than the component
+/// zeroes it and spills the excess to generic (CR 118.7c, 118.7d). They cover
+/// reductions only, since no real card increases a specific pip. A positive
+/// `amount` just adds that many pips and is untested; mixing it with a
+/// same-color reduction would bring back order dependence (see `CostModifier`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CostModifierTarget {
     Generic,
@@ -263,19 +184,14 @@ pub enum CostModifierTarget {
     Colorless,
 }
 
-/// Applies every `CostModifier` in `modifiers` whose `filter` matches
-/// `spell` (evaluated from that modifier's own `controller`'s perspective),
-/// grouped by `target` and summed *within* each group before being applied —
-/// once for generic, once per distinct color, once for colorless — rather
-/// than once per modifier. See `CostModifier`'s own doc comment for why
-/// summing first (per component) is what CR 601.2f actually asks for.
+/// Applies every `CostModifier` whose `filter` matches `spell`, from that
+/// modifier's own `controller`'s perspective. Amounts are summed within each
+/// group (generic, each color, colorless) before applying, not applied one by
+/// one. See `CostModifier` for why.
 pub fn apply_cost_modifiers(base: &ManaCost, modifiers: &[CostModifier], spell: &GameObject) -> ManaCost {
     let matching = modifiers
         .iter()
-        // `spell`'s own `.controller` is used directly here, not a resolved
-        // effective_controller - it's a spell on the stack, not a
-        // battlefield permanent, and no GainControl effect (CR 108.4) can
-        // target something in that zone.
+        // `spell.controller` is used as is, since no control-change effect can target a spell on the stack (CR 108.4).
         .filter(|modifier| modifier.filter.matches(spell, spell.controller, modifier.controller));
 
     let mut generic_delta = 0i32;
@@ -295,9 +211,7 @@ pub fn apply_cost_modifiers(base: &ManaCost, modifiers: &[CostModifier], spell: 
     }
 
     let mut result = base.clone();
-    // Every colored/colorless spillover (CR 118.7b/c/d) folds into the same
-    // generic delta computed below - applied once, alongside every plain
-    // `Generic`-target modifier, not as a separate `apply_cost_delta` call.
+    // Colored and colorless spillover (CR 118.7b-d) folds into the one generic delta computed below.
     let mut spillover = 0i32;
     for (color, delta) in colored_deltas {
         if delta == 0 {
@@ -314,27 +228,15 @@ pub fn apply_cost_modifiers(base: &ManaCost, modifiers: &[CostModifier], spell: 
     }
 
     let net_generic = generic_delta + spillover;
-    // A net-zero generic delta (no matching Generic modifiers or spillover,
-    // or ones that cancel out) must be a true no-op - `ManaCost::
-    // apply_cost_delta(0)` isn't one: it always drops an *explicit*
-    // `Generic(0)` symbol (e.g. an {X} cost resolved with X=0, `ManaCost::
-    // resolve_x`'s own output), since a bare `0` never clears its own
-    // "adjusted > 0, push it back" condition. Skipping the call entirely
-    // when there's nothing to add preserves that explicit zero marker -
-    // same "don't touch what isn't changing" bug `phase5/cost-modifier-
-    // order` caught via `phase5_x_costs.rs`'s own
-    // `x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry`
-    // regressing once this function started calling `apply_cost_delta`
-    // unconditionally.
+    // A net-zero generic delta must skip the call: `apply_cost_delta(0)` drops an explicit `Generic(0)` symbol, such as an `{X}` cost resolved with X=0 by `resolve_x`, and that marker has to survive.
     if net_generic != 0 {
         result = result.apply_cost_delta(net_generic);
     }
     result
 }
 
-/// `Color` enum order used to index a fixed-size `[u32; 5]` colored-mana
-/// tally — shared between `PaymentPlan::validate` and `spend` so the two
-/// can't drift apart on which slot means which color.
+/// Indexes the `[u32; 5]` colored-mana tally, shared by
+/// `PaymentPlan::validate` and `spend` so the two agree on slot order.
 fn color_index(c: Color) -> usize {
     match c {
         Color::White => 0,
@@ -345,13 +247,10 @@ fn color_index(c: Color) -> usize {
     }
 }
 
-/// One way to settle a single symbol's requirement — the unit of choice
-/// that `assign_branches`'s backtracking search picks between. `Color`
-/// reserves one dedicated unit of that color out of the shared pool;
-/// `Snow` reserves one dedicated snow-tagged unit of *any* color/colorless
-/// (CR 107.4h); `Generic`/`Life` don't reserve anything up front, they add
-/// to a running total settled by the final exactness check (a
-/// leftover-units total for `Generic`, a declared-life total for `Life`).
+/// One way to settle a single symbol, the choice `assign_branches` searches
+/// over. `Color` reserves one unit of that color. `Snow` reserves one
+/// snow-tagged unit of any type (CR 107.4h). `Generic` and `Life` reserve
+/// nothing up front and add to totals settled by the final exactness check.
 #[derive(Clone, Copy)]
 enum PayBranch {
     Color(Color),
@@ -362,10 +261,9 @@ enum PayBranch {
     Life(u32),
 }
 
-/// The branches a single atom offers (CR 107.4f: a `Phyrexian` atom is
-/// inherently two-way — pay that color, or pay 2 life — even outside a
-/// `Hybrid`). `Colorless` is the `{C}` cost symbol (CR 107.4c), payable only
-/// with colorless mana.
+/// Branches for one atom. A `Phyrexian` atom always has two (that color or 2
+/// life, CR 107.4f), even outside a `Hybrid`. `Colorless` is `{C}`
+/// (CR 107.4c), payable only with colorless mana.
 fn atom_branches(atom: AtomicManaSymbol) -> Option<Vec<PayBranch>> {
     match atom {
         AtomicManaSymbol::Colored(c) => Some(vec![PayBranch::Color(c)]),
@@ -376,15 +274,10 @@ fn atom_branches(atom: AtomicManaSymbol) -> Option<Vec<PayBranch>> {
     }
 }
 
-/// The branches a whole cost symbol offers. A plain `Atom` just forwards
-/// its atom's branches (a plain colored/generic pip ends up with exactly
-/// one branch — no real choice, but the same machinery handles it). A
-/// `Hybrid(a, b)` (CR 107.4e/f) offers the union of both atoms' branches —
-/// this is what lets a hybrid Phyrexian symbol like `{W/U/P}` end up with
-/// three real options (`Colored(U)`'s one branch plus `Phyrexian(W)`'s two)
-/// out of only two atom slots, per mana.rs's own doc comment on `Hybrid`.
-/// `None` (an unsupported atom shape, or bare `X`) means this whole symbol
-/// isn't payable by this slice.
+/// Branches for a whole symbol. An `Atom` forwards its atom's branches. A
+/// `Hybrid(a, b)` (CR 107.4e, 107.4f) offers the union, so `{W/U/P}` gets
+/// three options from two slots (see `Hybrid` in `mana.rs`). `None` means an
+/// unsupported atom or a bare `X`, so the symbol is unpayable here.
 fn symbol_branches(symbol: &ManaSymbol) -> Option<Vec<PayBranch>> {
     match symbol {
         ManaSymbol::Atom(atom) => atom_branches(*atom),
@@ -397,11 +290,9 @@ fn symbol_branches(symbol: &ManaSymbol) -> Option<Vec<PayBranch>> {
     }
 }
 
-/// Snapshot of the payer's remaining declared units as `assign_branches`'s
-/// backtracking search consumes them — mirrors `ManaPool`'s color/colorless
-/// split, plus the snow subcounts CR 107.4h's `{S}` symbol needs.
-/// `snow_colored[i] <= colored[i]` (and `snow_colorless <= colorless`) is an
-/// invariant every mutation below preserves, same as `ManaPool` itself.
+/// Remaining declared units as `assign_branches` consumes them. Mirrors
+/// `ManaPool`'s split plus the snow subcounts (CR 107.4h), and keeps
+/// `snow_colored[i] <= colored[i]` through every mutation.
 #[derive(Clone, Copy)]
 struct SpentPool {
     colored: [u32; 5],
@@ -410,21 +301,15 @@ struct SpentPool {
     snow_colorless: u32,
 }
 
-/// Checks whether `spent` (the payer's chosen units, already tallied by
-/// `spent_tally`) plus `phyrexian_life` (the payer's declared life payment,
-/// CR 107.4f) can satisfy `required` (the cost's symbols) per CR 118.13a.
-/// `None` means `required` contains a symbol shape this slice doesn't
-/// support paying for yet (see `symbol_branches`/`atom_branches` for exactly
-/// what's unsupported and why). `Some(false)` means every symbol is a
-/// supported shape but this particular payment can't cover them.
+/// Whether `spent` plus `phyrexian_life` (CR 107.4f) satisfies `required`
+/// (CR 118.13a). `None` means a symbol shape this engine cannot pay for (see
+/// `symbol_branches`), and `Some(false)` means every shape is supported but
+/// this payment doesn't cover them.
 ///
-/// Which branch each symbol takes isn't decidable by tallying once 2+
-/// multi-branch symbols compete for the same pool of spent units — e.g.
-/// two `{W/U}` paid with one white + one blue unit is legal only if each
-/// symbol claims a *different* unit. So this is a small backtracking
-/// assignment search over every symbol's branch options, not a sum
-/// comparison — costs are never more than a handful of symbols, so this
-/// doesn't need real search-algorithm sophistication.
+/// A tally is not enough once 2+ multi-branch symbols share spent units: two
+/// `{W/U}` paid with one white and one blue unit is legal only if each symbol
+/// claims a different unit. So this is a backtracking assignment search,
+/// which is cheap for the handful of symbols a cost has.
 fn mana_payment_satisfies(
     required: &[ManaSymbol],
     spent: SpentPool,
@@ -437,22 +322,15 @@ fn mana_payment_satisfies(
     Some(assign_branches(&branch_sets, 0, spent, 0, 0, phyrexian_life))
 }
 
-/// Backtracking step for `mana_payment_satisfies` — tries each remaining
-/// symbol's branch options against the current leftover pool, recursing
-/// before committing. At the base case (`idx` past the last symbol), the
-/// pool remaining after every `Color`/`Snow` reservation must equal the
-/// accumulated `Generic` total exactly; and the accumulated `Life` total
-/// must equal the payer's declared `phyrexian_life` exactly — no more, no
-/// less either way (CR 118.13a).
+/// Backtracking step for `mana_payment_satisfies`. At the base case the pool
+/// left after every `Color` and `Snow` reservation must equal the accumulated
+/// `Generic` total, and the accumulated `Life` total must equal
+/// `phyrexian_life`, both exactly (CR 118.13a).
 ///
-/// `Color(c)` tries *both* a non-snow and a snow-tagged unit of `c` when
-/// both are available, not just "any unit of color `c`" — which specific
-/// unit backs a colored pip changes what's left over for a later `Snow`
-/// symbol to claim, so it's part of the same search, not an independent
-/// choice. `Snow` tries every color-or-colorless bucket that still has a
-/// snow-tagged unit (CR 107.4h: `{S}` doesn't care which type, only that it
-/// came from a snow source) — removing one always debits both the color
-/// total and its snow subcount together, keeping the invariant intact.
+/// `Color(c)` tries both a non-snow and a snow-tagged unit when both exist,
+/// because the choice changes what a later `Snow` symbol can claim. `Snow`
+/// tries every bucket with a snow-tagged unit (CR 107.4h: any type, from a
+/// snow source), debiting the color total and snow subcount together.
 fn assign_branches(
     branch_sets: &[Vec<PayBranch>],
     idx: usize,
@@ -551,19 +429,12 @@ fn assign_branches(
     false
 }
 
-/// Tallies `units` into per-color spent counts, total colorless spent, and
-/// their snow subcounts (CR 107.4h) — the payer's-side mirror of
-/// `atom_branches`, but over literal `ManaUnit`s rather than cost-shape
-/// symbols (there's no "generic unit"; every unit spent is some specific
-/// color or colorless, snow-tagged or not).
-///
-/// A restricted unit (CR 106.11) folds into its base color/colorless bucket
-/// same as an ordinary one - the restriction narrows *what it can pay for*,
-/// not what pip shape it looks like, so it's correct for `validate`'s CR
-/// 118.13a shape check (`mana_payment_satisfies`). `validate` calls this
-/// function a second time on a *restricted-filtered* slice for the separate
-/// pool-affordability check, where that distinction does matter - see its
-/// own doc comment.
+/// Tallies `units` into per-color counts, the colorless count and their snow
+/// subcounts (CR 107.4h), the payer-side mirror of `atom_branches`. A
+/// restricted unit (CR 106.11) folds into its base bucket, since a
+/// restriction narrows what it can pay for and not which pip it satisfies.
+/// `validate` calls this again on a restricted-filtered slice for the
+/// pool-affordability check.
 fn spent_tally(units: &[ManaUnit]) -> ([u32; 5], u32, [u32; 5], u32) {
     let mut colored = [0u32; 5];
     let mut colorless = 0u32;
@@ -588,12 +459,10 @@ fn spent_tally(units: &[ManaUnit]) -> ([u32; 5], u32, [u32; 5], u32) {
     (colored, colorless, snow_colored, snow_colorless)
 }
 
-/// Deducts exactly `units` from `pool` (CR 118.3a) — no priority order, no
-/// inference: `units` already says precisely which mana came out, because
-/// that's what `PaymentPlan::validate` required it to declare (CR 118.13a's
-/// payment choice). Only call this after `validate` has confirmed the pool
-/// can actually cover it — this function trusts that and does not re-check,
-/// so calling it against a pool that doesn't hold `units` would underflow.
+/// CR 118.3a: deducts exactly `units` from `pool`, with no inference, since
+/// `PaymentPlan::validate` made the payer declare them (CR 118.13a). Call it
+/// only after `validate` confirmed the pool covers `units`. It does not
+/// recheck and would underflow.
 pub(crate) fn spend(units: &[ManaUnit], pool: &mut ManaPool) {
     for unit in units {
         match unit {
@@ -627,11 +496,7 @@ pub(crate) fn spend(units: &[ManaUnit], pool: &mut ManaPool) {
                 pool.colorless -= 1;
                 pool.snow_colorless -= 1;
             }
-            // CR 106.11: a restricted unit isn't in the plain aggregate
-            // counts above at all - remove one matching entry from the
-            // pool's own side-channel instead. `validate` already confirmed
-            // a match exists, same "trusts validate, doesn't recheck"
-            // contract this function's own doc comment already states.
+            // CR 106.11: a restricted unit is not in the plain counts, so remove its entry from the side-channel. `validate` already confirmed it exists.
             unit @ (ManaUnit::RestrictedColored(..) | ManaUnit::RestrictedColorless(..)) => {
                 let idx = pool
                     .restricted
@@ -646,32 +511,23 @@ pub(crate) fn spend(units: &[ManaUnit], pool: &mut ManaPool) {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum CostPayment {
-    /// The exact literal payment for a mana cost (CR 118.13a) — not an echo
-    /// of the cost's shape. `units` is the exact literal mana spent from the
-    /// pool; `phyrexian_life` is however much life the payer declared toward
-    /// Phyrexian-mana pips (CR 107.4f) paid via the life option instead of
-    /// colored mana — 0 when the cost has no Phyrexian symbols, or every
-    /// Phyrexian pip present was paid with mana instead. See `cost.rs`'s
-    /// `PaymentPlan` doc comment for why this is the payer's *choice*, not a
-    /// restatement of what was owed.
+    /// CR 118.13a: the exact literal payment, not an echo of the cost's
+    /// shape. `units` is the mana spent and `phyrexian_life` is the life
+    /// declared toward Phyrexian pips (CR 107.4f), 0 when none. See
+    /// `PaymentPlan` for why this is the payer's choice.
     Mana { units: Vec<ManaUnit>, phyrexian_life: u32 },
     Sacrifice(ObjectId),
     Discard(ObjectId),
-    /// CR 702.138a Escape's "exile N other cards from your graveyard" — one
-    /// entry per exiled card, same "one `CostPayment` per instance" shape
-    /// `TapPermanents`' repeated `Tap(id)` entries already use.
+    /// CR 702.138a Escape's exile cost, one entry per exiled card.
     Exile(ObjectId),
     Tap(ObjectId),
     Life(u32),
     Other { description: String },
 }
 
-/// CR 702.44b (Sunburst): the distinct colors of mana actually spent across
-/// every `CostPayment::Mana` entry in `payments` — a snow-colored unit
-/// counts toward its color same as a plain one (CR 702.44a doesn't
-/// distinguish). Non-`Mana` payments (Sacrifice/Discard/Tap/Life/Other)
-/// contribute nothing, same "only colored mana units count" reading CR
-/// 702.44b's own text takes.
+/// CR 702.44b (Sunburst): distinct colors of mana spent across every
+/// `CostPayment::Mana` in `payments`. A snow unit counts as its color
+/// (CR 702.44a). Other payments contribute nothing.
 pub fn colors_spent(payments: &[CostPayment]) -> ColorSet {
     let mut set = ColorSet::empty();
     for payment in payments {
@@ -693,67 +549,39 @@ pub fn colors_spent(payments: &[CostPayment]) -> ColorSet {
     set
 }
 
-/// A fully chosen, validated-before-commit set of payments for a `CostSpec`.
-///
-/// Flow: a `CostSpec` describes what's owed (mana, plus any additional/
-/// alternative costs) but not yet *how* it'll be paid — that requires player
-/// choice (which lands to tap, which creature to sacrifice, whether to take
-/// the alternative cost instead). The host collects those choices from the
-/// player as a `PlayerActionKind::SubmitPayment` and assembles them into a
-/// `PaymentPlan`. The engine then validates the whole plan atomically against
-/// the originating `CostSpec` — every payment present, nothing extra, mana
-/// payments actually affordable from the pool — and only commits it (taps the
-/// lands, removes the mana, sacrifices the creature, etc.) if the entire plan
-/// checks out. No partial payment ever lands in game state; either the whole
-/// `PaymentPlan` is paid or none of it is.
+/// A fully chosen set of payments for a `CostSpec`. The spec says what is
+/// owed, and the player's choices (which lands to tap, what to sacrifice,
+/// whether to use the alternative cost) arrive as `SubmitPayment`. The engine
+/// validates the whole plan against the spec before committing any of it, so
+/// no partial payment ever lands in state.
 #[derive(Clone, PartialEq, Debug)]
 pub struct PaymentPlan {
     pub payments: Vec<CostPayment>,
 }
 
 impl PaymentPlan {
-    /// Validates this plan atomically against `spec` — every cost component
-    /// present, nothing extra, mana actually affordable from `payer`'s pool,
-    /// every additional-cost payment resolving to a real, legal object.
-    /// `state`/`payer` replace the original `pool: &ManaPool` param (kept for
-    /// mana affordability, same reasoning as before) since validating
-    /// `spec.additional` needs to look objects up by id and check their
-    /// zone/controller/tapped state — `source` is the object activating the
-    /// ability/spell, needed so `AdditionalCost::TapSelf` can confirm the
-    /// payment taps *that* object specifically, not some other one.
+    /// Validates this plan atomically against `spec`: every component
+    /// present, nothing extra, mana affordable from `payer`'s pool, and every
+    /// additional-cost payment a real, legal object. `source` is the
+    /// activating object, so `TapSelf` can confirm it taps that one.
     ///
-    /// `self.payments` is ordered to mirror `spec`: a `Mana` entry first, iff
-    /// `spec.mana` is `Some` *and* actually has symbols to pay (a `{0}` cost
-    /// — CR 118.5a's "must explicitly acknowledge" requirement — is
-    /// satisfied by there being no `Mana` entry at all, same convention this
-    /// function used before generalizing to additional costs), then exactly
-    /// one entry per `spec.additional` component in order (`TapPermanents`'s
-    /// `count` consumes that many consecutive `Tap` entries) — this
-    /// ordering is what lets several same-shaped payments (e.g. two `Tap`
-    /// entries, one for `TapSelf` and one for a `TapPermanents` component)
-    /// disambiguate which requirement each one is satisfying. `commit`
-    /// doesn't need this ordering — once validated, every payment's *action*
-    /// (tap this id, sacrifice this id, ...) is unambiguous on its own.
+    /// `self.payments` mirrors `spec`: a `Mana` entry first, only when
+    /// `spec.mana` has symbols to pay (a `{0}` cost needs none, CR 118.5a),
+    /// then one entry per `spec.additional` component in order, with
+    /// `TapPermanents` taking `count` consecutive `Tap` entries. The order
+    /// tells same-shaped payments apart. `commit` doesn't need it.
     ///
-    /// CR 118.13a's payment choice: a colored pip must be paid with that
-    /// *exact* color — no substitution — but the generic component can be
-    /// paid with any leftover units, including extra units of a color that
-    /// also satisfied a colored pip (e.g. paying `{1}{G}` with three green
-    /// units: one for the `{G}` pip, two covering the `{1}`). The `units`
-    /// list inside a `CostPayment::Mana` entry must total *exactly* the
-    /// cost — every pip accounted for by the right color, every leftover
-    /// unit summing to exactly the generic amount, no more, no less.
+    /// CR 118.13a: a colored pip takes that exact color, but the generic part
+    /// takes any leftover units, including extra units of a color that paid a
+    /// pip (`{1}{G}` with three green). The `units` in a `Mana` entry must
+    /// total exactly the cost.
     ///
-    /// Out of scope this slice (returns `false`): `spec.alternative` costs and
-    /// an unresolved `{X}` (callers run `ManaCost::resolve_x` first). Plain
-    /// colored/generic pips, the `{C}` colorless pip (CR 107.4c), `Phyrexian` pips (paid with colored mana or 2
-    /// life, CR 107.4f), `Snow` pips (paid with any snow-tagged mana, CR
-    /// 107.4h), and `Hybrid` symbols built from any of those atoms (`{W/U}`,
-    /// `{2/W}`, `{W/U/P}`) *are* handled. `AdditionalCost::Other` always
-    /// fails validation too — no `CostPayment` shape can express an
-    /// unstructured-text cost. Returning `bool` here as a placeholder — real
-    /// version will likely return a `Result` with a reason once validation
-    /// failure modes are designed.
+    /// Returns `false` for `spec.alternative` costs, an unresolved `{X}`
+    /// (callers run `ManaCost::resolve_x` first) and `AdditionalCost::Other`,
+    /// which no `CostPayment` can express. Colored, generic, `{C}`
+    /// (CR 107.4c), Phyrexian (CR 107.4f), snow (CR 107.4h) and hybrid symbols
+    /// are handled.
+    // TODO: return a `Result` with a reason once the failure modes are designed
     pub fn validate(
         &self,
         spec: &CostSpec,
@@ -773,10 +601,7 @@ impl PaymentPlan {
                 let Some(CostPayment::Mana { units, phyrexian_life }) = payments.next() else {
                     return false;
                 };
-                // CR 118.13a shape check: a restricted unit folds into its
-                // base color/colorless bucket here (see `spent_tally`'s own
-                // doc comment) - the restriction doesn't change what pip
-                // shape it can satisfy, only what it's eligible to fund.
+                // CR 118.13a: a restricted unit folds into its base bucket here (see `spent_tally`).
                 let (spent_colored, spent_colorless, spent_snow_colored, spent_snow_colorless) =
                     spent_tally(units);
                 let spent = SpentPool {
@@ -797,12 +622,7 @@ impl PaymentPlan {
                 }
                 let pool = &player.mana_pool;
 
-                // Pool-affordability, ordinary mana: restricted units never
-                // land in the plain aggregate fields (`ManaPool::add_unit`
-                // routes them into `pool.restricted` instead), so this
-                // re-tallies only the non-restricted declared units against
-                // those fields - checked separately from the shape tally
-                // above, which needed restricted units folded in.
+                // Pool affordability: restricted units are in `pool.restricted`, not the plain fields, so only the non-restricted declared units are checked against those.
                 let (plain_units, restricted_units): (Vec<ManaUnit>, Vec<ManaUnit>) = units
                     .iter()
                     .copied()
@@ -816,10 +636,7 @@ impl PaymentPlan {
                 if plain_colorless > pool.colorless {
                     return false;
                 }
-                // The snow-tagged units declared can't exceed how much of
-                // the pool is actually snow-tagged - the color/colorless
-                // check above only bounds the total, not which of it is
-                // snow-sourced (CR 107.4h).
+                // Declared snow units cannot exceed the pool's snow-tagged mana (CR 107.4h). The check above bounds only totals.
                 let pool_snow_colored =
                     [pool.snow_white, pool.snow_blue, pool.snow_black, pool.snow_red, pool.snow_green];
                 if plain_snow_colored.iter().zip(pool_snow_colored).any(|(spent, have)| *spent > have) {
@@ -829,19 +646,7 @@ impl PaymentPlan {
                     return false;
                 }
 
-                // CR 106.11 restricted mana: each declared restricted unit
-                // must (a) actually be sitting in the pool's own
-                // `restricted` side-channel - checked as a multiset, one
-                // pool entry consumed per declared unit so two declared
-                // copies of the same restricted unit can't both be
-                // satisfied by a single pool entry - and (b) be eligible
-                // for what this cost is paying for. This engine only models
-                // the "spend only to cast a [card type] spell" shape, so
-                // eligibility is: `source`'s own `GameObject` is sitting in
-                // the `Stack` zone (the same signal `PendingPaymentRequest::
-                // source`'s doc comment already uses to mean "this is a
-                // spell being cast, not an ability") and its card types
-                // intersect the restriction.
+                // CR 106.11: each declared restricted unit must be in `pool.restricted`, consumed as a multiset so two declared copies cannot share one entry, and be eligible for this cost. Only the "cast a [card type] spell" shape exists: `source` is on the stack (the signal `PendingPaymentRequest::source` uses for a spell) and its card types intersect the restriction.
                 let mut remaining_restricted = pool.restricted.clone();
                 for unit in &restricted_units {
                     let Some(idx) = remaining_restricted.iter().position(|candidate| candidate == unit) else {
@@ -860,9 +665,7 @@ impl PaymentPlan {
                     }
                 }
             }
-            // required.is_empty(): CR 118.5a's explicit-acknowledgment
-            // requirement is satisfied by the absence of a Mana entry here -
-            // nothing to consume.
+            // CR 118.5a: an empty `required` is satisfied by having no Mana entry.
         }
 
         for additional in &spec.additional {
@@ -903,11 +706,7 @@ impl PaymentPlan {
                             return false;
                         }
                         let Some(obj) = state.object(*id) else { return false };
-                        // A graveyard card's `.controller` always equals its
-                        // owner in this engine (no GainControl effect
-                        // targets a non-battlefield card, CR 108.4) - same
-                        // reasoning `Discard { filter }`'s own raw-field
-                        // check below already documents.
+                        // A graveyard card's `.controller` equals its owner (CR 108.4).
                         if obj.zone != ZoneKind::Graveyard || obj.controller != payer {
                             return false;
                         }
@@ -936,10 +735,7 @@ impl PaymentPlan {
                         return false;
                     }
                     let Some(obj) = state.object(*id) else { return false };
-                    // CR 701.20a, same check `Sacrifice{filter}` makes above,
-                    // minus the filter (there's nothing left to match against
-                    // once the id is pinned to source) - same shape
-                    // `DiscardSelf` already takes relative to `Discard{filter}`.
+                    // CR 701.20a: the `Sacrifice{filter}` check without the filter, since the id is pinned to source.
                     let controller = crate::layers::effective_controller(state, script_runtime, *id);
                     if obj.zone != ZoneKind::Battlefield || controller != payer {
                         return false;
@@ -948,11 +744,7 @@ impl PaymentPlan {
                 AdditionalCost::Discard { filter } => {
                     let Some(CostPayment::Discard(id)) = payments.next() else { return false };
                     let Some(obj) = state.object(*id) else { return false };
-                    // A hand card's `.controller` always equals its owner in
-                    // this engine (no GainControl effect targets a
-                    // non-battlefield card, CR 108.4) - the raw field is
-                    // exactly correct here, not a stand-in for the resolved
-                    // query.
+                    // A hand card's `.controller` equals its owner (CR 108.4), so the raw field is correct.
                     if obj.zone != ZoneKind::Hand || obj.controller != payer {
                         return false;
                     }
@@ -966,11 +758,7 @@ impl PaymentPlan {
                         return false;
                     }
                     let Some(obj) = state.object(*id) else { return false };
-                    // CR 702.29a: the source must actually still be sitting
-                    // in its controller's hand - same shape the plain
-                    // Discard { filter } arm above checks, minus the filter
-                    // (there's nothing left to match against once the id is
-                    // pinned to source).
+                    // CR 702.29a: the source must still be in its controller's hand.
                     if obj.zone != ZoneKind::Hand || obj.controller != payer {
                         return false;
                     }
@@ -1159,11 +947,8 @@ mod tests {
             AtomicManaSymbol::Colored(Color::White),
             AtomicManaSymbol::Colored(Color::Blue),
         )];
-        // {W/U} paid with white - legal.
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
-        // {W/U} paid with blue - legal.
         assert_eq!(mana_payment_satisfies(&required, spent([0, 1, 0, 0, 0], 0), 0), Some(true));
-        // {W/U} paid with black - rejected (not one of the two options).
         assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 1, 0, 0], 0), 0), Some(false));
     }
 
@@ -1173,9 +958,7 @@ mod tests {
             AtomicManaSymbol::Generic(2),
             AtomicManaSymbol::Colored(Color::White),
         )];
-        // {2/W} paid with 2 generic-eligible (colorless) units - legal.
         assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 0, 0], 2), 0), Some(true));
-        // {2/W} paid with 1 white - legal via the color branch, 0 generic owed.
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
     }
 
@@ -1191,11 +974,8 @@ mod tests {
                 AtomicManaSymbol::Colored(Color::Blue),
             ),
         ];
-        // One white + one blue - legal, but only because each symbol can
-        // claim a different unit (a plain tally can't tell this apart from
-        // an unpayable case without the assignment).
+        // Each symbol must claim a different unit; a plain tally cannot tell this from an unpayable case.
         assert_eq!(mana_payment_satisfies(&required, spent([1, 1, 0, 0, 0], 0), 0), Some(true));
-        // Two white - also legal, both symbols take the white branch.
         assert_eq!(mana_payment_satisfies(&required, spent([2, 0, 0, 0, 0], 0), 0), Some(true));
     }
 
@@ -1208,34 +988,23 @@ mod tests {
                 AtomicManaSymbol::Colored(Color::Blue),
             ),
         ];
-        // {1}{W/U} paid with white (for the hybrid) + one colorless (for
-        // the plain generic) - legal.
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 1), 0), Some(true));
-        // Same payment but one colorless short - the generic component
-        // isn't fully covered, rejected.
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
-        // One extra, unneeded colorless unit - overpaying is rejected too
-        // (leftover must equal the generic component exactly, no more).
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 2), 0), Some(false));
     }
 
     #[test]
     fn plain_phyrexian_paid_with_color_or_life() {
         let required = [ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))];
-        // {W/P} paid with white - legal.
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
-        // {W/P} paid with 2 life, no mana - legal.
         assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 2), Some(true));
-        // {W/P} paid with black - rejected, not the pip's color and no life declared.
         assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 1, 0, 0], 0), 0), Some(false));
-        // {W/P} "paid" with only 1 life - short of the flat 2, rejected.
         assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 1), Some(false));
     }
 
     #[test]
     fn hybrid_phyrexian_offers_three_real_branches() {
-        // {G/U/P}-style: Hybrid(Phyrexian(Blue), Colored(Green)) - pay blue,
-        // pay green, or pay 2 life (mana.rs's own doc comment on `Hybrid`).
+        // Hybrid(Phyrexian(Blue), Colored(Green)): pay blue, green or 2 life (CR 107.4f).
         let required = [ManaSymbol::Hybrid(
             AtomicManaSymbol::Phyrexian(Color::Blue),
             AtomicManaSymbol::Colored(Color::Green),
@@ -1243,7 +1012,6 @@ mod tests {
         assert_eq!(mana_payment_satisfies(&required, spent([0, 1, 0, 0, 0], 0), 0), Some(true));
         assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 0, 1], 0), 0), Some(true));
         assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 2), Some(true));
-        // Red is none of the three options - rejected.
         assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 1, 0], 0), 0), Some(false));
     }
 
@@ -1253,45 +1021,31 @@ mod tests {
             ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
             ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White)),
         ];
-        // {1}{W/P} paid with 2 life for the Phyrexian pip + 1 colorless for
-        // the generic - legal.
         assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 2), Some(true));
-        // Declaring only 1 life toward a pip that needs the full 2 - rejected.
         assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 1), Some(false));
-        // Declaring life the cost never asked for (paid the pip with white
-        // mana instead, but still declared 2 life) - rejected, no more no less.
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 1), 2), Some(false));
     }
 
     #[test]
     fn snow_pip_paid_with_any_snow_tagged_mana() {
         let required = [ManaSymbol::Atom(AtomicManaSymbol::Snow)];
-        // {S} paid with a snow-tagged white unit - legal.
         assert_eq!(
             mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
             Some(true)
         );
-        // {S} paid with a snow-tagged colorless unit - legal (any type works).
         assert_eq!(mana_payment_satisfies(&required, spent_snow([0; 5], 1, [0; 5], 1), 0), Some(true));
-        // {S} "paid" with an ordinary (non-snow) white unit - rejected, right
-        // color but wrong source.
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
     }
 
     #[test]
     fn colored_pip_and_snow_pip_compete_for_the_same_snow_unit() {
-        // {W}{S} with exactly one snow white unit and nothing else - only
-        // one symbol can claim it, so this must be rejected (not a plain
-        // tally, which could wrongly see "1 white available" and think
-        // both symbols are covered).
+        // One snow white cannot cover both {W} and {S}; a plain tally would miss it.
         let required =
             [ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)), ManaSymbol::Atom(AtomicManaSymbol::Snow)];
         assert_eq!(
             mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
             Some(false)
         );
-        // Same cost, but with a second, non-snow white unit available too -
-        // now {W} can take the non-snow one, freeing the snow one for {S}.
         assert_eq!(
             mana_payment_satisfies(&required, spent_snow([2, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
             Some(true)
@@ -1302,13 +1056,10 @@ mod tests {
     fn generic_pip_mixed_with_snow_leftover_must_match_exactly() {
         let required =
             [ManaSymbol::Atom(AtomicManaSymbol::Generic(1)), ManaSymbol::Atom(AtomicManaSymbol::Snow)];
-        // {1}{S} paid with a snow white unit (for {S}) + a colorless unit
-        // (for the generic) - legal.
         assert_eq!(
             mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 1, [1, 0, 0, 0, 0], 0), 0),
             Some(true)
         );
-        // Same, but the generic component is short - rejected.
         assert_eq!(
             mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
             Some(false)
@@ -1317,8 +1068,7 @@ mod tests {
 
     #[test]
     fn a_bare_x_bails_with_none() {
-        // `resolve_x` turns every {X} into generic mana before payment, so an
-        // unresolved one is never payable.
+        // `resolve_x` runs before payment, so an unresolved {X} is never payable.
         assert_eq!(mana_payment_satisfies(&[ManaSymbol::X], spent([0; 5], 0), 0), None);
     }
 
@@ -1326,17 +1076,15 @@ mod tests {
     fn colorless_symbol_takes_only_colorless_mana() {
         let required = [ManaSymbol::Atom(AtomicManaSymbol::Colorless)];
         assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 0), Some(true));
-        // CR 107.4c: a colored unit never pays {C}.
+        // CR 107.4c
         assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
         assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 0), Some(false));
-        // A snow colorless unit is still colorless.
         assert_eq!(mana_payment_satisfies(&required, spent_snow([0; 5], 1, [0; 5], 1), 0), Some(true));
     }
 
     #[test]
     fn colorless_symbol_beside_generic_must_match_exactly() {
-        // {2}{C} paid with three colorless: legal. Paid with one colorless and
-        // two white: the {C} takes the colorless and the {2} takes the white.
+        // {2}{C}: the {C} must take the colorless unit, and the {2} can take white.
         let required = [
             ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
             ManaSymbol::Atom(AtomicManaSymbol::Colorless),
