@@ -436,3 +436,374 @@ fn resolve_base_pt(
     }
     value.and_then(|v| v.as_fixed())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CardTypeSet, KeywordSet, ManaPool};
+    use crate::types::card::{CardDefinition, ModeChoice, PTValue, ScriptReference, SupertypeSet as SupertypeSetT};
+    use crate::types::counter::{CounterKind, CounterSet};
+    use crate::types::game::{GameState, RngState};
+    use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
+    use crate::types::mana::ManaCost;
+    use crate::types::object::{GameObject, VisibilityPolicy};
+    use crate::types::player::PlayerState;
+    use crate::types::zone::ZoneKind;
+    use std::collections::HashMap;
+
+    fn player(id: PlayerId) -> PlayerState {
+        PlayerState {
+            player_id: id,
+            life: 20,
+            mana_pool: ManaPool::default(),
+            counters: CounterSet::new(),
+            emblems: Vec::new(),
+            commander_damage_taken: Vec::new(),
+            eliminated: false,
+            drew_from_empty_library: false,
+            mulligans_taken: 0,
+            hand_kept: false,
+            commander_casts: HashMap::new(),
+        }
+    }
+
+    fn object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet, zone: ZoneKind) -> GameObject {
+        GameObject {
+            object_id: id,
+            lineage: crate::types::ids::ObjectLineage { previous: None },
+            definition: CardDefinition {
+                definition_id: 1,
+                name: "Test Object".to_string(),
+                mana_cost: ManaCost { symbols: Vec::new() },
+                color_indicator: None,
+                supertypes: SupertypeSetT::empty(),
+                card_types,
+                subtypes: Vec::new(),
+                oracle_text: String::new(),
+                power: Some(PTValue::Fixed(1)),
+                toughness: Some(PTValue::Fixed(1)),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::ByKey("test".to_string()),
+                keywords: KeywordSet::empty(),
+                target_requirement: None,
+                alternative_costs: Vec::new(),
+                buyback_cost: None,
+                effect: None,
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
+            },
+            copiable_override: None,
+            owner: controller,
+            controller,
+            zone,
+            tapped: false,
+            flipped: false,
+            face_down: false,
+            phased_out: false,
+            damage_marked: 0,
+            deathtouched: false,
+            counters: CounterSet::new(),
+            attachments: Vec::new(),
+            attached_to: None,
+            attached_to_player: None,
+            timestamp: SequenceNo(0),
+            controlled_since_turn: 0,
+            is_commander: false,
+            is_token: false,
+            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            copy_generation: 0,
+            entered_via_escape: false,
+        }
+    }
+
+    fn creature_with_pt(id: ObjectId, controller: PlayerId, power: i32, toughness: i32) -> GameObject {
+        let mut obj = object(id, controller, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        obj.definition.power = Some(PTValue::Fixed(power));
+        obj.definition.toughness = Some(PTValue::Fixed(toughness));
+        obj
+    }
+
+    fn state_with(objects: Vec<GameObject>) -> GameState {
+        let p0 = PlayerId(0);
+        GameState {
+            players: vec![player(p0)],
+            turn_order: vec![p0],
+            active_player: p0,
+            turn_number: 1,
+            phase: crate::types::turn::Phase::Main,
+            step: crate::types::turn::Step::PreCombatMain,
+            priority_player: p0,
+            consecutive_passes: 0,
+            lands_played_this_turn: HashMap::new(),
+            combat: None,
+            last_active_turn_number: HashMap::new(),
+            objects: objects.into_iter().map(|o| (o.object_id, o)).collect(),
+            zones: Vec::new(),
+            stack: Vec::new(),
+            continuous_effects: Vec::new(),
+            replacement_effects: Vec::new(),
+            cost_modifiers: Vec::new(),
+            hand_size_modifiers: Vec::new(),
+            hand_reveal_modifiers: Vec::new(),
+            draw_limit_modifiers: Vec::new(),
+            land_play_modifiers: Vec::new(),
+            abilities: Vec::new(),
+            ledger: Vec::new(),
+            rng: RngState { seed: 1, draws_consumed: 0 },
+            next_event_id: 0,
+            next_sequence_no: 10,
+            next_object_id: 1000,
+            pending_step_skips: Vec::new(),
+            once_per_turn_triggered: std::collections::HashSet::new(),
+            commander_return_offered: std::collections::HashSet::new(),
+            linked_ability_generation: std::collections::HashMap::new(),
+            script_ability_ids: std::collections::HashSet::new(),
+            ability_function_zones: std::collections::HashMap::new(),
+            off_battlefield_scripts_run: std::collections::HashSet::new(),
+            linked_exiles: Vec::new(),
+            pending_timing_bypass: None,
+            pending_free_cast: None,
+        }
+    }
+
+    fn continuous_effect(
+        source: ObjectId,
+        layer: Layer,
+        primitive: EffectPrimitive,
+        affected: AffectedFilter,
+        timestamp: u64,
+    ) -> ContinuousEffect {
+        ContinuousEffect {
+            source,
+            layer,
+            affected,
+            effect: EffectPayload::Primitive(primitive),
+            timestamp: SequenceNo(timestamp),
+            duration: crate::types::effect::EffectDuration::Permanent,
+            condition: None,
+        }
+    }
+
+    fn self_filter(_id: ObjectId) -> AffectedFilter {
+        AffectedFilter::Primitive(crate::types::effect::EffectFilter {
+            controller: None,
+            card_types: None,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+            self_only: true,
+        })
+    }
+
+    #[test]
+    fn effective_controller_without_effects_returns_raw_controller() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let state = state_with(vec![object(id, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        assert_eq!(effective_controller(&state, &ScriptRuntime::new(), id), p0);
+    }
+
+    #[test]
+    fn effective_controller_follows_latest_gain_control() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let id = ObjectId(1);
+        let mut state = state_with(vec![object(id, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        state.players.push(player(p1));
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::ControlChangingEffects,
+            EffectPrimitive::GainControl(p1),
+            self_filter(id),
+            1,
+        ));
+        assert_eq!(effective_controller(&state, &ScriptRuntime::new(), id), p1);
+    }
+
+    #[test]
+    fn effective_characteristics_carries_base_definition_values() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut obj = object(id, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        obj.definition.power = Some(PTValue::Fixed(3));
+        obj.definition.toughness = Some(PTValue::Fixed(4));
+        obj.definition.keywords = KeywordSet::FLYING;
+        let state = state_with(vec![obj]);
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
+        assert_eq!(ec.power, Some(3));
+        assert_eq!(ec.toughness, Some(4));
+        assert!(ec.keywords.contains(KeywordSet::FLYING));
+    }
+
+    #[test]
+    fn add_card_type_unions_with_base_types() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut state = state_with(vec![object(id, p0, CardTypeSet::LAND, ZoneKind::Battlefield)]);
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::TypeChanging,
+            EffectPrimitive::AddCardType(CardTypeSet::CREATURE),
+            self_filter(id),
+            1,
+        ));
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
+        assert!(ec.card_types.contains(CardTypeSet::LAND));
+        assert!(ec.card_types.contains(CardTypeSet::CREATURE));
+    }
+
+    #[test]
+    fn set_card_types_overwrites_earlier_type_changes() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut state = state_with(vec![object(id, p0, CardTypeSet::LAND, ZoneKind::Battlefield)]);
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::TypeChanging,
+            EffectPrimitive::AddCardType(CardTypeSet::CREATURE),
+            self_filter(id),
+            1,
+        ));
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::TypeChanging,
+            EffectPrimitive::SetCardTypes(CardTypeSet::ARTIFACT),
+            self_filter(id),
+            2,
+        ));
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
+        assert_eq!(ec.card_types, CardTypeSet::ARTIFACT);
+    }
+
+    #[test]
+    fn add_color_unions_with_base_color() {
+        let p0 = PlayerId(0);
+        let mut obj = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        obj.definition.color_indicator = Some(crate::ColorSet::BLUE);
+        let mut state = state_with(vec![obj]);
+        state.continuous_effects.push(continuous_effect(
+            ObjectId(1),
+            Layer::ColorChanging,
+            EffectPrimitive::AddColor(crate::ColorSet::RED),
+            self_filter(ObjectId(1)),
+            1,
+        ));
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), ObjectId(1));
+        assert!(ec.colors.contains(crate::ColorSet::BLUE));
+        assert!(ec.colors.contains(crate::ColorSet::RED));
+    }
+
+    #[test]
+    fn add_keyword_grants_and_remove_keyword_removes() {
+        let p0 = PlayerId(0);
+        let mut obj = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        obj.definition.keywords = KeywordSet::FLYING;
+        let mut state = state_with(vec![obj]);
+        state.continuous_effects.push(continuous_effect(
+            ObjectId(1),
+            Layer::AbilityAdding,
+            EffectPrimitive::AddKeyword(KeywordSet::REACH),
+            self_filter(ObjectId(1)),
+            1,
+        ));
+        state.continuous_effects.push(continuous_effect(
+            ObjectId(1),
+            Layer::AbilityAdding,
+            EffectPrimitive::RemoveKeyword(KeywordSet::FLYING),
+            self_filter(ObjectId(1)),
+            2,
+        ));
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), ObjectId(1));
+        assert!(!ec.keywords.contains(KeywordSet::FLYING));
+        assert!(ec.keywords.contains(KeywordSet::REACH));
+    }
+
+    #[test]
+    fn modify_pt_adds_to_base() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut state = state_with(vec![creature_with_pt(id, p0, 2, 3)]);
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::PowerToughnessModifying,
+            EffectPrimitive::ModifyPT { power: 2, toughness: -1 },
+            self_filter(id),
+            1,
+        ));
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
+        assert_eq!(ec.power, Some(4));
+        assert_eq!(ec.toughness, Some(2));
+    }
+
+    #[test]
+    fn set_pt_overwrites_base() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut state = state_with(vec![creature_with_pt(id, p0, 2, 3)]);
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::PowerToughnessSetting,
+            EffectPrimitive::SetPT { power: 5, toughness: 5 },
+            self_filter(id),
+            1,
+        ));
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
+        assert_eq!(ec.power, Some(5));
+        assert_eq!(ec.toughness, Some(5));
+    }
+
+    #[test]
+    fn double_pt_depends_on_earlier_modify_pt() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut state = state_with(vec![creature_with_pt(id, p0, 2, 2)]);
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::PowerToughnessModifying,
+            EffectPrimitive::ModifyPT { power: 2, toughness: 0 },
+            self_filter(id),
+            1,
+        ));
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::PowerToughnessModifying,
+            EffectPrimitive::DoublePT { power: true, toughness: false },
+            self_filter(id),
+            2,
+        ));
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
+        assert_eq!(ec.power, Some(8));
+        assert_eq!(ec.toughness, Some(2));
+    }
+
+    #[test]
+    fn switch_pt_swaps_power_and_toughness() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut state = state_with(vec![creature_with_pt(id, p0, 2, 5)]);
+        state.continuous_effects.push(continuous_effect(
+            id,
+            Layer::PowerToughnessSwitching,
+            EffectPrimitive::SwitchPT,
+            self_filter(id),
+            1,
+        ));
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
+        assert_eq!(ec.power, Some(5));
+        assert_eq!(ec.toughness, Some(2));
+    }
+
+    #[test]
+    fn plus_one_counters_add_to_power_and_toughness() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut obj = creature_with_pt(id, p0, 2, 2);
+        obj.counters.add(CounterKind::PlusOnePlusOne, 3, SequenceNo(1));
+        let state = state_with(vec![obj]);
+        let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
+        assert_eq!(ec.power, Some(5));
+        assert_eq!(ec.toughness, Some(5));
+    }
+}

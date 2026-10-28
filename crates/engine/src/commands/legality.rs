@@ -1027,3 +1027,399 @@ pub(crate) fn combine_chosen_modes(
     let effects: Vec<Option<AbilityEffect>> = chosen_modes.iter().map(|m| m.effect.clone()).collect();
     Ok((Some(TargetSpec::Multiple(reqs)), Some(AbilityEffect::Modal { effects, words })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ability::AbilityEffect;
+    use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SpellMode, SupertypeSet as SupertypeSetT};
+    use crate::types::counter::CounterSet;
+    use crate::types::cost::FilterController;
+    use crate::types::game::{GameState, RngState};
+    use crate::types::ids::{ObjectId, PlayerId, SequenceNo, Target};
+    use crate::types::mana::{Color, ManaCost, ManaPool, ManaUnit};
+    use crate::types::object::{GameObject, VisibilityPolicy};
+    use crate::types::player::PlayerState;
+    use crate::types::stack::{StackEntryKind, StackObject};
+    use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
+    use crate::types::turn::{Phase, Step};
+    use crate::types::zone::ZoneKind;
+    use std::collections::HashMap;
+
+    fn player(id: PlayerId) -> PlayerState {
+        PlayerState {
+            player_id: id,
+            life: 20,
+            mana_pool: ManaPool::default(),
+            counters: CounterSet::new(),
+            emblems: Vec::new(),
+            commander_damage_taken: Vec::new(),
+            eliminated: false,
+            drew_from_empty_library: false,
+            mulligans_taken: 0,
+            hand_kept: false,
+            commander_casts: HashMap::new(),
+        }
+    }
+
+    fn object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet, zone: ZoneKind) -> GameObject {
+        GameObject {
+            object_id: id,
+            lineage: crate::types::ids::ObjectLineage { previous: None },
+            definition: CardDefinition {
+                definition_id: 1,
+                name: "Test Object".to_string(),
+                mana_cost: ManaCost { symbols: Vec::new() },
+                color_indicator: None,
+                supertypes: SupertypeSetT::empty(),
+                card_types,
+                subtypes: Vec::new(),
+                oracle_text: String::new(),
+                power: Some(PTValue::Fixed(1)),
+                toughness: Some(PTValue::Fixed(1)),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::ByKey("test".to_string()),
+                keywords: KeywordSet::empty(),
+                target_requirement: None,
+                alternative_costs: Vec::new(),
+                buyback_cost: None,
+                effect: None,
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
+            },
+            copiable_override: None,
+            owner: controller,
+            controller,
+            zone,
+            tapped: false,
+            flipped: false,
+            face_down: false,
+            phased_out: false,
+            damage_marked: 0,
+            deathtouched: false,
+            counters: CounterSet::new(),
+            attachments: Vec::new(),
+            attached_to: None,
+            attached_to_player: None,
+            timestamp: SequenceNo(0),
+            controlled_since_turn: 0,
+            is_commander: false,
+            is_token: false,
+            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            copy_generation: 0,
+            entered_via_escape: false,
+        }
+    }
+
+    fn creature_with_pt(id: ObjectId, controller: PlayerId, power: i32, toughness: i32) -> GameObject {
+        let mut obj = object(id, controller, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        obj.definition.power = Some(PTValue::Fixed(power));
+        obj.definition.toughness = Some(PTValue::Fixed(toughness));
+        obj
+    }
+
+    fn state_with(objects: Vec<GameObject>) -> GameState {
+        let p0 = PlayerId(0);
+        GameState {
+            players: vec![player(p0)],
+            turn_order: vec![p0],
+            active_player: p0,
+            turn_number: 1,
+            phase: Phase::Main,
+            step: Step::PreCombatMain,
+            priority_player: p0,
+            consecutive_passes: 0,
+            lands_played_this_turn: HashMap::new(),
+            combat: None,
+            last_active_turn_number: HashMap::new(),
+            objects: objects.into_iter().map(|o| (o.object_id, o)).collect(),
+            zones: Vec::new(),
+            stack: Vec::new(),
+            continuous_effects: Vec::new(),
+            replacement_effects: Vec::new(),
+            cost_modifiers: Vec::new(),
+            hand_size_modifiers: Vec::new(),
+            hand_reveal_modifiers: Vec::new(),
+            draw_limit_modifiers: Vec::new(),
+            land_play_modifiers: Vec::new(),
+            abilities: Vec::new(),
+            ledger: Vec::new(),
+            rng: RngState { seed: 1, draws_consumed: 0 },
+            next_event_id: 0,
+            next_sequence_no: 10,
+            next_object_id: 1000,
+            pending_step_skips: Vec::new(),
+            once_per_turn_triggered: std::collections::HashSet::new(),
+            commander_return_offered: std::collections::HashSet::new(),
+            linked_ability_generation: std::collections::HashMap::new(),
+            script_ability_ids: std::collections::HashSet::new(),
+            ability_function_zones: std::collections::HashMap::new(),
+            off_battlefield_scripts_run: std::collections::HashSet::new(),
+            linked_exiles: Vec::new(),
+            pending_timing_bypass: None,
+            pending_free_cast: None,
+        }
+    }
+
+    fn stack_object(owner: PlayerId) -> StackObject {
+        StackObject::new(
+            ObjectId(99),
+            StackEntryKind::Spell,
+            ObjectId(99),
+            owner,
+            owner,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            false,
+            false,
+            false,
+            crate::types::ids::ScriptHandle(0),
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn player_req(controller: Option<FilterController>) -> TargetRequirement {
+        TargetRequirement {
+            filter: TargetFilter::Player { controller },
+            count: 1,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        }
+    }
+
+    fn mode_with_effect(effect: AbilityEffect) -> SpellMode {
+        SpellMode {
+            target_requirement: None,
+            effect: Some(effect),
+            additional_cost: None,
+            pawprint_weight: 0,
+        }
+    }
+
+    #[test]
+    fn sorcery_speed_holds_when_active_player_has_priority_in_main_with_empty_stack() {
+        let p0 = PlayerId(0);
+        let state = state_with(Vec::new());
+        assert!(is_sorcery_speed(&state, p0));
+    }
+
+    #[test]
+    fn sorcery_speed_fails_when_wrong_player_has_priority() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let mut state = state_with(Vec::new());
+        state.players.push(player(p1));
+        state.priority_player = p1;
+        assert!(!is_sorcery_speed(&state, p0));
+    }
+
+    #[test]
+    fn sorcery_speed_fails_when_not_active_player() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let mut state = state_with(Vec::new());
+        state.players.push(player(p1));
+        state.active_player = p1;
+        assert!(!is_sorcery_speed(&state, p0));
+    }
+
+    #[test]
+    fn sorcery_speed_fails_outside_main_phase() {
+        let p0 = PlayerId(0);
+        let mut state = state_with(Vec::new());
+        state.phase = Phase::Combat;
+        state.step = Step::DeclareAttackers;
+        assert!(!is_sorcery_speed(&state, p0));
+    }
+
+    #[test]
+    fn sorcery_speed_fails_with_nonempty_stack() {
+        let p0 = PlayerId(0);
+        let mut state = state_with(Vec::new());
+        state.stack.push(stack_object(p0));
+        assert!(!is_sorcery_speed(&state, p0));
+    }
+
+    #[test]
+    fn first_strike_participation_requires_first_strike_or_double_strike() {
+        assert!(participates_in_damage_step(KeywordSet::FIRST_STRIKE, Step::FirstStrikeDamage));
+        assert!(participates_in_damage_step(KeywordSet::DOUBLE_STRIKE, Step::FirstStrikeDamage));
+        assert!(!participates_in_damage_step(KeywordSet::empty(), Step::FirstStrikeDamage));
+    }
+
+    #[test]
+    fn normal_damage_participation_excludes_first_strike_without_double_strike() {
+        assert!(!participates_in_damage_step(KeywordSet::FIRST_STRIKE, Step::CombatDamage));
+        assert!(participates_in_damage_step(KeywordSet::DOUBLE_STRIKE, Step::CombatDamage));
+        assert!(participates_in_damage_step(KeywordSet::empty(), Step::CombatDamage));
+    }
+
+    #[test]
+    fn lethal_damage_is_remaining_toughness_minus_marked() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let state = state_with(vec![creature_with_pt(id, p0, 2, 4)]);
+        assert_eq!(lethal_damage_needed(&state, &ScriptRuntime::new(), id, false), 4);
+    }
+
+    #[test]
+    fn lethal_damage_floors_at_zero_and_deathtouch_needs_one() {
+        let p0 = PlayerId(0);
+        let id = ObjectId(1);
+        let mut overmarked = creature_with_pt(id, p0, 2, 1);
+        overmarked.damage_marked = 3;
+        let state = state_with(vec![overmarked]);
+        assert_eq!(lethal_damage_needed(&state, &ScriptRuntime::new(), id, false), 0);
+
+        let mut injured = creature_with_pt(ObjectId(2), p0, 2, 5);
+        injured.damage_marked = 1;
+        let state2 = state_with(vec![injured]);
+        assert_eq!(lethal_damage_needed(&state2, &ScriptRuntime::new(), ObjectId(2), false), 4);
+        assert_eq!(lethal_damage_needed(&state2, &ScriptRuntime::new(), ObjectId(2), true), 1);
+    }
+
+    #[test]
+    fn lethal_damage_for_missing_object_is_max() {
+        let state = state_with(Vec::new());
+        assert_eq!(lethal_damage_needed(&state, &ScriptRuntime::new(), ObjectId(99), false), u32::MAX);
+    }
+
+    #[test]
+    fn split_two_exact_requirements_positionally() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let mut state = state_with(Vec::new());
+        state.players.push(player(p1));
+        let reqs = vec![player_req(None), player_req(None)];
+        let targets = vec![Target::Player(p0), Target::Player(p1)];
+        let chunks = split_targets_by_requirement(
+            &state, &ScriptRuntime::new(), &reqs, &targets, p0, ObjectId(1), None,
+        );
+        assert_eq!(chunks, Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]]));
+    }
+
+    #[test]
+    fn split_with_up_to_takes_remainder() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let mut state = state_with(Vec::new());
+        state.players.push(player(p1));
+        let exact = player_req(None);
+        let mut variable = player_req(None);
+        variable.up_to = true;
+        variable.count = 2;
+        let reqs = vec![exact, variable];
+        let targets = vec![Target::Player(p0), Target::Player(p1)];
+        let chunks = split_targets_by_requirement(
+            &state, &ScriptRuntime::new(), &reqs, &targets, p0, ObjectId(1), None,
+        );
+        assert_eq!(chunks, Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]]));
+    }
+
+    #[test]
+    fn split_two_variable_requirements_uses_filter_assignment() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let mut state = state_with(Vec::new());
+        state.players.push(player(p1));
+        let mut req0 = player_req(Some(FilterController::You));
+        req0.up_to = true;
+        req0.count = 1;
+        let mut req1 = player_req(Some(FilterController::Opponent));
+        req1.up_to = true;
+        req1.count = 1;
+        let reqs = vec![req0, req1];
+        let targets = vec![Target::Player(p0), Target::Player(p1)];
+        let chunks = split_targets_by_requirement(
+            &state, &ScriptRuntime::new(), &reqs, &targets, p0, ObjectId(1), None,
+        );
+        assert_eq!(chunks, Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]]));
+    }
+
+    #[test]
+    fn split_rejects_targets_too_short_for_exact_requirements() {
+        let p0 = PlayerId(0);
+        let state = state_with(Vec::new());
+        let reqs = vec![TargetRequirement {
+            filter: TargetFilter::Player { controller: None },
+            count: 2,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        }];
+        let targets = vec![Target::Player(p0)];
+        assert!(split_targets_by_requirement(
+            &state, &ScriptRuntime::new(), &reqs, &targets, p0, ObjectId(1), None,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn mode_with_resolvable_effect_can_join_others() {
+        let mode = mode_with_effect(AbilityEffect::Damage(3));
+        assert!(mode_can_join_others(&mode));
+    }
+
+    #[test]
+    fn mode_with_empty_multiple_requirement_cannot_join() {
+        let mode = SpellMode {
+            target_requirement: Some(TargetSpec::Multiple(Vec::new())),
+            effect: Some(AbilityEffect::Damage(3)),
+            additional_cost: None,
+            pawprint_weight: 0,
+        };
+        assert!(!mode_can_join_others(&mode));
+    }
+
+    #[test]
+    fn mode_with_unresolvable_effect_cannot_join() {
+        let mode = mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::White)]));
+        assert!(!mode_can_join_others(&mode));
+    }
+
+    #[test]
+    fn solo_only_modes_lists_only_non_joining_indices() {
+        let modes = vec![
+            mode_with_effect(AbilityEffect::Damage(3)),
+            mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::White)])),
+        ];
+        assert_eq!(solo_only_modes(&modes), vec![1]);
+    }
+
+    #[test]
+    fn combine_single_mode_returns_its_own_target_and_effect() {
+        let mode = mode_with_effect(AbilityEffect::Damage(3));
+        let result = combine_chosen_modes(&[mode.clone()], &[0]).unwrap();
+        assert_eq!(result.0, None);
+        assert_eq!(result.1, Some(AbilityEffect::Damage(3)));
+    }
+
+    #[test]
+    fn combine_two_modes_wraps_them_in_modal() {
+        let m1 = mode_with_effect(AbilityEffect::Damage(3));
+        let m2 = mode_with_effect(AbilityEffect::GainLife(2));
+        let result = combine_chosen_modes(&[m1, m2], &[0, 1]).unwrap();
+        assert!(matches!(result.0, Some(TargetSpec::Multiple(_))));
+        assert!(matches!(result.1, Some(AbilityEffect::Modal { .. })));
+    }
+
+    #[test]
+    fn combine_chosen_modes_errors_on_out_of_range_index() {
+        let mode = mode_with_effect(AbilityEffect::Damage(3));
+        assert!(combine_chosen_modes(&[mode], &[1]).is_err());
+    }
+
+    #[test]
+    fn combine_chosen_modes_errors_when_solo_only_mode_is_combined() {
+        let m1 = mode_with_effect(AbilityEffect::Damage(3));
+        let m2 = mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::White)]));
+        assert!(combine_chosen_modes(&[m1, m2], &[0, 1]).is_err());
+    }
+}

@@ -34,6 +34,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 026 Whole-declaration combat predicates. Menace and "attacks each combat if able" are one module, `commands/combat/predicate.rs`, called by `validate_declare_attackers`, `validate_declare_blockers`, `validate_pass_priority` and the two entry builders. Must-attack is the `ATTACKS_EACH_COMBAT` keyword bit, and `AttackerEntry` has `required`. [closed/026-whole-declaration-predicates.md]
 - 036 Mode-combination predicate. `mode_can_join_others` in `commands/legality.rs` is the shared rule for the cast, the modal entries, modal triggers and the opponent's mode choice. `ModeRange` and `ReplyShape::Modes` carry `solo_only`, and the entries refuse a solo-only mode beside another. [closed/036-mode-combination-predicate.md]
 - 048 Add unit tests for pure engine helpers. Added local `#[cfg(test)]` coverage for deterministic helpers in `color_identity.rs` and `types/{zone,object,player,counter,card,mana,cost}.rs`. [closed/048-add-unit-tests-pure-helpers.md]
+- 049 Add unit tests for engine helpers that need a small GameState or layer stubs. Added `#[cfg(test)]` coverage for `layers.rs`, `commands/legality.rs` and `commands/combat/predicate.rs` with minimal state fixtures. [closed/049-add-unit-tests-stubbed-helpers.md]
 
 ## Not yet specified
 
@@ -55,7 +56,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open build tickets, unblocked and unclaimed:
 
-- 049 Add unit tests for engine helpers that need a small GameState or layer stubs. [tickets/049-add-unit-tests-stubbed-helpers.md]
+- none
 
 Blocked:
 
