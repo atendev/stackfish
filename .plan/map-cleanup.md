@@ -74,7 +74,7 @@ Make the Lua surface area small, documented, and strict before scaling up card s
 - 052 Decide on Lua API removals, canonical forms, and strict key validation. Type grilling, HITL. Blocked by 050 and 051. Closed.
   - Pick the single canonical spelling for each concept, decide which aliases to cut, and agree on how unknown table keys fail at load time.
 - 053 Constructor-only operation and effect results (`Ops.Chain`, `AddKeyword` list). Type build, HITL. Blocked by 052. Closed.
-- 062 Strict key, type and counter-name validation in Lua decoders. Type build, HITL. Blocked by 061.
+- 062 Strict key, type and counter-name validation in Lua decoders. Type build, HITL. Blocked by 061. [closed/062-strict-lua-validation.md]
 - 063 Standardize parameter names, casing and mana argument order, fix stub drift, migrate the 25 `stackfish-db` scripts. Type build, HITL. Blocked by 062.
 - 054 Document the canonical Lua API in `docs/LUA_API.md`. Type task, HITL. Blocked by 063.
 
@@ -93,9 +93,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 062, 055, 056, 060
+- 063, 055, 056, 060
 
-Suggested order. Work 062, 063 in sequence; they edit the same script files. Research tickets 055 and 056 and grilling 060 can run in parallel.
+Suggested order. Work 063 next; it edits the same script files as 062. Research tickets 055 and 056 and grilling 060 can run in parallel.
 
 ## Not yet specified
 

@@ -91,7 +91,27 @@ checked fresh whenever it is asked.
 | `AtOrBelowLife(threshold)` | True iff the ability's controller's current life total is at or below `threshold`. "At the beginning of your upkeep, if you have 10 or less life..." is `Game.Conditions.AtOrBelowLife(10)`. |
 | `ControlsAtLeast(filter, count)` | CR 611.2c, "as long as you control `count` or more permanents matching `filter`." `filter` is a raw flat table, the same shape as `DiesMatching` above. |
 | `Escaped` | CR 603.4, 702.138b, "if it escaped" (an enters trigger that checks how the permanent was cast). A bare tag. |
-| `HadNoCounters(kind)` | CR 603.4, 702.79a, 702.93a, "if it had no `kind` counters on it" (Persist, Undying), checked against the object as it died. |
+| `HadNoCounters(kind)` | CR 603.4, 702.79a, 702.93a, "if it had no `kind` counters on it" (Persist, Undying), checked against the object as it died. `kind` is a `Game.Counter.*` tag or a known counter kind name. |
+
+## `Game.Counter.*`
+
+Common counter kinds and a custom-counter constructor. Everywhere a counter kind is expected
+(`Game.Ops.Counters`, `Game.Ops.AddCountersTo`, `Game.Ops.ReturnSelfWithCounter`,
+`Game.Conditions.HadNoCounters`, `Game.ReplacementPayloads.EntersWithCounters`,
+`Game.ReplacementPayloads.EntersWithCountersBloodthirst`) you may pass either a known name string
+or one of these tags. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")`
+for flavor counters.
+
+| Name | Meaning |
+|---|---|
+| `PlusOnePlusOne` | +1/+1 counters. |
+| `MinusOneMinusOne` | -1/-1 counters. |
+| `Loyalty` | Loyalty counters (planeswalkers). |
+| `Poison` | Poison counters. |
+| `Energy` | Energy counters. |
+| `Experience` | Experience counters. |
+| `Charge` | Charge counters. |
+| `Custom(name)` | Factory for any other counter kind; `name` is the flavor counter's name. |
 
 ## `Game.Affected.*`
 
@@ -175,13 +195,13 @@ what the ability/spell actually does when it resolves.
 | `ForEachPlayer(x)` | `x`: `function(source, controller, state)`, or a bare `SacrificeRandom`/`DiscardRandom`/`Mill`/`LoseLife` value | CR 101.4 (APNAP) — invokes `x` once per player, active player first (or, for the bare-tag shape, draws each player's own random picks, or applies the mill or life loss to each player, with no script involved at all). Inside this wrapper `Mill`/`LoseLife` act on every player and ignore the ability's own target. See [targeting-and-choices.md](targeting-and-choices.md#applying-an-effect-to-each-player) for the full shape, including the CR 101.4 simultaneity guarantee. |
 | `Chain(a, b, ...)` | One or more called `Game.Ops.*` values, for example `Game.Ops.Chain(Game.Ops.Destroy, Game.Ops.DrawCards(1))`. | CR 608.2c, runs the operations in the order written. An operation that pauses (a CR 616.1 ordering choice, a search, a scry) holds the rest until it is answered, and one that can't act leaves the next to run (CR 609.3). All entries share the ability's one `:SetTarget`/`s.target_requirement()`; an entry that doesn't use a target ignores it, and a target that is illegal at resolution fizzles the whole chain (CR 608.2b). Load errors: no arguments, a nested `Chain`, `ForEachPlayer`, `AddMana*`, a custom function, an uncalled constructor (`Game.Ops.Mill` without arguments). TODO: separate targets per entry ("destroy target creature, then deal 2 damage to target player"), a chain inside `ForEachPlayer`, a custom function as an entry, and a chain as a mode of a modal spell. |
 | `ChainEach({ op, words }, ...)` | One or more `{ op, words }` pairs. `op` is a called `Game.Ops.*` value (same limits as `Chain`), `words` is a whole number of 0 or more, for example `Game.Ops.ChainEach({ Game.Ops.DrawCards(2), 0 }, { Game.Ops.DrawCards(2), 1 })`. | CR 601.2c/608.2c, `Chain` where entry i owns `words` consecutive target words of the ability's target requirement, in order, the way a modal spell's modes own theirs. An entry that owns none acts on its controller. The counts must add up to the words declared by `:SetTarget` (an array gives one word per entry, a bare table is one word) or `s.target_requirement()`, or the ability fails to register and the spell fails to load. An entry whose own word became illegal does nothing while the others still run, and the whole thing fizzles only if every target is illegal (CR 608.2b). Example, "Draw 2 cards. Target opponent draws 2 cards.", with `s.target_requirement()` returning `{ type = "player", controller = "opponent", count = 1 }`. TODO: one word shared by two entries ("destroy target creature, then its controller gains 3 life"). |
-| `Counters(kind, amount)` | `kind`: counter kind name, e.g. `"PlusOnePlusOne"`, `"MinusOneMinusOne"`, `"Loyalty"`, `"Poison"`, `"Energy"`, `"Experience"`, `"Charge"`; any other string becomes a custom counter kind with that name. `amount`: integer. | CR 122.1a, puts `amount` counters of `kind` on the ability's target. Object targets only — no player-facing counters (Energy/Experience on a player) yet. |
+| `Counters(kind, amount)` | `kind`: counter kind name from the known set or a `Game.Counter.*` tag. Unknown strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. `amount`: integer. | CR 122.1a, puts `amount` counters of `kind` on the ability's target. Object targets only — no player-facing counters (Energy/Experience on a player) yet. |
 | `Pump(power, toughness, duration)` | `power`/`toughness`: integers (can be negative). `duration`: a `Game.Durations.*` value. | "Target creature gets +X/+Y until `duration`." Every legal target gets its own independent effect. |
 | `GainControl(duration)` | `duration`: a `Game.Durations.*` value. | CR 108.4/613.1, "gain control of target permanent until `duration`" (Threaten-style). The new controller is always whoever controls the resolving spell/ability — there's no separate "give control to a specific player" argument. Only covers a resolving spell/ability's own one-shot control change; a static "you control enchanted creature" aura effect isn't built yet. |
 | `Regenerate` | — | CR 701.19a, gives the ability's target a one-shot regeneration shield. A target that can't be regenerated gets no shield (silently) rather than erroring. |
 | `DrawCards(amount)` | integer | CR 120.3/121, the ability's controller draws exactly `amount` cards. If the ability declares a player target word ("target player draws two cards", "target opponent draws a card"), the first legal player target draws instead, and nobody draws if that target is gone. A target requirement with no player word ("destroy target creature, then draw") leaves the controller drawing. Drawing from an empty library currently just stops, rather than being tracked as a loss condition. |
 | `DealDamageTo(pick, amount)` | `pick`: a `{ kind, id }` pick from `Game.SelectTargets`/`Game.ChooseN`. `amount`: integer. | CR 120.3, deals `amount` damage to `pick` through the normal damage pipeline. Only valid as a custom operation function's return value, alone or inside a `Chain`. See [targeting-and-choices.md](targeting-and-choices.md#drawing-dealing-damage-and-adding-counters). |
-| `AddCountersTo(pick, counter, amount)` | `pick`: an object pick. `counter`: a counter kind name. `amount`: integer. | CR 122.1, puts `amount` counters on `pick`. Only valid as a custom operation function's return value, alone or inside a `Chain`. |
+| `AddCountersTo(pick, counter, amount)` | `pick`: an object pick. `counter`: a counter kind name or `Game.Counter.*` tag. `amount`: integer. | CR 122.1, puts `amount` counters on `pick`. Only valid as a custom operation function's return value, alone or inside a `Chain`. |
 | `CreateToken(spec, count?)` | `spec`: a `Game.Tokens.*` value — see [tokens.md](tokens.md). `count`: how many copies, default 1. | CR 111, creates one or more tokens under the controller's control. |
 | `Shuffle` | — | CR 701.19b (mechanic), the resolving controller shuffles their own library. No "target player shuffles" shape yet. |
 | `Scry(n)` | integer | CR 701.22a, look at the top `n` cards of your library, then put any number on the bottom (any order) and the rest back on top (any order). `n = 0` (or an empty library) is a true no-op. |
@@ -410,8 +430,8 @@ substitution. Each only pairs with the filter(s) noted; see
 | `Regenerate` | — | `WouldDie` | CR 701.19b, a repeatable regeneration shield ("each time this would die," not just the next time — contrast the one-shot `Game.Ops.Regenerate` operation). |
 | `ReplaceZoneDestination(zone)` | a zone name string | `WouldDie` or `WouldMoveZone` | CR 614.13-style "instead" substitution — the object goes to `zone` instead of its original destination. |
 | `EntersTapped` | — | `WouldMoveZone(_, "Battlefield")` | CR 603.6d, the permanent enters tapped. |
-| `EntersWithCounters(kind, amount)` | counter kind name, integer | `WouldMoveZone(_, "Battlefield")` | The permanent enters with this many counters already on it (e.g. Modular). |
-| `EntersWithCountersBloodthirst(kind, amount)` | counter kind name, integer | `WouldMoveZone(_, "Battlefield")` | CR 702.54a Bloodthirst — the counters are only added if an opponent was dealt damage this turn (checked automatically, no separate condition needed). |
+| `EntersWithCounters(kind, amount)` | counter kind name or `Game.Counter.*` tag, integer | `WouldMoveZone(_, "Battlefield")` | The permanent enters with this many counters already on it (e.g. Modular). |
+| `EntersWithCountersBloodthirst(kind, amount)` | counter kind name or `Game.Counter.*` tag, integer | `WouldMoveZone(_, "Battlefield")` | CR 702.54a Bloodthirst — the counters are only added if an opponent was dealt damage this turn (checked automatically, no separate condition needed). |
 | `EntersWithCountersSunburst` | — | `WouldMoveZone(_, "Battlefield")` | CR 702.44 Sunburst — kind and amount are derived automatically from the mana spent to cast this permanent. |
 | `EntersWithCountersDevour(perCreature)` | integer | `WouldMoveZone(_, "Battlefield")` | CR 702.82a Devour — this permanent's controller is asked, as it enters, how many creatures to sacrifice; it enters with `perCreature` × (creatures sacrificed) counters. "Devour [quality] N" (sacrificing only permanents of a named quality, not just any creature) isn't modeled yet. |
 | `EntersWithCountersAmplify(perCard)` | integer | `WouldMoveZone(_, "Battlefield")` | CR 702.38a Amplify — the controller is asked to reveal matching cards from hand as it enters; it enters with `perCard` × (cards revealed) counters. A single creature having multiple independent Amplify instances isn't modeled yet. |

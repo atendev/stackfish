@@ -12,11 +12,11 @@ assuming a signature you don't see documented is just "missing from the docs."
 - **[Card script basics](card-script-basics.md)** — how a card's Lua actually runs: the
   `register_abilities(c)` structure, the condition/operation split, primitives vs. custom functions,
   and how a card's registrations reset when it changes zones. Read this first.
-- **[Game constants reference](game-constants.md)** — every `Game.Conditions.*`, `Game.Conditions.*`,
-  `Game.Ops.*`, `Game.Costs.*`, `Game.Layers.*`, `Game.Effects.*`, `Game.Durations.*`,
-  `Game.EventFilters.*`, `Game.ReplacementPayloads.*`, `Game.Consumption.*`, and `Game.Tokens.*`
-  entry, in one page, organized by table. The page to search when you know roughly what primitive
-  you want and need its exact Lua signature.
+- **[Game constants reference](game-constants.md)** — every `Game.Conditions.*`, `Game.Counter.*`,
+  `Game.Affected.*`, `Game.Ops.*`, `Game.Costs.*`, `Game.Layers.*`, `Game.Effects.*`,
+  `Game.Durations.*`, `Game.EventFilters.*`, `Game.ReplacementPayloads.*`, `Game.Consumption.*`,
+  and `Game.Tokens.*` entry, in one page, organized by table. The page to search when you know
+  roughly what primitive you want and need its exact Lua signature.
 
 ## Registering an ability (one page per kind)
 

@@ -353,10 +353,10 @@ e:SetOperation(function(source, controller)
 end)
 ```
 
-`Game.Ops.AddCountersTo(pick, counter, amount)` — `counter` is a counter kind name
-(`"PlusOnePlusOne"`, `"MinusOneMinusOne"`, `"Loyalty"`, `"Poison"`, `"Energy"`, `"Experience"`,
-`"Charge"`, or any other string for a custom counter kind). Object targets only — a player pick is
-silently skipped, same as every other CR 613 counter-adding shape in this engine.
+`Game.Ops.AddCountersTo(pick, counter, amount)` — `counter` is a counter kind name from the
+known set or a `Game.Counter.*` tag. Use `Game.Counter.Custom("Name")` for flavor counters; unknown
+plain strings raise a load error. Object targets only — a player pick is silently skipped, same as
+every other CR 613 counter-adding shape in this engine.
 
 To return several of these, use `Game.Ops.Chain(a, b, ...)`. A chain inside a custom function may hold
 `GainLife` (applied directly) plus at most one pending kind: zone moves (`SacrificeChosen` and

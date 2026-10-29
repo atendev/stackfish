@@ -3,7 +3,8 @@ use crate::types::ability::InterveningIfSpec;
 use crate::types::card::{CardTypeSet, KeywordSet, PTValue, ScriptReference};
 use crate::types::counter::CounterKind;
 use crate::types::effect::{
-    AffectedFilter, ContinuousEffect, EffectPayload, EffectPrimitive, EffectiveCharacteristics, Layer,
+    AffectedFilter, ContinuousEffect, EffectPayload, EffectPrimitive, EffectiveCharacteristics,
+    Layer,
 };
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
@@ -29,14 +30,26 @@ pub fn effective_characteristics(
     script_runtime: &ScriptRuntime,
     object: ObjectId,
 ) -> EffectiveCharacteristics {
-    let obj = state
-        .object(object)
-        .unwrap_or_else(|| panic!("effective_characteristics called with unknown ObjectId {object:?}"));
+    let obj = state.object(object).unwrap_or_else(|| {
+        panic!("effective_characteristics called with unknown ObjectId {object:?}")
+    });
     // CR 613.1a: a copy takes its copiable values from a stored snapshot, not a layer 1 effect.
     let def = obj.copiable_override.as_ref().unwrap_or(&obj.definition);
 
-    let mut power = resolve_base_pt(def.power.as_ref(), state, script_runtime, object, obj.controller);
-    let mut toughness = resolve_base_pt(def.toughness.as_ref(), state, script_runtime, object, obj.controller);
+    let mut power = resolve_base_pt(
+        def.power.as_ref(),
+        state,
+        script_runtime,
+        object,
+        obj.controller,
+    );
+    let mut toughness = resolve_base_pt(
+        def.toughness.as_ref(),
+        state,
+        script_runtime,
+        object,
+        obj.controller,
+    );
     let mut keywords = def.keywords;
     let mut card_types = def.card_types;
     // CR 105.2a, 202.2: a color indicator if set, otherwise the mana cost symbols.
@@ -61,8 +74,20 @@ pub fn effective_characteristics(
                 supertypes = donor.supertypes;
                 subtypes = donor.subtypes.clone();
                 keywords = donor.keywords;
-                power = resolve_base_pt(donor.power.as_ref(), state, script_runtime, object, obj.controller);
-                toughness = resolve_base_pt(donor.toughness.as_ref(), state, script_runtime, object, obj.controller);
+                power = resolve_base_pt(
+                    donor.power.as_ref(),
+                    state,
+                    script_runtime,
+                    object,
+                    obj.controller,
+                );
+                toughness = resolve_base_pt(
+                    donor.toughness.as_ref(),
+                    state,
+                    script_runtime,
+                    object,
+                    obj.controller,
+                );
             }
             _ => {}
         }
@@ -174,9 +199,13 @@ pub fn effective_characteristics(
     }
 
     // Layer 7b: the later timestamp overrides outright.
-    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSetting) {
-        if let Some(EffectPrimitive::SetPT { power: p, toughness: t }) =
-            resolve_primitive(effect, state, script_runtime, obj.controller)
+    for effect in
+        applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSetting)
+    {
+        if let Some(EffectPrimitive::SetPT {
+            power: p,
+            toughness: t,
+        }) = resolve_primitive(effect, state, script_runtime, obj.controller)
         {
             power = Some(p);
             toughness = Some(t);
@@ -186,16 +215,24 @@ pub fn effective_characteristics(
     // Layer 7c (CR 613.4c): modifying is additive, and `applicable_effects_in_layer`
     // already orders `ModifyPT` before a dependent `DoublePT` (CR 613.8a).
     // Counters merge in by timestamp against that order without being re-sorted into it.
-    let modify_effects = applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessModifying);
+    let modify_effects =
+        applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessModifying);
     let mut counter_deltas: Vec<(SequenceNo, i32, i32)> = obj
         .counters
         .batches(&CounterKind::PlusOnePlusOne)
         .map(|(amount, ts)| (ts, amount, amount))
-        .chain(obj.counters.batches(&CounterKind::MinusOneMinusOne).map(|(amount, ts)| (ts, -amount, -amount)))
+        .chain(
+            obj.counters
+                .batches(&CounterKind::MinusOneMinusOne)
+                .map(|(amount, ts)| (ts, -amount, -amount)),
+        )
         .collect();
     counter_deltas.sort_by_key(|(ts, _, _)| *ts);
     let mut next_counter = 0;
-    let apply_counters_up_to = |power: &mut Option<i32>, toughness: &mut Option<i32>, next_counter: &mut usize, before: SequenceNo| {
+    let apply_counters_up_to = |power: &mut Option<i32>,
+                                toughness: &mut Option<i32>,
+                                next_counter: &mut usize,
+                                before: SequenceNo| {
         while *next_counter < counter_deltas.len() && counter_deltas[*next_counter].0 < before {
             let (_, dp, dt) = counter_deltas[*next_counter];
             *power = power.map(|p| p + dp);
@@ -204,13 +241,24 @@ pub fn effective_characteristics(
         }
     };
     for effect in modify_effects {
-        apply_counters_up_to(&mut power, &mut toughness, &mut next_counter, effect.timestamp);
+        apply_counters_up_to(
+            &mut power,
+            &mut toughness,
+            &mut next_counter,
+            effect.timestamp,
+        );
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
-            Some(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) => {
+            Some(EffectPrimitive::ModifyPT {
+                power: dp,
+                toughness: dt,
+            }) => {
                 power = power.map(|p| p + dp);
                 toughness = toughness.map(|t| t + dt);
             }
-            Some(EffectPrimitive::DoublePT { power: double_power, toughness: double_toughness }) => {
+            Some(EffectPrimitive::DoublePT {
+                power: double_power,
+                toughness: double_toughness,
+            }) => {
                 if double_power {
                     power = power.map(|p| p * 2);
                 }
@@ -221,11 +269,21 @@ pub fn effective_characteristics(
             _ => {}
         }
     }
-    apply_counters_up_to(&mut power, &mut toughness, &mut next_counter, SequenceNo(u64::MAX));
+    apply_counters_up_to(
+        &mut power,
+        &mut toughness,
+        &mut next_counter,
+        SequenceNo(u64::MAX),
+    );
 
     // Layer 7e (CR 613.4d): skipped when either side is unresolved.
-    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSwitching) {
-        if matches!(resolve_primitive(effect, state, script_runtime, obj.controller), Some(EffectPrimitive::SwitchPT)) {
+    for effect in
+        applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSwitching)
+    {
+        if matches!(
+            resolve_primitive(effect, state, script_runtime, obj.controller),
+            Some(EffectPrimitive::SwitchPT)
+        ) {
             if let (Some(p), Some(t)) = (power, toughness) {
                 power = Some(t);
                 toughness = Some(p);
@@ -263,13 +321,19 @@ pub fn effective_characteristics(
 /// in layer 2 over `GameObject.controller`.
 ///
 // TODO: read the effective controller at the combat, targeting, cost-filter and summoning-sickness sites
-pub fn effective_controller(state: &GameState, script_runtime: &ScriptRuntime, object: ObjectId) -> PlayerId {
+pub fn effective_controller(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    object: ObjectId,
+) -> PlayerId {
     let obj = state
         .object(object)
         .unwrap_or_else(|| panic!("effective_controller called with unknown ObjectId {object:?}"));
     let mut controller = obj.controller;
 
-    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::ControlChangingEffects) {
+    for effect in
+        applicable_effects_in_layer(state, script_runtime, obj, Layer::ControlChangingEffects)
+    {
         if let Some(EffectPrimitive::GainControl(new_controller)) =
             resolve_primitive(effect, state, script_runtime, controller)
         {
@@ -301,11 +365,15 @@ fn applicable_effects_in_layer<'a>(
         .filter(|e| e.layer == layer)
         .filter(|e| {
             // A source that no longer resolves cannot supply a controller, so the effect is skipped.
-            let Some(source_obj) = state.object(e.source) else { return false };
+            let Some(source_obj) = state.object(e.source) else {
+                return false;
+            };
             // Script errors are not logged: this hot query path holds only `&GameState`.
             let condition_holds = match &e.condition {
                 None => true,
-                Some(InterveningIfSpec::Primitive(p)) => p.holds(state, source_obj.controller, e.source, None),
+                Some(InterveningIfSpec::Primitive(p)) => {
+                    p.holds(state, source_obj.controller, e.source, None)
+                }
                 Some(InterveningIfSpec::Script(handle)) => script_runtime
                     .invoke_intervening_if(*handle, state, e.source, source_obj.controller)
                     .unwrap_or(false),
@@ -352,8 +420,16 @@ fn order_by_dependency<'a>(
     while !remaining.is_empty() {
         let ready: Vec<usize> = (0..remaining.len())
             .filter(|&i| {
-                (0..remaining.len())
-                    .all(|j| i == j || !depends_on(remaining[i], remaining[j], state, script_runtime, controller))
+                (0..remaining.len()).all(|j| {
+                    i == j
+                        || !depends_on(
+                            remaining[i],
+                            remaining[j],
+                            state,
+                            script_runtime,
+                            controller,
+                        )
+                })
             })
             .collect();
 
@@ -364,7 +440,10 @@ fn order_by_dependency<'a>(
             return placed;
         }
 
-        let next = *ready.iter().min_by_key(|&&i| remaining[i].timestamp).unwrap();
+        let next = *ready
+            .iter()
+            .min_by_key(|&&i| remaining[i].timestamp)
+            .unwrap();
         placed.push(remaining.remove(next));
     }
 
@@ -388,10 +467,18 @@ fn depends_on(
         return false;
     };
     match (this, that) {
-        (EffectPrimitive::DoublePT { power, toughness }, EffectPrimitive::ModifyPT { .. }) => power || toughness,
+        (EffectPrimitive::DoublePT { power, toughness }, EffectPrimitive::ModifyPT { .. }) => {
+            power || toughness
+        }
         (
-            EffectPrimitive::DoublePT { power: p1, toughness: t1 },
-            EffectPrimitive::DoublePT { power: p2, toughness: t2 },
+            EffectPrimitive::DoublePT {
+                power: p1,
+                toughness: t1,
+            },
+            EffectPrimitive::DoublePT {
+                power: p2,
+                toughness: t2,
+            },
         ) => (p1 && p2) || (t1 && t2),
         _ => false,
     }
@@ -411,10 +498,26 @@ fn resolve_primitive(
         EffectPayload::Script(handle) => {
             // CR 303.4m: the enchanted permanent's id is passed so a script can reference it.
             let enchanted = state.object(effect.source).and_then(|o| o.attached_to);
-            script_runtime
-                .invoke_continuous_effect(*handle, state, effect.source, controller, enchanted)
-                .ok()
-                .flatten()
+            // `effective_characteristics` holds only `&GameState`, so a script error here is
+            // logged but cannot be propagated as a result. The conservative fallback is to treat
+            // the effect as absent for this computation.
+            match script_runtime.invoke_continuous_effect(
+                *handle,
+                state,
+                effect.source,
+                controller,
+                enchanted,
+            ) {
+                Ok(Some(p)) => Some(p),
+                Ok(None) => None,
+                Err(e) => {
+                    eprintln!(
+                        "continuous effect script error for object {:?}: {e:?}",
+                        effect.source
+                    );
+                    None
+                }
+            }
         }
     }
 }
@@ -429,10 +532,14 @@ fn resolve_base_pt(
     source: ObjectId,
     controller: PlayerId,
 ) -> Option<i32> {
-    if let Some(PTValue::CharacteristicDefining { script: Some(ScriptReference::Inline(source_code)), .. }) =
-        value
+    if let Some(PTValue::CharacteristicDefining {
+        script: Some(ScriptReference::Inline(source_code)),
+        ..
+    }) = value
     {
-        return script_runtime.invoke_cda(source_code, state, source, controller).ok();
+        return script_runtime
+            .invoke_cda(source_code, state, source, controller)
+            .ok();
     }
     value.and_then(|v| v.as_fixed())
 }
@@ -440,8 +547,9 @@ fn resolve_base_pt(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CardTypeSet, KeywordSet, ManaPool};
-    use crate::types::card::{CardDefinition, ModeChoice, PTValue, ScriptReference, SupertypeSet as SupertypeSetT};
+    use crate::types::card::{
+        CardDefinition, ModeChoice, PTValue, ScriptReference, SupertypeSet as SupertypeSetT,
+    };
     use crate::types::counter::{CounterKind, CounterSet};
     use crate::types::game::{GameState, RngState};
     use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
@@ -449,6 +557,7 @@ mod tests {
     use crate::types::object::{GameObject, VisibilityPolicy};
     use crate::types::player::PlayerState;
     use crate::types::zone::ZoneKind;
+    use crate::{CardTypeSet, KeywordSet, ManaPool};
     use std::collections::HashMap;
 
     fn player(id: PlayerId) -> PlayerState {
@@ -467,14 +576,21 @@ mod tests {
         }
     }
 
-    fn object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet, zone: ZoneKind) -> GameObject {
+    fn object(
+        id: ObjectId,
+        controller: PlayerId,
+        card_types: CardTypeSet,
+        zone: ZoneKind,
+    ) -> GameObject {
         GameObject {
             object_id: id,
             lineage: crate::types::ids::ObjectLineage { previous: None },
             definition: CardDefinition {
                 definition_id: 1,
                 name: "Test Object".to_string(),
-                mana_cost: ManaCost { symbols: Vec::new() },
+                mana_cost: ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator: None,
                 supertypes: SupertypeSetT::empty(),
                 card_types,
@@ -511,13 +627,21 @@ mod tests {
             controlled_since_turn: 0,
             is_commander: false,
             is_token: false,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
     }
 
-    fn creature_with_pt(id: ObjectId, controller: PlayerId, power: i32, toughness: i32) -> GameObject {
+    fn creature_with_pt(
+        id: ObjectId,
+        controller: PlayerId,
+        power: i32,
+        toughness: i32,
+    ) -> GameObject {
         let mut obj = object(id, controller, CardTypeSet::CREATURE, ZoneKind::Battlefield);
         obj.definition.power = Some(PTValue::Fixed(power));
         obj.definition.toughness = Some(PTValue::Fixed(toughness));
@@ -550,7 +674,10 @@ mod tests {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: RngState { seed: 1, draws_consumed: 0 },
+            rng: RngState {
+                seed: 1,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no: 10,
             next_object_id: 1000,
@@ -601,7 +728,12 @@ mod tests {
     fn effective_controller_without_effects_returns_raw_controller() {
         let p0 = PlayerId(0);
         let id = ObjectId(1);
-        let state = state_with(vec![object(id, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        let state = state_with(vec![object(
+            id,
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        )]);
         assert_eq!(effective_controller(&state, &ScriptRuntime::new(), id), p0);
     }
 
@@ -610,7 +742,12 @@ mod tests {
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let id = ObjectId(1);
-        let mut state = state_with(vec![object(id, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        let mut state = state_with(vec![object(
+            id,
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        )]);
         state.players.push(player(p1));
         state.continuous_effects.push(continuous_effect(
             id,
@@ -641,7 +778,12 @@ mod tests {
     fn add_card_type_unions_with_base_types() {
         let p0 = PlayerId(0);
         let id = ObjectId(1);
-        let mut state = state_with(vec![object(id, p0, CardTypeSet::LAND, ZoneKind::Battlefield)]);
+        let mut state = state_with(vec![object(
+            id,
+            p0,
+            CardTypeSet::LAND,
+            ZoneKind::Battlefield,
+        )]);
         state.continuous_effects.push(continuous_effect(
             id,
             Layer::TypeChanging,
@@ -658,7 +800,12 @@ mod tests {
     fn set_card_types_overwrites_earlier_type_changes() {
         let p0 = PlayerId(0);
         let id = ObjectId(1);
-        let mut state = state_with(vec![object(id, p0, CardTypeSet::LAND, ZoneKind::Battlefield)]);
+        let mut state = state_with(vec![object(
+            id,
+            p0,
+            CardTypeSet::LAND,
+            ZoneKind::Battlefield,
+        )]);
         state.continuous_effects.push(continuous_effect(
             id,
             Layer::TypeChanging,
@@ -680,7 +827,12 @@ mod tests {
     #[test]
     fn add_color_unions_with_base_color() {
         let p0 = PlayerId(0);
-        let mut obj = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        let mut obj = object(
+            ObjectId(1),
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        );
         obj.definition.color_indicator = Some(crate::ColorSet::BLUE);
         let mut state = state_with(vec![obj]);
         state.continuous_effects.push(continuous_effect(
@@ -698,7 +850,12 @@ mod tests {
     #[test]
     fn add_keyword_grants_and_remove_keyword_removes() {
         let p0 = PlayerId(0);
-        let mut obj = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        let mut obj = object(
+            ObjectId(1),
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        );
         obj.definition.keywords = KeywordSet::FLYING;
         let mut state = state_with(vec![obj]);
         state.continuous_effects.push(continuous_effect(
@@ -728,7 +885,10 @@ mod tests {
         state.continuous_effects.push(continuous_effect(
             id,
             Layer::PowerToughnessModifying,
-            EffectPrimitive::ModifyPT { power: 2, toughness: -1 },
+            EffectPrimitive::ModifyPT {
+                power: 2,
+                toughness: -1,
+            },
             self_filter(id),
             1,
         ));
@@ -745,7 +905,10 @@ mod tests {
         state.continuous_effects.push(continuous_effect(
             id,
             Layer::PowerToughnessSetting,
-            EffectPrimitive::SetPT { power: 5, toughness: 5 },
+            EffectPrimitive::SetPT {
+                power: 5,
+                toughness: 5,
+            },
             self_filter(id),
             1,
         ));
@@ -762,14 +925,20 @@ mod tests {
         state.continuous_effects.push(continuous_effect(
             id,
             Layer::PowerToughnessModifying,
-            EffectPrimitive::ModifyPT { power: 2, toughness: 0 },
+            EffectPrimitive::ModifyPT {
+                power: 2,
+                toughness: 0,
+            },
             self_filter(id),
             1,
         ));
         state.continuous_effects.push(continuous_effect(
             id,
             Layer::PowerToughnessModifying,
-            EffectPrimitive::DoublePT { power: true, toughness: false },
+            EffectPrimitive::DoublePT {
+                power: true,
+                toughness: false,
+            },
             self_filter(id),
             2,
         ));
@@ -800,7 +969,8 @@ mod tests {
         let p0 = PlayerId(0);
         let id = ObjectId(1);
         let mut obj = creature_with_pt(id, p0, 2, 2);
-        obj.counters.add(CounterKind::PlusOnePlusOne, 3, SequenceNo(1));
+        obj.counters
+            .add(CounterKind::PlusOnePlusOne, 3, SequenceNo(1));
         let state = state_with(vec![obj]);
         let ec = effective_characteristics(&state, &ScriptRuntime::new(), id);
         assert_eq!(ec.power, Some(5));
