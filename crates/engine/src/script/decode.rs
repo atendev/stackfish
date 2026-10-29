@@ -14,8 +14,8 @@ use crate::types::target::{ManaValueBound, ManaValueComparison, ManaValueRequire
 use crate::types::zone::ZoneKind;
 
 use super::tags::{
-    ConditionTag, CostComponent, CostTag, EffectPrimitiveTag, ForEachPlayerTag, LayerTag, OncePerTurnTag,
-    OperationTag,
+    AffectedTag, ConditionTag, CostComponent, CostTag, EffectPrimitiveTag, FilterTag, ForEachPlayerTag,
+    InterveningIfTag, LayerTag, OncePerTurnTag, OperationTag,
 };
 use super::types::{ScriptChoiceRequest, ScriptError, ScriptRegistry};
 
@@ -38,6 +38,13 @@ pub(crate) fn decode_condition_value(
             if let Ok(tag) = ud.borrow::<OncePerTurnTag>() {
                 return Ok(ConditionSpec::PrimitiveOncePerTurn(tag.0.clone()));
             }
+            if ud.is::<InterveningIfTag>() {
+                return Err(ScriptError::LoadError(
+                    "that Game.Conditions value checks game state (AtOrBelowLife, ControlsAtLeast, Escaped, \
+                     HadNoCounters), so it belongs in :SetInterveningIf, not :SetCondition"
+                        .to_string(),
+                ));
+            }
             Err(ScriptError::LoadError(
                 "condition script returned an unrecognized userdata value".to_string(),
             ))
@@ -51,8 +58,8 @@ pub(crate) fn decode_condition_value(
             Ok(ConditionSpec::Script(handle))
         }
         Value::Nil => Err(ScriptError::LoadError(
-            "condition script returned nil - use `return Game.Conditions.Always` \
-             for an explicit unconditional trigger, not an empty/typo'd chunk"
+            "condition script returned nil - expected a Game.Conditions.* value or a function; \
+             omit :SetCondition for an unconditional ability"
                 .to_string(),
         )),
         other => Err(ScriptError::LoadError(format!(
@@ -195,68 +202,138 @@ pub(crate) fn decode_alternative_cost_table(table: Table) -> Result<AlternativeC
     Ok(AlternativeCost::Replacement { description, cost, from_zone, exile_on_leaving_stack, escape })
 }
 
-/// The filter argument of `:AddCost`, `Game.Costs.Sacrifice`, `Discard`,
-/// `TapPermanents` and `Game.Ops.Search`: a plain Lua table
-/// (`{controller=.., card_types={..}, supertypes={..}, subtypes={..},
-/// random=..}`, every key optional), like `decode_affected_value`. `extra` is
-/// never settable from Lua (see `FilterSpec::extra`) and is always `None`.
-pub(crate) fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
-    let controller_name: Option<String> =
-        table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+/// Every object filter key a script can write, decoded once. `Game.Filter`,
+/// the raw filter tables of `Game.Ops.*` and `Game.Costs.*`, and target tables
+/// all read their keys through `decode_object_filter_keys`, then each takes the
+/// fields it can match on (`into_filter_spec`, `into_effect_filter`, or
+/// `TargetFilter::Object`).
+#[derive(Clone, Default)]
+pub(crate) struct ObjectFilterKeys {
+    pub(crate) card_types: Option<CardTypeSet>,
+    pub(crate) excluded_card_types: Option<CardTypeSet>,
+    pub(crate) subtypes: Option<Vec<Subtype>>,
+    pub(crate) excluded_subtypes: Option<Vec<Subtype>>,
+    pub(crate) supertypes: Option<SupertypeSet>,
+    pub(crate) excluded_supertypes: Option<SupertypeSet>,
+    pub(crate) controller: Option<FilterController>,
+    pub(crate) zone: Option<ZoneKind>,
+    pub(crate) mana_value: Option<ManaValueRequirement>,
+    pub(crate) random: bool,
+}
 
-    let card_types_table: Option<Table> =
-        table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let card_types = match card_types_table {
-        Some(t) => {
-            let mut set = CardTypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                set |= parse_card_type_name(&name)?;
-            }
-            Some(set)
+impl ObjectFilterKeys {
+    /// `extra` is never settable from Lua (see `FilterSpec::extra`) and is always `None`.
+    pub(crate) fn into_filter_spec(self) -> FilterSpec {
+        FilterSpec {
+            card_types: self.card_types,
+            supertypes: self.supertypes,
+            subtypes: self.subtypes,
+            controller: self.controller,
+            random: self.random,
+            extra: None,
         }
-        None => None,
-    };
+    }
 
-    let supertypes_table: Option<Table> =
-        table.get("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let supertypes = match supertypes_table {
-        Some(t) => {
-            let mut set = SupertypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                set |= parse_supertype_name(&name)?;
-            }
-            Some(set)
+    pub(crate) fn into_effect_filter(self) -> EffectFilter {
+        EffectFilter {
+            controller: self.controller,
+            card_types: self.card_types,
+            subtypes: self.subtypes,
+            excluded_subtypes: self.excluded_subtypes,
+            supertypes: self.supertypes,
+            excluded_supertypes: self.excluded_supertypes,
+            self_only: false,
         }
-        None => None,
-    };
+    }
+}
 
-    let subtypes_table: Option<Table> =
-        table.get("subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let subtypes = match subtypes_table {
-        Some(t) => {
-            let mut list = Vec::new();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                list.push(Subtype(name));
-            }
-            Some(list)
-        }
-        None => None,
-    };
+fn lua_load_err(error: mlua::Error) -> ScriptError {
+    ScriptError::LoadError(error.to_string())
+}
 
-    let random: Option<bool> = table.get("random").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+fn read_names(table: &Table, key: &str) -> Result<Option<Vec<String>>, ScriptError> {
+    let list: Option<Table> = table.get(key).map_err(lua_load_err)?;
+    list.map(|list| list.sequence_values::<String>().map(|entry| entry.map_err(lua_load_err)).collect())
+        .transpose()
+}
 
-    Ok(FilterSpec {
-        card_types,
-        supertypes,
-        subtypes,
-        controller,
+fn read_card_types(table: &Table, key: &str) -> Result<Option<CardTypeSet>, ScriptError> {
+    let Some(names) = read_names(table, key)? else { return Ok(None) };
+    let mut set = CardTypeSet::empty();
+    for name in names {
+        set |= parse_card_type_name(&name)?;
+    }
+    Ok(Some(set))
+}
+
+fn read_supertypes(table: &Table, key: &str) -> Result<Option<SupertypeSet>, ScriptError> {
+    let Some(names) = read_names(table, key)? else { return Ok(None) };
+    let mut set = SupertypeSet::empty();
+    for name in names {
+        set |= parse_supertype_name(&name)?;
+    }
+    Ok(Some(set))
+}
+
+fn read_subtypes(table: &Table, key: &str) -> Result<Option<Vec<Subtype>>, ScriptError> {
+    Ok(read_names(table, key)?.map(|names| names.into_iter().map(Subtype).collect()))
+}
+
+fn read_controller(table: &Table) -> Result<Option<FilterController>, ScriptError> {
+    let name: Option<String> = table.get("controller").map_err(lua_load_err)?;
+    name.map(|name| parse_filter_controller_name(&name)).transpose()
+}
+
+/// The one reader of a flat object filter table (`{ controller = .., card_types
+/// = {..}, supertypes = {..}, subtypes = {..}, excluded_* = {..}, zone = ..,
+/// mana_value_* = .., random = .. }`, every key optional). CR 205.4a and
+/// 205.4b types, CR 601.2c and 115 negation ("nonland", "nonlegendary"), CR
+/// 202.3 mana value.
+///
+/// TODO: keywords, colors, name, other, power/toughness bounds, is_token, tapped, attacking, blocking have no engine backing yet
+/// TODO: unknown and wrong-typed keys pass silently until strict validation lands
+pub(crate) fn decode_object_filter_keys(table: &Table) -> Result<ObjectFilterKeys, ScriptError> {
+    let zone_name: Option<String> = table.get("zone").map_err(lua_load_err)?;
+    let random: Option<bool> = table.get("random").map_err(lua_load_err)?;
+    Ok(ObjectFilterKeys {
+        card_types: read_card_types(table, "card_types")?,
+        excluded_card_types: read_card_types(table, "excluded_card_types")?,
+        subtypes: read_subtypes(table, "subtypes")?,
+        excluded_subtypes: read_subtypes(table, "excluded_subtypes")?,
+        supertypes: read_supertypes(table, "supertypes")?,
+        excluded_supertypes: read_supertypes(table, "excluded_supertypes")?,
+        controller: read_controller(table)?,
+        zone: zone_name.map(|name| parse_zone_kind_name(&name)).transpose()?,
+        mana_value: decode_mana_value_keys(table)?,
         random: random.unwrap_or(false),
-        extra: None,
     })
+}
+
+/// The filter argument of `:AddCost`, `Game.Costs.Sacrifice`, `Discard`,
+/// `TapPermanents` and `Game.Ops.Search`: a flat table read by
+/// `decode_object_filter_keys`, of which a `FilterSpec` matches on
+/// `controller`, `card_types`, `supertypes`, `subtypes` and `random`.
+pub(crate) fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
+    Ok(decode_object_filter_keys(&table)?.into_filter_spec())
+}
+
+/// CR 202.3: "target spell with mana value X (or less, or greater)". Three
+/// independent optional keys, each a plain number (`ManaValueBound::Fixed`) or
+/// the string "X" (`ManaValueBound::X`, the cast or resolution's announced X).
+/// If several are set, `equals` wins over `at_most` over `at_least`, with no
+/// validation.
+fn decode_mana_value_keys(table: &Table) -> Result<Option<ManaValueRequirement>, ScriptError> {
+    for (key, comparison) in [
+        ("mana_value_equals", ManaValueComparison::Equal),
+        ("mana_value_at_most", ManaValueComparison::AtMost),
+        ("mana_value_at_least", ManaValueComparison::AtLeast),
+    ] {
+        let value: Option<Value> = table.get(key).map_err(lua_load_err)?;
+        if let Some(value) = value {
+            return Ok(Some(ManaValueRequirement { comparison, bound: decode_mana_value_bound(value)? }));
+        }
+    }
+    Ok(None)
 }
 
 /// `CardTypeSet` names by printed card type. Mirrors `parse_card_types` in the
@@ -387,9 +464,14 @@ pub(crate) fn parse_supertype_name(name: &str) -> Result<SupertypeSet, ScriptErr
     })
 }
 
-/// Decodes the `subtypes` argument: either a Lua string `"Soldier"` (one
-/// subtype) or a Lua table `{"Elf", "Warrior"}` (multiple).
-pub(crate) fn decode_subtypes(val: Value) -> Result<Vec<String>, ScriptError> {
+/// A string (`"Soldier"`) or a Lua list (`{"Elf", "Warrior"}`) of names, for
+/// the `subtypes` argument of `Game.Tokens.Creature` and
+/// `Game.Effects.SetCardTypes`. A "set" must express the whole resulting type
+/// line in one call ("becomes an artifact creature" sets two types), because
+/// two `SetCardTypes` registrations wouldn't compose: the later wipes the
+/// earlier (see the layer 4 fold in `layers::effective_characteristics`).
+/// `what` names the argument in the error.
+pub(crate) fn decode_name_list(val: Value, what: &str) -> Result<Vec<String>, ScriptError> {
     match val {
         Value::String(s) => Ok(vec![s.to_str().map_err(|e| ScriptError::LoadError(e.to_string()))?.to_string()]),
         Value::Table(t) => {
@@ -399,27 +481,7 @@ pub(crate) fn decode_subtypes(val: Value) -> Result<Vec<String>, ScriptError> {
             }
             Ok(out)
         }
-        _ => Err(ScriptError::LoadError("subtypes must be a string or table".to_string())),
-    }
-}
-
-/// The `decode_subtypes` shape (string or table), for
-/// `Game.Effects.SetCardTypes`. Unlike `AddCardType`'s one name at a time, a
-/// "set" must express the whole resulting type line in one call ("becomes an
-/// artifact creature" sets two types), because two `SetCardTypes`
-/// registrations wouldn't compose: the later wipes the earlier (see the layer
-/// 4 fold in `layers::effective_characteristics`).
-pub(crate) fn decode_card_type_names(val: Value) -> Result<Vec<String>, ScriptError> {
-    match val {
-        Value::String(s) => Ok(vec![s.to_str().map_err(|e| ScriptError::LoadError(e.to_string()))?.to_string()]),
-        Value::Table(t) => {
-            let mut out = Vec::new();
-            for pair in t.sequence_values::<String>() {
-                out.push(pair.map_err(|e| ScriptError::LoadError(e.to_string()))?);
-            }
-            Ok(out)
-        }
-        _ => Err(ScriptError::LoadError("card types must be a string or table".to_string())),
+        _ => Err(ScriptError::LoadError(format!("{what} must be a string or table"))),
     }
 }
 
@@ -451,8 +513,7 @@ pub(crate) fn parse_mana_unit_letter(letter: &str) -> Result<ManaUnit, ScriptErr
     })
 }
 
-/// Decodes the optional `opts` table for `Game.Tokens.Creature` /
-/// `Game.Tokens.ArtifactCreature`. Returns
+/// Decodes the optional `opts` table for `Game.Tokens.Creature`. Returns
 /// `(keywords, name_override, additional_types, additional_supertypes)`.
 pub(crate) fn decode_creature_token_opts(
     opts: Option<mlua::Table>,
@@ -654,136 +715,60 @@ pub(crate) fn decode_effect_value(
     }
 }
 
-/// The `controller`, `card_types` and `self_only` part of `:SetAffected`'s
-/// filter table, decoded to an `EffectFilter`. Shared by
-/// `decode_affected_value` (for `AffectedFilter::Primitive`) and
-/// `Game.Ops.DestroyAll`'s filter argument, which has no `enchanted_only` or
-/// function-predicate case (CR 701.8's "destroy all X" is never "enchanted
-/// X").
-///
-/// `decode_affected_value` (`:SetAffected`) takes the shapes of
-/// `decode_effect_value`. A plain table (`{controller=.., card_types={..},
-/// self_only=..}`, every key optional) decodes to `AffectedFilter::Primitive`,
-/// and omitting every key means no filter, so it applies to everything. A
-/// custom function becomes `AffectedFilter::Script`, invoked later through
-/// `ScriptRuntime::invoke_continuous_affects`. CR 303.4m: `{ enchanted_only =
-/// true }` short-circuits to `AffectedFilter::EnchantedOnly` before the other
-/// keys are read, and `{ enchanted_player_controls = true }` does the same for
-/// `AffectedFilter::EnchantedPlayerControls` (Curse of Vitality), checked
-/// second so a table setting both prefers `enchanted_only`. Other keys beside
-/// them are ignored, not rejected.
-pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, ScriptError> {
-    let controller_name: Option<String> =
-        table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
-
-    let card_types_table: Option<Table> =
-        table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let card_types = match card_types_table {
-        Some(t) => {
-            let mut set = CardTypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                set |= parse_card_type_name(&name)?;
-            }
-            Some(set)
-        }
-        None => None,
-    };
-
-    // CR 205.4b: a plain list of subtype names, the shape `decode_filter_table`'s `TargetFilter::Object` branch uses for `subtypes`.
-    let subtypes_table: Option<Table> =
-        table.get("subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let subtypes = match subtypes_table {
-        Some(t) => {
-            let mut list = Vec::new();
-            for entry in t.sequence_values::<String>() {
-                list.push(Subtype(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?));
-            }
-            Some(list)
-        }
-        None => None,
-    };
-
-    // CR 601.2c, 115, 205.4b negated ("nonbasic lands"): same shape and key as `subtypes`.
-    let excluded_subtypes_table: Option<Table> =
-        table.get("excluded_subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let excluded_subtypes = match excluded_subtypes_table {
-        Some(t) => {
-            let mut list = Vec::new();
-            for entry in t.sequence_values::<String>() {
-                list.push(Subtype(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?));
-            }
-            Some(list)
-        }
-        None => None,
-    };
-
-    // CR 205.4a: same shape and key as `decode_filter_table`'s `supertypes`.
-    let supertypes_table: Option<Table> =
-        table.get("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let supertypes = match supertypes_table {
-        Some(t) => {
-            let mut set = SupertypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                set |= parse_supertype_name(&name)?;
-            }
-            Some(set)
-        }
-        None => None,
-    };
-
-    // CR 601.2c, 115, 205.4a negated: same shape and key as `supertypes`.
-    let excluded_supertypes_table: Option<Table> =
-        table.get("excluded_supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let excluded_supertypes = match excluded_supertypes_table {
-        Some(t) => {
-            let mut set = SupertypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                set |= parse_supertype_name(&name)?;
-            }
-            Some(set)
-        }
-        None => None,
-    };
-
-    let self_only: Option<bool> =
-        table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-
-    Ok(EffectFilter {
-        controller,
-        card_types,
-        subtypes,
-        excluded_subtypes,
-        supertypes,
-        excluded_supertypes,
-        self_only: self_only.unwrap_or(false),
-    })
+fn self_only_filter() -> EffectFilter {
+    EffectFilter {
+        controller: None,
+        card_types: None,
+        subtypes: None,
+        excluded_subtypes: None,
+        supertypes: None,
+        excluded_supertypes: None,
+        self_only: true,
+    }
 }
 
+/// The raw-table form of `Game.Filter` for `Game.Ops.DestroyAll` and the other
+/// mass operations, decoded to an `EffectFilter` through
+/// `decode_object_filter_keys`. It has no `self_only`, `enchanted_only` or
+/// function-predicate case (CR 701.8's "destroy all X" is never "enchanted
+/// X").
+pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, ScriptError> {
+    Ok(decode_object_filter_keys(table)?.into_effect_filter())
+}
+
+const RAW_AFFECTED_TABLE_HINT: &str = "wrap object filter keys in Game.Filter({...}), and write the flags as \
+    Game.Affected.Self, Game.Affected.Enchanted or Game.Affected.EnchantedPlayerControls";
+
+/// `StaticAbilityBuilder::SetAffected`'s decoder, in the two-shapes pattern of
+/// `decode_effect_value`. A `Game.Filter({...})` or `Game.Affected.Self`
+/// decodes to `AffectedFilter::Primitive`, and omitting `:SetAffected` means no
+/// filter, so the effect applies to everything. CR 303.4m's
+/// `Game.Affected.Enchanted` and `Game.Affected.EnchantedPlayerControls` (Curse
+/// of Vitality) decode to their own variants. A custom function becomes
+/// `AffectedFilter::Script`, invoked later through
+/// `ScriptRuntime::invoke_continuous_affects`. A raw table or a player tag
+/// (`Game.Affected.You`) is a load error.
 pub(crate) fn decode_affected_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
     value: Value,
 ) -> Result<AffectedFilter, ScriptError> {
     match value {
-        Value::Table(table) => {
-            let enchanted_only: Option<bool> =
-                table.get("enchanted_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            if enchanted_only.unwrap_or(false) {
-                return Ok(AffectedFilter::EnchantedOnly);
+        Value::UserData(ud) if ud.is::<AffectedTag>() => {
+            let tag = *ud.borrow::<AffectedTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            match tag {
+                AffectedTag::SelfOnly => Ok(AffectedFilter::Primitive(self_only_filter())),
+                AffectedTag::Enchanted => Ok(AffectedFilter::EnchantedOnly),
+                AffectedTag::EnchantedPlayerControls => Ok(AffectedFilter::EnchantedPlayerControls),
+                other => Err(ScriptError::LoadError(format!(
+                    "{} selects players for a player modifier, not objects for a static ability's SetAffected",
+                    other.describe()
+                ))),
             }
-
-            let enchanted_player_controls: Option<bool> = table
-                .get("enchanted_player_controls")
-                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            if enchanted_player_controls.unwrap_or(false) {
-                return Ok(AffectedFilter::EnchantedPlayerControls);
-            }
-
-            Ok(AffectedFilter::Primitive(decode_effect_filter_table(&table)?))
+        }
+        Value::UserData(ud) if ud.is::<FilterTag>() => {
+            let tag = ud.borrow::<FilterTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            Ok(AffectedFilter::Primitive(tag.0.clone().into_effect_filter()))
         }
         Value::Function(function) => {
             let key = lua
@@ -793,8 +778,40 @@ pub(crate) fn decode_affected_value(
             registry.scripts.insert(handle, key);
             Ok(AffectedFilter::Script(handle))
         }
+        Value::Table(_) => Err(ScriptError::LoadError(format!(
+            "SetAffected no longer takes a raw table - {RAW_AFFECTED_TABLE_HINT}"
+        ))),
         other => Err(ScriptError::LoadError(format!(
-            "SetAffected() expects a table or a function, got {}",
+            "SetAffected expects a Game.Affected.* value, Game.Filter({{...}}) or a function, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// `ReplacementEffectBuilder::SetAffected`'s decoder. `EventFilter` has no
+/// scripted-affected shape (see `ReplacementSpec`), so a function is an error,
+/// and so is every tag but `Game.Affected.Self` and `Game.Filter({...})`.
+pub(crate) fn decode_replacement_affected(value: Value) -> Result<EffectFilter, ScriptError> {
+    match value {
+        Value::UserData(ud) if ud.is::<AffectedTag>() => {
+            let tag = *ud.borrow::<AffectedTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            match tag {
+                AffectedTag::SelfOnly => Ok(self_only_filter()),
+                other => Err(ScriptError::LoadError(format!(
+                    "{} isn't valid for a replacement effect's SetAffected - use Game.Affected.Self or Game.Filter({{...}})",
+                    other.describe()
+                ))),
+            }
+        }
+        Value::UserData(ud) if ud.is::<FilterTag>() => {
+            let tag = ud.borrow::<FilterTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            Ok(tag.0.clone().into_effect_filter())
+        }
+        Value::Table(_) => Err(ScriptError::LoadError(format!(
+            "SetAffected no longer takes a raw table - {RAW_AFFECTED_TABLE_HINT}"
+        ))),
+        other => Err(ScriptError::LoadError(format!(
+            "a replacement effect's SetAffected expects Game.Affected.Self or Game.Filter({{...}}), got {}",
             other.type_name()
         ))),
     }
@@ -850,8 +867,8 @@ pub(crate) fn decode_target_pick(table: &Table) -> Result<Target, ScriptError> {
     }
 }
 
-/// `Game.SelectTargets`'s filter argument: the flat option-bag of
-/// `decode_affected_value` and `decode_filter_table`, plus a `type`
+/// `Game.SelectTargets`'s filter argument: the flat object keys of
+/// `decode_object_filter_keys`, plus a `type`
 /// discriminator (`"object"` default, `"player"`, `"any"`, `"ability"`)
 /// matching the scenario crate's TOML `target_requirement.filter`
 /// (`build_target_requirement`). `type` defaults to `"object"` so scripts that
@@ -873,127 +890,17 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
         // CR 702.21a (Ward): the spell or ability that triggered this one.
         "triggering" => Ok(TargetFilter::TriggeringStackObject),
         "object" => {
-            let controller_name: Option<String> =
-                table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
-
-            let card_types_table: Option<Table> =
-                table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let card_types = match card_types_table {
-                Some(t) => {
-                    let mut set = CardTypeSet::empty();
-                    for entry in t.sequence_values::<String>() {
-                        set |=
-                            parse_card_type_name(&entry.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
-                    }
-                    Some(set)
-                }
-                None => None,
-            };
-
-            // CR 205.4b: "target Human", "Equip Dragons": a plain list of subtype names, matched as an "or" (see `TargetFilter::Object::subtypes`). No parser, since `Subtype` is a bare string newtype.
-            let subtypes_table: Option<Table> =
-                table.get("subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let subtypes = match subtypes_table {
-                Some(t) => {
-                    let mut list = Vec::new();
-                    for entry in t.sequence_values::<String>() {
-                        list.push(Subtype(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?));
-                    }
-                    Some(list)
-                }
-                None => None,
-            };
-
-            // CR 205.4a: same shape and key as `decode_filter_table`'s `supertypes`.
-            let supertypes_table: Option<Table> =
-                table.get("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let supertypes = match supertypes_table {
-                Some(t) => {
-                    let mut set = SupertypeSet::empty();
-                    for entry in t.sequence_values::<String>() {
-                        let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                        set |= parse_supertype_name(&name)?;
-                    }
-                    Some(set)
-                }
-                None => None,
-            };
-
-            // CR 601.2c, 115 negated ("target nonland permanent"): same shape and key as `card_types`.
-            let excluded_card_types_table: Option<Table> =
-                table.get("excluded_card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let excluded_card_types = match excluded_card_types_table {
-                Some(t) => {
-                    let mut set = CardTypeSet::empty();
-                    for entry in t.sequence_values::<String>() {
-                        set |=
-                            parse_card_type_name(&entry.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
-                    }
-                    Some(set)
-                }
-                None => None,
-            };
-
-            // CR 601.2c, 115, 205.4b negated ("target creature that isn't a Wall"): same shape and key as `subtypes`.
-            let excluded_subtypes_table: Option<Table> =
-                table.get("excluded_subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let excluded_subtypes = match excluded_subtypes_table {
-                Some(t) => {
-                    let mut list = Vec::new();
-                    for entry in t.sequence_values::<String>() {
-                        list.push(Subtype(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?));
-                    }
-                    Some(list)
-                }
-                None => None,
-            };
-
-            // CR 601.2c, 115, 205.4a negated ("target nonlegendary creature"): same shape and key as `supertypes`.
-            let excluded_supertypes_table: Option<Table> =
-                table.get("excluded_supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let excluded_supertypes = match excluded_supertypes_table {
-                Some(t) => {
-                    let mut set = SupertypeSet::empty();
-                    for entry in t.sequence_values::<String>() {
-                        let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                        set |= parse_supertype_name(&name)?;
-                    }
-                    Some(set)
-                }
-                None => None,
-            };
-
-            let zone_name: Option<String> = table.get("zone").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let zone = zone_name.map(|name| parse_zone_kind_name(&name)).transpose()?;
-
-            // CR 202.3: "target spell with mana value X (or less, or greater)". Three independent optional keys, flat like `up_to` and `at_least`, each a plain number (`ManaValueBound::Fixed`) or the string "X" (`ManaValueBound::X`, the cast or resolution's announced X). If several are set, `equals` wins over `at_most` over `at_least`, with no validation, as `at_least` over `up_to`.
-            let mana_value_equals: Option<Value> =
-                table.get("mana_value_equals").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let mana_value_at_most: Option<Value> =
-                table.get("mana_value_at_most").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let mana_value_at_least: Option<Value> =
-                table.get("mana_value_at_least").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let mana_value = if let Some(v) = mana_value_equals {
-                Some(ManaValueRequirement { comparison: ManaValueComparison::Equal, bound: decode_mana_value_bound(v)? })
-            } else if let Some(v) = mana_value_at_most {
-                Some(ManaValueRequirement { comparison: ManaValueComparison::AtMost, bound: decode_mana_value_bound(v)? })
-            } else if let Some(v) = mana_value_at_least {
-                Some(ManaValueRequirement { comparison: ManaValueComparison::AtLeast, bound: decode_mana_value_bound(v)? })
-            } else {
-                None
-            };
-
+            let keys = decode_object_filter_keys(&table)?;
             Ok(TargetFilter::Object {
-                card_types,
-                excluded_card_types,
-                subtypes,
-                excluded_subtypes,
-                supertypes,
-                excluded_supertypes,
-                controller,
-                zone,
-                mana_value,
+                card_types: keys.card_types,
+                excluded_card_types: keys.excluded_card_types,
+                subtypes: keys.subtypes,
+                excluded_subtypes: keys.excluded_subtypes,
+                supertypes: keys.supertypes,
+                excluded_supertypes: keys.excluded_supertypes,
+                controller: keys.controller,
+                zone: keys.zone,
+                mana_value: keys.mana_value,
             })
         }
         other => Err(ScriptError::LoadError(format!(
@@ -1021,13 +928,10 @@ fn decode_mana_value_bound(value: Value) -> Result<ManaValueBound, ScriptError> 
 /// with the field names and defaults of the scenario crate's
 /// `TargetRequirementSpec`.
 ///
-/// An explicit `filter` key goes to `decode_target_filter_value`, the
-/// table-or-function-or-`{type="player", filter=fn}` decoder of
-/// `ActivatedAbilityBuilder::SetTarget`, so a card's base target requirement
-/// can be a scripted predicate too ("Enchant creature with power 4 or
-/// greater"). See `TargetFilter::Script`. Without `filter`, the same table
-/// goes to `decode_target_filter_table`, which reads only the keys it knows,
-/// so the count and mode keys needn't be stripped.
+/// The same table goes to `decode_target_filter_value`, so the filter keys sit
+/// flat beside the count keys and a `filter` function gives a scripted
+/// predicate ("Enchant creature with power 4 or greater"). See
+/// `TargetFilter::Script`.
 pub(crate) fn decode_target_requirement_table(
     lua: &Lua,
     registry: &mut ScriptRegistry,
@@ -1045,12 +949,7 @@ pub(crate) fn decode_target_requirement_table(
         .get::<_, Option<bool>>("exclude_source")
         .map_err(|e| ScriptError::LoadError(e.to_string()))?
         .unwrap_or(false);
-    let filter_value: Option<Value> =
-        table.get("filter").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let filter = match filter_value {
-        Some(value) => decode_target_filter_value(lua, registry, value)?,
-        None => decode_target_filter_table(table)?,
-    };
+    let filter = decode_target_filter_value(lua, registry, Value::Table(table))?;
     Ok(TargetRequirement { filter, count, up_to, at_least, exclude_source })
 }
 
@@ -1180,39 +1079,55 @@ pub(crate) fn check_chain_words(
 }
 
 /// `ActivatedAbilityBuilder::SetTarget`'s argument decoder, taking a `Value`
-/// and not `decode_target_filter_table`'s bare `Table`, with the
-/// table-or-function fallback of `decode_affected_value`. A bare function is
+/// and not `decode_target_filter_table`'s bare `Table`. A bare function is
 /// registered and returned as `TargetFilter::Script` (invoked later through
 /// `ScriptRuntime::invoke_target_legal`), for a legality shape the flat table
-/// can't express ("power 4 or greater").
+/// can't express ("power 4 or greater"). A table's `filter` key takes a
+/// function the same way (`TargetFilter::PlayerScript` with `type = "player"`),
+/// and a nested filter table is an error, since the filter keys sit beside
+/// `count` and `type`.
 pub(crate) fn decode_target_filter_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
     value: Value,
 ) -> Result<TargetFilter, ScriptError> {
+    let mut register = |function: Function| -> Result<ScriptHandle, ScriptError> {
+        let key = lua
+            .create_registry_value(function)
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let handle = registry.next_script_handle();
+        registry.scripts.insert(handle, key);
+        Ok(handle)
+    };
     match value {
-        // `{ type = "player", filter = function(player, source, controller, state) -> bool }`, the Lua entry point of `TargetFilter::PlayerScript`. Checked before the flat decode so a bare `{type="player"}` still reaches `TargetFilter::Player` through `decode_target_filter_table`.
-        Value::Table(ref table) if matches!(table.get::<_, Option<String>>("type"), Ok(Some(ref k)) if k == "player")
-            && matches!(table.get::<_, Value>("filter"), Ok(Value::Function(_))) =>
-        {
-            let function: Function =
-                table.get("filter").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let key = lua
-                .create_registry_value(function)
-                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let handle = registry.next_script_handle();
-            registry.scripts.insert(handle, key);
-            Ok(TargetFilter::PlayerScript(handle))
+        Value::Table(table) => {
+            let predicate: Value = table.get("filter").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            match predicate {
+                Value::Nil => decode_target_filter_table(table),
+                // CR 601.2c, 602.2b: `{ type = "player", filter = function(player, source, controller, state) -> bool }` is the Lua entry point of `TargetFilter::PlayerScript`.
+                Value::Function(function) => {
+                    let kind: Option<String> =
+                        table.get("type").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                    match kind.as_deref().unwrap_or("object") {
+                        "player" => Ok(TargetFilter::PlayerScript(register(function)?)),
+                        "object" => Ok(TargetFilter::Script(register(function)?)),
+                        other => Err(ScriptError::LoadError(format!(
+                            "a target `filter` function pairs with type \"object\" or \"player\", got '{other}'"
+                        ))),
+                    }
+                }
+                Value::Table(_) => Err(ScriptError::LoadError(
+                    "a target table's `filter` key takes a function; put the filter keys beside `count` and `type` \
+                     and drop the nested `filter` table"
+                        .to_string(),
+                )),
+                other => Err(ScriptError::LoadError(format!(
+                    "a target table's `filter` key must be a function, got {}",
+                    other.type_name()
+                ))),
+            }
         }
-        Value::Table(table) => decode_target_filter_table(table),
-        Value::Function(function) => {
-            let key = lua
-                .create_registry_value(function)
-                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let handle = registry.next_script_handle();
-            registry.scripts.insert(handle, key);
-            Ok(TargetFilter::Script(handle))
-        }
+        Value::Function(function) => Ok(TargetFilter::Script(register(function)?)),
         other => Err(ScriptError::LoadError(format!(
             "SetTarget expected a filter table or a function, got {}",
             other.type_name()

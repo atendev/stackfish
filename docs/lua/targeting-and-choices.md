@@ -4,10 +4,11 @@
 
 ## Filter table shape
 
-Every filter table across this API — `:SetAffected`, `:SetTarget`, `Game.Costs.Sacrifice`/
-`Discard`/`TapPermanents`, `Game.Ops.Search`, `Game.CreateCostModifier`'s `:SetFilter`,
-`Game.Conditions.DiesMatching`, `Game.InterveningIf.ControlsAtLeast` — shares the same key
-vocabulary. Every key is optional.
+Every object filter across this API shares one key vocabulary: `:SetTarget`,
+`Game.Costs.Sacrifice`/`Discard`/`TapPermanents`, `Game.Ops.Search`, `Game.Ops.DestroyAll` and the
+other mass ops, `Game.Conditions.DiesMatching`, `Game.Conditions.ControlsAtLeast`, and the
+[`Game.Filter({...})`](static-abilities.md#gamefilter) value that `:SetAffected` and a cost modifier's
+`:SetFilter` take. Every key is optional.
 
 ```lua
 {
@@ -18,15 +19,24 @@ vocabulary. Every key is optional.
     excluded_subtypes = { "Wall" },  -- negated form of subtypes
     supertypes = { "Legendary" },    -- list of supertype names (CR 205.4a)
     excluded_supertypes = { ... },   -- negated form of supertypes
+    zone = "Hand",                   -- zone name, see below
+    mana_value_equals = 3,           -- number or "X", see below
     random = true,                   -- affects which matching object is picked, not membership
 }
 ```
 
 A positive key and its negated counterpart can be combined — `{ card_types = { "Creature" },
-excluded_subtypes = { "Wall" } }` is "target creature that isn't a Wall." Not every consumer of
-this shape reads every key (e.g. a cost filter has no reason to read `excluded_supertypes` if
-nothing needs it yet) — check the specific method's own page if a key doesn't seem to be having an
-effect.
+excluded_subtypes = { "Wall" } }` is "target creature that isn't a Wall." Each consumer matches on
+the keys it can, and ignores the rest silently for now (strict key rejection comes later):
+
+| Consumer | Keys it matches on |
+|---|---|
+| `Game.Filter` in `:SetAffected` and `:SetFilter`, and the mass ops such as `Game.Ops.DestroyAll` | `controller`, `card_types`, `subtypes`, `excluded_subtypes`, `supertypes`, `excluded_supertypes` |
+| `Game.Ops.Search`, `Game.Ops.DiscardRandom`, `Game.Costs.Sacrifice`/`Discard`/`TapPermanents` | `controller`, `card_types`, `supertypes`, `subtypes`, `random` |
+| Target tables (`:SetTarget`, `s.target_requirement()`, `Game.SelectTargets`) | `controller`, `card_types`, `excluded_card_types`, `subtypes`, `excluded_subtypes`, `supertypes`, `excluded_supertypes`, `zone`, `mana_value_*` |
+
+Ops, costs and condition constructors take the raw flat table. Only `:SetAffected` and a cost
+modifier's `:SetFilter` take it wrapped in `Game.Filter`.
 
 `Game.SelectTargets`/`:SetTarget` additionally accept a `type` key (`"object"`, `"player"`, or
 `"any"`, default `"object"`) to say what kind of thing is being targeted at all — see below.
@@ -105,7 +115,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
-    e:SetAffected({ enchanted_only = true })
+    e:SetAffected(Game.Affected.Enchanted)
     e:Register()
 end
 
@@ -131,9 +141,10 @@ flat filter table as everywhere else on this page, plus these siblings:
 A card with no `target_requirement()` function needs no targets to cast — the same default as
 omitting `[cards.target_requirement]` in a TOML fixture.
 
-For a legality check the flat filter shape can't express, set `filter` to a function (or the
-player-target `{type="player", filter=fn}` form) instead of relying on the inline keys above — same
-scripted-predicate shapes `:SetTarget` accepts, see
+For a legality check the flat filter shape can't express, set `filter` to a function. The `filter`
+key takes only a function, never a nested table (a nested `filter = { ... }` is a load error), and
+the filter keys sit beside it as siblings. With `type = "player"` the function is a player predicate;
+otherwise it is an object predicate. Same scripted-predicate shapes `:SetTarget` accepts, see
 [Scripted targeting predicates](#scripted-targeting-predicates) below:
 
 ```lua

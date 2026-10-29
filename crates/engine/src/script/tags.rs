@@ -10,23 +10,26 @@ use crate::types::effect::{ConsumptionPolicy, EffectDuration, EffectPrimitive, L
 use crate::types::counter::CounterKind;
 use crate::types::ids::{ObjectId, ScriptHandle, Target};
 use crate::types::mana::ManaCost;
-use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect, LandPlayAffected};
+use crate::types::cost::FilterController;
+use crate::types::player::HandSizeEffect;
 use crate::types::zone::ZoneKind;
 
+use super::decode::ObjectFilterKeys;
 use super::types::ScriptZoneMoveKind;
 
-/// Wraps `ConditionPrimitive` so `Game.Conditions.Enters` and `Always` are Lua
-/// values a condition script can `return`, decoded by `decode_condition_value`.
+/// Wraps `ConditionPrimitive` so `Game.Conditions.Enters` is a Lua value a
+/// condition script can `return`, decoded by `decode_condition_value`.
 /// `Clone` only, since `ConditionPrimitive` owns a `FilterSpec`.
 #[derive(Clone)]
 pub(crate) struct ConditionTag(pub(crate) ConditionPrimitive);
 impl UserData for ConditionTag {}
 
 /// Wraps `InterveningIfPrimitive` like `ConditionTag`:
-/// `Game.InterveningIf.AtOrBelowLife(n)` returns one, consumed by
-/// `TriggeredAbilityBuilder::SetInterveningIf` (CR 603.4). It has no
-/// `decode_*` function, since that is its only consumer. `Clone` only, since
-/// `InterveningIfPrimitive` owns a `FilterSpec`.
+/// `Game.Conditions.AtOrBelowLife(n)` returns one, consumed by
+/// `TriggeredAbilityBuilder::SetInterveningIf` (CR 603.4) and
+/// `StaticAbilityBuilder::SetCondition` (CR 611.2c). It lives in the same Lua
+/// namespace as `ConditionTag`, so each consumer rejects the other kind by
+/// name. `Clone` only, since `InterveningIfPrimitive` owns a `FilterSpec`.
 #[derive(Clone)]
 pub(crate) struct InterveningIfTag(pub(crate) InterveningIfPrimitive);
 impl UserData for InterveningIfTag {}
@@ -198,13 +201,45 @@ impl UserData for EventFilterKindTag {}
 pub(crate) struct ReplacementPayloadTag(pub(crate) ReplacementPayload);
 impl UserData for ReplacementPayloadTag {}
 
-/// Like `ConditionTag`, for `Game.HandSizeAffected.*`: `You` and
-/// `.EnchantedPlayer` are the argument to `HandSizeModifierBuilder::SetAffected`.
-/// `EnchantedPlayer` (CR 303.4m) is `HandSizeAffected`'s second variant, not a
-/// `FilterController`.
+/// `Game.Affected.*`, the one namespace behind every `:SetAffected`. Each
+/// builder accepts the variants that mean something to it and rejects the rest
+/// by name (see `AffectedTag::describe`).
 #[derive(Clone, Copy)]
-pub(crate) struct HandSizeAffectedTag(pub(crate) HandSizeAffected);
-impl UserData for HandSizeAffectedTag {}
+pub(crate) enum AffectedTag {
+    /// `Game.Affected.Self`: only the effect's own source object.
+    SelfOnly,
+    /// CR 303.4m: `Game.Affected.Enchanted`, the object the source Aura or Equipment is attached to.
+    Enchanted,
+    /// CR 303.4m: `Game.Affected.EnchantedPlayerControls`, permanents the enchanted player controls.
+    EnchantedPlayerControls,
+    /// `Game.Affected.You`, `.Opponent` and `.Any`, for the player modifiers.
+    Players(FilterController),
+    /// CR 303.4m: `Game.Affected.EnchantedPlayer`, for the player modifiers.
+    EnchantedPlayer,
+}
+impl UserData for AffectedTag {}
+
+impl AffectedTag {
+    pub(crate) fn describe(self) -> &'static str {
+        match self {
+            AffectedTag::SelfOnly => "Game.Affected.Self",
+            AffectedTag::Enchanted => "Game.Affected.Enchanted",
+            AffectedTag::EnchantedPlayerControls => "Game.Affected.EnchantedPlayerControls",
+            AffectedTag::Players(FilterController::You) => "Game.Affected.You",
+            AffectedTag::Players(FilterController::Opponent) => "Game.Affected.Opponent",
+            AffectedTag::Players(FilterController::Any) => "Game.Affected.Any",
+            AffectedTag::EnchantedPlayer => "Game.Affected.EnchantedPlayer",
+        }
+    }
+}
+
+/// `Game.Filter({...})`: an object filter decoded once by
+/// `decode_object_filter_keys`. Each consumer takes the keys it can match on
+/// (`:SetAffected` an `EffectFilter`, `CostModifierBuilder::SetFilter` a
+/// `FilterSpec`).
+#[derive(Clone)]
+pub(crate) struct FilterTag(pub(crate) ObjectFilterKeys);
+impl UserData for FilterTag {}
 
 /// Like `ConditionTag`, for `Game.HandSizeEffects.*`: `NoMaximum` and
 /// `.SetTo(n)` are the argument to `HandSizeModifierBuilder::SetEffect`.
@@ -212,26 +247,6 @@ impl UserData for HandSizeAffectedTag {}
 pub(crate) struct HandSizeEffectTag(pub(crate) HandSizeEffect);
 impl UserData for HandSizeEffectTag {}
 
-/// Like `ConditionTag`, for `Game.HandRevealAffected.*`, the argument to
-/// `HandRevealModifierBuilder::SetAffected`. Separate from `HandSizeAffectedTag`
-/// despite the same shape; see `HandRevealAffected`.
-#[derive(Clone, Copy)]
-pub(crate) struct HandRevealAffectedTag(pub(crate) HandRevealAffected);
-impl UserData for HandRevealAffectedTag {}
-
-/// Like `ConditionTag`, for `Game.DrawLimitAffected.*` (`You`, `.Opponent`,
-/// `.Any`), the argument to `DrawLimitModifierBuilder::SetAffected`. It has no
-/// `EnchantedPlayer`; see `DrawLimitAffected`.
-#[derive(Clone, Copy)]
-pub(crate) struct DrawLimitAffectedTag(pub(crate) DrawLimitAffected);
-impl UserData for DrawLimitAffectedTag {}
-
-/// Like `ConditionTag`, for `Game.LandPlayAffected.*` (`You`, `.Opponent`,
-/// `.Any`), the argument to `LandPlayModifierBuilder::SetAffected`. It has no
-/// `EnchantedPlayer`; see `LandPlayAffected`.
-#[derive(Clone, Copy)]
-pub(crate) struct LandPlayAffectedTag(pub(crate) LandPlayAffected);
-impl UserData for LandPlayAffectedTag {}
 
 /// `Game.ReplacementPayloads.RedirectDamageToSource`, a sentinel and not a
 /// `ReplacementPayloadTag`: `RedirectDamage(Target)` needs a real `ObjectId`,

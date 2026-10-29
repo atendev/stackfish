@@ -85,7 +85,7 @@ const YOU_CANT_DRAW_MORE_THAN_ONE: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local m = Game.CreateDrawLimitModifier(c)
-    m:SetAffected(Game.DrawLimitAffected.You)
+    m:SetAffected(Game.Affected.You)
     m:SetLimit(1)
     m:Register()
 end

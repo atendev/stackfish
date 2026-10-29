@@ -9,14 +9,23 @@ primitive-vs-custom-function pattern these all follow, and the per-kind pages
 [activated](activated-abilities.md), [replacement](replacement-effects.md),
 [cost modifier](cost-modifiers.md)) for how each table is actually consumed by a builder.
 
-A **bare value** is used directly, no call: `Game.Conditions.Always`. A **factory** is called with
+A **bare value** is used directly, no call: `Game.Conditions.Enters`. A **factory** is called with
 arguments to produce a value: `Game.Ops.GainLife(1)`.
 
 ## `Game.Conditions.*`
 
-Used with `:SetCondition` on a [triggered ability](triggered-abilities.md). Answers "did this
-ability's triggering event just happen" — CR 603's trigger-event condition, checked once per
-matching event.
+Two kinds of value live here, and each goes to a different slot. Passing a value to the wrong slot
+is a load error that names the right method.
+
+- Event tags and factories (`Enters`, `Dies`, `Upkeep`, `DiesMatching`, ...) go to a
+  [triggered ability's](triggered-abilities.md) `:SetCondition`. They answer "did this ability's
+  triggering event just happen" (CR 603), checked once per matching event. Leave `:SetCondition`
+  out for a trigger that fires on every event; `:SetCondition(nil)` and an unknown tag are load errors.
+- State tags and factories (`AtOrBelowLife`, `ControlsAtLeast`, `Escaped`, `HadNoCounters`) go to a
+  triggered ability's `:SetInterveningIf` (CR 603.4) or a [static ability's](static-abilities.md)
+  `:SetCondition` (CR 611.2c). They read the board and involve no triggering event.
+
+Both slots also accept a Lua function.
 
 ### Bare tags
 
@@ -24,7 +33,6 @@ matching event.
 |---|---|
 | `Enters` | CR 603, "when this enters the battlefield." |
 | `Cast` | CR 601.2i/702.85a, "when you cast this spell" (self-referential). Registers only while the spell is on the stack — see [Registration timing](card-script-basics.md#registration-timing). |
-| `Always` | No filter — matches every event. Write this explicitly for an unconditional trigger; don't rely on a typo/`nil` meaning the same thing. |
 | `DealsDamage` | CR 603.2, "whenever this deals damage" — matches any damage this object deals, combat or otherwise. |
 | `IsDealtDamage` | "Whenever this is dealt damage." Object targets only — a player being dealt damage never satisfies this. |
 | `Upkeep` | CR 502.1, "at the beginning of your upkeep." |
@@ -73,24 +81,53 @@ The wrapped condition still has to genuinely match — `OncePerTurn` just additi
 this exact ability hasn't already triggered once already this turn. Resets at the start of each
 new turn. Not available for a custom-function condition — only wraps a `Game.Conditions.*` value.
 
-## `Game.InterveningIf.*`
+### State tags
 
-Used with `:SetInterveningIf` on a [triggered ability](triggered-abilities.md), or `:SetCondition`
-on a [static ability](static-abilities.md) (CR 611.2c, "this effect applies only as long as X is
-true"). A pure board-state predicate — no triggering event involved, checked fresh whenever it's
-asked.
+For `:SetInterveningIf` on a triggered ability, or `:SetCondition` on a static ability. Each is
+checked fresh whenever it is asked.
 
-**`Game.InterveningIf.AtOrBelowLife(threshold)`** — true iff the ability's controller's current
-life total is at or below `threshold`. E.g. "at the beginning of your upkeep, if you have 10 or
-less life..." is `Game.InterveningIf.AtOrBelowLife(10)`.
+| Name | Meaning |
+|---|---|
+| `AtOrBelowLife(threshold)` | True iff the ability's controller's current life total is at or below `threshold`. "At the beginning of your upkeep, if you have 10 or less life..." is `Game.Conditions.AtOrBelowLife(10)`. |
+| `ControlsAtLeast(filter, count)` | CR 611.2c, "as long as you control `count` or more permanents matching `filter`." `filter` is a raw flat table, the same shape as `DiesMatching` above. |
+| `Escaped` | CR 603.4, 702.138b, "if it escaped" (an enters trigger that checks how the permanent was cast). A bare tag. |
+| `HadNoCounters(kind)` | CR 603.4, 702.79a, 702.93a, "if it had no `kind` counters on it" (Persist, Undying), checked against the object as it died. |
 
-**`Game.InterveningIf.ControlsAtLeast(filter, count)`** — CR 611.2c, "as long as you control
-`count` or more permanents matching `filter`." `filter` is the same filter-table shape as
-`DiesMatching` above.
+## `Game.Affected.*`
 
-A custom function is also accepted anywhere a `Game.InterveningIf.*` value is — see
-[triggered-abilities.md](triggered-abilities.md) and
-[static-abilities.md](static-abilities.md) for the call signature.
+The one namespace behind every `:SetAffected`. Each builder accepts only the tags that mean
+something to it, and anything else is a load error.
+
+| Name | Kind | Meaning |
+|---|---|---|
+| `Self` | object | Only the effect's own source. Accepted by [static abilities](static-abilities.md) and [replacement effects](replacement-effects.md). |
+| `Enchanted` | object | CR 303.4m, the object this Aura is attached to. Static abilities only. |
+| `EnchantedPlayerControls` | object | CR 303.4m, every permanent the enchanted player controls. Static abilities only. |
+| `You` | player | The effect's controller. |
+| `Opponent` | player | Each opponent of the controller. |
+| `Any` | player | Every player. |
+| `EnchantedPlayer` | player | CR 303.4m, the player this Aura is attached to. |
+
+Player tags go to the [player modifiers](player-modifiers.md): `Game.CreateHandSizeModifier`,
+`CreateHandRevealModifier`, `CreateDrawLimitModifier` and `CreateLandPlayModifier`. The draw limit and
+land play modifiers reject `EnchantedPlayer` at `:SetAffected`. An object tag given to a player
+modifier, or a player tag given to a static ability, is a load error.
+
+## `Game.Filter(table)`
+
+Wraps a flat object filter table so a builder can tell it from a tag. Takes the shared filter keys
+(see [targeting-and-choices.md#filter-table-shape](targeting-and-choices.md#filter-table-shape)) and
+returns a value for a static or replacement ability's `:SetAffected`, or a cost modifier's
+`:SetFilter`:
+
+```lua
+e:SetAffected(Game.Filter({ controller = "you", card_types = { "Creature" } }))
+```
+
+The keys `self_only`, `enchanted_only` and `enchanted_player_controls` are errors. Use
+`Game.Affected.Self`, `.Enchanted` or `.EnchantedPlayerControls` instead. A raw table in those
+slots is also an error. Ops, costs and condition constructors (`DestroyAll`, `Search`, `Sacrifice`,
+`DiesMatching`, `ControlsAtLeast`, ...) keep taking raw flat tables, not `Game.Filter`.
 
 ## `Game.Ops.*`
 
@@ -109,7 +146,7 @@ what the ability/spell actually does when it resolves.
 | `Mill(n)` | non-negative integer | CR 701.17a, "you mill N" / "target player mills N". Same player selection as `LoseLife`. Moves the top `n` cards of that player's library to their owner's graveyard, as many as possible if the library is smaller (CR 701.17b). Milling is not drawing, so an empty library does not lose the game (CR 704.5b). Each card is its own replacement-checked Library to Graveyard move, so Leyline of the Void style redirects apply and a CR 616.1 ordering choice can pause the mill. No "whenever a card is milled" condition, no "the milled card" follow-up (CR 701.17c/d), no mill as a cost. |
 | `Damage(amount)` | integer (unsigned) | CR 608.2m, deals exactly `amount` damage to the ability's target. Goes through the normal damage pipeline, so prevention/replacement effects and Lifelink/Wither/Infect/Deathtouch all apply normally. Single fixed target only — no "divide among any number of targets" or "each opponent" shape yet. |
 | `Destroy` | — | CR 701.8, destroys the ability's target. Indestructible targets are unaffected. |
-| `DestroyAll(filter)` | `filter`: a table with `card_types`/`controller`/`self_only` — the same shape [`:SetAffected`](static-abilities.md#filter-table) uses. | CR 701.8/601.2c, destroys every battlefield permanent matching `filter`, unconditionally — no targets at all (e.g. Armageddon: `Game.Ops.DestroyAll({ card_types = { "Land" } })`). Indestructible permanents are unaffected, same as `Destroy`. `subtypes`/exclusion keys aren't supported in `filter` yet — a plain type/controller restriction is all this covers so far. |
+| `DestroyAll(filter)` | `filter`: a raw flat table with the keys [`Game.Filter`](static-abilities.md#gamefilter) matches on: `controller`, `card_types`, `subtypes`, `excluded_subtypes`, `supertypes`, `excluded_supertypes`. | CR 701.8/601.2c, destroys every battlefield permanent matching `filter`, unconditionally — no targets at all (e.g. Armageddon: `Game.Ops.DestroyAll({ card_types = { "Land" } })`). Indestructible permanents are unaffected, same as `Destroy`. Keys this op can't match on are ignored silently for now; strict key rejection comes later. |
 | `Sacrifice` | — | CR 701.21a, sacrifices the ability's target (must be something the caster/controller controls). Unlike `Destroy`, indestructibility doesn't stop this. Not to be confused with `Game.Costs.Sacrifice` — that's a *cost* (pick any matching permanent you control, no targeting), this is a resolution effect against a chosen target. |
 | `SacrificeSelf` | — | CR 701.21a, "sacrifice this permanent": sacrifices the ability's own **source**, no target. Same replacement-checked path as `Sacrifice`, so indestructible does not stop it, regeneration cannot intercept it and Dies triggers fire. If the source already left the battlefield it is a new object (CR 400.7) and nothing happens. If it is still there but under another player's control, nothing happens (a player can't sacrifice a permanent they don't control). The effect form of `Game.Costs.SacrificeSelf`. |
 | `Exile` | — | CR 701.18, exiles the ability's target. Ignores indestructibility. The target may be on the battlefield or in a graveyard (declare it with a `zone = "Graveyard"` target filter); the source zone is read at resolution. |
@@ -255,7 +292,7 @@ the effect shape instead of using a tag).
 
 `Game.RegisterKeyword(source, name)` is a standalone helper (not part of the `Game.Effects.*`
 table) that wraps the `CreateStaticAbility`/`SetLayer(AbilityAdding)`/`SetEffect(AddKeyword(name))`/
-`SetAffected({ self_only = true })`/`Register()` boilerplate for the common case of a card granting
+`SetAffected(Game.Affected.Self)`/`Register()` boilerplate for the common case of a card granting
 itself a printed keyword — see the
 [cookbook](../wiki/Card-Script-Cookbook.md#grant-itself-a-printed-keyword-ability) for the full
 comparison. Fall back to the longhand `Game.Effects.AddKeyword` form when the target isn't

@@ -18,7 +18,7 @@ use crate::types::effect::{
 use crate::types::ids::ObjectId;
 use crate::types::mana::{ManaCost, ManaUnit};
 use crate::types::zone::ZoneKind;
-use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect, LandPlayAffected};
+use crate::types::player::HandSizeEffect;
 
 use super::builders::{
     ActivatedAbilityBuilder, CostModifierBuilder, DrawLimitModifierBuilder, HandRevealModifierBuilder,
@@ -26,16 +26,16 @@ use super::builders::{
     StaticAbilityBuilder, TriggeredAbilityBuilder,
 };
 use super::decode::{
-    decode_card_type_names, decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table,
-    decode_filter_table, decode_landwalk_quality, decode_subtypes, decode_target_pick, parse_card_type_name,
+    decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table,
+    decode_filter_table, decode_landwalk_quality, decode_name_list, decode_object_filter_keys, decode_target_pick, parse_card_type_name,
     parse_color_letter,
     parse_color_string, parse_counter_kind_name, parse_filter_controller_name, parse_keyword_name,
     parse_mana_unit_letter, parse_supertype_name, parse_zone_kind_name,
 };
 use super::tags::{
-    ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DrawLimitAffectedTag, DurationTag,
-    EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, ForEachPlayerTag, HandRevealAffectedTag,
-    HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LandPlayAffectedTag, LayerTag, OncePerTurnTag,
+    AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DurationTag,
+    EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, FilterTag, ForEachPlayerTag,
+    HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag,
     OperationResultTag, OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, ResultItem, TokenTag,
     result_items,
 };
@@ -52,7 +52,6 @@ use super::types::{to_lua_err, ScriptError, ScriptRegistry, ScriptZoneMoveKind};
 pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::Result<()> {
     let conditions = lua.create_table()?;
     conditions.set("Enters", ConditionTag(ConditionPrimitive::EntersBattlefield))?;
-    conditions.set("Always", ConditionTag(ConditionPrimitive::Always))?;
     conditions.set("DealsDamage", ConditionTag(ConditionPrimitive::DealsDamage))?;
     conditions.set("IsDealtDamage", ConditionTag(ConditionPrimitive::IsDealtDamage))?;
     conditions.set("Upkeep", ConditionTag(ConditionPrimitive::BeginningOfYourUpkeep))?;
@@ -98,25 +97,24 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     })?;
     conditions.set("OncePerTurn", once_per_turn)?;
 
-    // CR 603.4: `Game.InterveningIf.*` tags, consumed by `TriggeredAbilityBuilder:SetInterveningIf` and (CR 611.2c) `StaticAbilityBuilder:SetCondition`. A separate table from `Conditions`; see `InterveningIfTag`.
-    let intervening_if = lua.create_table()?;
+    // CR 603.4: state conditions, consumed by `TriggeredAbilityBuilder:SetInterveningIf` and (CR 611.2c) `StaticAbilityBuilder:SetCondition`. Same namespace as the event tags above, with its own tag type; see `InterveningIfTag`.
     let at_or_below_life = lua.create_function(|_, threshold: i32| {
         Ok(InterveningIfTag(InterveningIfPrimitive::ControllerAtOrBelowLife(threshold)))
     })?;
-    intervening_if.set("AtOrBelowLife", at_or_below_life)?;
+    conditions.set("AtOrBelowLife", at_or_below_life)?;
     // CR 611.2c: "as long as you control N or more [filter]", reusing `decode_filter_table`.
     let controls_at_least = lua.create_function(|_, (table, count): (Table, u32)| {
         let filter = decode_filter_table(table).map_err(to_lua_err)?;
         Ok(InterveningIfTag(InterveningIfPrimitive::ControllerControlsAtLeast { filter, count }))
     })?;
-    intervening_if.set("ControlsAtLeast", controls_at_least)?;
+    conditions.set("ControlsAtLeast", controls_at_least)?;
     // CR 603.4, 702.138b: "if it escaped" (Kroxa, Uro), an ordinary ETB trigger's intervening-if.
-    intervening_if.set("Escaped", InterveningIfTag(InterveningIfPrimitive::Escaped))?;
+    conditions.set("Escaped", InterveningIfTag(InterveningIfPrimitive::Escaped))?;
     // CR 603.4, 702.79a, 702.93a: "if it had no [kind] counters on it" (Persist, Undying), checked against the object as it died; see `InterveningIfPrimitive::HadNoCountersOfKind`.
     let had_no_counters = lua.create_function(|_, kind: String| {
         Ok(InterveningIfTag(InterveningIfPrimitive::HadNoCountersOfKind(parse_counter_kind_name(&kind))))
     })?;
-    intervening_if.set("HadNoCounters", had_no_counters)?;
+    conditions.set("HadNoCounters", had_no_counters)?;
 
     let ops = lua.create_table()?;
     // CR 605: `Game.Ops.AddMana(letter, count?)`. `letter` is one WUBRG or "C" symbol and `count` (default 1) repeats that fixed unit, which covers most real mana abilities.
@@ -387,7 +385,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
     })?;
     ops.set("Counters", counters)?;
-    // CR 702.79a, 702.93a: `Game.Ops.ReturnSelfWithCounter(kind)`, Persist and Undying's resolution effect, paired with `Game.Conditions.Dies` and `Game.InterveningIf.HadNoCounters(kind)` (see `AbilityEffect::ReturnSelfWithCounter`).
+    // CR 702.79a, 702.93a: `Game.Ops.ReturnSelfWithCounter(kind)`, Persist and Undying's resolution effect, paired with `Game.Conditions.Dies` and `Game.Conditions.HadNoCounters(kind)` (see `AbilityEffect::ReturnSelfWithCounter`).
     let return_self_with_counter = lua.create_function(|_, kind: String| {
         Ok(OperationTag(AbilityEffect::ReturnSelfWithCounter(parse_counter_kind_name(&kind))))
     })?;
@@ -653,7 +651,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     effects.set(
         "SetCardTypes",
         lua.create_function(|_, val: Value| {
-            let names = decode_card_type_names(val).map_err(to_lua_err)?;
+            let names = decode_name_list(val, "card types").map_err(to_lua_err)?;
             let mut set = CardTypeSet::empty();
             for name in names {
                 set |= parse_card_type_name(&name).map_err(to_lua_err)?;
@@ -925,12 +923,6 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
 
-    // `Game.HandSizeAffected.*`: which players a `Game.CreateHandSizeModifier` applies to (`HandSizeModifierBuilder::SetAffected`). `EnchantedPlayer` (CR 303.4m) is `HandSizeAffected`'s second variant, not a `FilterController`.
-    let hand_size_affected = lua.create_table()?;
-    hand_size_affected.set("You", HandSizeAffectedTag(HandSizeAffected::Filter(FilterController::You)))?;
-    hand_size_affected.set("Opponent", HandSizeAffectedTag(HandSizeAffected::Filter(FilterController::Opponent)))?;
-    hand_size_affected.set("Any", HandSizeAffectedTag(HandSizeAffected::Filter(FilterController::Any)))?;
-    hand_size_affected.set("EnchantedPlayer", HandSizeAffectedTag(HandSizeAffected::EnchantedPlayer))?;
 
     // `Game.HandSizeEffects.*`: what a `Game.CreateHandSizeModifier` does (`HandSizeModifierBuilder::SetEffect`).
     let hand_size_effects = lua.create_table()?;
@@ -947,12 +939,6 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
 
-    // `Game.HandRevealAffected.*`: which players a `Game.CreateHandRevealModifier` applies to (`HandRevealModifierBuilder::SetAffected`). The shape of `Game.HandSizeAffected.*`, in a separate table; see `HandRevealAffected`.
-    let hand_reveal_affected = lua.create_table()?;
-    hand_reveal_affected.set("You", HandRevealAffectedTag(HandRevealAffected::Filter(FilterController::You)))?;
-    hand_reveal_affected.set("Opponent", HandRevealAffectedTag(HandRevealAffected::Filter(FilterController::Opponent)))?;
-    hand_reveal_affected.set("Any", HandRevealAffectedTag(HandRevealAffected::Filter(FilterController::Any)))?;
-    hand_reveal_affected.set("EnchantedPlayer", HandRevealAffectedTag(HandRevealAffected::EnchantedPlayer))?;
 
     let create_draw_limit_modifier = {
         let registry = Rc::clone(&registry);
@@ -967,11 +953,6 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
 
-    // `Game.DrawLimitAffected.*`: which players a `Game.CreateDrawLimitModifier` applies to (`DrawLimitModifierBuilder::SetAffected`), with no `EnchantedPlayer`; see `DrawLimitAffected`.
-    let draw_limit_affected = lua.create_table()?;
-    draw_limit_affected.set("You", DrawLimitAffectedTag(DrawLimitAffected::Filter(FilterController::You)))?;
-    draw_limit_affected.set("Opponent", DrawLimitAffectedTag(DrawLimitAffected::Filter(FilterController::Opponent)))?;
-    draw_limit_affected.set("Any", DrawLimitAffectedTag(DrawLimitAffected::Filter(FilterController::Any)))?;
 
     let create_land_play_modifier = {
         let registry = Rc::clone(&registry);
@@ -986,11 +967,6 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
 
-    // `Game.LandPlayAffected.*`: which players a `Game.CreateLandPlayModifier` applies to (`LandPlayModifierBuilder::SetAffected`), with no `EnchantedPlayer`; see `LandPlayAffected`.
-    let land_play_affected = lua.create_table()?;
-    land_play_affected.set("You", LandPlayAffectedTag(LandPlayAffected::Filter(FilterController::You)))?;
-    land_play_affected.set("Opponent", LandPlayAffectedTag(LandPlayAffected::Filter(FilterController::Opponent)))?;
-    land_play_affected.set("Any", LandPlayAffectedTag(LandPlayAffected::Filter(FilterController::Any)))?;
 
     let tokens = lua.create_table()?;
     tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
@@ -999,24 +975,10 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     tokens.set(
         "Creature",
         lua.create_function(|_, (subtypes_val, colors_str, power, toughness, opts): (Value, String, i32, i32, Option<mlua::Table>)| {
-            let subtypes = decode_subtypes(subtypes_val).map_err(to_lua_err)?;
+            let subtypes = decode_name_list(subtypes_val, "subtypes").map_err(to_lua_err)?;
             let colors = parse_color_string(&colors_str).map_err(to_lua_err)?;
             let (keywords, name, additional_types, additional_supertypes) =
                 decode_creature_token_opts(opts).map_err(to_lua_err)?;
-            Ok(TokenTag(TokenSpec::Creature(CreatureTokenSpec {
-                subtypes, colors, power, toughness,
-                keywords, name, additional_types, additional_supertypes,
-            })))
-        })?,
-    )?;
-    tokens.set(
-        "ArtifactCreature",
-        lua.create_function(|_, (subtypes_val, colors_str, power, toughness, opts): (Value, String, i32, i32, Option<mlua::Table>)| {
-            let subtypes = decode_subtypes(subtypes_val).map_err(to_lua_err)?;
-            let colors = parse_color_string(&colors_str).map_err(to_lua_err)?;
-            let (keywords, name, extra_types, additional_supertypes) =
-                decode_creature_token_opts(opts).map_err(to_lua_err)?;
-            let additional_types = extra_types | CardTypeSet::ARTIFACT;
             Ok(TokenTag(TokenSpec::Creature(CreatureTokenSpec {
                 subtypes, colors, power, toughness,
                 keywords, name, additional_types, additional_supertypes,
@@ -1126,7 +1088,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     //   local e = Game.CreateStaticAbility(source)
     //   e:SetLayer(Game.Layers.AbilityAdding)
     //   e:SetEffect(Game.Effects.AddKeyword(name))
-    //   e:SetAffected({ self_only = true })
+    //   e:SetAffected(Game.Affected.Self)
     //   e:Register()
     // It resolves `Game.*` at call time, so it must run after `Game` is assigned to the Lua globals below.
     let register_keyword: Function = lua
@@ -1136,7 +1098,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 local e = Game.CreateStaticAbility(source)
                 e:SetLayer(Game.Layers.AbilityAdding)
                 e:SetEffect(Game.Effects.AddKeyword(name))
-                e:SetAffected({ self_only = true })
+                e:SetAffected(Game.Affected.Self)
                 e:Register()
             end
             "#,
@@ -1164,9 +1126,32 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         )
         .eval()?;
 
+    // `Game.Affected.*`: the one namespace behind every `:SetAffected`. Each builder takes the tags that mean something to it; see `AffectedTag`.
+    let affected = lua.create_table()?;
+    affected.set("Self", AffectedTag::SelfOnly)?;
+    affected.set("Enchanted", AffectedTag::Enchanted)?;
+    affected.set("EnchantedPlayerControls", AffectedTag::EnchantedPlayerControls)?;
+    affected.set("You", AffectedTag::Players(FilterController::You))?;
+    affected.set("Opponent", AffectedTag::Players(FilterController::Opponent))?;
+    affected.set("Any", AffectedTag::Players(FilterController::Any))?;
+    affected.set("EnchantedPlayer", AffectedTag::EnchantedPlayer)?;
+
+    // `Game.Filter({...})`: the flat object keys of `decode_object_filter_keys`. The object flags live in `Game.Affected`, so a flag key here is an error and not a silently ignored key.
+    let filter = lua.create_function(|_, table: Table| {
+        for flag in ["self_only", "enchanted_only", "enchanted_player_controls"] {
+            if table.contains_key(flag)? {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Game.Filter has no `{flag}` key - use Game.Affected.Self, Game.Affected.Enchanted or Game.Affected.EnchantedPlayerControls"
+                )));
+            }
+        }
+        Ok(FilterTag(decode_object_filter_keys(&table).map_err(to_lua_err)?))
+    })?;
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
-    game.set("InterveningIf", intervening_if)?;
+    game.set("Affected", affected)?;
+    game.set("Filter", filter)?;
     game.set("Ops", ops)?;
     game.set("Costs", costs)?;
     game.set("Layers", layers)?;
@@ -1185,14 +1170,10 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     game.set("CreateManaAbility", create_mana_ability)?;
     game.set("CreateCostModifier", create_cost_modifier)?;
     game.set("CreateHandSizeModifier", create_hand_size_modifier)?;
-    game.set("HandSizeAffected", hand_size_affected)?;
     game.set("HandSizeEffects", hand_size_effects)?;
     game.set("CreateHandRevealModifier", create_hand_reveal_modifier)?;
-    game.set("HandRevealAffected", hand_reveal_affected)?;
     game.set("CreateDrawLimitModifier", create_draw_limit_modifier)?;
-    game.set("DrawLimitAffected", draw_limit_affected)?;
     game.set("CreateLandPlayModifier", create_land_play_modifier)?;
-    game.set("LandPlayAffected", land_play_affected)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;
     game.set("ChooseN", choose_n)?;

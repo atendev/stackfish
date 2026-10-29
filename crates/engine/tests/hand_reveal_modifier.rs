@@ -12,7 +12,7 @@ const ENCHANTED_PLAYER_HAND_REVEALED: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local m = Game.CreateHandRevealModifier(c)
-    m:SetAffected(Game.HandRevealAffected.EnchantedPlayer)
+    m:SetAffected(Game.Affected.EnchantedPlayer)
     m:Register()
 end
 return s

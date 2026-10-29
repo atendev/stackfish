@@ -13,7 +13,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -25,7 +25,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersWithCounters("PlusOnePlusOne", 2))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -37,7 +37,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)
-    e:SetAffected({ controller = "opponent", card_types = { "Land" } })
+    e:SetAffected(Game.Filter({ controller = "opponent", card_types = { "Land" } }))
     e:Register()
 end
 return s
@@ -50,7 +50,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)
-    e:SetAffected({ controller = "opponent", subtypes = { "Swamp" } })
+    e:SetAffected(Game.Filter({ controller = "opponent", subtypes = { "Swamp" } }))
     e:Register()
 end
 return s
@@ -63,7 +63,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)
-    e:SetAffected({ controller = "opponent", supertypes = { "Legendary" } })
+    e:SetAffected(Game.Filter({ controller = "opponent", supertypes = { "Legendary" } }))
     e:Register()
 end
 return s

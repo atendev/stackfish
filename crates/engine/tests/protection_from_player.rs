@@ -16,7 +16,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddProtectionPlayer("opponent"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s

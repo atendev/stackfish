@@ -9,7 +9,7 @@ they are not CR 613 layer effects, so they don't go through
 
 ```lua
 local m = Game.CreateXModifier(c)
-m:SetAffected(Game.XAffected.You)   -- which player(s)
+m:SetAffected(Game.Affected.You)   -- which player(s)
 -- ...a magnitude setter, where the builder has one...
 m:Register()
 ```
@@ -27,16 +27,17 @@ its source is in that zone and is removed when the card leaves it. Without it, o
 
 ## Which player is affected
 
-`:SetAffected` takes a tagged value, not a filter table:
+`:SetAffected` takes a player tag from [`Game.Affected`](game-constants.md#gameaffected), not a
+filter table:
 
 | Value | Meaning |
 |---|---|
-| `Game.<Kind>Affected.You` | the source's controller |
-| `Game.<Kind>Affected.Opponent` | each opponent of the source's controller |
-| `Game.<Kind>Affected.Any` | every player |
-| `Game.<Kind>Affected.EnchantedPlayer` | the player this Aura is attached to (CR 303.4m). **Hand size and hand reveal only.** |
+| `Game.Affected.You` | the source's controller |
+| `Game.Affected.Opponent` | each opponent of the source's controller |
+| `Game.Affected.Any` | every player |
+| `Game.Affected.EnchantedPlayer` | the player this Aura is attached to (CR 303.4m). Hand size and hand reveal only; the draw limit and land play modifiers reject it at `:SetAffected`. |
 
-`<Kind>` is `HandSize`, `HandReveal`, `DrawLimit` or `LandPlay`.
+An object tag (`Self`, `Enchanted`, `EnchantedPlayerControls`) given to a player modifier is a load error.
 
 ## `Game.CreateHandSizeModifier(c)` — CR 402.2
 
@@ -53,7 +54,7 @@ local s = {}
 
 function s.register_abilities(c)
     local m = Game.CreateHandSizeModifier(c)
-    m:SetAffected(Game.HandSizeAffected.EnchantedPlayer)
+    m:SetAffected(Game.Affected.EnchantedPlayer)
     m:SetEffect(Game.HandSizeEffects.SetTo(3))
     m:Register()
 end
@@ -71,7 +72,7 @@ apply to the same player, the one with the latest timestamp wins outright.
 ```lua
 -- Enchanted player plays with their hand revealed.
 local m = Game.CreateHandRevealModifier(c)
-m:SetAffected(Game.HandRevealAffected.EnchantedPlayer)
+m:SetAffected(Game.Affected.EnchantedPlayer)
 m:Register()
 ```
 
@@ -86,7 +87,7 @@ m:Register()
 ```lua
 -- You can't draw more than one card each turn.
 local m = Game.CreateDrawLimitModifier(c)
-m:SetAffected(Game.DrawLimitAffected.You)
+m:SetAffected(Game.Affected.You)
 m:SetLimit(1)
 m:Register()
 ```
@@ -102,7 +103,7 @@ Enforced at the single point every draw goes through, so both the draw step and 
 ```lua
 -- You may play an additional land on each of your turns.
 local m = Game.CreateLandPlayModifier(c)
-m:SetAffected(Game.LandPlayAffected.You)
+m:SetAffected(Game.Affected.You)
 m:SetAdditional(1)
 m:Register()
 ```

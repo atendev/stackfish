@@ -49,7 +49,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.RemoveKeyword("Defender"))
-    e:SetAffected({ enchanted_only = true })
+    e:SetAffected(Game.Affected.Enchanted)
     e:Register()
 end
 

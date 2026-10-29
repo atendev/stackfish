@@ -104,6 +104,7 @@ mod layer_engine_type_color_overwrite;
 mod layer_engine_types_colors;
 mod legal_actions;
 mod legend_world_rule;
+mod lua_namespace_unification;
 mod lose_all_abilities;
 mod madness;
 mod mana_ability_during_payment;

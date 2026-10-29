@@ -35,7 +35,7 @@
 ---@field from string  -- "library"|"hand"|"battlefield"|"graveyard"|"stack"|"exile"|"command"
 ---@field to string
 
--- The shared filter-table shape used across :SetAffected/:SetTarget/costs/Game.Ops.Search etc.
+-- The shared filter-table shape used across :SetTarget/costs/Game.Ops.Search/Game.Filter etc.
 -- See docs/lua/targeting-and-choices.md#filter-table-shape.
 ---@class FilterTable
 ---@field controller? "you"|"opponent"|"any"
@@ -51,18 +51,10 @@
 ---@field mana_value_at_most? integer|"X"
 ---@field mana_value_at_least? integer|"X"
 
--- :SetAffected (static)/Game.Ops.DestroyAll/replacement :SetAffected all layer extra keys
--- onto the base filter shape; not every consumer accepts every key (see per-table notes
--- in docs/lua/static-abilities.md and docs/lua/game-constants.md).
----@class AffectedFilterTable : FilterTable
----@field self_only? boolean                    -- "just this effect's own source"
----@field enchanted_only? boolean                -- CR 303.4m; can't combine with other keys
----@field enchanted_player_controls? boolean     -- CR 303.4m player-side; can't combine with other keys
-
----@class ReplacementAffectedTable
----@field controller? "you"|"opponent"|"any"
----@field card_types? string[]
----@field self_only? boolean
+-- The argument of Game.Filter({...}): the flat object filter keys. Each consumer matches only the
+-- keys it can (see docs/lua/static-abilities.md and docs/lua/game-constants.md), and ignores the rest.
+-- self_only, enchanted_only and enchanted_player_controls are errors; use Game.Affected tags instead.
+---@class ObjectFilter : FilterTable
 
 ---@class TargetRequirementTable : FilterTable
 ---@field type? "object"|"player"|"any"  -- default "object"
@@ -70,7 +62,7 @@
 ---@field up_to? boolean                  -- mutually exclusive with at_least
 ---@field at_least? boolean
 ---@field exclude_source? boolean         -- CR 115.4 "another target"
----@field filter? ScriptedTargetFn
+---@field filter? ScriptedTargetFn|PlayerPredicateFn  -- a function only, never a table; type = "player" takes the player predicate
 
 ---@alias ScriptedTargetFn fun(object: ObjectId, source: ObjectId, controller: PlayerId, state: StateSnapshot): boolean
 ---@alias PlayerPredicateFn fun(player: PlayerId, source: ObjectId, controller: PlayerId, state: StateSnapshot): boolean
@@ -126,7 +118,9 @@
 -------------------------------------------------------------------------------
 
 ---@class GameConditionsValue
----@class GameInterveningIfValue
+---@class GameStateConditionValue  -- AtOrBelowLife/ControlsAtLeast/Escaped/HadNoCounters; :SetInterveningIf or a static :SetCondition
+---@class GameAffectedValue
+---@class GameFilterValue  -- result of Game.Filter({...})
 ---@class GameOpsValue
 ---@class GameOpsAddManaValue : GameOpsValue  -- only AddMana/AddManaChoice/AddRestrictedMana results
 ---@class GameOpsSacrificeChosenValue : GameOpsValue  -- only SacrificeChosen results
@@ -148,13 +142,15 @@
 ---@class TriggeredAbilityBuilder
 local TriggeredAbilityBuilder = {}
 
---- CR 603, "did this ability's triggering event just happen." Omit ⇒ Game.Conditions.Always.
+--- CR 603, "did this ability's triggering event just happen." Takes an event tag (Enters, Dies, Upkeep, ...)
+--- or a function. Omit for an unconditional trigger; nil or an unknown tag is an error.
 ---@param value GameConditionsValue|ConditionFn
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetCondition(value) end
 
---- CR 603, extra board-state check evaluated when the trigger would go on the stack.
----@param value GameInterveningIfValue|InterveningIfFn
+--- CR 603.4, extra board-state check evaluated when the trigger would go on the stack. Takes a state
+--- tag (AtOrBelowLife, ControlsAtLeast, Escaped, HadNoCounters) or a function.
+---@param value GameStateConditionValue|InterveningIfFn
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetInterveningIf(value) end
 
@@ -197,17 +193,19 @@ function StaticAbilityBuilder:SetEffect(value) end
 
 --- Marks this as a characteristic-defining ability (CR 604.3): it functions in every zone, not just the
 --- battlefield. CR 604.3a restricts it to AddSubtype (layer 4) or AddColor/SetColors (layer 5), with
---- SetAffected({ self_only = true }), no SetCondition, no SetDuration and no SetFunctionsFrom.
+--- SetAffected(Game.Affected.Self), no SetCondition, no SetDuration and no SetFunctionsFrom.
 ---@return StaticAbilityBuilder
 function StaticAbilityBuilder:SetCharacteristicDefining() end
 
---- Which objects this effect applies to. Omit ⇒ applies to every object.
----@param value AffectedFilterTable|AffectsPredicateFn
+--- Which objects this effect applies to. Takes Game.Affected.Self, .Enchanted or .EnchantedPlayerControls,
+--- a Game.Filter({...}) value, or a function. A raw table is an error. Omit ⇒ applies to every object.
+---@param value GameAffectedValue|GameFilterValue|AffectsPredicateFn
 ---@return StaticAbilityBuilder
 function StaticAbilityBuilder:SetAffected(value) end
 
---- CR 611.2c intervening-if: "this effect applies only as long as X is true."
----@param value GameInterveningIfValue|InterveningIfFn
+--- CR 611.2c: "this effect applies only as long as X is true." Takes a state tag (AtOrBelowLife,
+--- ControlsAtLeast, Escaped, HadNoCounters) or a function. Omit for an unconditional effect.
+---@param value GameStateConditionValue|InterveningIfFn
 ---@return StaticAbilityBuilder
 function StaticAbilityBuilder:SetCondition(value) end
 
@@ -272,8 +270,8 @@ local ReplacementEffectBuilder = {}
 ---@return ReplacementEffectBuilder
 function ReplacementEffectBuilder:SetFunctionsFrom(zoneName) end
 
---- Table-only — no scripted-predicate form. Default: no filter (applies to source only via defaults below).
----@param value ReplacementAffectedTable
+--- Game.Affected.Self or Game.Filter({...}); no scripted-predicate form. Default: this effect's own source.
+---@param value GameAffectedValue|GameFilterValue
 ---@return ReplacementEffectBuilder
 function ReplacementEffectBuilder:SetAffected(value) end
 
@@ -305,8 +303,8 @@ local CostModifierBuilder = {}
 ---@return CostModifierBuilder
 function CostModifierBuilder:SetFunctionsFrom(zoneName) end
 
---- Which spells this modifies. Required before :Register().
----@param value FilterTable
+--- Which spells this modifies, as a Game.Filter({...}) value (a raw table is an error). Required before :Register().
+---@param value GameFilterValue
 ---@return CostModifierBuilder
 function CostModifierBuilder:SetFilter(value) end
 
@@ -332,7 +330,7 @@ local HandSizeModifierBuilder = {}
 function HandSizeModifierBuilder:SetFunctionsFrom(zoneName) end
 
 --- Which player(s) this applies to. Required before :Register().
----@param value GameHandSizeAffectedValue
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent, .Any or .EnchantedPlayer
 ---@return HandSizeModifierBuilder
 function HandSizeModifierBuilder:SetAffected(value) end
 
@@ -344,14 +342,6 @@ function HandSizeModifierBuilder:SetEffect(value) end
 --- Finalizes and registers the modifier. If several apply to the same player, the one with the
 --- latest timestamp wins outright (no stacking).
 function HandSizeModifierBuilder:Register() end
-
----@class GameHandSizeAffectedValue
----@class GameHandSizeAffectedTable
----@field You GameHandSizeAffectedValue
----@field Opponent GameHandSizeAffectedValue
----@field Any GameHandSizeAffectedValue
----@field EnchantedPlayer GameHandSizeAffectedValue  -- CR 303.4m, the player this Aura is attached to
-local GameHandSizeAffectedTable = {}
 
 ---@class GameHandSizeEffectValue
 ---@class GameHandSizeEffectsTable
@@ -375,21 +365,13 @@ local HandRevealModifierBuilder = {}
 function HandRevealModifierBuilder:SetFunctionsFrom(zoneName) end
 
 --- Which player(s) this applies to. Required before :Register().
----@param value GameHandRevealAffectedValue
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent, .Any or .EnchantedPlayer
 ---@return HandRevealModifierBuilder
 function HandRevealModifierBuilder:SetAffected(value) end
 
 --- Finalizes and registers the modifier. NOTE: nothing enforces this yet — the engine has no
 --- per-viewer visibility boundary for it to change (see docs/lua/player-modifiers.md).
 function HandRevealModifierBuilder:Register() end
-
----@class GameHandRevealAffectedValue
----@class GameHandRevealAffectedTable
----@field You GameHandRevealAffectedValue
----@field Opponent GameHandRevealAffectedValue
----@field Any GameHandRevealAffectedValue
----@field EnchantedPlayer GameHandRevealAffectedValue
-local GameHandRevealAffectedTable = {}
 
 -------------------------------------------------------------------------------
 -- Game.CreateDrawLimitModifier(c) — CR 121.2b "can't draw more than N cards each turn."
@@ -404,7 +386,7 @@ local DrawLimitModifierBuilder = {}
 function DrawLimitModifierBuilder:SetFunctionsFrom(zoneName) end
 
 --- Which player(s) this applies to. Required before :Register().
----@param value GameDrawLimitAffectedValue
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent or .Any; .EnchantedPlayer is an error
 ---@return DrawLimitModifierBuilder
 function DrawLimitModifierBuilder:SetAffected(value) end
 
@@ -416,13 +398,6 @@ function DrawLimitModifierBuilder:SetLimit(limit) end
 --- Finalizes and registers the modifier. If several apply to the same player, the one with the
 --- latest timestamp wins outright (no stacking).
 function DrawLimitModifierBuilder:Register() end
-
----@class GameDrawLimitAffectedValue
----@class GameDrawLimitAffectedTable
----@field You GameDrawLimitAffectedValue
----@field Opponent GameDrawLimitAffectedValue
----@field Any GameDrawLimitAffectedValue
-local GameDrawLimitAffectedTable = {}
 
 -------------------------------------------------------------------------------
 -- Game.CreateLandPlayModifier(c) — CR 305.2 "play an additional land each turn."
@@ -437,7 +412,7 @@ local LandPlayModifierBuilder = {}
 function LandPlayModifierBuilder:SetFunctionsFrom(zoneName) end
 
 --- Which player(s) this applies to. Required before :Register().
----@param value GameLandPlayAffectedValue
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent or .Any; .EnchantedPlayer is an error
 ---@return LandPlayModifierBuilder
 function LandPlayModifierBuilder:SetAffected(value) end
 
@@ -451,12 +426,19 @@ function LandPlayModifierBuilder:SetAdditional(additional) end
 --- overriding the rest.
 function LandPlayModifierBuilder:Register() end
 
----@class GameLandPlayAffectedValue
----@class GameLandPlayAffectedTable
----@field You GameLandPlayAffectedValue
----@field Opponent GameLandPlayAffectedValue
----@field Any GameLandPlayAffectedValue
-local GameLandPlayAffectedTable = {}
+-------------------------------------------------------------------------------
+-- Game.Affected.* — the one namespace behind every :SetAffected.
+-------------------------------------------------------------------------------
+
+---@class GameAffectedTable
+---@field Self GameAffectedValue                    -- object tag: only the effect's own source (static, replacement)
+---@field Enchanted GameAffectedValue               -- object tag: CR 303.4m, the object this Aura is attached to (static)
+---@field EnchantedPlayerControls GameAffectedValue -- object tag: CR 303.4m, permanents the enchanted player controls (static)
+---@field You GameAffectedValue                     -- player tag (player modifiers only)
+---@field Opponent GameAffectedValue                -- player tag
+---@field Any GameAffectedValue                     -- player tag
+---@field EnchantedPlayer GameAffectedValue         -- player tag: CR 303.4m; rejected by draw limit and land play modifiers
+local GameAffectedTable = {}
 
 -------------------------------------------------------------------------------
 -- Game.Conditions.* — :SetCondition on a triggered ability. CR 603 trigger-event check.
@@ -464,7 +446,7 @@ local GameLandPlayAffectedTable = {}
 
 ---@class GameConditionsTable
 ---@field Enters GameConditionsValue                    -- CR 603, "when this enters the battlefield"
----@field Always GameConditionsValue                     -- no filter, matches every event
+---@field Escaped GameStateConditionValue                 -- state tag: CR 702.138b, "if it escaped"
 ---@field DealsDamage GameConditionsValue                 -- CR 603.2, "whenever this deals damage"
 ---@field IsDealtDamage GameConditionsValue                -- "whenever this is dealt damage" (object targets only)
 ---@field Upkeep GameConditionsValue                       -- CR 502.1, your upkeep
@@ -505,23 +487,24 @@ function GameConditionsTable.LeavesBattlefieldMatching(filter) end
 ---@return GameConditionsValue
 function GameConditionsTable.OncePerTurn(condition) end
 
--------------------------------------------------------------------------------
--- Game.InterveningIf.* — :SetInterveningIf (triggered) or :SetCondition (static). CR 611.2c.
--------------------------------------------------------------------------------
+-- State conditions: pass to a triggered ability's :SetInterveningIf (CR 603.4) or a static
+-- ability's :SetCondition (CR 611.2c). Event tags above go to a triggered ability's :SetCondition.
 
----@class GameInterveningIfTable
-local GameInterveningIfTable = {}
-
---- True iff controller's current life is at or below threshold.
+--- True iff the controller's current life is at or below threshold.
 ---@param threshold integer
----@return GameInterveningIfValue
-function GameInterveningIfTable.AtOrBelowLife(threshold) end
+---@return GameStateConditionValue
+function GameConditionsTable.AtOrBelowLife(threshold) end
 
---- CR 611.2c, "as long as you control `count` or more permanents matching `filter`."
+--- "As long as you control `count` or more permanents matching `filter`."
 ---@param filter FilterTable
 ---@param count integer
----@return GameInterveningIfValue
-function GameInterveningIfTable.ControlsAtLeast(filter, count) end
+---@return GameStateConditionValue
+function GameConditionsTable.ControlsAtLeast(filter, count) end
+
+--- CR 603.4, 702.79a, 702.93a: "if it had no `kind` counters on it" (Persist, Undying).
+---@param kind string
+---@return GameStateConditionValue
+function GameConditionsTable.HadNoCounters(kind) end
 
 -------------------------------------------------------------------------------
 -- Game.Ops.* — :SetOperation (triggered/activated) or s.operation().
@@ -588,8 +571,9 @@ function GameOpsTable.Mill(n) end
 ---@return GameOpsValue
 function GameOpsTable.Damage(amount) end
 
---- CR 701.8/601.2c. No targets; only card_types/controller/self_only in filter (no subtypes/exclusion yet).
----@param filter { card_types?: string[], controller?: string, self_only?: boolean }
+--- CR 701.8/601.2c. No targets. Takes a raw flat table with the same keys Game.Filter matches on
+--- (controller, card_types, subtypes, excluded_subtypes, supertypes, excluded_supertypes); other keys are ignored.
+---@param filter ObjectFilter
 ---@return GameOpsValue
 function GameOpsTable.DestroyAll(filter) end
 
@@ -1006,10 +990,6 @@ function GameTokensTable.Creature(subtypes, colors, power, toughness, opts) end
 ---@param colors string
 ---@param power integer
 ---@param toughness integer
----@param opts? TokenOpts
----@return GameTokensValue
-function GameTokensTable.ArtifactCreature(subtypes, colors, power, toughness, opts) end
-
 ---@param objectId ObjectId
 ---@param exceptions? BecomeCopyExceptions
 ---@return GameTokensValue
@@ -1021,7 +1001,7 @@ function GameTokensTable.CopyOf(objectId, exceptions) end
 
 ---@class Game
 ---@field Conditions GameConditionsTable
----@field InterveningIf GameInterveningIfTable
+---@field Affected GameAffectedTable
 ---@field Ops GameOpsTable
 ---@field Costs GameCostsTable
 ---@field Layers GameLayersTable
@@ -1031,12 +1011,14 @@ function GameTokensTable.CopyOf(objectId, exceptions) end
 ---@field ReplacementPayloads GameReplacementPayloadsTable
 ---@field Consumption GameConsumptionTable
 ---@field Tokens GameTokensTable
----@field LandPlayAffected GameLandPlayAffectedTable
----@field HandSizeAffected GameHandSizeAffectedTable
 ---@field HandSizeEffects GameHandSizeEffectsTable
----@field HandRevealAffected GameHandRevealAffectedTable
----@field DrawLimitAffected GameDrawLimitAffectedTable
 local Game = {}
+
+--- Wraps a flat object filter table for a static or replacement :SetAffected or a cost modifier's :SetFilter.
+--- The keys self_only, enchanted_only and enchanted_player_controls are errors; use Game.Affected tags.
+---@param filter ObjectFilter
+---@return GameFilterValue
+function Game.Filter(filter) end
 
 ---@param c ObjectId
 ---@return TriggeredAbilityBuilder
@@ -1078,7 +1060,7 @@ function Game.CreateHandRevealModifier(c) end
 ---@return DrawLimitModifierBuilder
 function Game.CreateDrawLimitModifier(c) end
 
---- Sugar for CreateStaticAbility/SetLayer(AbilityAdding)/SetEffect(AddKeyword(name))/SetAffected({self_only=true})/Register().
+--- Sugar for CreateStaticAbility/SetLayer(AbilityAdding)/SetEffect(AddKeyword(name))/SetAffected(Game.Affected.Self)/Register().
 ---@param source ObjectId
 ---@param name KeywordName|string
 function Game.RegisterKeyword(source, name) end

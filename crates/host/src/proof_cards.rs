@@ -313,7 +313,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(3, 3))
-    e:SetAffected({ enchanted_only = true })
+    e:SetAffected(Game.Affected.Enchanted)
     e:Register()
 end
 return s
@@ -334,7 +334,7 @@ return s
         r#"    local bonus = Game.CreateStaticAbility(c)
     bonus:SetLayer(Game.Layers.PowerToughnessModifying)
     bonus:SetEffect(Game.Effects.ModifyPT(2, 0))
-    bonus:SetAffected({ enchanted_only = true })
+    bonus:SetAffected(Game.Affected.Enchanted)
     bonus:Register()
 
     local equip = Game.CreateActivatedAbility(c)

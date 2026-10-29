@@ -12,7 +12,7 @@ const STATIC_REGENERATE_SELF: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -69,7 +69,7 @@ fn run_card_script_self_registers_a_repeatable_regeneration_shield() {
     assert_eq!(shield.consumption, ConsumptionPolicy::Repeatable);
     match &shield.spec {
         ReplacementSpec::Primitive { filter: EventFilter::WouldDie { affected }, payload: ReplacementPayload::Regenerate } => {
-            assert!(affected.self_only, "SetAffected({{ self_only = true }}) should carry through");
+            assert!(affected.self_only, "SetAffected(Game.Affected.Self) should carry through");
         }
         other => panic!("expected a WouldDie/Regenerate primitive spec, got {other:?}"),
     }

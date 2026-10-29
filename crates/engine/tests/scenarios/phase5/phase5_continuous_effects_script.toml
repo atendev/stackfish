@@ -35,7 +35,7 @@ function s.register_abilities(c)
     e:SetEffect(function(source, controller)
         return Game.Effects.ModifyPT(1, 1)
     end)
-    e:SetAffected({ controller = "you", card_types = { "Creature" } })
+    e:SetAffected(Game.Filter({ controller = "you", card_types = { "Creature" } }))
     e:Register()
 end
 return s

@@ -176,7 +176,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
-    e:SetAffected({ enchanted_only = true })
+    e:SetAffected(Game.Affected.Enchanted)
     e:Register()
 end
 return s

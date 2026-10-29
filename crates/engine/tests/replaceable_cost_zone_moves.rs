@@ -134,7 +134,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
-    e:SetAffected({ card_types = { "Creature" } })
+    e:SetAffected(Game.Filter({ card_types = { "Creature" } }))
     e:Register()
 end
 return s
@@ -146,7 +146,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Hand", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
-    e:SetAffected({ card_types = { "Creature" } })
+    e:SetAffected(Game.Filter({ card_types = { "Creature" } }))
     e:Register()
 end
 return s
@@ -235,7 +235,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
-    e:SetAffected({ card_types = { "Land" } })
+    e:SetAffected(Game.Filter({ card_types = { "Land" } }))
     e:Register()
 end
 return s

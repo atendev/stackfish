@@ -45,7 +45,6 @@ local s = {}
 function s.register_abilities(c)
     local t = Game.CreateTriggeredAbility(c)
     t:SetFunctionsFrom("Graveyard")
-    t:SetCondition(Game.Conditions.Always)
     t:SetOperation(Game.Ops.GainLife(1))
     t:Register()
 

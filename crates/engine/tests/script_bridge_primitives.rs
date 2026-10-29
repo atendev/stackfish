@@ -139,12 +139,18 @@ fn primitive_enters_condition_false_on_wrong_destination_zone() {
 }
 
 #[test]
+fn the_always_condition_tag_is_not_a_lua_value() {
+    let mut runtime = ScriptRuntime::new();
+    let error = runtime.load_condition("return Game.Conditions.Always").expect_err("Always is removed");
+    assert!(format!("{error:?}").contains("omit :SetCondition"), "{error:?}");
+}
+
+#[test]
 fn primitive_always_condition_matches_an_unrelated_event() {
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
-    let mut runtime = ScriptRuntime::new();
-    let condition = runtime.load_condition("return Game.Conditions.Always").expect("primitive loads");
-    assert!(matches!(condition, ConditionSpec::Primitive(ConditionPrimitive::Always)));
+    let runtime = ScriptRuntime::new();
+    let condition = ConditionSpec::Primitive(ConditionPrimitive::Always);
 
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
@@ -163,7 +169,7 @@ fn primitive_always_condition_matches_an_unrelated_event() {
         intervening_if: None,
     });
 
-    // An unrelated event kind matches anyway, like a None condition, through the explicit Game.Conditions.Always spelling.
+    // An unrelated event kind matches anyway, like a None condition.
     let event = GameEvent {
         event_id: EventId(0),
         sequence_no: SequenceNo(0),
@@ -172,7 +178,7 @@ fn primitive_always_condition_matches_an_unrelated_event() {
         parent_event: None,
     };
     let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
-    assert_eq!(pending.len(), 1, "Game.Conditions.Always means no filter - any event matches");
+    assert_eq!(pending.len(), 1, "an Always condition means no filter - any event matches");
 }
 
 #[test]

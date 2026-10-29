@@ -1,5 +1,5 @@
 //! CR 702.138b/c/d: Escape provenance. `AlternativeCost::Replacement.escape` marks Escape's cost, `StackObject::escaped` is baked in at push time, and `GameObject::entered_via_escape` is set when the spell resolves onto the battlefield.
-//! `InterveningIfPrimitive::Escaped` serves an ordinary ETB trigger (CR 603.4), `EntersWithCountersEscape` serves CR 702.138c, and `Game.InterveningIf.Escaped` serves CR 702.138d through `SetCondition` (CR 611.2c).
+//! `InterveningIfPrimitive::Escaped` serves an ordinary ETB trigger (CR 603.4), `EntersWithCountersEscape` serves CR 702.138c, and `Game.Conditions.Escaped` serves CR 702.138d through `SetCondition` (CR 611.2c).
 //! One creature is cast both ways, so `entered_via_escape` is per-incarnation provenance and not a standing permission.
 
 use stackfish_engine::layers::effective_characteristics;
@@ -13,21 +13,21 @@ local s = {}
 function s.register_abilities(c)
     local trig = Game.CreateTriggeredAbility(c)
     trig:SetCondition(Game.Conditions.Enters)
-    trig:SetInterveningIf(Game.InterveningIf.Escaped)
+    trig:SetInterveningIf(Game.Conditions.Escaped)
     trig:SetOperation(Game.Ops.GainLife(1))
     trig:Register()
 
     local counters = Game.CreateReplacementEffect(c)
     counters:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     counters:SetPayload(Game.ReplacementPayloads.EntersWithCountersEscape("PlusOnePlusOne", 2))
-    counters:SetAffected({ self_only = true })
+    counters:SetAffected(Game.Affected.Self)
     counters:Register()
 
     local keyword = Game.CreateStaticAbility(c)
     keyword:SetLayer(Game.Layers.AbilityAdding)
     keyword:SetEffect(Game.Effects.AddKeyword("Flying"))
-    keyword:SetAffected({ self_only = true })
-    keyword:SetCondition(Game.InterveningIf.Escaped)
+    keyword:SetAffected(Game.Affected.Self)
+    keyword:SetCondition(Game.Conditions.Escaped)
     keyword:Register()
 end
 return s

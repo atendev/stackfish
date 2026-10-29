@@ -68,7 +68,7 @@ fn target_requirement_function_decodes_a_player_scripted_predicate_filter() {
     let source = r#"
         local s = {}
         function s.target_requirement()
-            return { count = 1, filter = { type = "player", filter = function(player, source, controller, state) return true end } }
+            return { count = 1, type = "player", filter = function(player, source, controller, state) return true end }
         end
         return s
     "#;
@@ -126,7 +126,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
-    e:SetAffected({ enchanted_only = true })
+    e:SetAffected(Game.Affected.Enchanted)
     e:Register()
 end
 

@@ -35,7 +35,7 @@ function s.register_abilities(c)
     local e2 = Game.CreateStaticAbility(c)
     e2:SetLayer(Game.Layers.PowerToughnessModifying)
     e2:SetEffect(Game.Effects.ModifyPT(1, 1))
-    e2:SetAffected({ self_only = true })
+    e2:SetAffected(Game.Affected.Self)
     e2:Register()
 end
 ```
@@ -84,8 +84,9 @@ full list):
 
 ```lua
 return Game.Conditions.Enters       -- CR 603, "when this enters the battlefield"
-return Game.Conditions.Always       -- no filter, matches every event
 ```
+
+For an unconditional trigger, leave `:SetCondition` out.
 
 **Several operations in order** — wrap them in `Game.Ops.Chain`. `:SetOperation` and `s.operation()` hold
 one value each, and a second `:SetOperation` call replaces the first.

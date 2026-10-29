@@ -14,7 +14,7 @@ function s.register_abilities(c)
     e:SetCharacteristicDefining()
     e:SetLayer(Game.Layers.ColorChanging)
     e:SetEffect(Game.Effects.SetColors("WUBRG"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -26,7 +26,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.ColorChanging)
     e:SetEffect(Game.Effects.SetColors("WUBRG"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s

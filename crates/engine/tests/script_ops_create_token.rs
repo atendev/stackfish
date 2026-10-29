@@ -1,4 +1,4 @@
-//! `AbilityEffect::CreateToken` (`Game.Tokens.*` and `Game.Ops.CreateToken`) places tokens directly onto the battlefield with `is_token: true`. Named tokens (Clue, Food) register their activated ability through `register_token_abilities`, and Creature and ArtifactCreature tokens have none.
+//! `AbilityEffect::CreateToken` (`Game.Tokens.*` and `Game.Ops.CreateToken`) places tokens directly onto the battlefield with `is_token: true`. Named tokens (Clue, Food) register their activated ability through `register_token_abilities`, and Creature tokens, artifact creatures included, have none.
 // TODO: CR 111.7 cessation, since a token goes to the graveyard like any other permanent
 
 use std::collections::HashMap;

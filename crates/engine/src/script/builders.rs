@@ -5,29 +5,31 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mlua::{Table, UserData, UserDataMethods, Value};
+use mlua::{Lua, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, RegisteredAbility};
 use crate::types::card::ModeChoice;
-use crate::types::cost::{CostModifier, CostModifierTarget, CostSpec, FilterSpec};
+use crate::types::cost::{CostModifier, CostModifierTarget, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
-use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
+use crate::types::player::{
+    DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected, HandSizeModifier,
+    LandPlayAffected, LandPlayModifier,
+};
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::decode::{
-    decode_affected_value, decode_condition_value, decode_cost_component_value, decode_effect_filter_table,
-    decode_effect_value, decode_filter_table, decode_layer_value, decode_operation_value,
+    decode_affected_value, decode_condition_value, decode_cost_component_value,
+    decode_effect_value, decode_layer_value, decode_operation_value, decode_replacement_affected,
     check_chain_words, decode_target_spec_value, parse_single_color_letter,
 };
 use super::tags::{
-    ConsumptionPolicyTag, CostComponent, DrawLimitAffectedTag, DurationTag, EventFilterKind, EventFilterKindTag,
-    HandRevealAffectedTag, HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LandPlayAffectedTag,
-    RedirectDamageToSourceTag, ReplacementPayloadTag,
+    AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind, EventFilterKindTag,
+    FilterTag, HandSizeEffectTag, InterveningIfTag, OncePerTurnTag, RedirectDamageToSourceTag, ReplacementPayloadTag,
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
@@ -104,7 +106,7 @@ fn validate_characteristic_defining(
         return Err(err("only AddSubtype (layer 4) and AddColor/SetColors (layer 5) can define a characteristic"));
     }
     if !matches!(affected, AffectedFilter::Primitive(filter) if filter.self_only) {
-        return Err(err("it must affect only its own source - use SetAffected({ self_only = true })"));
+        return Err(err("it must affect only its own source - use SetAffected(Game.Affected.Self)"));
     }
     if has_condition {
         return Err(err("it can't set a characteristic only if a condition is met"));
@@ -156,7 +158,7 @@ fn validate_replacement_filter_payload_pairing(
         Ok(())
     } else {
         Err(ScriptError::LoadError(format!(
-            "SetFilter({kind:?}) doesn't pair with SetPayload({payload:?}) - each event filter only \
+            "SetFilter(Game.Filter({kind:?})) doesn't pair with SetPayload({payload:?}) - each event filter only \
              accepts its own replacement payload shape(s)"
         )))
     }
@@ -188,7 +190,7 @@ pub(crate) struct TriggeredAbilityBuilder {
     pub(crate) target: Option<TargetSpec>,
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
     /// CR 603.4's intervening-if clause (see `InterveningIfSpec`), set through
-    /// `:SetInterveningIf(Game.InterveningIf.*)`, separate from `condition`.
+    /// `:SetInterveningIf(Game.Conditions.*)`, separate from `condition`.
     pub(crate) intervening_if: Option<InterveningIfSpec>,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_method`.
     pub(crate) function_zone: Option<ZoneKind>,
@@ -224,26 +226,7 @@ impl UserData for TriggeredAbilityBuilder {
             Ok(())
         });
         methods.add_method_mut("SetInterveningIf", |lua, this, value: Value| {
-            let spec = match value {
-                Value::UserData(ud) => {
-                    let primitive = ud.borrow::<InterveningIfTag>()?.0.clone();
-                    InterveningIfSpec::Primitive(primitive)
-                }
-                // A real Lua predicate, invoked through `ScriptRuntime::invoke_intervening_if` and registered as in the `Function` arm of `decode_condition_value`.
-                Value::Function(function) => {
-                    let key = lua.create_registry_value(function)?;
-                    let mut registry = this.registry.borrow_mut();
-                    let handle = registry.next_script_handle();
-                    registry.scripts.insert(handle, key);
-                    InterveningIfSpec::Script(handle)
-                }
-                other => {
-                    return Err(mlua::Error::RuntimeError(format!(
-                        "SetInterveningIf expects a Game.InterveningIf.* value or a function, got {}",
-                        other.type_name()
-                    )))
-                }
-            };
+            let spec = decode_state_condition(lua, &this.registry, value, "SetInterveningIf")?;
             this.intervening_if = Some(spec);
             Ok(())
         });
@@ -499,6 +482,70 @@ impl UserData for ManaAbilityBuilder {
     }
 }
 
+/// The state-condition argument of trigger `:SetInterveningIf` and static
+/// `:SetCondition`: a `Game.Conditions.*` state tag or a Lua predicate. An event
+/// tag from the same namespace (`Game.Conditions.Dies`) belongs in the trigger's
+/// `:SetCondition` and is rejected here by name.
+fn decode_state_condition(
+    lua: &Lua,
+    registry: &Rc<RefCell<ScriptRegistry>>,
+    value: Value,
+    method: &str,
+) -> mlua::Result<InterveningIfSpec> {
+    match value {
+        Value::UserData(ud) if ud.is::<InterveningIfTag>() => {
+            Ok(InterveningIfSpec::Primitive(ud.borrow::<InterveningIfTag>()?.0.clone()))
+        }
+        Value::UserData(ud) if ud.is::<ConditionTag>() || ud.is::<OncePerTurnTag>() => {
+            Err(mlua::Error::RuntimeError(format!(
+                "{method} takes a state condition (AtOrBelowLife, ControlsAtLeast, Escaped, HadNoCounters); \
+                 that Game.Conditions value is an event and belongs in a triggered ability's :SetCondition"
+            )))
+        }
+        // A real Lua predicate, invoked through `ScriptRuntime::invoke_intervening_if` and registered as in the `Function` arm of `decode_condition_value`.
+        Value::Function(function) => {
+            let key = lua.create_registry_value(function)?;
+            let mut registry = registry.borrow_mut();
+            let handle = registry.next_script_handle();
+            registry.scripts.insert(handle, key);
+            Ok(InterveningIfSpec::Script(handle))
+        }
+        other => Err(mlua::Error::RuntimeError(format!(
+            "{method} expects a Game.Conditions state value or a function, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// What a player modifier's `:SetAffected` took: a `Game.Affected.You`,
+/// `.Opponent`, `.Any` or `.EnchantedPlayer` value. An object tag is rejected by name.
+fn decode_player_affected(value: mlua::AnyUserData, builder: &str) -> mlua::Result<AffectedTag> {
+    if !value.is::<AffectedTag>() {
+        return Err(mlua::Error::RuntimeError(format!(
+            "{builder}:SetAffected expects a Game.Affected.You, .Opponent, .Any or .EnchantedPlayer value"
+        )));
+    }
+    let tag = *value.borrow::<AffectedTag>()?;
+    match tag {
+        AffectedTag::Players(_) | AffectedTag::EnchantedPlayer => Ok(tag),
+        other => Err(mlua::Error::RuntimeError(format!(
+            "{} selects objects, not players - {builder}:SetAffected takes Game.Affected.You, .Opponent, .Any or .EnchantedPlayer",
+            other.describe()
+        ))),
+    }
+}
+
+/// CR 303.4m: draw limit and land play modifiers have no enchanted-player form.
+fn reject_enchanted_player(tag: AffectedTag, builder: &str) -> mlua::Result<FilterController> {
+    match tag {
+        AffectedTag::Players(controller) => Ok(controller),
+        _ => Err(mlua::Error::RuntimeError(format!(
+            "{} isn't valid for {builder}:SetAffected - use Game.Affected.You, .Opponent or .Any",
+            tag.describe()
+        ))),
+    }
+}
+
 /// `Game.CreateStaticAbility(c)`'s return value, mirroring
 /// `TriggeredAbilityBuilder` for CR 604 and 611. `:SetLayer` accepts a
 /// `Game.Layers.*` tag only, with no `Script` fallback (see
@@ -522,7 +569,7 @@ pub(crate) struct StaticAbilityBuilder {
     pub(crate) affected: AffectedFilter,
     /// CR 611.2c: "applies only as long as X is true" (see
     /// `ContinuousEffect::condition`), set through
-    /// `:SetCondition(Game.InterveningIf.*)`, decoded as
+    /// `:SetCondition(Game.Conditions.*)`, decoded as
     /// `TriggeredAbilityBuilder::SetInterveningIf` does.
     pub(crate) condition: Option<InterveningIfSpec>,
     /// CR 611.2a: a limited-duration static effect ("artifacts you control gain
@@ -561,27 +608,9 @@ impl UserData for StaticAbilityBuilder {
             this.affected = affected;
             Ok(())
         });
-        // CR 611.2c: decoded as `TriggeredAbilityBuilder::SetInterveningIf` is (the same `InterveningIfTag` and `Function` shapes).
+        // CR 611.2c: decoded as `TriggeredAbilityBuilder::SetInterveningIf` is.
         methods.add_method_mut("SetCondition", |lua, this, value: Value| {
-            let spec = match value {
-                Value::UserData(ud) => {
-                    let primitive = ud.borrow::<InterveningIfTag>()?.0.clone();
-                    InterveningIfSpec::Primitive(primitive)
-                }
-                Value::Function(function) => {
-                    let key = lua.create_registry_value(function)?;
-                    let mut registry = this.registry.borrow_mut();
-                    let handle = registry.next_script_handle();
-                    registry.scripts.insert(handle, key);
-                    InterveningIfSpec::Script(handle)
-                }
-                other => {
-                    return Err(mlua::Error::RuntimeError(format!(
-                        "SetCondition expects a Game.InterveningIf.* value or a function, got {}",
-                        other.type_name()
-                    )))
-                }
-            };
+            let spec = decode_state_condition(lua, &this.registry, value, "SetCondition")?;
             this.condition = Some(spec);
             Ok(())
         });
@@ -674,8 +703,8 @@ impl UserData for ReplacementEffectBuilder {
             this.function_zone = Some(function_zone_name(&name)?);
             Ok(())
         });
-        methods.add_method_mut("SetAffected", |_, this, table: Table| {
-            this.affected = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+        methods.add_method_mut("SetAffected", |_, this, value: Value| {
+            this.affected = decode_replacement_affected(value).map_err(to_lua_err)?;
             Ok(())
         });
         // `Game.EventFilters.*`: which `EventFilter` shape this effect watches. It isn't the real `EventFilter` yet because `affected` is separate; see `EventFilterKindTag`.
@@ -754,9 +783,17 @@ impl UserData for CostModifierBuilder {
             this.function_zone = Some(function_zone_name(&name)?);
             Ok(())
         });
-        methods.add_method_mut("SetFilter", |_, this, table: Table| {
-            this.filter = Some(decode_filter_table(table).map_err(to_lua_err)?);
-            Ok(())
+        methods.add_method_mut("SetFilter", |_, this, value: Value| {
+            match value {
+                Value::UserData(ud) if ud.is::<FilterTag>() => {
+                    this.filter = Some(ud.borrow::<FilterTag>()?.0.clone().into_filter_spec());
+                    Ok(())
+                }
+                other => Err(mlua::Error::RuntimeError(format!(
+                    "a cost modifier's SetFilter expects Game.Filter({{...}}), got {}",
+                    other.type_name()
+                ))),
+            }
         });
         methods.add_method_mut("SetAmount", |_, this, (amount, color): (i32, Option<String>)| {
             this.amount = Some(amount);
@@ -795,7 +832,7 @@ impl UserData for CostModifierBuilder {
 
 /// `Game.CreateHandSizeModifier(c)`'s return value (CR 402.2), mirroring
 /// `CostModifierBuilder`'s queue-and-drain shape and its placeholder
-/// `controller`. `:SetAffected` takes a `Game.HandSizeAffected.*` tagged value
+/// `controller`. `:SetAffected` takes a `Game.Affected.*` tagged value
 /// and not a filter table, because `HandSizeAffected` is a small closed enum
 /// (`Filter(FilterController)`, `EnchantedPlayer` for CR 303.4m) and not an
 /// open filter with combinable keys.
@@ -815,7 +852,10 @@ impl UserData for HandSizeModifierBuilder {
             Ok(())
         });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
-            this.affected = Some(value.borrow::<HandSizeAffectedTag>()?.0);
+            this.affected = Some(match decode_player_affected(value, "a hand size modifier")? {
+                AffectedTag::EnchantedPlayer => HandSizeAffected::EnchantedPlayer,
+                tag => HandSizeAffected::Filter(reject_enchanted_player(tag, "a hand size modifier")?),
+            });
             Ok(())
         });
         methods.add_method_mut("SetEffect", |_, this, value: mlua::AnyUserData| {
@@ -869,7 +909,10 @@ impl UserData for HandRevealModifierBuilder {
             Ok(())
         });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
-            this.affected = Some(value.borrow::<HandRevealAffectedTag>()?.0);
+            this.affected = Some(match decode_player_affected(value, "a hand reveal modifier")? {
+                AffectedTag::EnchantedPlayer => HandRevealAffected::EnchantedPlayer,
+                tag => HandRevealAffected::Filter(reject_enchanted_player(tag, "a hand reveal modifier")?),
+            });
             Ok(())
         });
         methods.add_method_mut("Register", |_, this, ()| {
@@ -913,7 +956,8 @@ impl UserData for DrawLimitModifierBuilder {
             Ok(())
         });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
-            this.affected = Some(value.borrow::<DrawLimitAffectedTag>()?.0);
+            let tag = decode_player_affected(value, "a draw limit modifier")?;
+            this.affected = Some(DrawLimitAffected::Filter(reject_enchanted_player(tag, "a draw limit modifier")?));
             Ok(())
         });
         methods.add_method_mut("SetLimit", |_, this, limit: u32| {
@@ -969,7 +1013,8 @@ impl UserData for LandPlayModifierBuilder {
             Ok(())
         });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
-            this.affected = Some(value.borrow::<LandPlayAffectedTag>()?.0);
+            let tag = decode_player_affected(value, "a land play modifier")?;
+            this.affected = Some(LandPlayAffected::Filter(reject_enchanted_player(tag, "a land play modifier")?));
             Ok(())
         });
         methods.add_method_mut("SetAdditional", |_, this, additional: u32| {

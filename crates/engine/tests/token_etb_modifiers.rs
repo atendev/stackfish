@@ -92,7 +92,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s

@@ -140,7 +140,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersAsCopy())
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -174,13 +174,13 @@ function s.register_abilities(c)
     local tapped = Game.CreateReplacementEffect(c)
     tapped:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     tapped:SetPayload(Game.ReplacementPayloads.EntersTapped)
-    tapped:SetAffected({ self_only = true })
+    tapped:SetAffected(Game.Affected.Self)
     tapped:Register()
 
     local fade = Game.CreateReplacementEffect(c)
     fade:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     fade:SetPayload(Game.ReplacementPayloads.EntersWithCounters("Charge", 2))
-    fade:SetAffected({ self_only = true })
+    fade:SetAffected(Game.Affected.Self)
     fade:Register()
 end
 return s
@@ -292,7 +292,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersAsCopy({ counter_kind = "PlusOnePlusOne", counter_amount = 1 }))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -401,7 +401,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersAsCopy({ grant_recurring_copy_trigger = true }))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s

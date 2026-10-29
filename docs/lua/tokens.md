@@ -13,10 +13,9 @@ created with [`Game.Ops.CreateToken(spec, count?)`](game-constants.md#gameops).
 | `Food` | — | A Food token ("{2}, {T}, Sacrifice this artifact: You gain 3 life."). |
 | `Treasure` | — | A Treasure token ("{T}, Sacrifice this artifact: Add one mana of any color."). |
 | `Creature(subtypes, colors, power, toughness, opts?)` | see below | A creature token. |
-| `ArtifactCreature(subtypes, colors, power, toughness, opts?)` | same as `Creature` | A creature token that's also an artifact. |
 | `CopyOf(objectId, exceptions?)` | `objectId`: the object to copy. `exceptions`: same table `Game.Ops.BecomeCopy` accepts. | A token that enters as a copy of an existing object (CR 707.10f). |
 
-## `Creature`/`ArtifactCreature` arguments
+## `Creature` arguments
 
 - `subtypes` — a subtype name, or a list of subtype names, e.g. `"Soldier"` or `{ "Elf",
   "Warrior" }`.
@@ -26,8 +25,8 @@ created with [`Game.Ops.CreateToken(spec, count?)`](game-constants.md#gameops).
   - `keywords = { "Flying", ... }` — keyword abilities to grant.
   - `name = "..."` — overrides the default name (which is otherwise built from the subtypes, e.g.
     "Soldier" or "Elf Warrior").
-  - `additional_types = { "Artifact" }` — extra card types beyond Creature (used internally by
-    `ArtifactCreature`, but available directly too, e.g. for an enchantment creature token).
+  - `additional_types = { "Artifact" }` — extra card types beyond Creature, e.g. for an artifact
+    creature or an enchantment creature token.
   - `additional_supertypes = { "Legendary" }` — e.g. a legendary creature token.
 
 ## Worked examples
@@ -52,8 +51,9 @@ Game.Ops.CreateToken(Game.Tokens.Creature("Elemental", "G", 0, 0, {
 ```lua
 -- Create a legendary 4/4 colorless Golem artifact creature token named
 -- "Karnstruct".
-Game.Ops.CreateToken(Game.Tokens.ArtifactCreature("Golem", "", 4, 4, {
+Game.Ops.CreateToken(Game.Tokens.Creature("Golem", "", 4, 4, {
     name = "Karnstruct",
+    additional_types = { "Artifact" },
     additional_supertypes = { "Legendary" },
 }))
 ```

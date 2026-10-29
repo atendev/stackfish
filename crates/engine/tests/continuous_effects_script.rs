@@ -215,7 +215,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(function(source, controller) return Game.Effects.ModifyPT(1, 1) end)
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s

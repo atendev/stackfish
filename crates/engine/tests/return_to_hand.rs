@@ -29,7 +29,7 @@ function s.register_abilities(c)
     e:SetCharacteristicDefining()
     e:SetLayer(Game.Layers.ColorChanging)
     e:SetEffect(Game.Effects.SetColors("WUBRG"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -205,14 +205,14 @@ fn a_hand_declared_activated_ability_registers_only_in_hand() {
 
 #[test]
 fn a_hand_declared_trigger_registers_only_in_hand() {
-    let script = hand_declared("local t = Game.CreateTriggeredAbility(c) t:SetFunctionsFrom(\"Hand\") t:SetCondition(Game.Conditions.Always) t:SetOperation(Game.Ops.GainLife(1)) t:Register()");
+    let script = hand_declared("local t = Game.CreateTriggeredAbility(c) t:SetFunctionsFrom(\"Hand\") t:SetOperation(Game.Ops.GainLife(1)) t:Register()");
     assert_eq!(run_in(ZoneKind::Hand, &script).unwrap().abilities.len(), 1);
     assert!(run_in(ZoneKind::Battlefield, &script).unwrap().abilities.is_empty());
 }
 
 #[test]
 fn a_hand_declared_static_registers_only_in_hand() {
-    let script = hand_declared("local e = Game.CreateStaticAbility(c) e:SetFunctionsFrom(\"Hand\") e:SetLayer(Game.Layers.ColorChanging) e:SetEffect(Game.Effects.SetColors(\"WUBRG\")) e:SetAffected({ self_only = true }) e:Register()");
+    let script = hand_declared("local e = Game.CreateStaticAbility(c) e:SetFunctionsFrom(\"Hand\") e:SetLayer(Game.Layers.ColorChanging) e:SetEffect(Game.Effects.SetColors(\"WUBRG\")) e:SetAffected(Game.Affected.Self) e:Register()");
     assert_eq!(run_in(ZoneKind::Hand, &script).unwrap().continuous_effects.len(), 1);
     assert!(run_in(ZoneKind::Battlefield, &script).unwrap().continuous_effects.is_empty());
 }

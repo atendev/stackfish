@@ -14,7 +14,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -26,7 +26,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
-    e:SetAffected({ controller = "you", card_types = { "Creature" } })
+    e:SetAffected(Game.Filter({ controller = "you", card_types = { "Creature" } }))
     e:Register()
 end
 return s
@@ -69,7 +69,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.RemoveKeyword("Defender"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -92,7 +92,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.IgnoreKeyword("Defender"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -123,13 +123,13 @@ function s.register_abilities(c)
     local e1 = Game.CreateStaticAbility(c)
     e1:SetLayer(Game.Layers.PowerToughnessModifying)
     e1:SetEffect(Game.Effects.ModifyPT(1, 0))
-    e1:SetAffected({ self_only = true })
+    e1:SetAffected(Game.Affected.Self)
     e1:Register()
 
     local e2 = Game.CreateStaticAbility(c)
     e2:SetLayer(Game.Layers.AbilityAdding)
     e2:SetEffect(Game.Effects.AddKeyword("Flying"))
-    e2:SetAffected({ self_only = true })
+    e2:SetAffected(Game.Affected.Self)
     e2:Register()
 end
 return s

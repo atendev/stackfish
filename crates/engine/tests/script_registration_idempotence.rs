@@ -10,7 +10,7 @@ const ADDITIONAL_LAND: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local m = Game.CreateLandPlayModifier(c)
-    m:SetAffected(Game.LandPlayAffected.You)
+    m:SetAffected(Game.Affected.You)
     m:SetAdditional(1)
     m:Register()
 end

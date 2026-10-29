@@ -17,16 +17,18 @@ structure and the condition/operation concept in general.
 ## Methods
 
 **`:SetCondition(value)`** — CR 603's own trigger-event condition: did the thing this ability
-cares about just happen? `value` is a [`Game.Conditions.*`](game-constants.md#gameconditions) tag,
-a `Game.Conditions.OncePerTurn(...)` wrapper, or a custom function — see
-[card-script-basics.md](card-script-basics.md#writing-a-condition) for the custom-function
-signature. Omitting `:SetCondition` entirely means unconditional (equivalent to
-`Game.Conditions.Always`).
+cares about just happen? `value` is a [`Game.Conditions.*`](game-constants.md#gameconditions) event
+tag (`Enters`, `Dies`, `Upkeep`, ...), a `Game.Conditions.OncePerTurn(...)` wrapper, or a custom
+function — see [card-script-basics.md](card-script-basics.md#writing-a-condition) for the
+custom-function signature. Omitting `:SetCondition` entirely is the only way to write an
+unconditional trigger. `:SetCondition(nil)` and an unknown tag are load errors, and so is a state tag
+such as `AtOrBelowLife`, which belongs to `:SetInterveningIf`.
 
 **`:SetInterveningIf(value)`** — CR 603.4's separate "if" clause, for abilities phrased
 "When/Whenever/At X, **if Y**, Z." Independent of `:SetCondition` — set both if your ability has
-both a trigger event and a board-state gate. `value` is a
-[`Game.InterveningIf.*`](game-constants.md#gameinterveningif) tag or a custom function:
+both a trigger event and a board-state gate. `value` is a state tag from
+[`Game.Conditions.*`](game-constants.md#state-tags) (`AtOrBelowLife`, `ControlsAtLeast`, `Escaped`,
+`HadNoCounters`) or a custom function. An event tag is a load error. The function form is:
 
 ```lua
 function(source, controller) -> bool

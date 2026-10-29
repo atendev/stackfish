@@ -172,7 +172,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddKeyword("Lifelink"))
-    e:SetAffected({ enchanted_player_controls = true })
+    e:SetAffected(Game.Affected.EnchantedPlayerControls)
     e:Register()
 end
 return s

@@ -15,7 +15,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     {extra}
     {layer_and_effect}
-    e:SetAffected({{ self_only = true }})
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -114,7 +114,7 @@ fn the_engine_sweep_registers_a_graveyard_cda_once() {
 fn cr_604_3a_validation_rejects_non_cda_shapes() {
     let cases: [(&str, &str, &str); 5] = [
         ("keyword grant", "e:SetLayer(Game.Layers.AbilityAdding) e:SetEffect(Game.Effects.AddKeyword(\"Flying\"))", ""),
-        ("condition", ALL_COLORS, "e:SetCondition(Game.InterveningIf.AtOrBelowLife(5))"),
+        ("condition", ALL_COLORS, "e:SetCondition(Game.Conditions.AtOrBelowLife(5))"),
         ("function zone", ALL_COLORS, "e:SetFunctionsFrom(\"Graveyard\")"),
         ("duration", ALL_COLORS, "e:SetDuration(Game.Durations.UntilEndOfTurn)"),
         ("card type", "e:SetLayer(Game.Layers.TypeChanging) e:SetEffect(Game.Effects.AddCardType(\"Artifact\"))", ""),
@@ -135,7 +135,7 @@ function s.register_abilities(c)
     e:SetCharacteristicDefining()
     e:SetLayer(Game.Layers.ColorChanging)
     e:SetEffect(Game.Effects.SetColors("R"))
-    e:SetAffected({ controller = "you" })
+    e:SetAffected(Game.Filter({ controller = "you" }))
     e:Register()
 end
 return s
@@ -151,8 +151,8 @@ function s.register_abilities(c)
     e:SetFunctionsFrom("Graveyard")
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddKeyword("Haste"))
-    e:SetAffected({ controller = "you", card_types = { "Creature" } })
-    e:SetCondition(Game.InterveningIf.ControlsAtLeast({ subtypes = { "Mountain" } }, 1))
+    e:SetAffected(Game.Filter({ controller = "you", card_types = { "Creature" } }))
+    e:SetCondition(Game.Conditions.ControlsAtLeast({ subtypes = { "Mountain" } }, 1))
     e:Register()
 end
 return s

@@ -14,7 +14,7 @@ function s.register_abilities(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.PreventDamage)
     e:SetConsumption(Game.Consumption.OneShot)
-    e:SetAffected({ controller = "you" })
+    e:SetAffected(Game.Filter({ controller = "you" }))
     e:Register()
 end
 return s
@@ -26,7 +26,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldDie)
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -50,7 +50,7 @@ function s.register_abilities(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.PreventDamage)
     e:SetConsumption(Game.Consumption.LimitedUses(1))
-    e:SetAffected({ controller = "you" })
+    e:SetAffected(Game.Filter({ controller = "you" }))
     e:Register()
 end
 return s
@@ -60,7 +60,7 @@ const REGENERATE_DEFAULTS_UNCHANGED: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s

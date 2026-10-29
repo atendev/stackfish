@@ -14,7 +14,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Exile"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Graveyard"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s

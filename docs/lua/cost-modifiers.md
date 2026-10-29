@@ -11,7 +11,7 @@ local s = {}
 
 function s.register_abilities(c)
     local e = Game.CreateCostModifier(c)
-    e:SetFilter({ controller = "you" })
+    e:SetFilter(Game.Filter({ controller = "you" }))
     e:SetAmount(-1)
     e:Register()
 end
@@ -27,9 +27,10 @@ battlefield (Anger: "as long as this card is in your graveyard..."). `zoneName` 
 it; without this call it only functions on the battlefield. See
 [triggered-abilities.md](triggered-abilities.md#methods) for the shared behavior.
 
-**`:SetFilter(table)`** — which spells this modifier applies to. The shared filter-table shape —
-see [targeting-and-choices.md#filter-table-shape](targeting-and-choices.md#filter-table-shape).
-Required.
+**`:SetFilter(value)`** — which spells this modifier applies to. `value` is a
+[`Game.Filter({...})`](static-abilities.md#gamefilter) value over the shared filter keys — see
+[targeting-and-choices.md#filter-table-shape](targeting-and-choices.md#filter-table-shape). A raw
+table is a load error. Required.
 
 **`:SetAmount(amount)`** — the flat change to the spell's generic mana component. A negative
 number reduces the cost, a positive number increases it. Required.

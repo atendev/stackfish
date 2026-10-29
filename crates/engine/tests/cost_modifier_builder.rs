@@ -13,7 +13,7 @@ const CREATURES_COST_ONE_LESS: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local m = Game.CreateCostModifier(c)
-    m:SetFilter({ card_types = { "Creature" } })
+    m:SetFilter(Game.Filter({ card_types = { "Creature" } }))
     m:SetAmount(-1)
     m:Register()
 end
@@ -26,7 +26,7 @@ const CREATURES_COST_W_LESS: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local m = Game.CreateCostModifier(c)
-    m:SetFilter({ card_types = { "Creature" } })
+    m:SetFilter(Game.Filter({ card_types = { "Creature" } }))
     m:SetAmount(-1, "W")
     m:Register()
 end
@@ -47,7 +47,7 @@ const NO_SET_AMOUNT: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local m = Game.CreateCostModifier(c)
-    m:SetFilter({ card_types = { "Creature" } })
+    m:SetFilter(Game.Filter({ card_types = { "Creature" } }))
     m:Register()
 end
 return s

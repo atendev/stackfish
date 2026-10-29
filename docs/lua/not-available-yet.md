@@ -85,10 +85,6 @@ name.
   cost that depends on X. It can only be registered when the card's script runs, not granted to another
   permanent by a continuous effect. See [game-constants.md](game-constants.md#gameconditions).
 - **Enchanting/equipping a player** isn't modeled — attachment only ever targets a permanent.
-- **`Game.Ops.DestroyAll`'s filter has no `subtypes`/exclusion keys.** Only `card_types`/
-  `controller`/`self_only` — "destroy all Zombies" or "destroy all nonland permanents" aren't
-  expressible via mass destruction yet, only a plain type/controller restriction like Armageddon's
-  "destroy all lands." See [game-constants.md](game-constants.md#gameops).
 - **"Counter unless that player pays {X}" only supports a fixed printed amount.** Mana Leak's own
   shape (`Game.Ops.CounterUnlessPaid("{3}")`) is real now — see
   [game-constants.md](game-constants.md#gameops). Condescend's own `{X}` (an amount announced when

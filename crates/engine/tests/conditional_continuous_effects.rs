@@ -1,6 +1,6 @@
 //! CR 611.2c: conditional ("as long as ...") continuous effects, scoped to `InterveningIfPrimitive::ControllerControlsAtLeast` and reusing CR 603.4's `InterveningIfSpec`.
 //! `layers::applicable_effects_in_layer` drops an effect whose `condition` does not hold, checked fresh on every call.
-//! The Lua side is `Game.InterveningIf.ControlsAtLeast` with `StaticAbilityBuilder:SetCondition`.
+//! The Lua side is `Game.Conditions.ControlsAtLeast` with `StaticAbilityBuilder:SetCondition`.
 
 use std::collections::HashMap;
 
@@ -191,8 +191,8 @@ fn lua_controls_at_least_primitive_round_trips_through_set_condition() {
             local e = Game.CreateStaticAbility(c)
             e:SetLayer(Game.Layers.PowerToughnessModifying)
             e:SetEffect(Game.Effects.ModifyPT(1, 1))
-            e:SetAffected({ controller = "you" })
-            e:SetCondition(Game.InterveningIf.ControlsAtLeast({ card_types = { "Artifact" } }, 3))
+            e:SetAffected(Game.Filter({ controller = "you" }))
+            e:SetCondition(Game.Conditions.ControlsAtLeast({ card_types = { "Artifact" } }, 3))
             e:Register()
         end
         return s
@@ -220,7 +220,7 @@ fn lua_set_condition_accepts_a_custom_function_as_a_script_backed_condition() {
             local e = Game.CreateStaticAbility(c)
             e:SetLayer(Game.Layers.PowerToughnessModifying)
             e:SetEffect(Game.Effects.ModifyPT(1, 1))
-            e:SetAffected({ controller = "you" })
+            e:SetAffected(Game.Filter({ controller = "you" }))
             e:SetCondition(function(src, controller, snapshot)
                 return true
             end)

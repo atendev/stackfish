@@ -13,7 +13,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
-    e:SetAffected({ controller = "you", card_types = { "Creature" } })
+    e:SetAffected(Game.Filter({ controller = "you", card_types = { "Creature" } }))
     e:Register()
 end
 
@@ -38,15 +38,18 @@ effect that don't belong together (e.g. `SetLayer(TypeChanging)` with
 `SetEffect(Game.Effects.ModifyPT(...))`) is a real error — see the pairing table in
 [game-constants.md](game-constants.md#gamelayers).
 
-**`:SetAffected(value)`** — which objects this effect applies to. `value` is a plain table (every
-key optional), or a custom function — see [Filter table](#filter-table) and
-[Script-backed effects](#script-backed-setaffectedseteffect) below. Omitting `:SetAffected` entirely
-means the effect applies to every object (a real, if unusual, shape).
+**`:SetAffected(value)`** — which objects this effect applies to. `value` is a
+[`Game.Affected`](#gameaffected-object-tags) object tag, a [`Game.Filter({...})`](#gamefilter) value,
+or a custom function — see [Script-backed effects](#script-backed-setaffectedseteffect) below. A
+raw table is a load error. Omitting `:SetAffected` entirely means the effect applies to every object
+(a real, if unusual, shape).
 
 **`:SetCondition(value)`** — CR 611.2c, "this effect applies only as long as X is true." `value`
-is a [`Game.InterveningIf.*`](game-constants.md#gameinterveningif) tag or a custom function
-`function(source, controller) -> bool`. Optional — omitting it means the effect is unconditionally
-active whenever it's registered.
+is a state tag from [`Game.Conditions.*`](game-constants.md#state-tags) (`AtOrBelowLife`,
+`ControlsAtLeast`, `Escaped`, `HadNoCounters`) or a custom function
+`function(source, controller) -> bool`. An event tag such as `Dies` is a load error, because those
+belong to a triggered ability's `:SetCondition`. Optional — omitting it means the effect is
+unconditionally active whenever it's registered. `:SetCondition(nil)` and an unknown tag are load errors.
 
 **`:SetDuration(value)`** — makes the effect temporary instead of permanent. `value` is a
 [`Game.Durations.*`](game-constants.md#gamedurations) tag. Omitting it defaults to `Permanent`.
@@ -64,50 +67,56 @@ e:SetDuration(Game.Durations.UntilEndOfTurn)
 it functions in every zone instead of only the battlefield (a Mistform-style "this card is all colors"
 applies in hand, on the stack, in the graveyard, ...). `:Register()` checks CR 604.3a and errors unless
 the effect is `Game.Effects.AddSubtype` in `Game.Layers.TypeChanging` or `AddColor`/`SetColors` in
-`Game.Layers.ColorChanging`, it uses `:SetAffected({ self_only = true })`, and it has no `:SetCondition`,
+`Game.Layers.ColorChanging`, it uses `:SetAffected(Game.Affected.Self)`, and it has no `:SetCondition`,
 `:SetDuration` or `:SetFunctionsFrom`. A power/toughness CDA is not written this way — it's the card
 definition's `CharacteristicDefining` P/T value. The effect registers whenever the card's script runs
 for a zone (hand, library, cast, battlefield entry, graveyard/exile) — an engine sweep runs the script for
 any card found in hand, library, graveyard or exile, so it registers however the card got there. Not the
 command zone.
 
-## Filter table
+## `Game.Filter`
 
-The table passed to `:SetAffected` — every key optional:
+`Game.Filter({...})` wraps a flat object filter table for `:SetAffected`. Every key is optional:
 
 ```lua
-e:SetAffected({
-    controller = "you",           -- "you" | "opponent" | "any", default: no filter
-    card_types = { "Creature" },  -- default: no filter
-    self_only = true,             -- default false — "just this effect's own source"
-    enchanted_only = true,        -- default false — CR 303.4m, "whatever this is attached to"
-    enchanted_player_controls = true, -- default false — CR 303.4m, "creatures enchanted player controls"
-})
+e:SetAffected(Game.Filter({
+    controller = "you",                 -- "you" | "opponent" | "any", default: no filter
+    card_types = { "Creature" },        -- default: no filter
+    subtypes = { "Zombie" },
+    excluded_subtypes = { "Vampire" },
+    supertypes = { "Legendary" },
+    excluded_supertypes = { "Basic" },
+}))
 ```
 
-`enchanted_only = true` (CR 303.4m, e.g. "Enchanted creature gets +1/+1") can't be combined with
-the other keys — it short-circuits to "whatever this effect's own source (the Aura, or any other
-permanent with something attached to it) is currently attached to." Matches only permanents —
-enchanting a player is `enchanted_player_controls` instead, below. Combined with the parent
-effect's own `self_only`, note this is about the *target of attachment*, not the effect's own
-source — don't set both `self_only` and `enchanted_only`.
+A static ability's `:SetAffected` matches on `controller`, `card_types`, `subtypes`,
+`excluded_subtypes`, `supertypes` and `excluded_supertypes`. The other shared filter keys (see
+[targeting-and-choices.md](targeting-and-choices.md#filter-table-shape)) are ignored silently for
+now; strict key rejection comes later. `self_only`, `enchanted_only` and
+`enchanted_player_controls` are errors that point to `Game.Affected`.
 
-`enchanted_player_controls = true` (CR 303.4m's player-side sibling, e.g. Curse of Vitality's
-"Creatures enchanted player controls have lifelink") is the same kind of short-circuit —
-"objects controlled by whichever player this effect's own source is currently attached to (via
-`:SetTarget`ing a player instead of an object)," `false`/no match if the source isn't attached to
-a player at all. Also can't be combined with the other keys, same narrowing `enchanted_only`
-already takes — no real "creatures enchanted player controls that are also a [type]" card exists
-to justify it.
+## `Game.Affected` object tags
+
+Tags for the cases a filter table can't express, passed straight to `:SetAffected`. A tag can't be
+combined with filter keys.
+
+| Tag | Meaning |
+|---|---|
+| `Game.Affected.Self` | Only this effect's own source. |
+| `Game.Affected.Enchanted` | CR 303.4m, "Enchanted creature gets +1/+1": whatever this effect's source is currently attached to. Matches permanents only. |
+| `Game.Affected.EnchantedPlayerControls` | CR 303.4m, "Creatures enchanted player controls have lifelink" (Curse of Vitality): objects controlled by the player this effect's source is attached to. Matches nothing if the source isn't attached to a player. |
+
+The player tags (`You`, `Opponent`, `Any`, `EnchantedPlayer`) belong to the
+[player modifiers](player-modifiers.md), and passing one here is a load error.
 
 ## Script-backed `:SetAffected`/`:SetEffect`
 
-Both also accept a custom function instead of a table/tag — the same primitive-vs-custom-function
+Both also accept a custom function instead of a tag or `Game.Filter` value — the same primitive-vs-custom-function
 pattern every other slot in this API uses:
 
 ```lua
--- "Other creatures you control get +1/+1" via a predicate instead of the
--- {controller=.., card_types=..} table shape.
+-- "Other creatures you control get +1/+1" via a predicate instead of a
+-- Game.Filter({ controller = .., card_types = .. }) value.
 e:SetAffected(function(object, source, controller, state, enchanted)
     return object ~= source
 end)
@@ -130,7 +139,7 @@ treated as "no effect this call" rather than a hard failure.
 Both functions receive a **state snapshot** as a trailing argument — real, public board state, not
 just object identity — plus `enchanted` (CR 303.4m): whatever object `source` is currently
 attached to, or `nil` if nothing. `object == enchanted` is the function-form equivalent of
-`{ enchanted_only = true }` for a predicate that needs more than plain identity matching (e.g.
+`Game.Affected.Enchanted` for a predicate that needs more than plain identity matching (e.g.
 "enchanted creature, but only if it's a Human").
 
 Note: because a function-backed effect's real shape isn't known until it actually runs, a
@@ -147,7 +156,7 @@ all pair with `Game.Layers.AbilityAdding`:
 -- This creature has protection from red.
 e:SetLayer(Game.Layers.AbilityAdding)
 e:SetEffect(Game.Effects.AddProtectionColor("R"))
-e:SetAffected({ self_only = true })
+e:SetAffected(Game.Affected.Self)
 ```
 
 ```lua
@@ -175,7 +184,7 @@ e:SetEffect(Game.Effects.AddProtectionEverything)
 e:SetEffect(Game.Effects.AddProtectionPlayer("opponent"))
 ```
 
-Each pairs with `:SetAffected({ self_only = true })` in the common case (a creature granting
+Each pairs with `:SetAffected(Game.Affected.Self)` in the common case (a creature granting
 itself protection). Protection is enforced automatically everywhere it matters — damage
 prevention, illegal targeting, and illegal blocking — you don't need to do anything else once it's
 registered. "Protection from any player" isn't a real quality on its own — use

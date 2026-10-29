@@ -13,7 +13,7 @@ const ENCHANTED_PLAYER_HAND_SIZE_THREE: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local m = Game.CreateHandSizeModifier(c)
-    m:SetAffected(Game.HandSizeAffected.EnchantedPlayer)
+    m:SetAffected(Game.Affected.EnchantedPlayer)
     m:SetEffect(Game.HandSizeEffects.SetTo(3))
     m:Register()
 end

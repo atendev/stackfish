@@ -16,7 +16,7 @@ function s.register_abilities(c)
     {zone_call}
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddKeyword("Haste"))
-    e:SetAffected({{ controller = "you", card_types = {{"Creature"}} }})
+    e:SetAffected(Game.Filter({{ controller = "you", card_types = {{"Creature"}} }}))
     e:Register()
 end
 return s
@@ -33,7 +33,7 @@ function s.register_abilities(c)
     {zone_call}
     e:SetFilter(Game.EventFilters.WouldDie)
     e:SetPayload(Game.ReplacementPayloads.Regenerate)
-    e:SetAffected({{ self_only = true }})
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -48,7 +48,7 @@ local s = {{}}
 function s.register_abilities(c)
     local m = Game.CreateLandPlayModifier(c)
     {zone_call}
-    m:SetAffected(Game.LandPlayAffected.You)
+    m:SetAffected(Game.Affected.You)
     m:SetAdditional(1)
     m:Register()
 end

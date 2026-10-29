@@ -14,7 +14,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.RedirectDamageToSource)
-    e:SetAffected({ controller = "you" })
+    e:SetAffected(Game.Filter({ controller = "you" }))
     e:Register()
 end
 return s

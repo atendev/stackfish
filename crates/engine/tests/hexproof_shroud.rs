@@ -47,7 +47,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect({effect})
-    e:SetAffected({{ self_only = true }})
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s

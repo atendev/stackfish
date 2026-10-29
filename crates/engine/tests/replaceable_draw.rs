@@ -87,7 +87,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Library", "Hand"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
-    e:SetAffected({ controller = "you" })
+    e:SetAffected(Game.Filter({ controller = "you" }))
     e:Register()
 end
 return s

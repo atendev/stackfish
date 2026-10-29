@@ -15,7 +15,7 @@ local s = {}
 
 function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 
@@ -30,10 +30,11 @@ battlefield (Anger: "as long as this card is in your graveyard..."). `zoneName` 
 it; without this call it only functions on the battlefield. See
 [triggered-abilities.md](triggered-abilities.md#methods) for the shared behavior.
 
-**`:SetAffected(table)`** — which objects this effect watches for. A plain table:
-`{ controller = "you"|"opponent"|"any", card_types = {...}, self_only = true }`, every key
-optional. Unlike static abilities, this one only accepts a plain table — no scripted predicate
-form. Default (if never called): no filter, applies to any matching event regardless of object.
+**`:SetAffected(value)`** — which objects this effect watches for. `value` is
+`Game.Affected.Self` (only this effect's own source) or a [`Game.Filter({...})`](static-abilities.md#gamefilter)
+value, whose keys are all optional. Unlike static abilities, this one has no scripted predicate
+form, and a raw table is a load error. Default (if never called): no filter, applies to any matching
+event regardless of object.
 
 **`:SetFilter(value)`** — which event shape this effect watches. `value` is a
 [`Game.EventFilters.*`](game-constants.md#gameeventfilters) tag. Default: `WouldDie`.
@@ -59,7 +60,7 @@ sacrificed, discarded, drawn, etc.), since they're all zone changes underneath:
 local e = Game.CreateReplacementEffect(c)
 e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Exile"))
 e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Graveyard"))
-e:SetAffected({ self_only = true })
+e:SetAffected(Game.Affected.Self)
 e:Register()
 ```
 
@@ -67,7 +68,7 @@ e:Register()
 -- If you would draw a card, exile it instead.
 e:SetFilter(Game.EventFilters.WouldMoveZone("Library", "Hand"))
 e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
-e:SetAffected({ controller = "you" })
+e:SetAffected(Game.Filter({ controller = "you" }))
 ```
 
 ```lua
@@ -77,7 +78,7 @@ e:SetAffected({ controller = "you" })
 -- all the same underlying zone-change shape.)
 e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Graveyard"))
 e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
-e:SetAffected({ controller = "you", card_types = { "Creature" } })
+e:SetAffected(Game.Filter({ controller = "you", card_types = { "Creature" } }))
 ```
 
 ```lua
@@ -85,7 +86,7 @@ e:SetAffected({ controller = "you", card_types = { "Creature" } })
 -- graveyard -- whichever way it got discarded.
 e:SetFilter(Game.EventFilters.WouldMoveZone("Hand", "Graveyard"))
 e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
-e:SetAffected({ card_types = { "Creature" } })
+e:SetAffected(Game.Filter({ card_types = { "Creature" } }))
 ```
 
 **Damage prevention/redirection:**
@@ -96,7 +97,7 @@ local e = Game.CreateReplacementEffect(c)
 e:SetFilter(Game.EventFilters.DamageDealt)
 e:SetPayload(Game.ReplacementPayloads.PreventDamage)
 e:SetConsumption(Game.Consumption.OneShot)
-e:SetAffected({ controller = "you" })
+e:SetAffected(Game.Filter({ controller = "you" }))
 e:Register()
 ```
 
@@ -106,7 +107,7 @@ e:Register()
 local e = Game.CreateReplacementEffect(c)
 e:SetFilter(Game.EventFilters.DamageDealt)
 e:SetPayload(Game.ReplacementPayloads.RedirectDamageToSource)
-e:SetAffected({ controller = "you" })
+e:SetAffected(Game.Filter({ controller = "you" }))
 e:Register()
 ```
 
@@ -124,7 +125,7 @@ redirect simply doesn't apply and the original damage proceeds normally.
 local e = Game.CreateReplacementEffect(c)
 e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
 e:SetPayload(Game.ReplacementPayloads.EntersTapped)
-e:SetAffected({ self_only = true })
+e:SetAffected(Game.Affected.Self)
 e:Register()
 ```
 
@@ -133,7 +134,7 @@ e:Register()
 local e = Game.CreateReplacementEffect(c)
 e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
 e:SetPayload(Game.ReplacementPayloads.EntersWithCounters("PlusOnePlusOne", 2))
-e:SetAffected({ self_only = true })
+e:SetAffected(Game.Affected.Self)
 e:Register()
 ```
 
@@ -176,7 +177,7 @@ e:SetPayload(Game.ReplacementPayloads.EntersWithCountersAmplify(1))
 local e = Game.CreateReplacementEffect(c)
 e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
 e:SetPayload(Game.ReplacementPayloads.EntersAsCopy())
-e:SetAffected({ self_only = true })
+e:SetAffected(Game.Affected.Self)
 e:Register()
 ```
 

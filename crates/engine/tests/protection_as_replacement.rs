@@ -15,7 +15,7 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddProtectionColor("R"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 end
 return s
@@ -27,7 +27,7 @@ function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.RedirectDamageToSource)
-    e:SetAffected({ controller = "you" })
+    e:SetAffected(Game.Filter({ controller = "you" }))
     e:Register()
 end
 return s
@@ -39,13 +39,13 @@ function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddProtectionColor("R"))
-    e:SetAffected({ self_only = true })
+    e:SetAffected(Game.Affected.Self)
     e:Register()
 
     local r = Game.CreateReplacementEffect(c)
     r:SetFilter(Game.EventFilters.DamageDealt)
     r:SetPayload(Game.ReplacementPayloads.PreventDamage)
-    r:SetAffected({ self_only = true })
+    r:SetAffected(Game.Affected.Self)
     r:Register()
 end
 return s
