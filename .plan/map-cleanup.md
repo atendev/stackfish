@@ -32,6 +32,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 051: Audited the 25 active Lua scripts in the sibling `stackfish-db` database. Eleven basic-land scripts repeat the mana-ability builder, target tables repeat too little to hide, and Balance's custom counting is card-specific. [closed/051-audit-card-script-idioms.md]
 - 052: Decided on canonical Lua API forms and strict validation: require `Game.Ops.*` and `Game.Effects.*` constructors (remove raw-key return tables, use `Ops.Chain` for multi-op results, allow string or list in `Effects.AddKeyword`); unify `InterveningIf` into `Game.Conditions` and the 4 `*Affected` tables into `Game.Affected` with explicit `Game.Filter({...})` for filter tables; use flat filter keys in target tables with one shared filter schema; reject unknown keys, wrong-typed values, and unknown counter strings at both load time and game time; remove `Conditions.Always` and `Tokens.ArtifactCreature`, keep `RegisterKeyword`/`RegisterWard` and explicit `ManaAbility.New()`; standardize parameter names (`count`, `amount`, `counter`), casing, `"C"` colorless, and `AddMana`/`AddManaChoice` argument order; migrate both `crates/` inline scripts and the 25 active scripts in `../stackfish-db/stackfish.db`. [closed/052-decide-lua-api-canonical-forms.md]
 - 053: Callbacks return `Game.Ops.*` and `Game.Effects.*` values or `nil`, raw-key tables error, `DealDamageTo`, `AddCountersTo` and `DoublePT` added, and a returned value holds at most one pending kind. [closed/053-constructor-only-ops-and-effects.md]
+- 061: Merged `InterveningIf` into `Game.Conditions`, collapsed the four `*Affected` tables into `Game.Affected` plus `Game.Filter({...})`, flattened target filter keys behind one shared decoder covering only engine-backed keys, and removed `Conditions.Always` and `Tokens.ArtifactCreature`. Unbacked filter keys are TODOs; the key set feeds 062. [closed/061-unify-lua-namespaces-and-filters.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -73,7 +74,6 @@ Make the Lua surface area small, documented, and strict before scaling up card s
 - 052 Decide on Lua API removals, canonical forms, and strict key validation. Type grilling, HITL. Blocked by 050 and 051. Closed.
   - Pick the single canonical spelling for each concept, decide which aliases to cut, and agree on how unknown table keys fail at load time.
 - 053 Constructor-only operation and effect results (`Ops.Chain`, `AddKeyword` list). Type build, HITL. Blocked by 052. Closed.
-- 061 Unify `Conditions`, `Affected` and `Filter` namespaces, flat target filters, one filter decoder, remove `Conditions.Always` and `Tokens.ArtifactCreature`. Type build, HITL. Blocked by 053.
 - 062 Strict key, type and counter-name validation in Lua decoders. Type build, HITL. Blocked by 061.
 - 063 Standardize parameter names, casing and mana argument order, fix stub drift, migrate the 25 `stackfish-db` scripts. Type build, HITL. Blocked by 062.
 - 054 Document the canonical Lua API in `docs/LUA_API.md`. Type task, HITL. Blocked by 063.
@@ -93,9 +93,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 061, 055, 056, 060
+- 062, 055, 056, 060
 
-Suggested order. Work 061, 062, 063 in sequence; they edit the same script files. Research tickets 055 and 056 and grilling 060 can run in parallel.
+Suggested order. Work 062, 063 in sequence; they edit the same script files. Research tickets 055 and 056 and grilling 060 can run in parallel.
 
 ## Not yet specified
 

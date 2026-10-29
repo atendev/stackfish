@@ -4,7 +4,7 @@ title: Strict key, type and counter-name validation in Lua decoders
 type: build
 mode: HITL
 status: open
-blocked_by: [061]
+blocked_by: []
 claimed: false
 ---
 
