@@ -5,17 +5,20 @@ use mlua::{Function, Lua, Table, Value};
 
 use crate::types::ability::{AbilityEffect, ConditionSpec, CopyExceptions, CounterAmount};
 use crate::types::card::{CardTypeSet, KeywordSet, Subtype, SupertypeSet};
-use crate::types::counter::CounterKind;
 use crate::types::cost::{AlternativeCost, CostSpec, FilterController, FilterSpec};
+use crate::types::counter::CounterKind;
 use crate::types::effect::{AffectedFilter, EffectFilter, EffectPayload, LandwalkQuality, Layer};
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{Color, ColorSet, ManaUnit};
-use crate::types::target::{ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement, TargetSpec};
+use crate::types::target::{
+    ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement,
+    TargetSpec,
+};
 use crate::types::zone::ZoneKind;
 
 use super::tags::{
-    AffectedTag, ConditionTag, CostComponent, CostTag, EffectPrimitiveTag, FilterTag, ForEachPlayerTag,
-    InterveningIfTag, LayerTag, OncePerTurnTag, OperationTag,
+    AffectedTag, ConditionTag, CostComponent, CostTag, CounterTag, EffectPrimitiveTag, FilterTag,
+    ForEachPlayerTag, InterveningIfTag, LayerTag, OncePerTurnTag, OperationTag,
 };
 use super::types::{ScriptChoiceRequest, ScriptError, ScriptRegistry};
 
@@ -73,7 +76,11 @@ pub(crate) fn decode_condition_value(
 /// would register as a custom script function and fail confusingly at
 /// resolution. Name the mistake up front instead.
 pub(crate) fn reject_uncalled_op(lua: &Lua, function: &Function) -> Result<(), ScriptError> {
-    let Ok(ops) = lua.globals().get::<_, mlua::Table>("Game").and_then(|g| g.get::<_, mlua::Table>("Ops")) else {
+    let Ok(ops) = lua
+        .globals()
+        .get::<_, mlua::Table>("Game")
+        .and_then(|g| g.get::<_, mlua::Table>("Ops"))
+    else {
         return Ok(());
     };
     for (name, candidate) in ops.pairs::<String, Value>().flatten() {
@@ -97,13 +104,18 @@ pub(crate) fn decode_operation_value(
     match value {
         // `Game.Ops.ForEachPlayer(x)` returns a `ForEachPlayerTag`, a different `UserData` type than `OperationTag` (see its doc), so check it first.
         Value::UserData(ref ud) if ud.is::<ForEachPlayerTag>() => {
-            let tag: ForEachPlayerTag =
-                ud.borrow::<ForEachPlayerTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?.clone();
+            let tag: ForEachPlayerTag = ud
+                .borrow::<ForEachPlayerTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?
+                .clone();
             match tag {
-                ForEachPlayerTag::Function(handle) => Ok((Some(AbilityEffect::ForEachPlayer(None)), handle)),
-                ForEachPlayerTag::Static(effect) => {
-                    Ok((Some(AbilityEffect::ForEachPlayer(Some(Box::new(effect)))), ScriptHandle(0)))
+                ForEachPlayerTag::Function(handle) => {
+                    Ok((Some(AbilityEffect::ForEachPlayer(None)), handle))
                 }
+                ForEachPlayerTag::Static(effect) => Ok((
+                    Some(AbilityEffect::ForEachPlayer(Some(Box::new(effect)))),
+                    ScriptHandle(0),
+                )),
             }
         }
         Value::UserData(ud) => {
@@ -139,8 +151,10 @@ pub(crate) fn decode_operation_value(
 pub(crate) fn decode_cost_component_value(value: Value) -> Result<CostComponent, ScriptError> {
     match value {
         Value::UserData(ud) => {
-            let tag: CostTag =
-                ud.borrow::<CostTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?.clone();
+            let tag: CostTag = ud
+                .borrow::<CostTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?
+                .clone();
             Ok(tag.0)
         }
         Value::Nil => Err(ScriptError::LoadError(
@@ -161,12 +175,30 @@ pub(crate) fn decode_cost_component_value(value: Value) -> Result<CostComponent,
 /// appear at most once. `from_zone` uses `parse_zone_kind_name`.
 /// `exile_on_leaving_stack` and `escape` default to `false`, since most
 /// alternatives (anything but Flashback and Escape) need neither.
+const ALTERNATIVE_COST_KEYS: &[&str] = &[
+    "description",
+    "from_zone",
+    "exile_on_leaving_stack",
+    "escape",
+    "costs",
+];
+
 pub(crate) fn decode_alternative_cost_table(table: Table) -> Result<AlternativeCost, ScriptError> {
+    reject_unknown_keys(
+        &table,
+        ALTERNATIVE_COST_KEYS,
+        &[],
+        "alternative_costs() entry",
+    )?;
     let description: String = table.get("description").map_err(|e| {
-        ScriptError::LoadError(format!("alternative_costs() entry missing required 'description': {e}"))
+        ScriptError::LoadError(format!(
+            "alternative_costs() entry missing required 'description': {e}"
+        ))
     })?;
     let from_zone_name: String = table.get("from_zone").map_err(|e| {
-        ScriptError::LoadError(format!("alternative_costs() entry missing required 'from_zone': {e}"))
+        ScriptError::LoadError(format!(
+            "alternative_costs() entry missing required 'from_zone': {e}"
+        ))
     })?;
     let from_zone = parse_zone_kind_name(&from_zone_name)?;
     let exile_on_leaving_stack: bool = table
@@ -179,9 +211,15 @@ pub(crate) fn decode_alternative_cost_table(table: Table) -> Result<AlternativeC
         .unwrap_or(false);
 
     let costs_table: Table = table.get("costs").map_err(|e| {
-        ScriptError::LoadError(format!("alternative_costs() entry missing required 'costs': {e}"))
+        ScriptError::LoadError(format!(
+            "alternative_costs() entry missing required 'costs': {e}"
+        ))
     })?;
-    let mut cost = CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() };
+    let mut cost = CostSpec {
+        mana: None,
+        additional: Vec::new(),
+        alternative: Vec::new(),
+    };
     for entry in costs_table.sequence_values::<Value>() {
         let value = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
         match decode_cost_component_value(value)? {
@@ -199,7 +237,13 @@ pub(crate) fn decode_alternative_cost_table(table: Table) -> Result<AlternativeC
         }
     }
 
-    Ok(AlternativeCost::Replacement { description, cost, from_zone, exile_on_leaving_stack, escape })
+    Ok(AlternativeCost::Replacement {
+        description,
+        cost,
+        from_zone,
+        exile_on_leaving_stack,
+        escape,
+    })
 }
 
 /// Every object filter key a script can write, decoded once. `Game.Filter`,
@@ -251,14 +295,41 @@ fn lua_load_err(error: mlua::Error) -> ScriptError {
     ScriptError::LoadError(error.to_string())
 }
 
+/// Rejects a Lua table key that is not in `allowed` or `extra_allowed`.
+/// Every load-time table decoder uses this so typos fail at script load time.
+/// Game-time callback readers pass `extra_allowed` when a table mixes several
+/// concerns (target requirement keys beside filter keys).
+pub(crate) fn reject_unknown_keys(
+    table: &Table,
+    allowed: &[&str],
+    extra_allowed: &[&str],
+    context: &str,
+) -> Result<(), ScriptError> {
+    for pair in table.clone().pairs::<String, Value>() {
+        let (key, _) = pair.map_err(lua_load_err)?;
+        if !allowed.contains(&key.as_str()) && !extra_allowed.contains(&key.as_str()) {
+            return Err(ScriptError::LoadError(format!(
+                "{context} has unknown key '{key}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn read_names(table: &Table, key: &str) -> Result<Option<Vec<String>>, ScriptError> {
     let list: Option<Table> = table.get(key).map_err(lua_load_err)?;
-    list.map(|list| list.sequence_values::<String>().map(|entry| entry.map_err(lua_load_err)).collect())
-        .transpose()
+    list.map(|list| {
+        list.sequence_values::<String>()
+            .map(|entry| entry.map_err(lua_load_err))
+            .collect()
+    })
+    .transpose()
 }
 
 fn read_card_types(table: &Table, key: &str) -> Result<Option<CardTypeSet>, ScriptError> {
-    let Some(names) = read_names(table, key)? else { return Ok(None) };
+    let Some(names) = read_names(table, key)? else {
+        return Ok(None);
+    };
     let mut set = CardTypeSet::empty();
     for name in names {
         set |= parse_card_type_name(&name)?;
@@ -267,7 +338,9 @@ fn read_card_types(table: &Table, key: &str) -> Result<Option<CardTypeSet>, Scri
 }
 
 fn read_supertypes(table: &Table, key: &str) -> Result<Option<SupertypeSet>, ScriptError> {
-    let Some(names) = read_names(table, key)? else { return Ok(None) };
+    let Some(names) = read_names(table, key)? else {
+        return Ok(None);
+    };
     let mut set = SupertypeSet::empty();
     for name in names {
         set |= parse_supertype_name(&name)?;
@@ -281,8 +354,24 @@ fn read_subtypes(table: &Table, key: &str) -> Result<Option<Vec<Subtype>>, Scrip
 
 fn read_controller(table: &Table) -> Result<Option<FilterController>, ScriptError> {
     let name: Option<String> = table.get("controller").map_err(lua_load_err)?;
-    name.map(|name| parse_filter_controller_name(&name)).transpose()
+    name.map(|name| parse_filter_controller_name(&name))
+        .transpose()
 }
+
+const OBJECT_FILTER_KEYS: &[&str] = &[
+    "card_types",
+    "excluded_card_types",
+    "subtypes",
+    "excluded_subtypes",
+    "supertypes",
+    "excluded_supertypes",
+    "controller",
+    "zone",
+    "mana_value_equals",
+    "mana_value_at_most",
+    "mana_value_at_least",
+    "random",
+];
 
 /// The one reader of a flat object filter table (`{ controller = .., card_types
 /// = {..}, supertypes = {..}, subtypes = {..}, excluded_* = {..}, zone = ..,
@@ -290,9 +379,20 @@ fn read_controller(table: &Table) -> Result<Option<FilterController>, ScriptErro
 /// 205.4b types, CR 601.2c and 115 negation ("nonland", "nonlegendary"), CR
 /// 202.3 mana value.
 ///
+/// `extra_allowed` covers keys the caller consumes before this function runs,
+/// such as `type` and the target requirement count keys.
+///
 /// TODO: keywords, colors, name, other, power/toughness bounds, is_token, tapped, attacking, blocking have no engine backing yet
-/// TODO: unknown and wrong-typed keys pass silently until strict validation lands
-pub(crate) fn decode_object_filter_keys(table: &Table) -> Result<ObjectFilterKeys, ScriptError> {
+pub(crate) fn decode_object_filter_keys(
+    table: &Table,
+    extra_allowed: &[&str],
+) -> Result<ObjectFilterKeys, ScriptError> {
+    reject_unknown_keys(
+        table,
+        OBJECT_FILTER_KEYS,
+        extra_allowed,
+        "Game.Filter/Game.SelectTargets filter",
+    )?;
     let zone_name: Option<String> = table.get("zone").map_err(lua_load_err)?;
     let random: Option<bool> = table.get("random").map_err(lua_load_err)?;
     Ok(ObjectFilterKeys {
@@ -303,7 +403,9 @@ pub(crate) fn decode_object_filter_keys(table: &Table) -> Result<ObjectFilterKey
         supertypes: read_supertypes(table, "supertypes")?,
         excluded_supertypes: read_supertypes(table, "excluded_supertypes")?,
         controller: read_controller(table)?,
-        zone: zone_name.map(|name| parse_zone_kind_name(&name)).transpose()?,
+        zone: zone_name
+            .map(|name| parse_zone_kind_name(&name))
+            .transpose()?,
         mana_value: decode_mana_value_keys(table)?,
         random: random.unwrap_or(false),
     })
@@ -314,7 +416,7 @@ pub(crate) fn decode_object_filter_keys(table: &Table) -> Result<ObjectFilterKey
 /// `decode_object_filter_keys`, of which a `FilterSpec` matches on
 /// `controller`, `card_types`, `supertypes`, `subtypes` and `random`.
 pub(crate) fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
-    Ok(decode_object_filter_keys(&table)?.into_filter_spec())
+    Ok(decode_object_filter_keys(&table, &[])?.into_filter_spec())
 }
 
 /// CR 202.3: "target spell with mana value X (or less, or greater)". Three
@@ -330,7 +432,10 @@ fn decode_mana_value_keys(table: &Table) -> Result<Option<ManaValueRequirement>,
     ] {
         let value: Option<Value> = table.get(key).map_err(lua_load_err)?;
         if let Some(value) = value {
-            return Ok(Some(ManaValueRequirement { comparison, bound: decode_mana_value_bound(value)? }));
+            return Ok(Some(ManaValueRequirement {
+                comparison,
+                bound: decode_mana_value_bound(value)?,
+            }));
         }
     }
     Ok(None)
@@ -351,7 +456,11 @@ pub(crate) fn parse_card_type_name(name: &str) -> Result<CardTypeSet, ScriptErro
         "Kindred" => CardTypeSet::KINDRED,
         "Planeswalker" => CardTypeSet::PLANESWALKER,
         "Battle" => CardTypeSet::BATTLE,
-        other => return Err(ScriptError::LoadError(format!("unknown card type '{other}'"))),
+        other => {
+            return Err(ScriptError::LoadError(format!(
+                "unknown card type '{other}'"
+            )));
+        }
     })
 }
 
@@ -386,11 +495,10 @@ pub(crate) fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> 
     })
 }
 
-/// `CounterKind` names, from CR 122.3's common kinds. An unknown name is not
-/// an error, since `CounterKind::Custom` covers the long tail of flavor-named
-/// counters.
-pub(crate) fn parse_counter_kind_name(name: &str) -> CounterKind {
-    match name {
+/// `CounterKind` names, from CR 122.3's common kinds. Unknown strings now
+/// raise a load error; use `Game.Counter.Custom(name)` for flavor counters.
+pub(crate) fn parse_counter_kind_name(name: &str) -> Result<CounterKind, ScriptError> {
+    Ok(match name {
         "PlusOnePlusOne" => CounterKind::PlusOnePlusOne,
         "MinusOneMinusOne" => CounterKind::MinusOneMinusOne,
         "Loyalty" => CounterKind::Loyalty,
@@ -398,7 +506,36 @@ pub(crate) fn parse_counter_kind_name(name: &str) -> CounterKind {
         "Energy" => CounterKind::Energy,
         "Experience" => CounterKind::Experience,
         "Charge" => CounterKind::Charge,
-        other => CounterKind::Custom(other.to_string()),
+        other => {
+            return Err(ScriptError::LoadError(format!(
+                "unknown counter kind '{other}' - use Game.Counter.Custom(...) for flavor counters"
+            )));
+        }
+    })
+}
+
+/// Decodes a counter argument that is either a known kind string
+/// (`"PlusOnePlusOne"`) or a `Game.Counter.*` value (common tag or
+/// `Game.Counter.Custom(name)`).
+pub(crate) fn decode_counter_arg(value: Value) -> Result<CounterKind, ScriptError> {
+    match value {
+        Value::String(s) => parse_counter_kind_name(
+            s.to_str()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?,
+        ),
+        Value::UserData(ud) if ud.is::<CounterTag>() => {
+            let tag = ud
+                .borrow::<CounterTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            Ok(match *tag {
+                CounterTag::Known(ref kind) => kind.clone(),
+                CounterTag::Custom(ref name) => CounterKind::Custom(name.clone()),
+            })
+        }
+        other => Err(ScriptError::LoadError(format!(
+            "expected a counter kind string or Game.Counter.* value, got {}",
+            other.type_name()
+        ))),
     }
 }
 
@@ -460,7 +597,11 @@ pub(crate) fn parse_supertype_name(name: &str) -> Result<SupertypeSet, ScriptErr
         "Legendary" => SupertypeSet::LEGENDARY,
         "Snow" => SupertypeSet::SNOW,
         "World" => SupertypeSet::WORLD,
-        other => return Err(ScriptError::LoadError(format!("unknown supertype '{other}'"))),
+        other => {
+            return Err(ScriptError::LoadError(format!(
+                "unknown supertype '{other}'"
+            )));
+        }
     })
 }
 
@@ -473,7 +614,11 @@ pub(crate) fn parse_supertype_name(name: &str) -> Result<SupertypeSet, ScriptErr
 /// `what` names the argument in the error.
 pub(crate) fn decode_name_list(val: Value, what: &str) -> Result<Vec<String>, ScriptError> {
     match val {
-        Value::String(s) => Ok(vec![s.to_str().map_err(|e| ScriptError::LoadError(e.to_string()))?.to_string()]),
+        Value::String(s) => Ok(vec![
+            s.to_str()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?
+                .to_string(),
+        ]),
         Value::Table(t) => {
             let mut out = Vec::new();
             for pair in t.sequence_values::<String>() {
@@ -481,7 +626,9 @@ pub(crate) fn decode_name_list(val: Value, what: &str) -> Result<Vec<String>, Sc
             }
             Ok(out)
         }
-        _ => Err(ScriptError::LoadError(format!("{what} must be a string or table"))),
+        _ => Err(ScriptError::LoadError(format!(
+            "{what} must be a string or table"
+        ))),
     }
 }
 
@@ -508,10 +655,17 @@ pub(crate) fn parse_mana_unit_letter(letter: &str) -> Result<ManaUnit, ScriptErr
         other => {
             return Err(ScriptError::LoadError(format!(
                 "unknown mana unit letter '{other}' - expected W/U/B/R/G/C"
-            )))
+            )));
         }
     })
 }
+
+const CREATURE_TOKEN_OPT_KEYS: &[&str] = &[
+    "keywords",
+    "name",
+    "additional_types",
+    "additional_supertypes",
+];
 
 /// Decodes the optional `opts` table for `Game.Tokens.Creature`. Returns
 /// `(keywords, name_override, additional_types, additional_supertypes)`.
@@ -519,29 +673,59 @@ pub(crate) fn decode_creature_token_opts(
     opts: Option<mlua::Table>,
 ) -> Result<(KeywordSet, Option<String>, CardTypeSet, SupertypeSet), ScriptError> {
     let Some(opts) = opts else {
-        return Ok((KeywordSet::empty(), None, CardTypeSet::empty(), SupertypeSet::empty()));
+        return Ok((
+            KeywordSet::empty(),
+            None,
+            CardTypeSet::empty(),
+            SupertypeSet::empty(),
+        ));
     };
+    reject_unknown_keys(
+        &opts,
+        CREATURE_TOKEN_OPT_KEYS,
+        &[],
+        "Game.Tokens.Creature opts",
+    )?;
     let mut keywords = KeywordSet::empty();
-    if let Ok(Some(kws)) = opts.get::<_, Option<mlua::Table>>("keywords") {
+    if let Some(kws) = opts
+        .get::<_, Option<mlua::Table>>("keywords")
+        .map_err(lua_load_err)?
+    {
         for pair in kws.sequence_values::<String>() {
-            keywords |= parse_keyword_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+            keywords |=
+                parse_keyword_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
         }
     }
-    let name: Option<String> = opts.get("name").ok().flatten();
+    let name: Option<String> = opts.get("name").map_err(lua_load_err)?;
     let mut additional_types = CardTypeSet::empty();
-    if let Ok(Some(types)) = opts.get::<_, Option<mlua::Table>>("additional_types") {
+    if let Some(types) = opts
+        .get::<_, Option<mlua::Table>>("additional_types")
+        .map_err(lua_load_err)?
+    {
         for pair in types.sequence_values::<String>() {
-            additional_types |= parse_card_type_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+            additional_types |=
+                parse_card_type_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
         }
     }
     let mut additional_supertypes = SupertypeSet::empty();
-    if let Ok(Some(supers)) = opts.get::<_, Option<mlua::Table>>("additional_supertypes") {
+    if let Some(supers) = opts
+        .get::<_, Option<mlua::Table>>("additional_supertypes")
+        .map_err(lua_load_err)?
+    {
         for pair in supers.sequence_values::<String>() {
-            additional_supertypes |= parse_supertype_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+            additional_supertypes |=
+                parse_supertype_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
         }
     }
     Ok((keywords, name, additional_types, additional_supertypes))
 }
+
+const LANDWALK_QUALITY_KEYS: &[&str] = &[
+    "subtypes",
+    "card_types",
+    "supertypes",
+    "excluded_supertypes",
+];
 
 /// CR 702.14a's landwalk combination forms: `Game.Effects.AddLandwalkQuality(opts)`'s
 /// `opts` table. It uses the `{subtypes, card_types, supertypes,
@@ -552,27 +736,48 @@ pub(crate) fn decode_creature_token_opts(
 /// `LandwalkQuality::default()`, which matches any land and is harmless to
 /// allow.
 pub(crate) fn decode_landwalk_quality(opts: mlua::Table) -> Result<LandwalkQuality, ScriptError> {
+    reject_unknown_keys(
+        &opts,
+        LANDWALK_QUALITY_KEYS,
+        &[],
+        "Game.Effects.AddLandwalkQuality opts",
+    )?;
     let mut subtypes = Vec::new();
-    if let Ok(Some(t)) = opts.get::<_, Option<mlua::Table>>("subtypes") {
+    if let Some(t) = opts
+        .get::<_, Option<mlua::Table>>("subtypes")
+        .map_err(lua_load_err)?
+    {
         for pair in t.sequence_values::<String>() {
-            subtypes.push(Subtype(pair.map_err(|e| ScriptError::LoadError(e.to_string()))?));
+            subtypes.push(Subtype(
+                pair.map_err(|e| ScriptError::LoadError(e.to_string()))?,
+            ));
         }
     }
-    let card_types = match opts.get::<_, Option<mlua::Table>>("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))? {
+    let card_types = match opts
+        .get::<_, Option<mlua::Table>>("card_types")
+        .map_err(lua_load_err)?
+    {
         Some(t) => {
             let mut set = CardTypeSet::empty();
             for pair in t.sequence_values::<String>() {
-                set |= parse_card_type_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+                set |= parse_card_type_name(
+                    &pair.map_err(|e| ScriptError::LoadError(e.to_string()))?,
+                )?;
             }
             Some(set)
         }
         None => None,
     };
-    let supertypes = match opts.get::<_, Option<mlua::Table>>("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))? {
+    let supertypes = match opts
+        .get::<_, Option<mlua::Table>>("supertypes")
+        .map_err(lua_load_err)?
+    {
         Some(t) => {
             let mut set = SupertypeSet::empty();
             for pair in t.sequence_values::<String>() {
-                set |= parse_supertype_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+                set |= parse_supertype_name(
+                    &pair.map_err(|e| ScriptError::LoadError(e.to_string()))?,
+                )?;
             }
             Some(set)
         }
@@ -580,21 +785,39 @@ pub(crate) fn decode_landwalk_quality(opts: mlua::Table) -> Result<LandwalkQuali
     };
     let excluded_supertypes = match opts
         .get::<_, Option<mlua::Table>>("excluded_supertypes")
-        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+        .map_err(lua_load_err)?
     {
         Some(t) => {
             let mut set = SupertypeSet::empty();
             for pair in t.sequence_values::<String>() {
-                set |= parse_supertype_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+                set |= parse_supertype_name(
+                    &pair.map_err(|e| ScriptError::LoadError(e.to_string()))?,
+                )?;
             }
             Some(set)
         }
         None => None,
     };
-    Ok(LandwalkQuality { subtypes, card_types, supertypes, excluded_supertypes })
+    Ok(LandwalkQuality {
+        subtypes,
+        card_types,
+        supertypes,
+        excluded_supertypes,
+    })
 }
 
 /// CR 707.9 copy-effect exceptions, shared by `Game.Ops.BecomeCopy(opts?)` and
+const COPY_EXCEPTION_KEYS: &[&str] = &[
+    "power",
+    "toughness",
+    "keywords",
+    "retain_name",
+    "retain_color",
+    "grant_recurring_copy_trigger",
+    "counter_kind",
+    "counter_amount",
+];
+
 /// `Game.Tokens.CopyOf(objectId, opts?)`. `opts` holds
 /// `{ power = N, toughness = N }` (CR 707.9b, both required together, since a
 /// lone P/T override means nothing), `{ keywords = { "Flying", ... } }`
@@ -602,33 +825,56 @@ pub(crate) fn decode_landwalk_quality(opts: mlua::Table) -> Result<LandwalkQuali
 /// (CR 707.9c, 707.9d: keep the copy's own name or color). Retaining is a
 /// no-op for `CopyOf`; see `CopyExceptions::apply`. `None` is a bare copy,
 /// `CopyExceptions::default()`.
-pub(crate) fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyExceptions, ScriptError> {
-    let Some(opts) = opts else { return Ok(CopyExceptions::default()) };
-    let power: Option<i32> = opts.get("power").ok().flatten();
-    let toughness: Option<i32> = opts.get("toughness").ok().flatten();
+pub(crate) fn decode_copy_exceptions(
+    opts: Option<mlua::Table>,
+) -> Result<CopyExceptions, ScriptError> {
+    let Some(opts) = opts else {
+        return Ok(CopyExceptions::default());
+    };
+    reject_unknown_keys(
+        &opts,
+        COPY_EXCEPTION_KEYS,
+        &[],
+        "Game.Ops.BecomeCopy/Game.Tokens.CopyOf opts",
+    )?;
+    let power: Option<i32> = opts.get("power").map_err(lua_load_err)?;
+    let toughness: Option<i32> = opts.get("toughness").map_err(lua_load_err)?;
     let set_power_toughness = match (power, toughness) {
         (Some(p), Some(t)) => Some((p, t)),
         (None, None) => None,
         _ => {
             return Err(ScriptError::LoadError(
                 "CopyExceptions power/toughness must be set together, not just one".to_string(),
-            ))
+            ));
         }
     };
     let mut add_keywords = KeywordSet::empty();
-    if let Ok(Some(kws)) = opts.get::<_, Option<mlua::Table>>("keywords") {
+    if let Some(kws) = opts
+        .get::<_, Option<mlua::Table>>("keywords")
+        .map_err(lua_load_err)?
+    {
         for pair in kws.sequence_values::<String>() {
-            add_keywords |= parse_keyword_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+            add_keywords |=
+                parse_keyword_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
         }
     }
-    let retain_name: bool = opts.get::<_, Option<bool>>("retain_name").ok().flatten().unwrap_or(false);
-    let retain_color: bool = opts.get::<_, Option<bool>>("retain_color").ok().flatten().unwrap_or(false);
+    let retain_name: bool = opts
+        .get::<_, Option<bool>>("retain_name")
+        .map_err(lua_load_err)?
+        .unwrap_or(false);
+    let retain_color: bool = opts
+        .get::<_, Option<bool>>("retain_color")
+        .map_err(lua_load_err)?
+        .unwrap_or(false);
     // CR 707.9a: Vesuvan Doppelganger's "except it has [linked upkeep ability]" (see `CopyExceptions::grant_recurring_copy_trigger`). A `CopyOf` token could carry it, though no real card needs that.
-    let grant_recurring_copy_trigger: bool =
-        opts.get::<_, Option<bool>>("grant_recurring_copy_trigger").ok().flatten().unwrap_or(false);
+    let grant_recurring_copy_trigger: bool = opts
+        .get::<_, Option<bool>>("grant_recurring_copy_trigger")
+        .map_err(lua_load_err)?
+        .unwrap_or(false);
     // CR 707.9e: Spark Double's "enters with an additional +1/+1 counter" (see `CopyExceptions::enters_with_additional_counters`): `{ counter_kind = "PlusOnePlusOne", counter_amount = 1 }`, both required together as power and toughness are. `counter_amount` may be the string `"X"` (Altered Ego) for `CounterAmount::X`. It is read as a raw `mlua::Value` and matched by hand, because `.get::<u32>()` would silently fail to match a string.
-    let counter_kind: Option<String> = opts.get("counter_kind").ok().flatten();
-    let counter_amount_value: Option<mlua::Value> = opts.get("counter_amount").ok();
+    let counter_kind: Option<String> = opts.get("counter_kind").map_err(lua_load_err)?;
+    let counter_amount_value: Option<mlua::Value> =
+        opts.get("counter_amount").map_err(lua_load_err)?;
     let counter_amount = match counter_amount_value {
         Some(mlua::Value::Integer(n)) if n >= 0 => Some(CounterAmount::Fixed(n as u32)),
         Some(mlua::Value::Number(n)) if n >= 0.0 => Some(CounterAmount::Fixed(n as u32)),
@@ -637,16 +883,17 @@ pub(crate) fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyEx
         _ => {
             return Err(ScriptError::LoadError(
                 "CopyExceptions counter_amount must be a non-negative number or \"X\"".to_string(),
-            ))
+            ));
         }
     };
     let enters_with_additional_counters = match (counter_kind, counter_amount) {
-        (Some(kind), Some(amount)) => Some((parse_counter_kind_name(&kind), amount)),
+        (Some(kind), Some(amount)) => Some((parse_counter_kind_name(&kind)?, amount)),
         (None, None) => None,
         _ => {
             return Err(ScriptError::LoadError(
-                "CopyExceptions counter_kind/counter_amount must be set together, not just one".to_string(),
-            ))
+                "CopyExceptions counter_kind/counter_amount must be set together, not just one"
+                    .to_string(),
+            ));
         }
     };
     Ok(CopyExceptions {
@@ -664,8 +911,10 @@ pub(crate) fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyEx
 pub(crate) fn decode_layer_value(value: Value) -> Result<Layer, ScriptError> {
     match value {
         Value::UserData(ud) => {
-            let tag: LayerTag =
-                ud.borrow::<LayerTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?.clone();
+            let tag: LayerTag = ud
+                .borrow::<LayerTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?
+                .clone();
             Ok(tag.0)
         }
         Value::Nil => Err(ScriptError::LoadError(
@@ -706,7 +955,8 @@ pub(crate) fn decode_effect_value(
             Ok(EffectPayload::Script(handle))
         }
         Value::Nil => Err(ScriptError::LoadError(
-            "SetEffect() called with nil - expected a Game.Effects.* value or a function".to_string(),
+            "SetEffect() called with nil - expected a Game.Effects.* value or a function"
+                .to_string(),
         )),
         other => Err(ScriptError::LoadError(format!(
             "SetEffect() expects a Game.Effects.* value or a function, got {}",
@@ -733,7 +983,7 @@ fn self_only_filter() -> EffectFilter {
 /// function-predicate case (CR 701.8's "destroy all X" is never "enchanted
 /// X").
 pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, ScriptError> {
-    Ok(decode_object_filter_keys(table)?.into_effect_filter())
+    Ok(decode_object_filter_keys(table, &[])?.into_effect_filter())
 }
 
 const RAW_AFFECTED_TABLE_HINT: &str = "wrap object filter keys in Game.Filter({...}), and write the flags as \
@@ -755,7 +1005,9 @@ pub(crate) fn decode_affected_value(
 ) -> Result<AffectedFilter, ScriptError> {
     match value {
         Value::UserData(ud) if ud.is::<AffectedTag>() => {
-            let tag = *ud.borrow::<AffectedTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let tag = *ud
+                .borrow::<AffectedTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
             match tag {
                 AffectedTag::SelfOnly => Ok(AffectedFilter::Primitive(self_only_filter())),
                 AffectedTag::Enchanted => Ok(AffectedFilter::EnchantedOnly),
@@ -767,8 +1019,12 @@ pub(crate) fn decode_affected_value(
             }
         }
         Value::UserData(ud) if ud.is::<FilterTag>() => {
-            let tag = ud.borrow::<FilterTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            Ok(AffectedFilter::Primitive(tag.0.clone().into_effect_filter()))
+            let tag = ud
+                .borrow::<FilterTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            Ok(AffectedFilter::Primitive(
+                tag.0.clone().into_effect_filter(),
+            ))
         }
         Value::Function(function) => {
             let key = lua
@@ -794,7 +1050,9 @@ pub(crate) fn decode_affected_value(
 pub(crate) fn decode_replacement_affected(value: Value) -> Result<EffectFilter, ScriptError> {
     match value {
         Value::UserData(ud) if ud.is::<AffectedTag>() => {
-            let tag = *ud.borrow::<AffectedTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let tag = *ud
+                .borrow::<AffectedTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
             match tag {
                 AffectedTag::SelfOnly => Ok(self_only_filter()),
                 other => Err(ScriptError::LoadError(format!(
@@ -804,7 +1062,9 @@ pub(crate) fn decode_replacement_affected(value: Value) -> Result<EffectFilter, 
             }
         }
         Value::UserData(ud) if ud.is::<FilterTag>() => {
-            let tag = ud.borrow::<FilterTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let tag = ud
+                .borrow::<FilterTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
             Ok(tag.0.clone().into_effect_filter())
         }
         Value::Table(_) => Err(ScriptError::LoadError(format!(
@@ -830,23 +1090,43 @@ pub(crate) fn decode_script_choice_request(
     registry: &mut ScriptRegistry,
     table: Table,
 ) -> Result<ScriptChoiceRequest, ScriptError> {
-    let op: String = table.get("op").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let op: String = table
+        .get("op")
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     match op.as_str() {
         "select_target" => {
-            let filter_value: Value =
-                table.get("filter").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            reject_unknown_keys(
+                &table,
+                &["op", "filter", "exclude_ids"],
+                &[],
+                "Game.SelectTargets/Game.ChooseN select_target request",
+            )
+            .map_err(|e| ScriptError::RuntimeError(format!("{e:?}")))?;
+            let filter_value: Value = table
+                .get("filter")
+                .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             // `Game.ChooseN`'s Lua loop grows this by one id per iteration so a repeat ask can't return an object already picked this batch (see `ScriptChoiceRequest::SelectTarget`). Absent for a bare `Game.SelectTargets` call.
-            let exclude_ids: Option<Vec<i64>> =
-                table.get("exclude_ids").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            let exclude_ids =
-                exclude_ids.unwrap_or_default().into_iter().map(|id| ObjectId(id as u64)).collect();
+            let exclude_ids: Option<Vec<i64>> = table
+                .get("exclude_ids")
+                .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let exclude_ids = exclude_ids
+                .unwrap_or_default()
+                .into_iter()
+                .map(|id| ObjectId(id as u64))
+                .collect();
             Ok(ScriptChoiceRequest::SelectTarget {
-                filter: decode_target_filter_value(lua, registry, filter_value)?,
+                filter: decode_target_filter_value(lua, registry, filter_value, &["type"])?,
                 exclude_ids,
             })
         }
-        "may_choose" => Ok(ScriptChoiceRequest::MayChoose),
-        other => Err(ScriptError::RuntimeError(format!("unknown script choice request op '{other}'"))),
+        "may_choose" => {
+            reject_unknown_keys(&table, &["op"], &[], "Game.MayChoose request")
+                .map_err(|e| ScriptError::RuntimeError(format!("{e:?}")))?;
+            Ok(ScriptChoiceRequest::MayChoose)
+        }
+        other => Err(ScriptError::RuntimeError(format!(
+            "unknown script choice request op '{other}'"
+        ))),
     }
 }
 
@@ -857,13 +1137,21 @@ pub(crate) fn decode_script_choice_request(
 /// (`handle_operation_result`) uses it to turn a script's already-picked
 /// targets back into a `Target`.
 pub(crate) fn decode_target_pick(table: &Table) -> Result<Target, ScriptError> {
-    let kind: String = table.get("kind").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let id: u64 = table.get("id").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    reject_unknown_keys(table, &["kind", "id"], &[], "target pick")
+        .map_err(|e| ScriptError::RuntimeError(format!("{e:?}")))?;
+    let kind: String = table
+        .get("kind")
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let id: u64 = table
+        .get("id")
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     match kind.as_str() {
         "object" => Ok(Target::Object(ObjectId(id))),
         "player" => Ok(Target::Player(PlayerId(id as u32))),
         "ability" => Ok(Target::Ability(ObjectId(id))),
-        other => Err(ScriptError::RuntimeError(format!("unknown target pick kind '{other}'"))),
+        other => Err(ScriptError::RuntimeError(format!(
+            "unknown target pick kind '{other}'"
+        ))),
     }
 }
 
@@ -875,13 +1163,21 @@ pub(crate) fn decode_target_pick(table: &Table) -> Result<Target, ScriptError> {
 /// omit it still work. `zone` is a zone name parsed by `parse_zone_kind_name`,
 /// as in the TOML fixtures (`Game.ChooseN({ zone = "Hand", ... }, n)` for
 /// CR 701.9 discard), and `None` still means the battlefield.
-pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError> {
-    let kind: Option<String> = table.get("type").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+pub(crate) fn decode_target_filter_table(
+    table: Table,
+    extra_allowed: &[&str],
+) -> Result<TargetFilter, ScriptError> {
+    let kind: Option<String> = table
+        .get("type")
+        .map_err(|e| ScriptError::LoadError(e.to_string()))?;
     match kind.as_deref().unwrap_or("object") {
         "player" => {
-            let controller_name: Option<String> =
-                table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+            let controller_name: Option<String> = table
+                .get("controller")
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let controller = controller_name
+                .map(|name| parse_filter_controller_name(&name))
+                .transpose()?;
             Ok(TargetFilter::Player { controller })
         }
         "any" => Ok(TargetFilter::AnyTarget),
@@ -890,7 +1186,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
         // CR 702.21a (Ward): the spell or ability that triggered this one.
         "triggering" => Ok(TargetFilter::TriggeringStackObject),
         "object" => {
-            let keys = decode_object_filter_keys(&table)?;
+            let keys = decode_object_filter_keys(&table, extra_allowed)?;
             Ok(TargetFilter::Object {
                 card_types: keys.card_types,
                 excluded_card_types: keys.excluded_card_types,
@@ -938,9 +1234,14 @@ pub(crate) fn decode_target_requirement_table(
     table: Table,
 ) -> Result<TargetRequirement, ScriptError> {
     let count: u32 = table.get("count").map_err(|e| {
-        ScriptError::LoadError(format!("target_requirement() table missing required 'count': {e}"))
+        ScriptError::LoadError(format!(
+            "target_requirement() table missing required 'count': {e}"
+        ))
     })?;
-    let up_to: bool = table.get::<_, Option<bool>>("up_to").map_err(|e| ScriptError::LoadError(e.to_string()))?.unwrap_or(false);
+    let up_to: bool = table
+        .get::<_, Option<bool>>("up_to")
+        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+        .unwrap_or(false);
     let at_least: bool = table
         .get::<_, Option<bool>>("at_least")
         .map_err(|e| ScriptError::LoadError(e.to_string()))?
@@ -949,8 +1250,19 @@ pub(crate) fn decode_target_requirement_table(
         .get::<_, Option<bool>>("exclude_source")
         .map_err(|e| ScriptError::LoadError(e.to_string()))?
         .unwrap_or(false);
-    let filter = decode_target_filter_value(lua, registry, Value::Table(table))?;
-    Ok(TargetRequirement { filter, count, up_to, at_least, exclude_source })
+    let filter = decode_target_filter_value(
+        lua,
+        registry,
+        Value::Table(table),
+        &["type", "count", "up_to", "at_least", "exclude_source"],
+    )?;
+    Ok(TargetRequirement {
+        filter,
+        count,
+        up_to,
+        at_least,
+        exclude_source,
+    })
 }
 
 /// `ScriptRuntime::build_target_requirement`'s whole-return decoder: one
@@ -983,7 +1295,9 @@ pub(crate) fn decode_target_spec_table(
         ));
     }
     if array_len == 0 {
-        return Ok(TargetSpec::Primitive(decode_target_requirement_table(lua, registry, table)?));
+        return Ok(TargetSpec::Primitive(decode_target_requirement_table(
+            lua, registry, table,
+        )?));
     }
     if key_count != array_len {
         return Err(ScriptError::LoadError(
@@ -995,7 +1309,9 @@ pub(crate) fn decode_target_spec_table(
     }
     let mut requirements = Vec::with_capacity(array_len);
     for index in 1..=array_len {
-        let entry: Value = table.get(index).map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let entry: Value = table
+            .get(index)
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
         let Value::Table(entry) = entry else {
             return Err(ScriptError::LoadError(format!(
                 "target_requirement() array entry {index} must be a requirement table, got {}",
@@ -1022,7 +1338,13 @@ pub(crate) fn decode_target_spec_value(
     registry: &mut ScriptRegistry,
     value: Value,
 ) -> Result<TargetSpec, ScriptError> {
-    let single = |filter| TargetRequirement { filter, count: 1, up_to: false, at_least: false, exclude_source: false };
+    let single = |filter| TargetRequirement {
+        filter,
+        count: 1,
+        up_to: false,
+        at_least: false,
+        exclude_source: false,
+    };
     if let Value::Table(ref table) = value {
         let array_len = table.raw_len();
         if array_len > 0 {
@@ -1040,8 +1362,15 @@ pub(crate) fn decode_target_spec_value(
             }
             let mut requirements = Vec::with_capacity(array_len);
             for index in 1..=array_len {
-                let entry: Value = table.get(index).map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                requirements.push(single(decode_target_filter_value(lua, registry, entry)?));
+                let entry: Value = table
+                    .get(index)
+                    .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                requirements.push(single(decode_target_filter_value(
+                    lua,
+                    registry,
+                    entry,
+                    &["type"],
+                )?));
             }
             return Ok(if requirements.len() == 1 {
                 TargetSpec::Primitive(requirements.remove(0))
@@ -1050,7 +1379,12 @@ pub(crate) fn decode_target_spec_value(
             });
         }
     }
-    Ok(TargetSpec::Primitive(single(decode_target_filter_value(lua, registry, value)?)))
+    Ok(TargetSpec::Primitive(single(decode_target_filter_value(
+        lua,
+        registry,
+        value,
+        &["type"],
+    )?)))
 }
 
 /// A `Game.Ops.ChainEach` whose per-entry word counts don't add up to the
@@ -1062,7 +1396,12 @@ pub(crate) fn check_chain_words(
     effect: Option<&AbilityEffect>,
     target: Option<&TargetSpec>,
 ) -> Result<(), ScriptError> {
-    let Some(AbilityEffect::Chain { words: Some(words), .. }) = effect else { return Ok(()) };
+    let Some(AbilityEffect::Chain {
+        words: Some(words), ..
+    }) = effect
+    else {
+        return Ok(());
+    };
     let declared = match target {
         None => 0,
         Some(TargetSpec::Primitive(_)) => 1,
@@ -1090,6 +1429,7 @@ pub(crate) fn decode_target_filter_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
     value: Value,
+    extra_allowed: &[&str],
 ) -> Result<TargetFilter, ScriptError> {
     let mut register = |function: Function| -> Result<ScriptHandle, ScriptError> {
         let key = lua
@@ -1101,9 +1441,11 @@ pub(crate) fn decode_target_filter_value(
     };
     match value {
         Value::Table(table) => {
-            let predicate: Value = table.get("filter").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let predicate: Value = table
+                .get("filter")
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
             match predicate {
-                Value::Nil => decode_target_filter_table(table),
+                Value::Nil => decode_target_filter_table(table, extra_allowed),
                 // CR 601.2c, 602.2b: `{ type = "player", filter = function(player, source, controller, state) -> bool }` is the Lua entry point of `TargetFilter::PlayerScript`.
                 Value::Function(function) => {
                     let kind: Option<String> =
@@ -1151,27 +1493,58 @@ mod chain_word_tests {
     }
 
     fn each(words: Vec<usize>) -> AbilityEffect {
-        AbilityEffect::Chain { entries: vec![AbilityEffect::DrawCards(1); words.len()], words: Some(words) }
+        AbilityEffect::Chain {
+            entries: vec![AbilityEffect::DrawCards(1); words.len()],
+            words: Some(words),
+        }
     }
 
     #[test]
     fn counts_that_match_the_declared_words_pass() {
-        assert!(check_chain_words(Some(&each(vec![0, 1])), Some(&TargetSpec::Primitive(word()))).is_ok());
-        assert!(check_chain_words(Some(&each(vec![1, 1])), Some(&TargetSpec::Multiple(vec![word(), word()]))).is_ok());
+        assert!(
+            check_chain_words(
+                Some(&each(vec![0, 1])),
+                Some(&TargetSpec::Primitive(word()))
+            )
+            .is_ok()
+        );
+        assert!(
+            check_chain_words(
+                Some(&each(vec![1, 1])),
+                Some(&TargetSpec::Multiple(vec![word(), word()]))
+            )
+            .is_ok()
+        );
         assert!(check_chain_words(Some(&each(vec![0, 0])), None).is_ok());
     }
 
     #[test]
     fn counts_that_do_not_match_fail_and_name_both_numbers() {
-        let error = check_chain_words(Some(&each(vec![1, 1])), Some(&TargetSpec::Primitive(word()))).expect_err("2 vs 1");
-        assert!(format!("{error:?}").contains("own 2") && format!("{error:?}").contains("declares 1"), "{error:?}");
+        let error = check_chain_words(
+            Some(&each(vec![1, 1])),
+            Some(&TargetSpec::Primitive(word())),
+        )
+        .expect_err("2 vs 1");
+        assert!(
+            format!("{error:?}").contains("own 2") && format!("{error:?}").contains("declares 1"),
+            "{error:?}"
+        );
         assert!(check_chain_words(Some(&each(vec![0, 1])), None).is_err());
     }
 
     #[test]
     fn a_shared_chain_and_other_effects_are_not_checked() {
-        let shared = AbilityEffect::Chain { entries: vec![AbilityEffect::Destroy], words: None };
-        assert!(check_chain_words(Some(&shared), Some(&TargetSpec::Multiple(vec![word(), word()]))).is_ok());
+        let shared = AbilityEffect::Chain {
+            entries: vec![AbilityEffect::Destroy],
+            words: None,
+        };
+        assert!(
+            check_chain_words(
+                Some(&shared),
+                Some(&TargetSpec::Multiple(vec![word(), word()]))
+            )
+            .is_ok()
+        );
         assert!(check_chain_words(Some(&AbilityEffect::Destroy), None).is_ok());
         assert!(check_chain_words(None, None).is_ok());
     }

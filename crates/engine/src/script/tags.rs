@@ -6,11 +6,13 @@ use mlua::UserData;
 
 use crate::types::ability::{AbilityEffect, ConditionPrimitive, InterveningIfPrimitive, TokenSpec};
 use crate::types::cost::AdditionalCost;
-use crate::types::effect::{ConsumptionPolicy, EffectDuration, EffectPrimitive, Layer, ReplacementPayload};
+use crate::types::cost::FilterController;
 use crate::types::counter::CounterKind;
+use crate::types::effect::{
+    ConsumptionPolicy, EffectDuration, EffectPrimitive, Layer, ReplacementPayload,
+};
 use crate::types::ids::{ObjectId, ScriptHandle, Target};
 use crate::types::mana::ManaCost;
-use crate::types::cost::FilterController;
 use crate::types::player::HandSizeEffect;
 use crate::types::zone::ZoneKind;
 
@@ -57,9 +59,22 @@ pub(crate) enum ResultItem {
     GainLife(i32),
     DrawCards(u32),
     ZoneMove(ScriptZoneMoveKind, Vec<ObjectId>),
-    CastSpell { card: ObjectId, modes: Vec<u32>, targets: Vec<Target>, x_value: Option<u32>, free: bool },
-    DealDamage { target: Target, amount: u32 },
-    AddCounters { target: Target, counter: CounterKind, amount: i32 },
+    CastSpell {
+        card: ObjectId,
+        modes: Vec<u32>,
+        targets: Vec<Target>,
+        x_value: Option<u32>,
+        free: bool,
+    },
+    DealDamage {
+        target: Target,
+        amount: u32,
+    },
+    AddCounters {
+        target: Target,
+        counter: CounterKind,
+        amount: i32,
+    },
 }
 
 /// A `:SetOperation` callback's return value: `Game.Ops.SacrificeChosen`,
@@ -77,9 +92,11 @@ impl UserData for OperationResultTag {}
 /// wrap.
 pub(crate) fn result_items(value: &mlua::Value) -> Result<Vec<ResultItem>, String> {
     match value {
-        mlua::Value::UserData(ud) if ud.is::<OperationResultTag>() => {
-            Ok(ud.borrow::<OperationResultTag>().map_err(|e| e.to_string())?.0.clone())
-        }
+        mlua::Value::UserData(ud) if ud.is::<OperationResultTag>() => Ok(ud
+            .borrow::<OperationResultTag>()
+            .map_err(|e| e.to_string())?
+            .0
+            .clone()),
         mlua::Value::UserData(ud) if ud.is::<OperationTag>() => {
             match ud.borrow::<OperationTag>().map_err(|e| e.to_string())?.0.clone() {
                 AbilityEffect::GainLife(amount) => Ok(vec![ResultItem::GainLife(amount)]),
@@ -87,7 +104,10 @@ pub(crate) fn result_items(value: &mlua::Value) -> Result<Vec<ResultItem>, Strin
                 _ => Err("this Game.Ops value acts on the ability's targets and can't be returned from a custom operation or mixed with Game.Ops.SacrificeChosen, DiscardChosen, CastSpell, DealDamageTo or AddCountersTo".to_string()),
             }
         }
-        other => Err(format!("expected a Game.Ops.* value, got {}", other.type_name())),
+        other => Err(format!(
+            "expected a Game.Ops.* value, got {}",
+            other.type_name()
+        )),
     }
 }
 
@@ -172,7 +192,10 @@ impl UserData for DurationTag {}
 pub(crate) enum EventFilterKind {
     DamageDealt,
     WouldDie,
-    WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind> },
+    WouldMoveZone {
+        from: Option<ZoneKind>,
+        to: Option<ZoneKind>,
+    },
     /// CR 702.89a (Umbra armor); see `EventFilter::WouldDieEnchanted`.
     /// Fieldless like `WouldDie`. `:SetAffected` plays no role, since the
     /// affected object is always the registering effect's own `attached_to`,
@@ -200,6 +223,17 @@ impl UserData for EventFilterKindTag {}
 #[derive(Clone)]
 pub(crate) struct ReplacementPayloadTag(pub(crate) ReplacementPayload);
 impl UserData for ReplacementPayloadTag {}
+
+/// `Game.Counter.*`: a common counter kind or a custom flavor counter. The
+/// common kinds mirror `CounterKind` so constructors that take a counter can
+/// accept either a string for the known kinds or a `Game.Counter.Custom(name)`
+/// tag for the long tail (CR 122.3).
+#[derive(Clone)]
+pub(crate) enum CounterTag {
+    Known(CounterKind),
+    Custom(String),
+}
+impl UserData for CounterTag {}
 
 /// `Game.Affected.*`, the one namespace behind every `:SetAffected`. Each
 /// builder accepts the variants that mean something to it and rejects the rest
@@ -246,7 +280,6 @@ impl UserData for FilterTag {}
 #[derive(Clone, Copy)]
 pub(crate) struct HandSizeEffectTag(pub(crate) HandSizeEffect);
 impl UserData for HandSizeEffectTag {}
-
 
 /// `Game.ReplacementPayloads.RedirectDamageToSource`, a sentinel and not a
 /// `ReplacementPayloadTag`: `RedirectDamage(Target)` needs a real `ObjectId`,

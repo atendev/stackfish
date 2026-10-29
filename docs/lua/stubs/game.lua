@@ -118,7 +118,8 @@
 -------------------------------------------------------------------------------
 
 ---@class GameConditionsValue
----@class GameStateConditionValue  -- AtOrBelowLife/ControlsAtLeast/Escaped/HadNoCounters; :SetInterveningIf or a static :SetCondition
+---@class GameCounterValue
+---@alias CounterKind string|GameCounterValue
 ---@class GameAffectedValue
 ---@class GameFilterValue  -- result of Game.Filter({...})
 ---@class GameOpsValue
@@ -427,6 +428,21 @@ function LandPlayModifierBuilder:SetAdditional(additional) end
 function LandPlayModifierBuilder:Register() end
 
 -------------------------------------------------------------------------------
+-- Game.Counter.* — common counter kinds and a custom-counter constructor.
+-------------------------------------------------------------------------------
+
+---@class GameCounterTable
+---@field PlusOnePlusOne GameCounterValue
+---@field MinusOneMinusOne GameCounterValue
+---@field Loyalty GameCounterValue
+---@field Poison GameCounterValue
+---@field Energy GameCounterValue
+---@field Experience GameCounterValue
+---@field Charge GameCounterValue
+---@field Custom fun(name: string): GameCounterValue
+local GameCounterTable = {}
+
+-------------------------------------------------------------------------------
 -- Game.Affected.* — the one namespace behind every :SetAffected.
 -------------------------------------------------------------------------------
 
@@ -502,7 +518,7 @@ function GameConditionsTable.AtOrBelowLife(threshold) end
 function GameConditionsTable.ControlsAtLeast(filter, count) end
 
 --- CR 603.4, 702.79a, 702.93a: "if it had no `kind` counters on it" (Persist, Undying).
----@param kind string
+---@param kind CounterKind
 ---@return GameStateConditionValue
 function GameConditionsTable.HadNoCounters(kind) end
 
@@ -673,11 +689,16 @@ function GameOpsTable.Chain(...) end
 ---@return GameOpsValue
 function GameOpsTable.ChainEach(...) end
 
---- CR 122.1a. `kind` e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge", or a custom name. Object targets only.
----@param kind string
+--- CR 122.1a. `kind` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
+---@param kind CounterKind
 ---@param amount integer
 ---@return GameOpsValue
 function GameOpsTable.Counters(kind, amount) end
+
+--- CR 702.79a, 702.93a: Persist/Undying's "return this to the battlefield under its owner's control". `kind` is the counter kind checked by `Game.Conditions.HadNoCounters(kind)`.
+---@param kind CounterKind
+---@return GameOpsValue
+function GameOpsTable.ReturnSelfWithCounter(kind) end
 
 --- "Target creature gets +X/+Y until `duration`." Every legal target gets its own independent effect.
 ---@param power integer
@@ -707,7 +728,7 @@ function GameOpsTable.DealDamageTo(pick, amount) end
 --- CR 122.1, puts `amount` counters of `counter` on `pick` (an object pick from Game.SelectTargets / Game.ChooseN).
 --- Only valid as a custom operation function's return value (or inside Chain there).
 ---@param pick TargetResult
----@param counter string  e.g. "PlusOnePlusOne"
+---@param counter CounterKind
 ---@param amount integer
 ---@return GameOpsValue
 function GameOpsTable.AddCountersTo(pick, counter, amount) end
@@ -933,12 +954,12 @@ local GameReplacementPayloadsTable = {}
 ---@return GameReplacementPayloadsValue
 function GameReplacementPayloadsTable.ReplaceZoneDestination(zone) end
 
----@param kind string
+---@param kind CounterKind
 ---@param amount integer
 ---@return GameReplacementPayloadsValue
 function GameReplacementPayloadsTable.EntersWithCounters(kind, amount) end
 
----@param kind string
+---@param kind CounterKind
 ---@param amount integer
 ---@return GameReplacementPayloadsValue
 function GameReplacementPayloadsTable.EntersWithCountersBloodthirst(kind, amount) end
@@ -1001,6 +1022,7 @@ function GameTokensTable.CopyOf(objectId, exceptions) end
 
 ---@class Game
 ---@field Conditions GameConditionsTable
+---@field Counter GameCounterTable
 ---@field Affected GameAffectedTable
 ---@field Ops GameOpsTable
 ---@field Costs GameCostsTable

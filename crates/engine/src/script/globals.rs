@@ -7,39 +7,41 @@ use std::rc::Rc;
 use mlua::{AnyUserData, Function, Lua, Table, Value};
 
 use crate::types::ability::{
-    AbilityEffect, ConditionPrimitive, CreatureTokenSpec, EntryControl, InterveningIfPrimitive, NamedToken, SearchDestination,
-    TokenSpec, UnlessPaidConsequence,
+    AbilityEffect, ConditionPrimitive, CreatureTokenSpec, EntryControl, InterveningIfPrimitive,
+    NamedToken, SearchDestination, TokenSpec, UnlessPaidConsequence,
 };
 use crate::types::card::{CardTypeSet, KeywordSet, Subtype};
 use crate::types::cost::{AdditionalCost, CostModifierTarget, CostSpec, FilterController};
+use crate::types::counter::CounterKind;
 use crate::types::effect::{
-    AffectedFilter, ConsumptionPolicy, EffectDuration, EffectFilter, EffectPrimitive, Layer, ReplacementPayload,
+    AffectedFilter, ConsumptionPolicy, EffectDuration, EffectFilter, EffectPrimitive, Layer,
+    ReplacementPayload,
 };
 use crate::types::ids::ObjectId;
 use crate::types::mana::{ManaCost, ManaUnit};
-use crate::types::zone::ZoneKind;
 use crate::types::player::HandSizeEffect;
+use crate::types::zone::ZoneKind;
 
 use super::builders::{
-    ActivatedAbilityBuilder, CostModifierBuilder, DrawLimitModifierBuilder, HandRevealModifierBuilder,
-    HandSizeModifierBuilder, LandPlayModifierBuilder, ManaAbilityBuilder, ReplacementEffectBuilder,
-    StaticAbilityBuilder, TriggeredAbilityBuilder,
+    ActivatedAbilityBuilder, CostModifierBuilder, DrawLimitModifierBuilder,
+    HandRevealModifierBuilder, HandSizeModifierBuilder, LandPlayModifierBuilder,
+    ManaAbilityBuilder, ReplacementEffectBuilder, StaticAbilityBuilder, TriggeredAbilityBuilder,
 };
 use super::decode::{
-    decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table,
-    decode_filter_table, decode_landwalk_quality, decode_name_list, decode_object_filter_keys, decode_target_pick, parse_card_type_name,
-    parse_color_letter,
-    parse_color_string, parse_counter_kind_name, parse_filter_controller_name, parse_keyword_name,
-    parse_mana_unit_letter, parse_supertype_name, parse_zone_kind_name,
+    decode_copy_exceptions, decode_counter_arg, decode_creature_token_opts,
+    decode_effect_filter_table, decode_filter_table, decode_landwalk_quality, decode_name_list,
+    decode_object_filter_keys, decode_target_pick, parse_card_type_name, parse_color_letter,
+    parse_color_string, parse_filter_controller_name, parse_keyword_name, parse_mana_unit_letter,
+    parse_supertype_name, parse_zone_kind_name, reject_unknown_keys,
 };
 use super::tags::{
-    AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DurationTag,
-    EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, FilterTag, ForEachPlayerTag,
-    HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag,
-    OperationResultTag, OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, ResultItem, TokenTag,
-    result_items,
+    AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, CounterTag,
+    DurationTag, EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, FilterTag,
+    ForEachPlayerTag, HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag,
+    OperationResultTag, OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, ResultItem,
+    TokenTag, result_items,
 };
-use super::types::{to_lua_err, ScriptError, ScriptRegistry, ScriptZoneMoveKind};
+use super::types::{ScriptError, ScriptRegistry, ScriptZoneMoveKind, to_lua_err};
 
 /// Builds `Game.Conditions`, `Ops`, `Costs`, `Layers`, `Effects` and the
 /// `Create*Ability` sugar and binds it into `lua`'s globals. It is not all of
@@ -49,32 +51,74 @@ use super::types::{to_lua_err, ScriptError, ScriptRegistry, ScriptZoneMoveKind};
 /// by `Game.CreateTriggeredAbility`. The sugar lets a condition or operation
 /// source string be a one-liner and lets a card script self-register a
 /// triggered, static or activated ability.
-pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::Result<()> {
+pub(crate) fn bind_game_globals(
+    lua: &Lua,
+    registry: Rc<RefCell<ScriptRegistry>>,
+) -> mlua::Result<()> {
     let conditions = lua.create_table()?;
-    conditions.set("Enters", ConditionTag(ConditionPrimitive::EntersBattlefield))?;
+    conditions.set(
+        "Enters",
+        ConditionTag(ConditionPrimitive::EntersBattlefield),
+    )?;
     conditions.set("DealsDamage", ConditionTag(ConditionPrimitive::DealsDamage))?;
-    conditions.set("IsDealtDamage", ConditionTag(ConditionPrimitive::IsDealtDamage))?;
-    conditions.set("Upkeep", ConditionTag(ConditionPrimitive::BeginningOfYourUpkeep))?;
-    conditions.set("EachUpkeep", ConditionTag(ConditionPrimitive::BeginningOfEachUpkeep))?;
-    conditions.set("Untap", ConditionTag(ConditionPrimitive::BeginningOfYourUntap))?;
-    conditions.set("EachUntap", ConditionTag(ConditionPrimitive::BeginningOfEachUntap))?;
+    conditions.set(
+        "IsDealtDamage",
+        ConditionTag(ConditionPrimitive::IsDealtDamage),
+    )?;
+    conditions.set(
+        "Upkeep",
+        ConditionTag(ConditionPrimitive::BeginningOfYourUpkeep),
+    )?;
+    conditions.set(
+        "EachUpkeep",
+        ConditionTag(ConditionPrimitive::BeginningOfEachUpkeep),
+    )?;
+    conditions.set(
+        "Untap",
+        ConditionTag(ConditionPrimitive::BeginningOfYourUntap),
+    )?;
+    conditions.set(
+        "EachUntap",
+        ConditionTag(ConditionPrimitive::BeginningOfEachUntap),
+    )?;
     conditions.set("Dies", ConditionTag(ConditionPrimitive::Dies))?;
-    conditions.set("LeavesBattlefield", ConditionTag(ConditionPrimitive::LeavesBattlefield))?;
+    conditions.set(
+        "LeavesBattlefield",
+        ConditionTag(ConditionPrimitive::LeavesBattlefield),
+    )?;
     conditions.set("DrawsCard", ConditionTag(ConditionPrimitive::DrawsCard))?;
-    conditions.set("EachDrawsCard", ConditionTag(ConditionPrimitive::EachDrawsCard))?;
-    conditions.set("DiscardsCard", ConditionTag(ConditionPrimitive::DiscardsCard))?;
-    conditions.set("EachDiscardsCard", ConditionTag(ConditionPrimitive::EachDiscardsCard))?;
+    conditions.set(
+        "EachDrawsCard",
+        ConditionTag(ConditionPrimitive::EachDrawsCard),
+    )?;
+    conditions.set(
+        "DiscardsCard",
+        ConditionTag(ConditionPrimitive::DiscardsCard),
+    )?;
+    conditions.set(
+        "EachDiscardsCard",
+        ConditionTag(ConditionPrimitive::EachDiscardsCard),
+    )?;
     conditions.set("Discarded", ConditionTag(ConditionPrimitive::Discarded))?;
     conditions.set("Cycled", ConditionTag(ConditionPrimitive::Cycled))?;
-    conditions.set("MadnessExiled", ConditionTag(ConditionPrimitive::MadnessExiled))?;
+    conditions.set(
+        "MadnessExiled",
+        ConditionTag(ConditionPrimitive::MadnessExiled),
+    )?;
     // CR 601.2i: "when you cast this spell" (self-referential). No Lua producer self-registers it, because that needs the card's script to run again on the stack (CR 601.2a), which double-registers ETB triggers; see `ConditionPrimitive::Cast`. Direct `RegisteredAbility` construction only.
     conditions.set("Cast", ConditionTag(ConditionPrimitive::Cast))?;
     // CR 702.21a: Ward's trigger event, "this permanent becomes the target of a spell or ability an opponent controls".
-    conditions.set("BecomesTargetOfOpponent", ConditionTag(ConditionPrimitive::BecomesTargetOfOpponent))?;
+    conditions.set(
+        "BecomesTargetOfOpponent",
+        ConditionTag(ConditionPrimitive::BecomesTargetOfOpponent),
+    )?;
     conditions.set("Scries", ConditionTag(ConditionPrimitive::Scries))?;
     conditions.set("EachScries", ConditionTag(ConditionPrimitive::EachScries))?;
     conditions.set("Surveils", ConditionTag(ConditionPrimitive::Surveils))?;
-    conditions.set("EachSurveils", ConditionTag(ConditionPrimitive::EachSurveils))?;
+    conditions.set(
+        "EachSurveils",
+        ConditionTag(ConditionPrimitive::EachSurveils),
+    )?;
     // CR 700.4, 603.10: "whenever a creature you control dies", the filter-scoped sibling of Dies and LeavesBattlefield, reusing `decode_filter_table`.
     let dies_matching = lua.create_function(|_, table: Table| {
         let filter = decode_filter_table(table).map_err(to_lua_err)?;
@@ -83,13 +127,27 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     conditions.set("DiesMatching", dies_matching)?;
     let leaves_battlefield_matching = lua.create_function(|_, table: Table| {
         let filter = decode_filter_table(table).map_err(to_lua_err)?;
-        Ok(ConditionTag(ConditionPrimitive::LeavesBattlefieldMatching(filter)))
+        Ok(ConditionTag(ConditionPrimitive::LeavesBattlefieldMatching(
+            filter,
+        )))
     })?;
     conditions.set("LeavesBattlefieldMatching", leaves_battlefield_matching)?;
-    conditions.set("BeginningOfCombat", ConditionTag(ConditionPrimitive::BeginningOfYourCombat))?;
-    conditions.set("EachBeginningOfCombat", ConditionTag(ConditionPrimitive::BeginningOfEachCombat))?;
-    conditions.set("EndStep", ConditionTag(ConditionPrimitive::BeginningOfYourEndStep))?;
-    conditions.set("EachEndStep", ConditionTag(ConditionPrimitive::BeginningOfEachEndStep))?;
+    conditions.set(
+        "BeginningOfCombat",
+        ConditionTag(ConditionPrimitive::BeginningOfYourCombat),
+    )?;
+    conditions.set(
+        "EachBeginningOfCombat",
+        ConditionTag(ConditionPrimitive::BeginningOfEachCombat),
+    )?;
+    conditions.set(
+        "EndStep",
+        ConditionTag(ConditionPrimitive::BeginningOfYourEndStep),
+    )?;
+    conditions.set(
+        "EachEndStep",
+        ConditionTag(ConditionPrimitive::BeginningOfEachEndStep),
+    )?;
     // CR 603.2h: `Game.Conditions.OncePerTurn(Game.Conditions.X)` wraps any tag above so the ability triggers once each turn; see `OncePerTurnTag`.
     let once_per_turn = lua.create_function(|_, tag: AnyUserData| {
         let primitive = tag.borrow::<ConditionTag>()?.0.clone();
@@ -99,20 +157,27 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
 
     // CR 603.4: state conditions, consumed by `TriggeredAbilityBuilder:SetInterveningIf` and (CR 611.2c) `StaticAbilityBuilder:SetCondition`. Same namespace as the event tags above, with its own tag type; see `InterveningIfTag`.
     let at_or_below_life = lua.create_function(|_, threshold: i32| {
-        Ok(InterveningIfTag(InterveningIfPrimitive::ControllerAtOrBelowLife(threshold)))
+        Ok(InterveningIfTag(
+            InterveningIfPrimitive::ControllerAtOrBelowLife(threshold),
+        ))
     })?;
     conditions.set("AtOrBelowLife", at_or_below_life)?;
     // CR 611.2c: "as long as you control N or more [filter]", reusing `decode_filter_table`.
     let controls_at_least = lua.create_function(|_, (table, count): (Table, u32)| {
         let filter = decode_filter_table(table).map_err(to_lua_err)?;
-        Ok(InterveningIfTag(InterveningIfPrimitive::ControllerControlsAtLeast { filter, count }))
+        Ok(InterveningIfTag(
+            InterveningIfPrimitive::ControllerControlsAtLeast { filter, count },
+        ))
     })?;
     conditions.set("ControlsAtLeast", controls_at_least)?;
     // CR 603.4, 702.138b: "if it escaped" (Kroxa, Uro), an ordinary ETB trigger's intervening-if.
     conditions.set("Escaped", InterveningIfTag(InterveningIfPrimitive::Escaped))?;
     // CR 603.4, 702.79a, 702.93a: "if it had no [kind] counters on it" (Persist, Undying), checked against the object as it died; see `InterveningIfPrimitive::HadNoCountersOfKind`.
-    let had_no_counters = lua.create_function(|_, kind: String| {
-        Ok(InterveningIfTag(InterveningIfPrimitive::HadNoCountersOfKind(parse_counter_kind_name(&kind))))
+    let had_no_counters = lua.create_function(|_, kind: Value| {
+        let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+        Ok(InterveningIfTag(
+            InterveningIfPrimitive::HadNoCountersOfKind(kind),
+        ))
     })?;
     conditions.set("HadNoCounters", had_no_counters)?;
 
@@ -121,35 +186,46 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // TODO: a mixed-color `AddMana` call ("add one white and one blue")
     let add_mana = lua.create_function(|_, (letter, count): (String, Option<u32>)| {
         let unit = parse_mana_unit_letter(&letter).map_err(to_lua_err)?;
-        Ok(OperationTag(AbilityEffect::AddMana(vec![unit; count.unwrap_or(1) as usize])))
+        Ok(OperationTag(AbilityEffect::AddMana(vec![
+            unit;
+            count.unwrap_or(1)
+                as usize
+        ])))
     })?;
     ops.set("AddMana", add_mana)?;
     // CR 106.11: `Game.Ops.AddRestrictedMana(letter, cardType, count?)`. The `AddMana` vocabulary, with every unit tagged so `PaymentPlan::validate` accepts it only toward casting a spell of `cardType` (Mishra's Workshop). Limited to one card-type filter.
     // TODO: object-specific ("only to cast the exiled card") and ability-activation restrictions
-    let add_restricted_mana = lua.create_function(|_, (letter, card_type, count): (String, String, Option<u32>)| {
-        let unit = parse_mana_unit_letter(&letter).map_err(to_lua_err)?;
-        let types = parse_card_type_name(&card_type).map_err(to_lua_err)?;
-        let restricted = match unit {
-            ManaUnit::Colored(c) => ManaUnit::RestrictedColored(c, types),
-            ManaUnit::Colorless => ManaUnit::RestrictedColorless(types),
-            _ => unreachable!("parse_mana_unit_letter only ever returns Colored/Colorless"),
-        };
-        Ok(OperationTag(AbilityEffect::AddMana(vec![restricted; count.unwrap_or(1) as usize])))
-    })?;
+    let add_restricted_mana = lua.create_function(
+        |_, (letter, card_type, count): (String, String, Option<u32>)| {
+            let unit = parse_mana_unit_letter(&letter).map_err(to_lua_err)?;
+            let types = parse_card_type_name(&card_type).map_err(to_lua_err)?;
+            let restricted = match unit {
+                ManaUnit::Colored(c) => ManaUnit::RestrictedColored(c, types),
+                ManaUnit::Colorless => ManaUnit::RestrictedColorless(types),
+                _ => unreachable!("parse_mana_unit_letter only ever returns Colored/Colorless"),
+            };
+            Ok(OperationTag(AbilityEffect::AddMana(vec![
+                restricted;
+                count.unwrap_or(1)
+                    as usize
+            ])))
+        },
+    )?;
     ops.set("AddRestrictedMana", add_restricted_mana)?;
     // CR 605: `Game.Ops.AddManaChoice(count, colors)`. `count` is how many independently chosen mana the ability makes, and `colors` is a WUBRG string (`parse_color_string`, as in `Game.Effects.AddColor`) naming the allowed colors. The picked colors arrive later on `ActivateAbility::chosen_colors` (CR 602.2b), so this declares only the shape.
     let add_mana_choice = lua.create_function(|_, (count, colors): (u32, String)| {
         let choices = parse_color_string(&colors).map_err(to_lua_err)?;
-        Ok(OperationTag(AbilityEffect::AddManaChoice { count, choices }))
+        Ok(OperationTag(AbilityEffect::AddManaChoice {
+            count,
+            choices,
+        }))
     })?;
     ops.set("AddManaChoice", add_mana_choice)?;
-    let gain_life = lua.create_function(|_, amount: i32| {
-        Ok(OperationTag(AbilityEffect::GainLife(amount)))
-    })?;
+    let gain_life =
+        lua.create_function(|_, amount: i32| Ok(OperationTag(AbilityEffect::GainLife(amount))))?;
     ops.set("GainLife", gain_life)?;
-    let damage = lua.create_function(|_, amount: u32| {
-        Ok(OperationTag(AbilityEffect::Damage(amount)))
-    })?;
+    let damage =
+        lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::Damage(amount))))?;
     ops.set("Damage", damage)?;
     ops.set("Destroy", OperationTag(AbilityEffect::Destroy))?;
     ops.set("BecomeBlocked", OperationTag(AbilityEffect::BecomeBlocked))?;
@@ -166,13 +242,20 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     ops.set("Mill", mill)?;
     // CR 119.3: same player selection as Mill. A negative `n` is a Lua error;
     // use `GainLife` for signed amounts.
-    let lose_life = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::LoseLife(n))))?;
+    let lose_life =
+        lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::LoseLife(n))))?;
     ops.set("LoseLife", lose_life)?;
     ops.set("Exile", OperationTag(AbilityEffect::Exile))?;
     // CR 610.3: targeted exile that returns when the ability's source leaves.
-    ops.set("ExileUntilSourceLeaves", OperationTag(AbilityEffect::ExileUntilSourceLeaves))?;
+    ops.set(
+        "ExileUntilSourceLeaves",
+        OperationTag(AbilityEffect::ExileUntilSourceLeaves),
+    )?;
     ops.set("ReturnToHand", OperationTag(AbilityEffect::ReturnToHand))?;
-    ops.set("ReturnSelfToHand", OperationTag(AbilityEffect::ReturnSelfToHand))?;
+    ops.set(
+        "ReturnSelfToHand",
+        OperationTag(AbilityEffect::ReturnSelfToHand),
+    )?;
     // CR 400.3: `zone` defaults to "Battlefield"; only the zones
     // `ScriptedZoneMoveKind::Bounce` accepts as a source are allowed.
     let return_all_to_hand = lua.create_function(|_, (table, zone): (Table, Option<String>)| {
@@ -195,7 +278,10 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // optional `{ control = "You" | "Owner", tapped = bool }` table.
     let return_to_battlefield = lua.create_function(|_, opts: Option<Table>| {
         let (control, tapped) = decode_entry_options(opts, "ReturnToBattlefield")?;
-        Ok(OperationTag(AbilityEffect::ReturnToBattlefield { control, tapped }))
+        Ok(OperationTag(AbilityEffect::ReturnToBattlefield {
+            control,
+            tapped,
+        }))
     })?;
     ops.set("ReturnToBattlefield", return_to_battlefield)?;
     // `zone` defaults to "Graveyard"; only the zones
@@ -225,12 +311,16 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
         let zone = match zone {
             None => ZoneKind::Battlefield,
-            Some(name) => match crate::script::decode::parse_zone_kind_name(&name).map_err(to_lua_err)? {
-                z @ (ZoneKind::Battlefield | ZoneKind::Graveyard) => z,
-                other => {
-                    return Err(mlua::Error::RuntimeError(format!("ExileAll zone must be \"Battlefield\" or \"Graveyard\", got {other:?}")))
+            Some(name) => {
+                match crate::script::decode::parse_zone_kind_name(&name).map_err(to_lua_err)? {
+                    z @ (ZoneKind::Battlefield | ZoneKind::Graveyard) => z,
+                    other => {
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "ExileAll zone must be \"Battlefield\" or \"Graveyard\", got {other:?}"
+                        )));
+                    }
                 }
-            },
+            }
         };
         Ok(OperationTag(AbilityEffect::ExileAll { filter, zone }))
     })?;
@@ -256,8 +346,9 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // CR 701.6a, 118.12: "counter target spell unless that player pays [cost]". Same target declaration as Counter, plus the mana-cost string (`ManaCost::parse` grammar). The Lua name stays `CounterUnlessPaid`, which is how card authors read it.
     // TODO: Condescend's {X} amount (see `AbilityEffect::UnlessPaid`)
     let counter_unless_paid = lua.create_function(|_, s: String| {
-        let cost = ManaCost::parse(&s)
-            .map_err(|e| mlua::Error::RuntimeError(format!("Game.Ops.CounterUnlessPaid(\"{s}\"): {}", e.0)))?;
+        let cost = ManaCost::parse(&s).map_err(|e| {
+            mlua::Error::RuntimeError(format!("Game.Ops.CounterUnlessPaid(\"{s}\"): {}", e.0))
+        })?;
         Ok(OperationTag(AbilityEffect::UnlessPaid {
             cost: CostSpec::mana_only(cost),
             otherwise: UnlessPaidConsequence::Counter,
@@ -267,7 +358,10 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // `Game.Ops.SacrificeRandom(filter, count)` (CR 701.21, at random), decoding the same `EffectFilter` table as DestroyAll.
     let sacrifice_random = lua.create_function(|_, (table, count): (Table, u32)| {
         let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
-        Ok(OperationTag(AbilityEffect::SacrificeRandom { filter, count }))
+        Ok(OperationTag(AbilityEffect::SacrificeRandom {
+            filter,
+            count,
+        }))
     })?;
     ops.set("SacrificeRandom", sacrifice_random)?;
     // `Game.Ops.DiscardRandom(filter, count)` (CR 701.9b), decoding the same table as SacrificeRandom.
@@ -277,7 +371,8 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     })?;
     ops.set("DiscardRandom", discard_random)?;
     // `Game.Ops.Discard(count)` (CR 701.9, 701.9b): "target player discards `count` cards", the player's own choice. The target comes from `s.target_requirement()` (a single `TargetFilter::Player`), as for `Counter` and `UnlessPaid`.
-    let discard = lua.create_function(|_, count: u32| Ok(OperationTag(AbilityEffect::Discard { count })))?;
+    let discard =
+        lua.create_function(|_, count: u32| Ok(OperationTag(AbilityEffect::Discard { count })))?;
     ops.set("Discard", discard)?;
     // `Game.Ops.ForEachPlayer(x)` (CR 101.4). `x` is a per-card Lua function, registered into the script registry at once as the `Value::Function` arm of `decode_operation_value` does for a bare `:SetOperation(function...)`, or a bare tag unwrapped from its `OperationTag` with nothing to register. Anything else is a load-time error and not a silent no-op; see `ForEachPlayerTag`.
     let for_each_player = {
@@ -330,11 +425,17 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
             ));
         }
         // A chain holding a script-pick result (`SacrificeChosen`, `CastSpell`, `DealDamageTo`, ...) is a callback return value and not a declared ability effect, so it builds an `OperationResultTag`. Only `GainLife` and `DrawCards` mix in from the declared family.
-        if args.iter().any(|arg| matches!(arg, Value::UserData(ud) if ud.is::<OperationResultTag>())) {
+        if args
+            .iter()
+            .any(|arg| matches!(arg, Value::UserData(ud) if ud.is::<OperationResultTag>()))
+        {
             let mut items = Vec::new();
             for (index, arg) in args.iter().enumerate() {
                 items.extend(result_items(arg).map_err(|message| {
-                    mlua::Error::RuntimeError(format!("Game.Ops.Chain argument {}: {message}", index + 1))
+                    mlua::Error::RuntimeError(format!(
+                        "Game.Ops.Chain argument {}: {message}",
+                        index + 1
+                    ))
                 })?);
             }
             return lua.create_userdata(OperationResultTag(items));
@@ -343,7 +444,10 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         for (index, arg) in args.into_iter().enumerate() {
             entries.push(chain_entry(lua, "Chain", index + 1, arg)?);
         }
-        lua.create_userdata(OperationTag(AbilityEffect::Chain { entries, words: None }))
+        lua.create_userdata(OperationTag(AbilityEffect::Chain {
+            entries,
+            words: None,
+        }))
     })?;
     ops.set("Chain", chain)?;
     // `Game.Ops.ChainEach({ op, words }, ...)`: the same, but entry i owns `words` consecutive target words (0 for an entry that acts on its controller). `check_chain_words` verifies the counts when the ability registers or the spell loads, because the operation and the target requirement are declared separately.
@@ -381,20 +485,27 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::Chain { entries, words: Some(words) }))
     })?;
     ops.set("ChainEach", chain_each)?;
-    let counters = lua.create_function(|_, (kind, amount): (String, i32)| {
-        Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
+    let counters = lua.create_function(|_, (kind, amount): (Value, i32)| {
+        let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::Counters { kind, amount }))
     })?;
     ops.set("Counters", counters)?;
     // CR 702.79a, 702.93a: `Game.Ops.ReturnSelfWithCounter(kind)`, Persist and Undying's resolution effect, paired with `Game.Conditions.Dies` and `Game.Conditions.HadNoCounters(kind)` (see `AbilityEffect::ReturnSelfWithCounter`).
-    let return_self_with_counter = lua.create_function(|_, kind: String| {
-        Ok(OperationTag(AbilityEffect::ReturnSelfWithCounter(parse_counter_kind_name(&kind))))
+    let return_self_with_counter = lua.create_function(|_, kind: Value| {
+        let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::ReturnSelfWithCounter(kind)))
     })?;
     ops.set("ReturnSelfWithCounter", return_self_with_counter)?;
     // `Game.Ops.Pump(power, toughness, duration)`; `duration` is a `Game.Durations.*` tag (see `DurationTag`).
-    let pump = lua.create_function(|_, (power, toughness, duration): (i32, i32, AnyUserData)| {
-        let duration = duration.borrow::<DurationTag>()?.0.clone();
-        Ok(OperationTag(AbilityEffect::Pump { power, toughness, duration }))
-    })?;
+    let pump =
+        lua.create_function(|_, (power, toughness, duration): (i32, i32, AnyUserData)| {
+            let duration = duration.borrow::<DurationTag>()?.0.clone();
+            Ok(OperationTag(AbilityEffect::Pump {
+                power,
+                toughness,
+                duration,
+            }))
+        })?;
     ops.set("Pump", pump)?;
     // `Game.Ops.GainControl(duration)`, with Pump's `Game.Durations.*` decode. No player argument, since the new controller is always the resolving object's controller (see `AbilityEffect::GainControl`).
     let gain_control = lua.create_function(|_, duration: AnyUserData| {
@@ -404,13 +515,15 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     ops.set("GainControl", gain_control)?;
     // `Game.Ops.Regenerate()` (CR 701.19a): a no-argument toggle like `Destroy`.
     ops.set("Regenerate", OperationTag(AbilityEffect::Regenerate))?;
-    let draw_cards = lua.create_function(|_, amount: u32| {
-        Ok(OperationTag(AbilityEffect::DrawCards(amount)))
-    })?;
+    let draw_cards =
+        lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::DrawCards(amount))))?;
     ops.set("DrawCards", draw_cards)?;
     let create_token = lua.create_function(|_, (spec_ud, count): (AnyUserData, Option<u32>)| {
         let spec = spec_ud.borrow::<TokenTag>()?.0.clone();
-        Ok(OperationTag(AbilityEffect::CreateToken { spec, count: count.unwrap_or(1) }))
+        Ok(OperationTag(AbilityEffect::CreateToken {
+            spec,
+            count: count.unwrap_or(1),
+        }))
     })?;
     ops.set("CreateToken", create_token)?;
     ops.set("Shuffle", OperationTag(AbilityEffect::Shuffle))?;
@@ -419,45 +532,64 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     let surveil = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::Surveil(n))))?;
     ops.set("Surveil", surveil)?;
     // `Game.Ops.Search(filter_table, count, opts?)`. `filter_table` goes through `decode_filter_table`, as `Game.Costs.Sacrifice` does. `opts.destination` is `"hand"` (default) or `"battlefield"`, and `opts.tapped` and `opts.enters_attached` matter only for `"battlefield"` (CR 303.4f-h, meaningful for a found Aura; see `SearchDestination::Battlefield`). `opts.shuffle` defaults to `true` (CR 701.24a).
-    let search = lua.create_function(|_, (filter_table, count, opts): (Table, u32, Option<Table>)| {
-        let filter = decode_filter_table(filter_table).map_err(to_lua_err)?;
-        let destination_name: Option<String> = match &opts {
-            Some(t) => t.get("destination").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
-            None => None,
-        };
-        let destination = match destination_name.as_deref() {
-            None | Some("hand") => SearchDestination::Hand,
-            Some("battlefield") => {
-                let tapped: Option<bool> = match &opts {
-                    Some(t) => t.get("tapped").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
-                    None => None,
-                };
-                let enters_attached: Option<bool> = match &opts {
-                    Some(t) => t.get("enters_attached").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
-                    None => None,
-                };
-                SearchDestination::Battlefield {
-                    tapped: tapped.unwrap_or(false),
-                    enters_attached: enters_attached.unwrap_or(false),
+    let search = lua.create_function(
+        |_, (filter_table, count, opts): (Table, u32, Option<Table>)| {
+            let filter = decode_filter_table(filter_table).map_err(to_lua_err)?;
+            if let Some(opts) = &opts {
+                reject_unknown_keys(
+                    opts,
+                    &["destination", "tapped", "enters_attached", "shuffle"],
+                    &[],
+                    "Game.Ops.Search opts",
+                )
+                .map_err(to_lua_err)?;
+            }
+            let destination_name: Option<String> = match &opts {
+                Some(t) => t
+                    .get("destination")
+                    .map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+                None => None,
+            };
+            let destination = match destination_name.as_deref() {
+                None | Some("hand") => SearchDestination::Hand,
+                Some("battlefield") => {
+                    let tapped: Option<bool> = match &opts {
+                        Some(t) => t
+                            .get("tapped")
+                            .map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+                        None => None,
+                    };
+                    let enters_attached: Option<bool> = match &opts {
+                        Some(t) => t
+                            .get("enters_attached")
+                            .map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+                        None => None,
+                    };
+                    SearchDestination::Battlefield {
+                        tapped: tapped.unwrap_or(false),
+                        enters_attached: enters_attached.unwrap_or(false),
+                    }
                 }
-            }
-            Some(other) => {
-                return Err(to_lua_err(ScriptError::LoadError(format!(
-                    "unknown Game.Ops.Search destination '{other}' - expected hand/battlefield"
-                ))))
-            }
-        };
-        let shuffle_after: Option<bool> = match &opts {
-            Some(t) => t.get("shuffle").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
-            None => None,
-        };
-        Ok(OperationTag(AbilityEffect::Search {
-            filter,
-            count,
-            destination,
-            shuffle_after: shuffle_after.unwrap_or(true),
-        }))
-    })?;
+                Some(other) => {
+                    return Err(to_lua_err(ScriptError::LoadError(format!(
+                        "unknown Game.Ops.Search destination '{other}' - expected hand/battlefield"
+                    ))));
+                }
+            };
+            let shuffle_after: Option<bool> = match &opts {
+                Some(t) => t
+                    .get("shuffle")
+                    .map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+                None => None,
+            };
+            Ok(OperationTag(AbilityEffect::Search {
+                filter,
+                count,
+                destination,
+                shuffle_after: shuffle_after.unwrap_or(true),
+            }))
+        },
+    )?;
     ops.set("Search", search)?;
     // `Game.Ops.BecomeCopy(opts?)` (CR 707.2, 707.9, layer 1). The copy target is what the ability's targeting resolved, not a value passed here. `opts` is `CopyExceptions`: `{ power = N, toughness = N }` (CR 707.9b) and/or `{ keywords = { "Flying", ... } }` (CR 707.9a). Omitted or `nil` is a bare copy.
     let become_copy = lua.create_function(|_, opts: Option<Table>| {
@@ -468,40 +600,61 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // `Game.Ops.Attach` (CR 702.6a, Equip): a no-argument toggle. The attach target is what the activated ability's `:SetTarget` resolved.
     ops.set("Attach", OperationTag(AbilityEffect::Attach))?;
     // `Game.Ops.ExchangeTextBoxes` (CR 612.5): a no-argument toggle. The two targets are a `TargetSpec::Multiple` of exactly two entries from the ability's `:SetTarget` or `target_requirement`.
-    ops.set("ExchangeTextBoxes", OperationTag(AbilityEffect::ExchangeTextBoxes))?;
+    ops.set(
+        "ExchangeTextBoxes",
+        OperationTag(AbilityEffect::ExchangeTextBoxes),
+    )?;
     // `Game.Ops.Fight` (CR 701.14) and `Game.Ops.Bite` (one-sided) are bare tags. The creatures come from the ability's target spec: two words (first fights or bites second), one count-2 word (Fight only), or one count-1 word (the source is the first creature).
     ops.set("Fight", OperationTag(AbilityEffect::Fight))?;
     ops.set("Bite", OperationTag(AbilityEffect::Bite))?;
     // `Game.Ops.MadnessCastOrDiscard` (CR 702.35a): a no-argument toggle. The exiled card is found through `ObjectLineage` off the triggered ability's source (see `AbilityEffect::MadnessCastOrDiscard`).
-    ops.set("MadnessCastOrDiscard", OperationTag(AbilityEffect::MadnessCastOrDiscard))?;
+    ops.set(
+        "MadnessCastOrDiscard",
+        OperationTag(AbilityEffect::MadnessCastOrDiscard),
+    )?;
     // `Game.Ops.Cascade` (CR 702.85a): a no-argument toggle. The spell's mana value is derived from `top.source` and `top.x_value` at resolution.
     ops.set("Cascade", OperationTag(AbilityEffect::Cascade))?;
 
     let costs = lua.create_table()?;
-    costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;
+    costs.set(
+        "TapSelf",
+        CostTag(CostComponent::Additional(AdditionalCost::TapSelf)),
+    )?;
     // CR 702.29a Cycling's "Discard this card": always the ability's own source, with no filter table (unlike the filter-driven Discard binding below).
-    costs.set("DiscardSelf", CostTag(CostComponent::Additional(AdditionalCost::DiscardSelf)))?;
+    costs.set(
+        "DiscardSelf",
+        CostTag(CostComponent::Additional(AdditionalCost::DiscardSelf)),
+    )?;
     // "Sacrifice this permanent": always the ability's own source, with no filter table (unlike the filter-driven Sacrifice binding below).
-    costs.set("SacrificeSelf", CostTag(CostComponent::Additional(AdditionalCost::SacrificeSelf)))?;
+    costs.set(
+        "SacrificeSelf",
+        CostTag(CostComponent::Additional(AdditionalCost::SacrificeSelf)),
+    )?;
     costs.set(
         "Sacrifice",
         lua.create_function(|_, table: Table| {
             let filter = decode_filter_table(table).map_err(to_lua_err)?;
-            Ok(CostTag(CostComponent::Additional(AdditionalCost::Sacrifice { filter })))
+            Ok(CostTag(CostComponent::Additional(
+                AdditionalCost::Sacrifice { filter },
+            )))
         })?,
     )?;
     costs.set(
         "Discard",
         lua.create_function(|_, table: Table| {
             let filter = decode_filter_table(table).map_err(to_lua_err)?;
-            Ok(CostTag(CostComponent::Additional(AdditionalCost::Discard { filter })))
+            Ok(CostTag(CostComponent::Additional(
+                AdditionalCost::Discard { filter },
+            )))
         })?,
     )?;
     costs.set(
         "TapPermanents",
         lua.create_function(|_, (table, count): (Table, u32)| {
             let filter = decode_filter_table(table).map_err(to_lua_err)?;
-            Ok(CostTag(CostComponent::Additional(AdditionalCost::TapPermanents { filter, count })))
+            Ok(CostTag(CostComponent::Additional(
+                AdditionalCost::TapPermanents { filter, count },
+            )))
         })?,
     )?;
     // CR 702.138a Escape's "Exile N other cards from your graveyard" - same
@@ -510,30 +663,44 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         "ExileFromGraveyard",
         lua.create_function(|_, (table, count): (Table, u32)| {
             let filter = decode_filter_table(table).map_err(to_lua_err)?;
-            Ok(CostTag(CostComponent::Additional(AdditionalCost::ExileFromGraveyard { filter, count })))
+            Ok(CostTag(CostComponent::Additional(
+                AdditionalCost::ExileFromGraveyard { filter, count },
+            )))
         })?,
     )?;
     costs.set(
         "Life",
         lua.create_function(|_, amount: u32| {
-            Ok(CostTag(CostComponent::Additional(AdditionalCost::LifePayment { amount })))
+            Ok(CostTag(CostComponent::Additional(
+                AdditionalCost::LifePayment { amount },
+            )))
         })?,
     )?;
     // CR 107.4, 202.3: a printed mana-cost string, such as `Game.Costs.Mana("{1}{R}")`; see `ManaCost::parse` for the grammar.
     costs.set(
         "Mana",
         lua.create_function(|_, s: String| {
-            let mana = ManaCost::parse(&s)
-                .map_err(|e| mlua::Error::RuntimeError(format!("Game.Costs.Mana(\"{s}\"): {}", e.0)))?;
+            let mana = ManaCost::parse(&s).map_err(|e| {
+                mlua::Error::RuntimeError(format!("Game.Costs.Mana(\"{s}\"): {}", e.0))
+            })?;
             Ok(CostTag(CostComponent::Mana(mana)))
         })?,
     )?;
 
     // Only the 4 durations with a drain path are exposed; see `DurationTag`.
     let durations = lua.create_table()?;
-    durations.set("UntilEndOfTurn", DurationTag(EffectDuration::UntilEndOfTurn))?;
-    durations.set("UntilYourNextTurn", DurationTag(EffectDuration::UntilYourNextTurn))?;
-    durations.set("UntilEndOfCombat", DurationTag(EffectDuration::UntilEndOfCombat))?;
+    durations.set(
+        "UntilEndOfTurn",
+        DurationTag(EffectDuration::UntilEndOfTurn),
+    )?;
+    durations.set(
+        "UntilYourNextTurn",
+        DurationTag(EffectDuration::UntilYourNextTurn),
+    )?;
+    durations.set(
+        "UntilEndOfCombat",
+        DurationTag(EffectDuration::UntilEndOfCombat),
+    )?;
     durations.set("Permanent", DurationTag(EffectDuration::Permanent))?;
 
     // Only the 7 layers with a query path (`layers::effective_characteristics`) are exposed. A static ability can't request layer 1, 2 or 7d (see `Layer`).
@@ -542,25 +709,42 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     layers.set("TypeChanging", LayerTag(Layer::TypeChanging))?;
     layers.set("ColorChanging", LayerTag(Layer::ColorChanging))?;
     layers.set("AbilityAdding", LayerTag(Layer::AbilityAdding))?;
-    layers.set("PowerToughnessSetting", LayerTag(Layer::PowerToughnessSetting))?;
-    layers.set("PowerToughnessModifying", LayerTag(Layer::PowerToughnessModifying))?;
-    layers.set("PowerToughnessSwitching", LayerTag(Layer::PowerToughnessSwitching))?;
+    layers.set(
+        "PowerToughnessSetting",
+        LayerTag(Layer::PowerToughnessSetting),
+    )?;
+    layers.set(
+        "PowerToughnessModifying",
+        LayerTag(Layer::PowerToughnessModifying),
+    )?;
+    layers.set(
+        "PowerToughnessSwitching",
+        LayerTag(Layer::PowerToughnessSwitching),
+    )?;
 
     let effects = lua.create_table()?;
     effects.set(
         "SetName",
-        lua.create_function(|_, new_name: String| Ok(EffectPrimitiveTag(EffectPrimitive::SetName(new_name))))?,
+        lua.create_function(|_, new_name: String| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::SetName(new_name)))
+        })?,
     )?;
     effects.set(
         "SetPT",
         lua.create_function(|_, (power, toughness): (i32, i32)| {
-            Ok(EffectPrimitiveTag(EffectPrimitive::SetPT { power, toughness }))
+            Ok(EffectPrimitiveTag(EffectPrimitive::SetPT {
+                power,
+                toughness,
+            }))
         })?,
     )?;
     effects.set(
         "ModifyPT",
         lua.create_function(|_, (power, toughness): (i32, i32)| {
-            Ok(EffectPrimitiveTag(EffectPrimitive::ModifyPT { power, toughness }))
+            Ok(EffectPrimitiveTag(EffectPrimitive::ModifyPT {
+                power,
+                toughness,
+            }))
         })?,
     )?;
     effects.set(
@@ -568,12 +752,14 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         lua.create_function(|_, names: Value| {
             let names = match names {
                 Value::String(name) => vec![name.to_str()?.to_string()],
-                Value::Table(list) => list.sequence_values::<String>().collect::<mlua::Result<Vec<_>>>()?,
+                Value::Table(list) => list
+                    .sequence_values::<String>()
+                    .collect::<mlua::Result<Vec<_>>>()?,
                 other => {
                     return Err(mlua::Error::RuntimeError(format!(
                         "Game.Effects.AddKeyword expects a keyword name or a list of names, got {}",
                         other.type_name()
-                    )))
+                    )));
                 }
             };
             let mut set = KeywordSet::empty();
@@ -608,37 +794,57 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         "AddProtectionCardType",
         lua.create_function(|_, name: String| {
             let set = parse_card_type_name(&name).map_err(to_lua_err)?;
-            Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionCardType(set)))
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionCardType(
+                set,
+            )))
         })?,
     )?;
     effects.set(
         "AddProtectionSubtype",
-        lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionSubtype(Subtype(name)))))?,
+        lua.create_function(|_, name: String| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionSubtype(
+                Subtype(name),
+            )))
+        })?,
     )?;
     effects.set(
         "AddProtectionName",
-        lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionName(name))))?,
+        lua.create_function(|_, name: String| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionName(name)))
+        })?,
     )?;
     effects.set(
         "AddLandwalkSubtype",
-        lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddLandwalkSubtype(Subtype(name)))))?,
+        lua.create_function(|_, name: String| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddLandwalkSubtype(
+                Subtype(name),
+            )))
+        })?,
     )?;
     effects.set(
         "AddLandwalkQuality",
         lua.create_function(|_, opts: Table| {
             let quality = decode_landwalk_quality(opts).map_err(to_lua_err)?;
-            Ok(EffectPrimitiveTag(EffectPrimitive::AddLandwalkQuality(quality)))
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddLandwalkQuality(
+                quality,
+            )))
         })?,
     )?;
     effects.set(
         "AddBandsWithOther",
-        lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddBandsWithOther(Subtype(name)))))?,
+        lua.create_function(|_, name: String| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddBandsWithOther(
+                Subtype(name),
+            )))
+        })?,
     )?;
     effects.set(
         "AddBandsWithOtherSupertype",
         lua.create_function(|_, name: String| {
             let set = parse_supertype_name(&name).map_err(to_lua_err)?;
-            Ok(EffectPrimitiveTag(EffectPrimitive::AddBandsWithOtherSupertype(set)))
+            Ok(EffectPrimitiveTag(
+                EffectPrimitive::AddBandsWithOtherSupertype(set),
+            ))
         })?,
     )?;
     effects.set(
@@ -682,18 +888,31 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     )?;
     effects.set(
         "AddSubtype",
-        lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddSubtype(vec![Subtype(name)]))))?,
+        lua.create_function(|_, name: String| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddSubtype(vec![
+                Subtype(name),
+            ])))
+        })?,
     )?;
     // CR 613.8a: `Game.Effects.DoublePT(power, toughness)` takes two booleans for which values double. It is a distinct primitive so `layers::depends_on` can see it.
     effects.set(
         "DoublePT",
         lua.create_function(|_, (power, toughness): (bool, bool)| {
-            Ok(EffectPrimitiveTag(EffectPrimitive::DoublePT { power, toughness }))
+            Ok(EffectPrimitiveTag(EffectPrimitive::DoublePT {
+                power,
+                toughness,
+            }))
         })?,
     )?;
     effects.set("SwitchPT", EffectPrimitiveTag(EffectPrimitive::SwitchPT))?;
-    effects.set("RemoveAllAbilities", EffectPrimitiveTag(EffectPrimitive::RemoveAllAbilities))?;
-    effects.set("AddProtectionEverything", EffectPrimitiveTag(EffectPrimitive::AddProtectionEverything))?;
+    effects.set(
+        "RemoveAllAbilities",
+        EffectPrimitiveTag(EffectPrimitive::RemoveAllAbilities),
+    )?;
+    effects.set(
+        "AddProtectionEverything",
+        EffectPrimitiveTag(EffectPrimitive::AddProtectionEverything),
+    )?;
     effects.set(
         "AddProtectionPlayer",
         lua.create_function(|_, who: String| {
@@ -705,25 +924,46 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                         .to_string(),
                 )));
             }
-            Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionPlayer(filter)))
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionPlayer(
+                filter,
+            )))
         })?,
     )?;
 
     // `Game.EventFilters.*`: which `EventFilter` shape a ReplacementEffect watches (`ReplacementEffectBuilder::SetFilter`). Only shapes with a query path (`ReplacementEffect::matches`) are bound; see `EventFilter`.
     let event_filters = lua.create_table()?;
-    event_filters.set("DamageDealt", EventFilterKindTag(EventFilterKind::DamageDealt))?;
+    event_filters.set(
+        "DamageDealt",
+        EventFilterKindTag(EventFilterKind::DamageDealt),
+    )?;
     event_filters.set("WouldDie", EventFilterKindTag(EventFilterKind::WouldDie))?;
     // `Game.EventFilters.WouldMoveZone(fromName, toName)`: either argument may be nil for any zone, so `WouldMoveZone("Battlefield", nil)` matches any move off the battlefield and `WouldMoveZone(nil, "Exile")` any move into exile.
     event_filters.set(
         "WouldMoveZone",
-        lua.create_function(|_, (from_name, to_name): (Option<String>, Option<String>)| {
-            let from = from_name.as_deref().map(parse_zone_kind_name).transpose().map_err(to_lua_err)?;
-            let to = to_name.as_deref().map(parse_zone_kind_name).transpose().map_err(to_lua_err)?;
-            Ok(EventFilterKindTag(EventFilterKind::WouldMoveZone { from, to }))
-        })?,
+        lua.create_function(
+            |_, (from_name, to_name): (Option<String>, Option<String>)| {
+                let from = from_name
+                    .as_deref()
+                    .map(parse_zone_kind_name)
+                    .transpose()
+                    .map_err(to_lua_err)?;
+                let to = to_name
+                    .as_deref()
+                    .map(parse_zone_kind_name)
+                    .transpose()
+                    .map_err(to_lua_err)?;
+                Ok(EventFilterKindTag(EventFilterKind::WouldMoveZone {
+                    from,
+                    to,
+                }))
+            },
+        )?,
     )?;
     // CR 702.89a (Umbra armor): "if enchanted permanent would be destroyed", pairing only with `Game.ReplacementPayloads.UmbraArmor`. `:SetAffected` is a no-op, since the affected object is always this effect's `attached_to`.
-    event_filters.set("WouldDieEnchanted", EventFilterKindTag(EventFilterKind::WouldDieEnchanted))?;
+    event_filters.set(
+        "WouldDieEnchanted",
+        EventFilterKindTag(EventFilterKind::WouldDieEnchanted),
+    )?;
     // CR 303.4m, 616 (Wheel of Sun and Moon): "if a card would be put into enchanted player's graveyard from anywhere", pairing only with `Game.ReplacementPayloads.ReplaceZoneDestination`. `:SetAffected` is a no-op here too.
     event_filters.set(
         "WouldEnterEnchantedPlayerGraveyard",
@@ -732,61 +972,88 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
 
     // `Game.ReplacementPayloads.*`: what a ReplacementEffect rewrites the matched event into (`ReplacementEffectBuilder::SetPayload`). `RedirectDamageToSource` is a sentinel and not a `ReplacementPayloadTag`; see `RedirectDamageToSourceTag`.
     let replacement_payloads = lua.create_table()?;
-    replacement_payloads.set("PreventDamage", ReplacementPayloadTag(ReplacementPayload::PreventDamage))?;
-    replacement_payloads.set("Regenerate", ReplacementPayloadTag(ReplacementPayload::Regenerate))?;
+    replacement_payloads.set(
+        "PreventDamage",
+        ReplacementPayloadTag(ReplacementPayload::PreventDamage),
+    )?;
+    replacement_payloads.set(
+        "Regenerate",
+        ReplacementPayloadTag(ReplacementPayload::Regenerate),
+    )?;
     // CR 702.89a (Umbra armor): pairs only with `Game.EventFilters.WouldDieEnchanted`.
-    replacement_payloads.set("UmbraArmor", ReplacementPayloadTag(ReplacementPayload::UmbraArmor))?;
+    replacement_payloads.set(
+        "UmbraArmor",
+        ReplacementPayloadTag(ReplacementPayload::UmbraArmor),
+    )?;
     replacement_payloads.set("RedirectDamageToSource", RedirectDamageToSourceTag)?;
     replacement_payloads.set(
         "ReplaceZoneDestination",
         lua.create_function(|_, zone_name: String| {
             let zone = parse_zone_kind_name(&zone_name).map_err(to_lua_err)?;
-            Ok(ReplacementPayloadTag(ReplacementPayload::ReplaceZoneDestination(zone)))
+            Ok(ReplacementPayloadTag(
+                ReplacementPayload::ReplaceZoneDestination(zone),
+            ))
         })?,
     )?;
     // CR 603.6d: pairs only with `Game.EventFilters.WouldMoveZone(_, "Battlefield")` (see `validate_replacement_filter_payload_pairing`). Applied by `replacement::apply_enters_battlefield_modifiers`, not `ReplacementEffect::apply`.
-    replacement_payloads.set("EntersTapped", ReplacementPayloadTag(ReplacementPayload::EntersTapped))?;
+    replacement_payloads.set(
+        "EntersTapped",
+        ReplacementPayloadTag(ReplacementPayload::EntersTapped),
+    )?;
     // CR 614.1c, 122.6: `Game.ReplacementPayloads.EntersWithCounters(kindName, amount)`, fixed printed amounts only, with the `parse_counter_kind_name` table of `Game.Ops.Counters`. Sunburst has its own payload. Devour and Amplify's fixed per-unit rate fits, but choosing which units count needs a pause; see `ReplacementPayload::EntersWithCounters`.
     replacement_payloads.set(
         "EntersWithCounters",
-        lua.create_function(|_, (kind_name, amount): (String, i32)| {
-            let kind = parse_counter_kind_name(&kind_name);
-            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCounters { kind, amount }))
+        lua.create_function(|_, (kind, amount): (Value, i32)| {
+            let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+            Ok(ReplacementPayloadTag(
+                ReplacementPayload::EntersWithCounters { kind, amount },
+            ))
         })?,
     )?;
     // CR 702.54a: `EntersWithCountersBloodthirst(kindName, amount)`, the fixed-amount shape above gated on `replacement::opponent_damaged_this_turn`.
     replacement_payloads.set(
         "EntersWithCountersBloodthirst",
-        lua.create_function(|_, (kind_name, amount): (String, i32)| {
-            let kind = parse_counter_kind_name(&kind_name);
-            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersBloodthirst { kind, amount }))
+        lua.create_function(|_, (kind, amount): (Value, i32)| {
+            let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+            Ok(ReplacementPayloadTag(
+                ReplacementPayload::EntersWithCountersBloodthirst { kind, amount },
+            ))
         })?,
     )?;
     // CR 702.138c: `EntersWithCountersEscape(kindName, amount)`, gated on `GameObject::entered_via_escape`.
     replacement_payloads.set(
         "EntersWithCountersEscape",
-        lua.create_function(|_, (kind_name, amount): (String, i32)| {
-            let kind = parse_counter_kind_name(&kind_name);
-            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersEscape { kind, amount }))
+        lua.create_function(|_, (kind, amount): (Value, i32)| {
+            let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+            Ok(ReplacementPayloadTag(
+                ReplacementPayload::EntersWithCountersEscape { kind, amount },
+            ))
         })?,
     )?;
     // CR 702.44: `EntersWithCountersSunburst` takes no arguments, since kind and amount are derived at apply time.
-    replacement_payloads.set("EntersWithCountersSunburst", ReplacementPayloadTag(ReplacementPayload::EntersWithCountersSunburst))?;
+    replacement_payloads.set(
+        "EntersWithCountersSunburst",
+        ReplacementPayloadTag(ReplacementPayload::EntersWithCountersSunburst),
+    )?;
     // CR 702.82a, 702.82c: `EntersWithCountersDevour(perCreature, quality)`. Which creatures to sacrifice is decided outside this payload, which carries the fixed per-creature rate and an optional `quality` subtype ("Devour [quality] N", such as `(2, "Nightmare")`). `nil` means any creature.
     replacement_payloads.set(
         "EntersWithCountersDevour",
         lua.create_function(|_, (per_creature, quality): (i32, Option<String>)| {
-            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersDevour {
-                per_creature,
-                quality: quality.map(Subtype),
-            }))
+            Ok(ReplacementPayloadTag(
+                ReplacementPayload::EntersWithCountersDevour {
+                    per_creature,
+                    quality: quality.map(Subtype),
+                },
+            ))
         })?,
     )?;
     // CR 702.38a: `EntersWithCountersAmplify(perCard)`. Which cards to reveal is decided outside this payload, which carries the fixed per-card rate.
     replacement_payloads.set(
         "EntersWithCountersAmplify",
         lua.create_function(|_, per_card: i32| {
-            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersAmplify { per_card }))
+            Ok(ReplacementPayloadTag(
+                ReplacementPayload::EntersWithCountersAmplify { per_card },
+            ))
         })?,
     )?;
     // CR 707.6, 614.12a: `EntersAsCopy(opts?)` (Clone). Which creature to become is decided outside this payload, which carries only `CopyExceptions`, decoded as `Game.Ops.BecomeCopy(opts?)` does.
@@ -794,17 +1061,24 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         "EntersAsCopy",
         lua.create_function(|_, opts: Option<Table>| {
             let exceptions = decode_copy_exceptions(opts).map_err(to_lua_err)?;
-            Ok(ReplacementPayloadTag(ReplacementPayload::EntersAsCopy(exceptions)))
+            Ok(ReplacementPayloadTag(ReplacementPayload::EntersAsCopy(
+                exceptions,
+            )))
         })?,
     )?;
 
     // `Game.Consumption.*`: a ReplacementEffect's `ConsumptionPolicy` (`ReplacementEffectBuilder::SetConsumption`).
     let consumption = lua.create_table()?;
     consumption.set("OneShot", ConsumptionPolicyTag(ConsumptionPolicy::OneShot))?;
-    consumption.set("Repeatable", ConsumptionPolicyTag(ConsumptionPolicy::Repeatable))?;
+    consumption.set(
+        "Repeatable",
+        ConsumptionPolicyTag(ConsumptionPolicy::Repeatable),
+    )?;
     consumption.set(
         "LimitedUses",
-        lua.create_function(|_, uses: u32| Ok(ConsumptionPolicyTag(ConsumptionPolicy::LimitedUses(uses))))?,
+        lua.create_function(|_, uses: u32| {
+            Ok(ConsumptionPolicyTag(ConsumptionPolicy::LimitedUses(uses)))
+        })?,
     )?;
 
     let create_triggered_ability = {
@@ -875,7 +1149,11 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         lua.create_function(move |_, source: u64| {
             Ok(ActivatedAbilityBuilder {
                 source: ObjectId(source),
-                cost: CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() },
+                cost: CostSpec {
+                    mana: None,
+                    additional: Vec::new(),
+                    alternative: Vec::new(),
+                },
                 target: None,
                 operation: None,
                 function_zone: None,
@@ -889,7 +1167,11 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         lua.create_function(move |_, source: u64| {
             Ok(ManaAbilityBuilder {
                 source: ObjectId(source),
-                cost: CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() },
+                cost: CostSpec {
+                    mana: None,
+                    additional: Vec::new(),
+                    alternative: Vec::new(),
+                },
                 operation: None,
                 registry: Rc::clone(&registry),
             })
@@ -923,7 +1205,6 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
 
-
     // `Game.HandSizeEffects.*`: what a `Game.CreateHandSizeModifier` does (`HandSizeModifierBuilder::SetEffect`).
     let hand_size_effects = lua.create_table()?;
     hand_size_effects.set("NoMaximum", HandSizeEffectTag(HandSizeEffect::NoMaximum))?;
@@ -935,10 +1216,14 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     let create_hand_reveal_modifier = {
         let registry = Rc::clone(&registry);
         lua.create_function(move |_, source: u64| {
-            Ok(HandRevealModifierBuilder { source: ObjectId(source), affected: None, function_zone: None, registry: Rc::clone(&registry) })
+            Ok(HandRevealModifierBuilder {
+                source: ObjectId(source),
+                affected: None,
+                function_zone: None,
+                registry: Rc::clone(&registry),
+            })
         })?
     };
-
 
     let create_draw_limit_modifier = {
         let registry = Rc::clone(&registry);
@@ -953,7 +1238,6 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
 
-
     let create_land_play_modifier = {
         let registry = Rc::clone(&registry);
         lua.create_function(move |_, source: u64| {
@@ -967,23 +1251,37 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
 
-
     let tokens = lua.create_table()?;
     tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
     tokens.set("Food", TokenTag(TokenSpec::Named(NamedToken::Food)))?;
     tokens.set("Treasure", TokenTag(TokenSpec::Named(NamedToken::Treasure)))?;
     tokens.set(
         "Creature",
-        lua.create_function(|_, (subtypes_val, colors_str, power, toughness, opts): (Value, String, i32, i32, Option<mlua::Table>)| {
-            let subtypes = decode_name_list(subtypes_val, "subtypes").map_err(to_lua_err)?;
-            let colors = parse_color_string(&colors_str).map_err(to_lua_err)?;
-            let (keywords, name, additional_types, additional_supertypes) =
-                decode_creature_token_opts(opts).map_err(to_lua_err)?;
-            Ok(TokenTag(TokenSpec::Creature(CreatureTokenSpec {
-                subtypes, colors, power, toughness,
-                keywords, name, additional_types, additional_supertypes,
-            })))
-        })?,
+        lua.create_function(
+            |_,
+             (subtypes_val, colors_str, power, toughness, opts): (
+                Value,
+                String,
+                i32,
+                i32,
+                Option<mlua::Table>,
+            )| {
+                let subtypes = decode_name_list(subtypes_val, "subtypes").map_err(to_lua_err)?;
+                let colors = parse_color_string(&colors_str).map_err(to_lua_err)?;
+                let (keywords, name, additional_types, additional_supertypes) =
+                    decode_creature_token_opts(opts).map_err(to_lua_err)?;
+                Ok(TokenTag(TokenSpec::Creature(CreatureTokenSpec {
+                    subtypes,
+                    colors,
+                    power,
+                    toughness,
+                    keywords,
+                    name,
+                    additional_types,
+                    additional_supertypes,
+                })))
+            },
+        )?,
     )?;
     // `Game.Tokens.CopyOf(objectId, opts?)` (CR 707.10f, 707.9): see `TokenSpec::CopyOf` for why the token's `CardDefinition` ignores the opts of the other `Game.Tokens.*`. `opts` is `CopyExceptions`, decoded by `decode_copy_exceptions`.
     tokens.set(
@@ -1000,8 +1298,9 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         .eval()?;
 
     // CR 608.2d: `Game.MayChoose()` yields a plain yes/no request as `Game.SelectTargets` does, as a literal Lua function for the same reason. `resume_operation_bool` resumes with a raw boolean, which becomes the call's return value.
-    let may_choose: Function =
-        lua.load(r#"function() return coroutine.yield({ op = "may_choose" }) end"#).eval()?;
+    let may_choose: Function = lua
+        .load(r#"function() return coroutine.yield({ op = "may_choose" }) end"#)
+        .eval()?;
 
     // `Game.ChooseN(filter, n, opts)`: ask the player to choose N objects mid-resolution, built from the two yields above. Each pick makes its own `Game.SelectTargets`-style ask and grows an `exclude_ids` list (see `ScriptChoiceRequest::SelectTarget`) so one object isn't picked twice. Returns a plain array of `{kind, id}` tables, as `Game.SelectTargets` does. `Game.Ops.SacrificeChosen` and `DiscardChosen` consume it, and a script can read `.id` off each entry.
     //
@@ -1014,6 +1313,11 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
             r#"
             function(filter, n, opts)
                 opts = opts or {}
+                for k, _ in pairs(opts) do
+                    if k ~= "up_to" and k ~= "at_least" then
+                        error("Game.ChooseN opts has unknown key '" .. k .. "'")
+                    end
+                end
                 local results = {}
                 local ids = {}
                 local i = 1
@@ -1038,7 +1342,10 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         .eval()?;
 
     // CR 701.21, 701.9: `Game.Ops.SacrificeChosen(list)` and `DiscardChosen(list)` take `Game.ChooseN`'s return shape. They hand the ids up as `OperationOutcome::PendingZoneMoves` because a zone move needs the replacement-checked pipeline, unlike `GainLife`, which mutates `GameState` directly.
-    for (name, kind) in [("SacrificeChosen", ScriptZoneMoveKind::Sacrifice), ("DiscardChosen", ScriptZoneMoveKind::Discard)] {
+    for (name, kind) in [
+        ("SacrificeChosen", ScriptZoneMoveKind::Sacrifice),
+        ("DiscardChosen", ScriptZoneMoveKind::Discard),
+    ] {
         let ctor = lua.create_function(move |_, list: Table| {
             let mut ids = Vec::new();
             for pick in list.sequence_values::<Table>() {
@@ -1058,9 +1365,20 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // TODO: `opts.free` hardcodes casting from exile (see `OperationOutcome::PendingCast`), so only Cascade-shaped "free from exile" works, not an arbitrary zone
     let cast_spell = lua.create_function(|_, (card, opts): (u64, Option<Table>)| {
         let (mut free, mut modes, mut targets, mut x_value) = (false, Vec::new(), Vec::new(), None);
+        if let Some(opts) = &opts {
+            reject_unknown_keys(
+                opts,
+                &["free", "modes", "x_value", "targets"],
+                &[],
+                "Game.Ops.CastSpell opts",
+            )
+            .map_err(to_lua_err)?;
+        }
         if let Some(opts) = opts {
             free = opts.get::<_, Option<bool>>("free")?.unwrap_or(false);
-            modes = opts.get::<_, Option<Vec<u32>>>("modes")?.unwrap_or_default();
+            modes = opts
+                .get::<_, Option<Vec<u32>>>("modes")?
+                .unwrap_or_default();
             x_value = opts.get::<_, Option<u32>>("x_value")?;
             if let Some(picks) = opts.get::<_, Option<Vec<Table>>>("targets")? {
                 for pick in &picks {
@@ -1068,20 +1386,35 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 }
             }
         }
-        Ok(OperationResultTag(vec![ResultItem::CastSpell { card: ObjectId(card), modes, targets, x_value, free }]))
+        Ok(OperationResultTag(vec![ResultItem::CastSpell {
+            card: ObjectId(card),
+            modes,
+            targets,
+            x_value,
+            free,
+        }]))
     })?;
     ops.set("CastSpell", cast_spell)?;
 
     // `Game.Ops.DealDamageTo(pick, amount)` and `AddCountersTo(pick, counter, amount)` act on one `{ kind, id }` pick from `Game.SelectTargets` or `Game.ChooseN`. They hand back events (`OperationOutcome::PendingEvents`) so CR 615 and 616 prevention and replacement still apply.
     let deal_damage_to = lua.create_function(|_, (pick, amount): (Table, u32)| {
         let target = decode_target_pick(&pick).map_err(to_lua_err)?;
-        Ok(OperationResultTag(vec![ResultItem::DealDamage { target, amount }]))
+        Ok(OperationResultTag(vec![ResultItem::DealDamage {
+            target,
+            amount,
+        }]))
     })?;
     ops.set("DealDamageTo", deal_damage_to)?;
-    let add_counters_to = lua.create_function(|_, (pick, counter, amount): (Table, String, i32)| {
-        let target = decode_target_pick(&pick).map_err(to_lua_err)?;
-        Ok(OperationResultTag(vec![ResultItem::AddCounters { target, counter: parse_counter_kind_name(&counter), amount }]))
-    })?;
+    let add_counters_to =
+        lua.create_function(|_, (pick, counter, amount): (Table, Value, i32)| {
+            let target = decode_target_pick(&pick).map_err(to_lua_err)?;
+            let counter = decode_counter_arg(counter).map_err(to_lua_err)?;
+            Ok(OperationResultTag(vec![ResultItem::AddCounters {
+                target,
+                counter,
+                amount,
+            }]))
+        })?;
     ops.set("AddCountersTo", add_counters_to)?;
 
     // `Game.RegisterKeyword(source, name)`: sugar for the layer-6 (`AbilityAdding`) self-only static ability every printed keyword needs (CR 613.1f). Equivalent to:
@@ -1126,11 +1459,34 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         )
         .eval()?;
 
+    // `Game.Counter.*`: common counter kinds and a custom constructor. The
+    // common kinds keep their string names in `Game.Ops.Counters` etc.; the
+    // tags exist so custom counters have one explicit spelling.
+    let counters = lua.create_table()?;
+    for (name, kind) in [
+        ("PlusOnePlusOne", CounterKind::PlusOnePlusOne),
+        ("MinusOneMinusOne", CounterKind::MinusOneMinusOne),
+        ("Loyalty", CounterKind::Loyalty),
+        ("Poison", CounterKind::Poison),
+        ("Energy", CounterKind::Energy),
+        ("Experience", CounterKind::Experience),
+        ("Charge", CounterKind::Charge),
+    ] {
+        counters.set(name, CounterTag::Known(kind))?;
+    }
+    counters.set(
+        "Custom",
+        lua.create_function(|_, name: String| Ok(CounterTag::Custom(name)))?,
+    )?;
+
     // `Game.Affected.*`: the one namespace behind every `:SetAffected`. Each builder takes the tags that mean something to it; see `AffectedTag`.
     let affected = lua.create_table()?;
     affected.set("Self", AffectedTag::SelfOnly)?;
     affected.set("Enchanted", AffectedTag::Enchanted)?;
-    affected.set("EnchantedPlayerControls", AffectedTag::EnchantedPlayerControls)?;
+    affected.set(
+        "EnchantedPlayerControls",
+        AffectedTag::EnchantedPlayerControls,
+    )?;
     affected.set("You", AffectedTag::Players(FilterController::You))?;
     affected.set("Opponent", AffectedTag::Players(FilterController::Opponent))?;
     affected.set("Any", AffectedTag::Players(FilterController::Any))?;
@@ -1145,11 +1501,12 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 )));
             }
         }
-        Ok(FilterTag(decode_object_filter_keys(&table).map_err(to_lua_err)?))
+        Ok(FilterTag(decode_object_filter_keys(&table, &[]).map_err(to_lua_err)?))
     })?;
 
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
+    game.set("Counter", counters)?;
     game.set("Affected", affected)?;
     game.set("Filter", filter)?;
     game.set("Ops", ops)?;
@@ -1186,7 +1543,9 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
 fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(EntryControl, bool)> {
     let mut control = EntryControl::You;
     let mut tapped = false;
-    let Some(opts) = opts else { return Ok((control, tapped)) };
+    let Some(opts) = opts else {
+        return Ok((control, tapped));
+    };
     for pair in opts.pairs::<String, mlua::Value>() {
         let (key, value) = pair?;
         match (key.as_str(), value) {
@@ -1197,7 +1556,7 @@ fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(Ent
                     other => {
                         return Err(mlua::Error::RuntimeError(format!(
                             "{op_name} control must be \"You\" or \"Owner\", got {other:?}"
-                        )))
+                        )));
                     }
                 };
             }
@@ -1205,7 +1564,7 @@ fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(Ent
             (other, _) => {
                 return Err(mlua::Error::RuntimeError(format!(
                     "{op_name} option {other:?} is unknown or has the wrong type (expected control = \"You\"|\"Owner\", tapped = boolean)"
-                )))
+                )));
             }
         }
     }
@@ -1229,14 +1588,18 @@ fn chain_entry(lua: &Lua, ctor: &str, position: usize, arg: Value) -> mlua::Resu
             }
             Ok(effect)
         }
-        Value::UserData(ud) if ud.is::<ForEachPlayerTag>() => Err(mlua::Error::RuntimeError(format!(
-            "Game.Ops.{ctor} argument {position} is a ForEachPlayer, which can't be chained yet"
-        ))),
+        Value::UserData(ud) if ud.is::<ForEachPlayerTag>() => {
+            Err(mlua::Error::RuntimeError(format!(
+                "Game.Ops.{ctor} argument {position} is a ForEachPlayer, which can't be chained yet"
+            )))
+        }
         Value::Function(function) => {
             if let Err(crate::script::ScriptError::LoadError(message)) =
                 crate::script::decode::reject_uncalled_op(lua, &function)
             {
-                return Err(mlua::Error::RuntimeError(format!("Game.Ops.{ctor} argument {position}: {message}")));
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Game.Ops.{ctor} argument {position}: {message}"
+                )));
             }
             Err(mlua::Error::RuntimeError(format!(
                 "Game.Ops.{ctor} argument {position} is a custom function, which can't be chained yet - \
