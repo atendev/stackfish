@@ -3,9 +3,9 @@ id: 054
 title: Document the canonical Lua API in docs/LUA_API.md
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question
@@ -36,4 +36,4 @@ Write a single canonical reference document for card script authors that capture
 
 ## Resolution
 
-<Filled in at close.>
+Created `docs/LUA_API.md` as the single canonical reference, superseding `docs/lua/index.md` with a redirect. The new doc covers every `Game.*` namespace, shared schemas, builder methods, strict validation rules, migration notes, and common mistakes. Added `crates/engine/tests/lua_api_doc_sync.rs` to mechanically check that bound `Game.*` names in `crates/engine/src/script/globals.rs` are documented. Updated `docs/lua/stubs/game.lua` source-of-truth pointer and added missing bound ops (`BecomeBlocked`, `Cascade`, `MadnessCastOrDiscard`). Added a pointer from `docs/implementation/index.md`. All 1908 `stackfish-engine` tests pass; no CI is configured in the repo, so CI was skipped. Audit verdict: APPROVE.
