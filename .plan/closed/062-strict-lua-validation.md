@@ -5,7 +5,7 @@ type: build
 mode: HITL
 status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question
