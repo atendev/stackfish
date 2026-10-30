@@ -106,6 +106,7 @@ mod layer_engine_types_colors;
 mod legal_actions;
 mod legend_world_rule;
 mod lose_all_abilities;
+mod lua_api_doc_sync;
 mod lua_namespace_unification;
 mod madness;
 mod mana_ability_during_payment;

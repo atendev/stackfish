@@ -2,7 +2,7 @@
 -- EmmyLua type stub for the `Game` global injected by the Rust host (mlua, Lua 5.4).
 -- Not loaded at runtime — this file exists only so the sumneko/LuaLS VSCode Lua
 -- extension can offer autocomplete/hover docs while authoring card scripts.
--- Source of truth is docs/lua/*.md; regenerate by hand when those change.
+-- Source of truth is docs/LUA_API.md; regenerate by hand when that changes.
 -- See docs/lua/vscode-intellisense.md for setup.
 
 -------------------------------------------------------------------------------
@@ -549,6 +549,9 @@ function GameConditionsTable.HadNoCounters(counter) end
 ---@field ExchangeTextBoxes GameOpsValue         -- operates on ability's first two targets
 ---@field Fight GameOpsValue                     -- CR 701.14; two creatures deal damage equal to power to each other; pairing from the target spec (2 entries, one count=2 entry, or source + one target)
 ---@field Bite GameOpsValue                      -- one-sided: first creature deals damage equal to its power to the second; not a fight
+---@field BecomeBlocked GameOpsValue             -- the target becomes blocked; no combat damage from it this combat
+---@field MadnessCastOrDiscard GameOpsValue      -- CR 702.35a; exile and offer cast-or-discard
+---@field Cascade GameOpsValue                   -- CR 702.85a; exile and cast a lower-cost card for free
 local GameOpsTable = {}
 
 --- CR 605. `letter`: W/U/B/R/G/C. `count` default 1.
