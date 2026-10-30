@@ -37,6 +37,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 054: Documented the canonical Lua API in `docs/LUA_API.md`, added a mechanical sync test, updated the Lua stub, and redirected `docs/lua/index.md`. [closed/054-document-canonical-lua-api.md]
 - 058: Updated `docs/DESIGN.md` to reflect the post-cleanup module layout, replaced broken `docs/implementation.md` references with numbered `docs/implementation/*.md` notes, added `docs/implementation/28-module-layout.md`, and updated `docs/implementation/index.md`. [closed/058-update-design-doc-module-layout.md]
 - 055: Audited `pub` visibility and dead helpers across all seven crates. About 424 items and fields can narrow to `pub(crate)` (engine 85, scenario 137, host 187), 9 items are dead (engine 5 plus `invoke_cost` stub, host 3), and 6 more are test-only (engine 5, host 1). Decide nameability of `EngineCommand`, `CommandOutcome` and `ProcessState` before narrowing. [closed/055-audit-visibility-dead-helpers.md]
+- 056: Audited workspace `Cargo.toml` hygiene. No shared `[workspace.dependencies]`; `cargo fmt --check` has ~7.3k diffs; `cargo clippy --workspace --all-targets -- -D warnings` has 77 errors all in `stackfish-engine`. `cargo-machete`/`cargo-udeps` are not installed; manual inspection found no obvious unused deps. `cargo test --workspace` passes. [closed/056-audit-workspace-cargo.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -97,9 +98,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 056, 060
+- 060
 
-Suggested order. 056 is research and 060 is grilling, so they can run in parallel. 057 waits on 056.
+057 now waits only on 055.
 
 ## Not yet specified
 
