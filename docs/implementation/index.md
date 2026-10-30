@@ -31,4 +31,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [25-chain-operations](25-chain-operations.md) — `Game.Ops.Chain`/`ChainEach`, `AbilityEffect::Chain`, `ModalContinuation::shared_legal`, per-entry target words, `:SetTarget` arrays, `DrawCards` player target
 - [26-special-mana-payment](26-special-mana-payment.md) — ticket 030: the `{C}` cost symbol, snow mana from snow sources, hybrid Phyrexian wire text, the bot's payment planner (`bot_payment.rs`), X and life tracking
 - [27-constructor-only-results](27-constructor-only-results.md) — ticket 053: callbacks return `Game.Ops.*`/`Game.Effects.*` values, `OperationResultTag`, `DealDamageTo`/`AddCountersTo`/`DoublePT`, one pending kind per returned value
+- [28-module-layout](28-module-layout.md) — post-cleanup file split rationale for `crates/engine/src/`, `crates/scenario/src/`, and `crates/engine/src/script/`
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

@@ -409,11 +409,11 @@ See `crates/engine/tests/scenarios/phase5_layer_engine_basics.toml` for a full w
 (the anthem above keeping a lethally-damaged bear alive through CR 704.5g's state-based action).
 `phase5_layer_engine_consumers.toml` shows the same `power_toughness_modifying` primitive changing
 real combat damage dealt (`assign_combat_damage`), not just an SBA — see
-`docs/implementation.md`'s layer-engine-consumers slice notes.
+`docs/implementation/09-layers.md`'s layer-engine-consumers slice notes.
 `phase5_layer_engine_types_colors.toml` shows `type_changing` (CR 613 layer 4, additive only) —
 pairing an `AddCardType(Creature)` effect with a `power_toughness_setting` effect animates a Land
 into a creature that's then actually subject to CR 704.5g's lethal-damage SBA (two separate
-`[[cards]]` sources, since one `ContinuousEffect` is one layer — see `docs/implementation.md`'s
+`[[cards]]` sources, since one `ContinuousEffect` is one layer — see `docs/implementation/09-layers.md`'s
 layer-engine-types-colors slice notes).
 
 **`target_requirement` (CR 115/601.2c-e, targeting system):** if set, casting this card as a
