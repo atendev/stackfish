@@ -477,6 +477,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags",
  "mlua",
+ "rusqlite",
  "stackfish-scenario",
  "stackfish-testutil",
 ]

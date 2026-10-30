@@ -33,6 +33,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 052: Decided on canonical Lua API forms and strict validation: require `Game.Ops.*` and `Game.Effects.*` constructors (remove raw-key return tables, use `Ops.Chain` for multi-op results, allow string or list in `Effects.AddKeyword`); unify `InterveningIf` into `Game.Conditions` and the 4 `*Affected` tables into `Game.Affected` with explicit `Game.Filter({...})` for filter tables; use flat filter keys in target tables with one shared filter schema; reject unknown keys, wrong-typed values, and unknown counter strings at both load time and game time; remove `Conditions.Always` and `Tokens.ArtifactCreature`, keep `RegisterKeyword`/`RegisterWard` and explicit `ManaAbility.New()`; standardize parameter names (`count`, `amount`, `counter`), casing, `"C"` colorless, and `AddMana`/`AddManaChoice` argument order; migrate both `crates/` inline scripts and the 25 active scripts in `../stackfish-db/stackfish.db`. [closed/052-decide-lua-api-canonical-forms.md]
 - 053: Callbacks return `Game.Ops.*` and `Game.Effects.*` values or `nil`, raw-key tables error, `DealDamageTo`, `AddCountersTo` and `DoublePT` added, and a returned value holds at most one pending kind. [closed/053-constructor-only-ops-and-effects.md]
 - 061: Merged `InterveningIf` into `Game.Conditions`, collapsed the four `*Affected` tables into `Game.Affected` plus `Game.Filter({...})`, flattened target filter keys behind one shared decoder covering only engine-backed keys, and removed `Conditions.Always` and `Tokens.ArtifactCreature`. Unbacked filter keys are TODOs; the key set feeds 062. [closed/061-unify-lua-namespaces-and-filters.md]
+- 063: Standardized Lua parameter names and casing, and made the `stackfish-db` smoke test read the active database rows. It found and fixed three rows still on the old API. [closed/063-lua-naming-and-db-migration.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -75,8 +76,8 @@ Make the Lua surface area small, documented, and strict before scaling up card s
   - Pick the single canonical spelling for each concept, decide which aliases to cut, and agree on how unknown table keys fail at load time.
 - 053 Constructor-only operation and effect results (`Ops.Chain`, `AddKeyword` list). Type build, HITL. Blocked by 052. Closed.
 - 062 Strict key, type and counter-name validation in Lua decoders. Type build, HITL. Blocked by 061. [closed/062-strict-lua-validation.md]
-- 063 Standardize parameter names, casing and mana argument order, fix stub drift, migrate the 25 `stackfish-db` scripts. Type build, HITL. Blocked by 062.
-- 054 Document the canonical Lua API in `docs/LUA_API.md`. Type task, HITL. Blocked by 063.
+- 063 Standardize parameter names, casing and mana argument order, fix stub drift, migrate the 25 `stackfish-db` scripts. Type build, HITL. Blocked by 062. Closed.
+- 054 Document the canonical Lua API in `docs/LUA_API.md`. Type task, HITL.
 
 ### D. Architecture and housekeeping
 
@@ -86,16 +87,16 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 - 056 Audit workspace `Cargo.toml` dependencies, lints, and formatting. Type research, AFK.
   - Check shared `[workspace.dependencies]`, unused dependencies, `cargo clippy` warnings, and `cargo fmt --check` status across all crates.
 - 057 Tighten visibility, remove dead helpers, and apply workspace lints. Type task, HITL. Blocked by 055 and 056.
-- 058 Update `docs/DESIGN.md` to reflect the new module layout. Type task, HITL. Blocked by 038, 040, 041, 046, 063.
+- 058 Update `docs/DESIGN.md` to reflect the new module layout. Type task, HITL. Blocked by 038, 040, 041, 046.
 - 059 Decide on a pre-commit or CI check for `fmt`, `clippy`, and `comment_diff.py`. Type grilling, HITL. Blocked by 057.
 
 ## Frontier
 
 Open and unblocked:
 
-- 063, 055, 056, 060
+- 054, 055, 056, 058, 060
 
-Suggested order. Work 063 next; it edits the same script files as 062. Research tickets 055 and 056 and grilling 060 can run in parallel.
+Suggested order. 054 and 058 are now unblocked; 055 and 056 are research and 060 is grilling, so they can run in parallel.
 
 ## Not yet specified
 
