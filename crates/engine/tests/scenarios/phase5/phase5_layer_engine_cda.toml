@@ -15,7 +15,7 @@ types = ["Creature"]
 # CR 604.3/208.2a: no printed power/toughness number - power stays unset
 # (None), toughness is characteristic-defining (layer 7a), resolved via
 # ScriptRuntime::invoke_cda. No Game.* state-query bindings exist yet (see
-# docs/implementation.md's layer-engine-cda slice notes), so this is a
+# docs/implementation/09-layers.md's layer-engine-cda slice notes), so this is a
 # constant rather than a real "count things in a zone" CDA.
 toughness_script = "return function(source, controller) return 3 end"
 

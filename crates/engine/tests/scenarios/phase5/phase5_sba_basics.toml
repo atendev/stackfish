@@ -21,7 +21,7 @@ toughness = 2
 player = 0
 zone = "battlefield"
 card = "bear"
-# No real combat-damage step yet (see docs/implementation.md) - pre-seed
+# No real combat-damage step yet (see docs/implementation/04-sba.md) - pre-seed
 # lethal damage directly so CR 704.5g has something to check.
 damage_marked = 2
 

@@ -81,41 +81,55 @@ Resolved in Phase 1: the ledger logs every micro-step (each priority pass, each 
 each trigger queued, each replacement applied), not just coarse card-level events. It doubles as
 the live in-game action log and the replay viewer's step unit — those two consumers get different
 default filtering/grouping over the same underlying stream, not two separate logging strategies.
-First-pass event taxonomy lives in `crates/engine/src/event.rs`; expect additions as later phases
+First-pass event taxonomy lives in `crates/engine/src/types/event.rs`; expect additions as later phases
 surface gaps.
 
 ## Core modules
 
-(From the adaptation doc, adjusted for N-player + step-able core.)
+(From the adaptation doc, adjusted for N-player + step-able core. The cleanup map split the
+original monolithic files into submodules by subsystem; see `docs/implementation/28-module-layout.md`.)
 
 1. **Game Instance** — owns full mutable state for one game (N players, not fixed count).
+   `crates/engine/src/types/game.rs` and `crates/engine/src/engine/mod.rs`.
 2. **Object Store** — runtime `GameObject` instances (cards/tokens/spells/abilities/emblems).
+   `crates/engine/src/types/object.rs` and `crates/engine/src/types/ids.rs`.
 3. **Zone Containers** — Library, Hand, Battlefield, Graveyard, Exile, Stack, Command (includes
-   Commander zone for commander games).
+   Commander zone for commander games). `crates/engine/src/types/zone.rs`.
 4. **Rules Processor** — step-able state machine for phases/steps/priority/turn order.
+   `crates/engine/src/engine/process_state.rs`, `turn.rs`, `action.rs`, `event_pipeline.rs`.
 5. **Command Executor** — validates and executes `EngineCommand`s.
+   `crates/engine/src/commands/`.
 6. **Event Ledger** — immutable, ordered, append-only `GameEvent` log. Single source of truth for
-   state reconstruction, live action log, and replay.
+   state reconstruction, live action log, and replay. `crates/engine/src/types/event.rs`.
 7. **Replacement/Prevention Engine** — rewrites proposed events before commit.
+   `crates/engine/src/replacement.rs` and `crates/engine/src/engine/replacement_resume.rs`.
 8. **Continuous Layer Engine** — computes derived characteristics (CR 613 layers).
+   `crates/engine/src/layers.rs`. See `docs/implementation/09-layers.md`.
 9. **Trigger Engine** — captures and enqueues triggered abilities, APNAP-ordered onto the stack.
+   `crates/engine/src/triggers.rs` and `crates/engine/src/engine/triggers_pipeline.rs`.
 10. **Script Runtime** — embedded Lua VM (`mlua`) exposing a card-author-friendly bound API.
-11. **Protocol Emitter** — `crates/host`. A `Session` wraps one engine and talks only in bytes (JSON
+    `crates/engine/src/script/`; `script/globals.rs` builds the `Game.*` DSL and binds it into a fresh
+    `Lua` instance. The canonical Lua API reference is `docs/LUA_API.md`.
+11. **Decision Facade** — converts engine pause points into typed `Decision`s and routes `Answer`s
+    through the existing `submit_*` methods. `crates/engine/src/decision/`. See
+    `docs/implementation/16-decision-facade.md` and `docs/implementation/17-legal-actions.md`.
+12. **Protocol Emitter** — `crates/host`. A `Session` wraps one engine and talks only in bytes (JSON
     over direct calls): a `setup` request creates it, `advance` and `answer` requests drive it, and
     each response carries a batch of events plus the open Decision. A `CardSource` handed in at
     creation turns `oracle_id` keys into `CardDefinition`s. See `docs/implementation/18-host-session.md`.
     The crate also ships a 25-card fixture set (`proof_cards`) and a random `Bot` that plays whole games
     through the byte interface, which is how the protocol is tested end to end. See
     `docs/implementation/19-proof-game.md`.
-12. **Godot Adapter**, `crates/godot`. A `cdylib` that loads in Godot 4.2 or later and exposes `StackfishSession`, which
+13. **Godot Adapter**, `crates/godot`. A `cdylib` that loads in Godot 4.2 or later and exposes `StackfishSession`, which
     holds one `Session` on the thread that made it and passes `PackedByteArray` messages. A call from another thread
     fails. See `docs/implementation/20-godot-adapter.md`.
 
 ## Data model
 
-Implemented in `crates/engine/src/` (Phase 1 complete — see `docs/implementation.md` for the
-file-by-file rationale and decisions made while building it). High-level shape, per the
-adaptation doc, unchanged from the original plan:
+Implemented in `crates/engine/src/` and `crates/engine/src/types/` (Phase 1 complete — see
+`docs/implementation/index.md` for the per-subsystem notes and `docs/implementation/28-module-layout.md`
+for the cleanup file split rationale). High-level shape, per the adaptation doc, unchanged from the
+original plan:
 
 - Immutable shared card data (`CardDefinition`) is separate from mutable runtime instances
   (`GameObject`), which are separate again from the live, layer-computed view of an object's
@@ -126,7 +140,7 @@ adaptation doc, unchanged from the original plan:
 - Zone *order* lives in exactly one place (the zone container), never duplicated onto the object
   itself.
 - `PlayerAction -> EngineCommand -> GameEvent` pipeline, per the adaptation doc, unchanged — see
-  `docs/implementation.md` for why `EngineCommand` doesn't decompose into a lower command tier.
+  `docs/implementation/01-pipeline.md` for why `EngineCommand` doesn't decompose into a lower command tier.
 
 ## Scripting model
 
@@ -135,7 +149,7 @@ adaptation doc, unchanged from the original plan:
   compilation pipeline.
 - Script API is the friendly surface: `Game.CreateTriggeredAbility`, `Game.CreateStaticAbility`,
   `Game.CreateReplacementEffect`, `Game.Ops.CastSpell`, `Game.SelectTargets`, etc.
-  (see `docs/lua/index.md` for the full, current reference). Script authors should not need Rust
+  (see `docs/LUA_API.md` for the full, current reference). Script authors should not need Rust
   familiarity — only the Lua API surface.
 - Core responsibilities stay in Rust: legality, timing, hidden information, stack/priority/SBA/
   replacement semantics. Lua only expresses card-specific intent and is asked, never trusted.
@@ -201,9 +215,10 @@ REPL yet), and `crates/engine/tests/` (real `cargo test` integration tests over 
 `tests/scenarios/`). Scenarios build `GameState` via direct struct literals rather than the
 engine's own constructors, so setup/assertion-only scenarios already run for real regardless of
 implementation progress; actions that hit unimplemented engine code report as such rather than
-failing the run. See `docs/implementation.md`'s Phase 4 section for the full design.
+failing the run. See `docs/implementation/00-overview.md` for the Phase 4 section and
+`docs/implementation/index.md` for the rest of the decision log.
 
 ## Status
 
 Phases 0-4 complete (Design Doc, Structs, Interfaces, TODO annotation, Verification Setup).
-`docs/implementation.md` has the detailed decision log for each. Next: Phase 5 (Dry Run).
+`docs/implementation/index.md` has the detailed decision log for each subsystem. Next: Phase 5 (Dry Run).
