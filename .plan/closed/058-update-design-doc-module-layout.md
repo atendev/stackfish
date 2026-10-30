@@ -1,4 +1,32 @@
+---
+number: 058
+name: Update DESIGN.md to reflect the new module layout
+map: map-cleanup.md
+type: task
+state: closed
+owner: wayfinder-runner
+---
+
 # 058 — Update `docs/DESIGN.md` to reflect the new module layout
+
+## Goal
+
+`docs/DESIGN.md` still describes the old file layout (single `crates/engine/src/engine/mod.rs`, single `crates/engine/src/types.rs`, single `crates/engine/src/script/globals.rs`, etc.) and points to `docs/implementation.md` for file-by-file rationale. Update it so it accurately reflects the post-cleanup module structure and points to the right implementation notes.
+
+## Questions this ticket answers
+
+- What is the current top-level module structure of `crates/engine/src/`?
+- Which closed tickets produced the new layout, and where are their rationales recorded?
+- What parts of `DESIGN.md` still describe the old layout and need updating?
+
+## Definition of done
+
+- `docs/DESIGN.md` no longer describes `crates/engine/src/engine/mod.rs`, `crates/engine/src/types.rs`, or `crates/engine/src/script/globals.rs` as monolithic files.
+- The "Core modules" section lists the current subsystems and their owning modules (e.g., `crates/engine/src/engine/` submodules, `crates/engine/src/types/`, `crates/engine/src/script/globals/`).
+- References to `docs/implementation.md` for file-by-file rationale are replaced or augmented with references to the relevant closed tickets (`038`, `039`, `040`, `041`) and their `.plan/closed/` rationale documents, plus the existing `docs/implementation/index.md`.
+- `docs/implementation/index.md` is updated if it is missing a short entry for the module-layout cleanup or for the new `DESIGN.md`.
+- No code changes; only documentation and `// TODO`/`comment_diff.py` does not apply.
+- The change is committed to branch `phase5/update-design-doc-module-layout` after subagent audit and user approval per `CLAUDE.md` slice workflow.
 
 ## Decision
 
