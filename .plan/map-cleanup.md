@@ -35,6 +35,8 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 061: Merged `InterveningIf` into `Game.Conditions`, collapsed the four `*Affected` tables into `Game.Affected` plus `Game.Filter({...})`, flattened target filter keys behind one shared decoder covering only engine-backed keys, and removed `Conditions.Always` and `Tokens.ArtifactCreature`. Unbacked filter keys are TODOs; the key set feeds 062. [closed/061-unify-lua-namespaces-and-filters.md]
 - 063: Standardized Lua parameter names and casing, and made the `stackfish-db` smoke test read the active database rows. It found and fixed three rows still on the old API. [closed/063-lua-naming-and-db-migration.md]
 - 054: Documented the canonical Lua API in `docs/LUA_API.md`, added a mechanical sync test, updated the Lua stub, and redirected `docs/lua/index.md`. [closed/054-document-canonical-lua-api.md]
+- 058: Updated `docs/DESIGN.md` to reflect the post-cleanup module layout, replaced broken `docs/implementation.md` references with numbered `docs/implementation/*.md` notes, added `docs/implementation/28-module-layout.md`, and updated `docs/implementation/index.md`. [closed/058-update-design-doc-module-layout.md]
+- 055: Audited `pub` visibility and dead helpers across all seven crates. About 424 items and fields can narrow to `pub(crate)` (engine 85, scenario 137, host 187), 9 items are dead (engine 5 plus `invoke_cost` stub, host 3), and 6 more are test-only (engine 5, host 1). Decide nameability of `EngineCommand`, `CommandOutcome` and `ProcessState` before narrowing. [closed/055-audit-visibility-dead-helpers.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -84,7 +86,7 @@ Make the Lua surface area small, documented, and strict before scaling up card s
 
 Check module visibility, workspace hygiene, and developer tooling once the splits settle.
 
-- 055 Audit `pub` vs `pub(crate)` visibility and dead helpers across `crates/`. Type research, AFK. Blocked by 038, 040, 041.
+- 055 Audit `pub` vs `pub(crate)` visibility and dead helpers across `crates/`. Type research, AFK. Blocked by 038, 040, 041. Closed.
 - 056 Audit workspace `Cargo.toml` dependencies, lints, and formatting. Type research, AFK.
   - Check shared `[workspace.dependencies]`, unused dependencies, `cargo clippy` warnings, and `cargo fmt --check` status across all crates.
 - 057 Tighten visibility, remove dead helpers, and apply workspace lints. Type task, HITL. Blocked by 055 and 056.
@@ -95,9 +97,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 055, 056, 058, 060
+- 056, 060
 
-Suggested order. 058 is now unblocked; 055 and 056 are research and 060 is grilling, so they can run in parallel.
+Suggested order. 056 is research and 060 is grilling, so they can run in parallel. 057 waits on 056.
 
 ## Not yet specified
 
