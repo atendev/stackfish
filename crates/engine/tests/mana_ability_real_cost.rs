@@ -32,7 +32,7 @@ local s = {}
 function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:AddCost(Game.Costs.Sacrifice({ card_types = { "Artifact" } }))
-    e:SetOperation(Game.Ops.AddManaChoice(1, "WUBRG"))
+    e:SetOperation(Game.Ops.AddManaChoice("WUBRG", 1))
     e:Register()
 end
 return s
@@ -61,7 +61,7 @@ const ADD_MANA_CHOICE_NO_COST: &str = r#"
 local s = {}
 function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
-    e:SetOperation(Game.Ops.AddManaChoice(1, "WU"))
+    e:SetOperation(Game.Ops.AddManaChoice("WU", 1))
     e:Register()
 end
 return s

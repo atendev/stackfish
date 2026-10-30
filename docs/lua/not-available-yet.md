@@ -43,7 +43,7 @@ name.
   becomes tapped" can't be scripted. There is also no replacement hook for "would become tapped/untapped"
   and no stun counters (CR 122.1d), so an untap always succeeds.
 - **Reanimation options are limited.** `Game.Ops.ReturnToBattlefield`/`ReturnAllToBattlefield` take
-  only `control` (`"You"` or `"Owner"`) and `tapped`. Not available: entering with an extra counter
+  only `control` (`"you"` or `"owner"`) and `tapped`. Not available: entering with an extra counter
   ("with a +1/+1 counter"), entering attacking or blocking (CR 508.4), "under target opponent's
   control", a "may" return, and Zombify-style riders such as haste or "exile it at end of turn". A
   returned Clone, Devour or Amplify creature enters as itself with no choice, because those choices

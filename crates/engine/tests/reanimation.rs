@@ -112,8 +112,7 @@ fn definition(p: &Placed) -> CardDefinition {
         power: creature.then_some(PTValue::Fixed(2)),
         toughness: creature.then_some(PTValue::Fixed(2)),
         subtypes: p.subtypes.iter().map(|s| Subtype(s.to_string())).collect(),
-        target_requirement: is_aura.then(|| {
-            TargetSpec::Primitive(TargetRequirement {
+        target_requirement: is_aura.then_some(TargetSpec::Primitive(TargetRequirement {
                 filter: TargetFilter::Object {
                     mana_value: None,
                     excluded_card_types: None,
@@ -130,7 +129,7 @@ fn definition(p: &Placed) -> CardDefinition {
                 at_least: false,
                 exclude_source: false,
             })
-        }),
+        ),
         ..minimal_card_definition(p.id, p.name, "unused", ManaCost { symbols: Vec::new() }, p.types)
     }
 }
@@ -773,7 +772,7 @@ fn lua_return_to_battlefield_defaults_to_your_control_untapped() {
 
 #[test]
 fn lua_return_to_battlefield_reads_its_options() {
-    match build(&op(r#"Game.Ops.ReturnToBattlefield({ control = "Owner", tapped = true })"#)) {
+    match build(&op(r#"Game.Ops.ReturnToBattlefield({ control = "owner", tapped = true })"#)) {
         Ok(Some(AbilityEffect::ReturnToBattlefield { control: EntryControl::Owner, tapped: true })) => {}
         other => panic!("{other:?}"),
     }
@@ -798,7 +797,7 @@ fn lua_return_all_defaults_to_the_graveyard() {
 
 #[test]
 fn lua_return_all_reads_zone_and_options() {
-    let call = r#"Game.Ops.ReturnAllToBattlefield({}, "Exile", { control = "Owner", tapped = true })"#;
+    let call = r#"Game.Ops.ReturnAllToBattlefield({}, "Exile", { control = "owner", tapped = true })"#;
     match build(&op(call)) {
         Ok(Some(AbilityEffect::ReturnAllToBattlefield { zone: ZoneKind::Exile, control: EntryControl::Owner, tapped: true, .. })) => {}
         other => panic!("{other:?}"),

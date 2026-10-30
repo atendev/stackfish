@@ -54,6 +54,7 @@ mod counter_target_spell;
 mod cycling;
 mod cycling_triggers;
 mod damage_dealt_triggers;
+mod db_scripts_smoke;
 mod decision_answer_facade;
 mod destroy_ordering_choice;
 mod devour;
