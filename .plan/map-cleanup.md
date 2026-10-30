@@ -98,9 +98,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 060
+- 057, 060
 
-057 now waits only on 055.
+057 is unblocked now that 055 and 056 are closed.
 
 ## Not yet specified
 
