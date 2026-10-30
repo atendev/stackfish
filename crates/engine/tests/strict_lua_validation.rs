@@ -46,7 +46,31 @@ fn game_ops_search_rejects_unknown_option_key() {
 fn game_ops_search_rejects_unknown_destination() {
     assert_load_error(
         "return Game.Ops.Search({}, 1, { destination = \"library\" })",
-        &["Game.Ops.Search destination", "library", "hand/battlefield"],
+        &["Game.Ops.Search destination", "library", "Hand", "Battlefield"],
+    );
+}
+
+#[test]
+fn game_ops_search_rejects_lowercase_destination() {
+    assert_load_error(
+        "return Game.Ops.Search({}, 1, { destination = \"battlefield\" })",
+        &["Game.Ops.Search destination", "battlefield", "Hand", "Battlefield"],
+    );
+}
+
+#[test]
+fn return_to_battlefield_rejects_capitalized_control() {
+    assert_load_error(
+        "return Game.Ops.ReturnToBattlefield({ control = \"Owner\" })",
+        &["ReturnToBattlefield control", "Owner", "you", "owner"],
+    );
+}
+
+#[test]
+fn enters_as_copy_rejects_old_counter_keys() {
+    assert_load_error(
+        "return Game.ReplacementPayloads.EntersAsCopy({ counter_kind = \"PlusOnePlusOne\", counter_amount = 1 })",
+        &["counter_", "unknown key"],
     );
 }
 

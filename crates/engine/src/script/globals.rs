@@ -45,12 +45,10 @@ use super::types::{ScriptError, ScriptRegistry, ScriptZoneMoveKind, to_lua_err};
 
 /// Builds `Game.Conditions`, `Ops`, `Costs`, `Layers`, `Effects` and the
 /// `Create*Ability` sugar and binds it into `lua`'s globals. It is not all of
-/// `script_api.rs`: `Game.ReplaceEvent`, `Game.CastSpell`, `Game.PayCost` and
-/// `Game.SelectTargets` stay unbound there, and `Game.AddContinuousEffect` is
-/// superseded by `Game.CreateStaticAbility`, as `register_triggered_ability` is
-/// by `Game.CreateTriggeredAbility`. The sugar lets a condition or operation
-/// source string be a one-liner and lets a card script self-register a
-/// triggered, static or activated ability.
+/// `script_api.rs`: `Game.CastSpell` and `Game.SelectTargets` stay unbound here,
+/// because they are implemented as Lua-side helpers above. The sugar lets a
+/// condition or operation source string be a one-liner and lets a card script
+/// self-register a triggered, static or activated ability.
 pub(crate) fn bind_game_globals(
     lua: &Lua,
     registry: Rc<RefCell<ScriptRegistry>>,
@@ -212,11 +210,11 @@ pub(crate) fn bind_game_globals(
         },
     )?;
     ops.set("AddRestrictedMana", add_restricted_mana)?;
-    // CR 605: `Game.Ops.AddManaChoice(count, colors)`. `count` is how many independently chosen mana the ability makes, and `colors` is a WUBRG string (`parse_color_string`, as in `Game.Effects.AddColor`) naming the allowed colors. The picked colors arrive later on `ActivateAbility::chosen_colors` (CR 602.2b), so this declares only the shape.
-    let add_mana_choice = lua.create_function(|_, (count, colors): (u32, String)| {
+    // CR 605: `Game.Ops.AddManaChoice(colors, count?)`. `colors` is a WUBRG/C string (`parse_color_string`, as in `Game.Effects.AddColor`) naming the allowed colors, and `count` (default 1) is how many independently chosen mana the ability makes. The picked colors arrive later on `ActivateAbility::chosen_colors` (CR 602.2b), so this declares only the shape.
+    let add_mana_choice = lua.create_function(|_, (colors, count): (String, Option<u32>)| {
         let choices = parse_color_string(&colors).map_err(to_lua_err)?;
         Ok(OperationTag(AbilityEffect::AddManaChoice {
-            count,
+            count: count.unwrap_or(1),
             choices,
         }))
     })?;
@@ -275,7 +273,7 @@ pub(crate) fn bind_game_globals(
     })?;
     ops.set("ReturnAllToHand", return_all_to_hand)?;
     // CR 110.2a/400.7: reanimation. Both are call-form ops: `opts` is an
-    // optional `{ control = "You" | "Owner", tapped = bool }` table.
+    // optional `{ control = "you" | "owner", tapped = bool }` table.
     let return_to_battlefield = lua.create_function(|_, opts: Option<Table>| {
         let (control, tapped) = decode_entry_options(opts, "ReturnToBattlefield")?;
         Ok(OperationTag(AbilityEffect::ReturnToBattlefield {
@@ -485,14 +483,14 @@ pub(crate) fn bind_game_globals(
         Ok(OperationTag(AbilityEffect::Chain { entries, words: Some(words) }))
     })?;
     ops.set("ChainEach", chain_each)?;
-    let counters = lua.create_function(|_, (kind, amount): (Value, i32)| {
-        let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+    let counters = lua.create_function(|_, (counter, amount): (Value, i32)| {
+        let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
         Ok(OperationTag(AbilityEffect::Counters { kind, amount }))
     })?;
     ops.set("Counters", counters)?;
-    // CR 702.79a, 702.93a: `Game.Ops.ReturnSelfWithCounter(kind)`, Persist and Undying's resolution effect, paired with `Game.Conditions.Dies` and `Game.Conditions.HadNoCounters(kind)` (see `AbilityEffect::ReturnSelfWithCounter`).
-    let return_self_with_counter = lua.create_function(|_, kind: Value| {
-        let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+    // CR 702.79a, 702.93a: `Game.Ops.ReturnSelfWithCounter(counter)`, Persist and Undying's resolution effect, paired with `Game.Conditions.Dies` and `Game.Conditions.HadNoCounters(counter)` (see `AbilityEffect::ReturnSelfWithCounter`).
+    let return_self_with_counter = lua.create_function(|_, counter: Value| {
+        let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
         Ok(OperationTag(AbilityEffect::ReturnSelfWithCounter(kind)))
     })?;
     ops.set("ReturnSelfWithCounter", return_self_with_counter)?;
@@ -531,7 +529,7 @@ pub(crate) fn bind_game_globals(
     ops.set("Scry", scry)?;
     let surveil = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::Surveil(n))))?;
     ops.set("Surveil", surveil)?;
-    // `Game.Ops.Search(filter_table, count, opts?)`. `filter_table` goes through `decode_filter_table`, as `Game.Costs.Sacrifice` does. `opts.destination` is `"hand"` (default) or `"battlefield"`, and `opts.tapped` and `opts.enters_attached` matter only for `"battlefield"` (CR 303.4f-h, meaningful for a found Aura; see `SearchDestination::Battlefield`). `opts.shuffle` defaults to `true` (CR 701.24a).
+    // `Game.Ops.Search(filter_table, count, opts?)`. `filter_table` goes through `decode_filter_table`, as `Game.Costs.Sacrifice` does. `opts.destination` is `"Hand"` (default) or `"Battlefield"`, and `opts.tapped` and `opts.enters_attached` matter only for `"Battlefield"` (CR 303.4f-h, meaningful for a found Aura; see `SearchDestination::Battlefield`). `opts.shuffle` defaults to `true` (CR 701.24a).
     let search = lua.create_function(
         |_, (filter_table, count, opts): (Table, u32, Option<Table>)| {
             let filter = decode_filter_table(filter_table).map_err(to_lua_err)?;
@@ -551,8 +549,8 @@ pub(crate) fn bind_game_globals(
                 None => None,
             };
             let destination = match destination_name.as_deref() {
-                None | Some("hand") => SearchDestination::Hand,
-                Some("battlefield") => {
+                None | Some("Hand") => SearchDestination::Hand,
+                Some("Battlefield") => {
                     let tapped: Option<bool> = match &opts {
                         Some(t) => t
                             .get("tapped")
@@ -572,7 +570,7 @@ pub(crate) fn bind_game_globals(
                 }
                 Some(other) => {
                     return Err(to_lua_err(ScriptError::LoadError(format!(
-                        "unknown Game.Ops.Search destination '{other}' - expected hand/battlefield"
+                        "unknown Game.Ops.Search destination '{other}' - expected \"Hand\" or \"Battlefield\""
                     ))));
                 }
             };
@@ -1000,31 +998,31 @@ pub(crate) fn bind_game_globals(
         "EntersTapped",
         ReplacementPayloadTag(ReplacementPayload::EntersTapped),
     )?;
-    // CR 614.1c, 122.6: `Game.ReplacementPayloads.EntersWithCounters(kindName, amount)`, fixed printed amounts only, with the `parse_counter_kind_name` table of `Game.Ops.Counters`. Sunburst has its own payload. Devour and Amplify's fixed per-unit rate fits, but choosing which units count needs a pause; see `ReplacementPayload::EntersWithCounters`.
+    // CR 614.1c, 122.6: `Game.ReplacementPayloads.EntersWithCounters(counter, amount)`, fixed printed amounts only, with the `parse_counter_kind_name` table of `Game.Ops.Counters`. Sunburst has its own payload. Devour and Amplify's fixed per-unit rate fits, but choosing which units count needs a pause; see `ReplacementPayload::EntersWithCounters`.
     replacement_payloads.set(
         "EntersWithCounters",
-        lua.create_function(|_, (kind, amount): (Value, i32)| {
-            let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+        lua.create_function(|_, (counter, amount): (Value, i32)| {
+            let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
             Ok(ReplacementPayloadTag(
                 ReplacementPayload::EntersWithCounters { kind, amount },
             ))
         })?,
     )?;
-    // CR 702.54a: `EntersWithCountersBloodthirst(kindName, amount)`, the fixed-amount shape above gated on `replacement::opponent_damaged_this_turn`.
+    // CR 702.54a: `EntersWithCountersBloodthirst(counter, amount)`, the fixed-amount shape above gated on `replacement::opponent_damaged_this_turn`.
     replacement_payloads.set(
         "EntersWithCountersBloodthirst",
-        lua.create_function(|_, (kind, amount): (Value, i32)| {
-            let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+        lua.create_function(|_, (counter, amount): (Value, i32)| {
+            let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
             Ok(ReplacementPayloadTag(
                 ReplacementPayload::EntersWithCountersBloodthirst { kind, amount },
             ))
         })?,
     )?;
-    // CR 702.138c: `EntersWithCountersEscape(kindName, amount)`, gated on `GameObject::entered_via_escape`.
+    // CR 702.138c: `EntersWithCountersEscape(counter, amount)`, gated on `GameObject::entered_via_escape`.
     replacement_payloads.set(
         "EntersWithCountersEscape",
-        lua.create_function(|_, (kind, amount): (Value, i32)| {
-            let kind = decode_counter_arg(kind).map_err(to_lua_err)?;
+        lua.create_function(|_, (counter, amount): (Value, i32)| {
+            let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
             Ok(ReplacementPayloadTag(
                 ReplacementPayload::EntersWithCountersEscape { kind, amount },
             ))
@@ -1396,7 +1394,7 @@ pub(crate) fn bind_game_globals(
     })?;
     ops.set("CastSpell", cast_spell)?;
 
-    // `Game.Ops.DealDamageTo(pick, amount)` and `AddCountersTo(pick, counter, amount)` act on one `{ kind, id }` pick from `Game.SelectTargets` or `Game.ChooseN`. They hand back events (`OperationOutcome::PendingEvents`) so CR 615 and 616 prevention and replacement still apply.
+    // `Game.Ops.DealDamageTo(pick, amount)` and `AddCountersTo(pick, counter, amount)` act on one `{ kind, id }` pick from `Game.SelectTargets` or `Game.ChooseN`. The `counter` argument is a kind string or `Game.Counter.*` value. They hand back events (`OperationOutcome::PendingEvents`) so CR 615 and 616 prevention and replacement still apply.
     let deal_damage_to = lua.create_function(|_, (pick, amount): (Table, u32)| {
         let target = decode_target_pick(&pick).map_err(to_lua_err)?;
         Ok(OperationResultTag(vec![ResultItem::DealDamage {
@@ -1537,7 +1535,7 @@ pub(crate) fn bind_game_globals(
     lua.globals().set("Game", game)
 }
 
-/// Decodes the `{ control = "You" | "Owner", tapped = bool }` options table
+/// Decodes the `{ control = "you" | "owner", tapped = bool }` options table
 /// of the reanimation ops. Defaults are CR 110.2a's "under your control" and
 /// untapped; an unknown key or value is a script error so typos don't pass.
 fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(EntryControl, bool)> {
@@ -1550,12 +1548,12 @@ fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(Ent
         let (key, value) = pair?;
         match (key.as_str(), value) {
             ("control", mlua::Value::String(name)) => {
-                control = match name.to_str()?.to_ascii_lowercase().as_str() {
+                control = match name.to_str()? {
                     "you" => EntryControl::You,
                     "owner" => EntryControl::Owner,
                     other => {
                         return Err(mlua::Error::RuntimeError(format!(
-                            "{op_name} control must be \"You\" or \"Owner\", got {other:?}"
+                            "{op_name} control must be \"you\" or \"owner\", got {other:?}"
                         )));
                     }
                 };
@@ -1563,7 +1561,7 @@ fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(Ent
             ("tapped", mlua::Value::Boolean(flag)) => tapped = flag,
             (other, _) => {
                 return Err(mlua::Error::RuntimeError(format!(
-                    "{op_name} option {other:?} is unknown or has the wrong type (expected control = \"You\"|\"Owner\", tapped = boolean)"
+                    "{op_name} option {other:?} is unknown or has the wrong type (expected control = \"you\"|\"owner\", tapped = boolean)"
                 )));
             }
         }

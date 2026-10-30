@@ -97,7 +97,7 @@ local s = {}
 function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
-    e:SetPayload(Game.ReplacementPayloads.EntersAsCopy({ counter_kind = "PlusOnePlusOne", counter_amount = "X" }))
+    e:SetPayload(Game.ReplacementPayloads.EntersAsCopy({ counter = "PlusOnePlusOne", amount ="X" }))
     e:SetAffected(Game.Affected.Self)
     e:Register()
 end
@@ -132,7 +132,7 @@ local s = {}
 function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
-    e:SetPayload(Game.ReplacementPayloads.EntersAsCopy({ counter_kind = "PlusOnePlusOne", counter_amount = "Y" }))
+    e:SetPayload(Game.ReplacementPayloads.EntersAsCopy({ counter = "PlusOnePlusOne", amount ="Y" }))
     e:SetAffected(Game.Affected.Self)
     e:Register()
 end

@@ -280,7 +280,7 @@ pub fn proof_cards() -> FixtureCardSource {
     let rampant_growth = spell(
         base(18, "Rampant Growth", "{1}{G}", sorcery, "Search your library for a basic land card, put it onto the battlefield tapped, then shuffle."),
         None,
-        r#"Game.Ops.Search({ card_types = { "Land" } }, 1, { destination = "battlefield", tapped = true })"#,
+        r#"Game.Ops.Search({ card_types = { "Land" } }, 1, { destination = "Battlefield", tapped = true })"#,
     );
     let raise_militia = spell(
         base(19, "Raise Militia", "{2}{G}", sorcery, "Create a 2/2 green Soldier creature token."),

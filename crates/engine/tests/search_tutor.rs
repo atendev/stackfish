@@ -395,7 +395,7 @@ fn game_ops_search_lua_binding_decodes_correctly() {
             r#"return Game.Ops.Search(
                 { card_types = { "Land" }, supertypes = { "Basic" }, subtypes = { "Forest" } },
                 1,
-                { destination = "battlefield", tapped = true, shuffle = false }
+                { destination = "Battlefield", tapped = true, shuffle = false }
             )"#,
         )
         .expect("primitive loads");

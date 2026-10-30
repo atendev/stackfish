@@ -172,11 +172,27 @@ fn game_ops_add_mana_rejects_an_unknown_letter() {
 #[test]
 fn game_ops_add_mana_choice_decodes_count_and_colors() {
     let mut runtime = ScriptRuntime::new();
-    let (effect, _) = runtime.load_operation("return Game.Ops.AddManaChoice(1, \"WUBRG\")").unwrap();
+    let (effect, _) = runtime.load_operation("return Game.Ops.AddManaChoice(\"WUBRG\", 1)").unwrap();
     assert!(matches!(
         effect,
         Some(AbilityEffect::AddManaChoice { count: 1, choices }) if choices == ColorSet::all()
     ));
+}
+
+#[test]
+fn game_ops_add_mana_choice_decodes_colorless_with_default_count() {
+    let mut runtime = ScriptRuntime::new();
+    let (effect, _) = runtime.load_operation("return Game.Ops.AddManaChoice(\"C\")").unwrap();
+    assert!(matches!(
+        effect,
+        Some(AbilityEffect::AddManaChoice { count: 1, choices }) if choices == ColorSet::empty()
+    ));
+}
+
+#[test]
+fn game_ops_add_mana_choice_rejects_old_count_first_order() {
+    let mut runtime = ScriptRuntime::new();
+    assert!(runtime.load_operation("return Game.Ops.AddManaChoice(1, \"WUBRG\")").is_err());
 }
 
 #[test]

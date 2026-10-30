@@ -546,12 +546,14 @@ pub(crate) fn parse_color_letter(letter: &str) -> Result<ColorSet, ScriptError> 
         "B" => ColorSet::BLACK,
         "R" => ColorSet::RED,
         "G" => ColorSet::GREEN,
+        "C" => ColorSet::empty(),
         other => return Err(ScriptError::LoadError(format!("unknown color '{other}'"))),
     })
 }
 
 /// `parse_color_letter`'s letters returning a single `Color` and not a
 /// `ColorSet`, for `CostModifierTarget::Colored`, which names exactly one.
+/// Colorless is not a color (CR 105.2c), so "C" is rejected here.
 pub(crate) fn parse_single_color_letter(letter: &str) -> Result<Color, ScriptError> {
     Ok(match letter {
         "W" => Color::White,
@@ -586,7 +588,7 @@ pub(crate) fn parse_filter_controller_name(name: &str) -> Result<FilterControlle
         "opponent" => Ok(FilterController::Opponent),
         "any" => Ok(FilterController::Any),
         other => Err(ScriptError::LoadError(format!(
-            "unknown controller filter '{other}' - expected you/opponent/any"
+            "unknown controller filter '{other}' - expected \"you\", \"opponent\" or \"any\""
         ))),
     }
 }
@@ -814,8 +816,8 @@ const COPY_EXCEPTION_KEYS: &[&str] = &[
     "retain_name",
     "retain_color",
     "grant_recurring_copy_trigger",
-    "counter_kind",
-    "counter_amount",
+    "counter",
+    "amount",
 ];
 
 /// `Game.Tokens.CopyOf(objectId, opts?)`. `opts` holds
@@ -871,28 +873,26 @@ pub(crate) fn decode_copy_exceptions(
         .get::<_, Option<bool>>("grant_recurring_copy_trigger")
         .map_err(lua_load_err)?
         .unwrap_or(false);
-    // CR 707.9e: Spark Double's "enters with an additional +1/+1 counter" (see `CopyExceptions::enters_with_additional_counters`): `{ counter_kind = "PlusOnePlusOne", counter_amount = 1 }`, both required together as power and toughness are. `counter_amount` may be the string `"X"` (Altered Ego) for `CounterAmount::X`. It is read as a raw `mlua::Value` and matched by hand, because `.get::<u32>()` would silently fail to match a string.
-    let counter_kind: Option<String> = opts.get("counter_kind").map_err(lua_load_err)?;
-    let counter_amount_value: Option<mlua::Value> =
-        opts.get("counter_amount").map_err(lua_load_err)?;
-    let counter_amount = match counter_amount_value {
+    // CR 707.9e: Spark Double's "enters with an additional +1/+1 counter" (see `CopyExceptions::enters_with_additional_counters`): `{ counter = "PlusOnePlusOne", amount = 1 }`, both required together as power and toughness are. `amount` may be the string `"X"` (Altered Ego) for `CounterAmount::X`. It is read as a raw `mlua::Value` and matched by hand, because `.get::<u32>()` would silently fail to match a string.
+    let counter: Option<String> = opts.get("counter").map_err(lua_load_err)?;
+    let amount_value: Option<mlua::Value> = opts.get("amount").map_err(lua_load_err)?;
+    let amount = match amount_value {
         Some(mlua::Value::Integer(n)) if n >= 0 => Some(CounterAmount::Fixed(n as u32)),
         Some(mlua::Value::Number(n)) if n >= 0.0 => Some(CounterAmount::Fixed(n as u32)),
         Some(mlua::Value::String(s)) if s.to_str().ok() == Some("X") => Some(CounterAmount::X),
         Some(mlua::Value::Nil) | None => None,
         _ => {
             return Err(ScriptError::LoadError(
-                "CopyExceptions counter_amount must be a non-negative number or \"X\"".to_string(),
+                "CopyExceptions amount must be a non-negative number or \"X\"".to_string(),
             ));
         }
     };
-    let enters_with_additional_counters = match (counter_kind, counter_amount) {
+    let enters_with_additional_counters = match (counter, amount) {
         (Some(kind), Some(amount)) => Some((parse_counter_kind_name(&kind)?, amount)),
         (None, None) => None,
         _ => {
             return Err(ScriptError::LoadError(
-                "CopyExceptions counter_kind/counter_amount must be set together, not just one"
-                    .to_string(),
+                "CopyExceptions counter/amount must be set together, not just one".to_string(),
             ));
         }
     };
@@ -911,10 +911,9 @@ pub(crate) fn decode_copy_exceptions(
 pub(crate) fn decode_layer_value(value: Value) -> Result<Layer, ScriptError> {
     match value {
         Value::UserData(ud) => {
-            let tag: LayerTag = ud
+            let tag: LayerTag = *ud
                 .borrow::<LayerTag>()
-                .map_err(|e| ScriptError::LoadError(e.to_string()))?
-                .clone();
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
             Ok(tag.0)
         }
         Value::Nil => Err(ScriptError::LoadError(

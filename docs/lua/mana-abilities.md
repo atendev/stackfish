@@ -74,7 +74,7 @@ A real cost is what makes a **compound-cost mana ability** possible at all — s
 -- Sacrifice this artifact: Add one mana of any color.
 local e = Game.CreateManaAbility(c)
 e:AddCost(Game.Costs.Sacrifice({ card_types = { "Artifact" } }))
-e:SetOperation(Game.Ops.AddManaChoice(1, "WUBRG"))
+e:SetOperation(Game.Ops.AddManaChoice("WUBRG", 1))
 e:Register()
 ```
 

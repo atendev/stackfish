@@ -14,10 +14,15 @@
 
 ---@class CardSummary
 ---@field id ObjectId
+---@field name string
 ---@field card_types string[]
+---@field is_creature boolean
 ---@field controller PlayerId
 ---@field power? integer
 ---@field toughness? integer
+---@field attached_to? ObjectId
+---@field attached_to_player? PlayerId
+---@field attachments ObjectId[]
 
 ---@class StateSnapshot
 ---@field battlefield CardSummary[]
@@ -81,8 +86,8 @@
 ---@field keywords? string[]
 ---@field retain_name? boolean
 ---@field retain_color? boolean
----@field counter_kind? string    -- must set with counter_amount
----@field counter_amount? integer
+---@field counter? string         -- must set with amount
+---@field amount? integer
 
 ---@class TokenOpts
 ---@field keywords? string[]
@@ -517,10 +522,10 @@ function GameConditionsTable.AtOrBelowLife(threshold) end
 ---@return GameStateConditionValue
 function GameConditionsTable.ControlsAtLeast(filter, count) end
 
---- CR 603.4, 702.79a, 702.93a: "if it had no `kind` counters on it" (Persist, Undying).
----@param kind CounterKind
+--- CR 603.4, 702.79a, 702.93a: "if it had no `counter` counters on it" (Persist, Undying).
+---@param counter CounterKind
 ---@return GameStateConditionValue
-function GameConditionsTable.HadNoCounters(kind) end
+function GameConditionsTable.HadNoCounters(counter) end
 
 -------------------------------------------------------------------------------
 -- Game.Ops.* — :SetOperation (triggered/activated) or s.operation().
@@ -552,11 +557,11 @@ local GameOpsTable = {}
 ---@return GameOpsAddManaValue
 function GameOpsTable.AddMana(letter, count) end
 
---- CR 605, "add `count` mana of any of these `colors`, your choice." e.g. colors="WU".
----@param count integer
+--- CR 605, "add `count` mana of any of these `colors`, your choice." e.g. colors="WU". `count` defaults to 1; `"C"` is accepted for colorless.
 ---@param colors string
+---@param count? integer
 ---@return GameOpsAddManaValue
-function GameOpsTable.AddManaChoice(count, colors) end
+function GameOpsTable.AddManaChoice(colors, count) end
 
 --- CR 106.11, fixed mana spendable only toward casting a spell of `cardType`. Never usable for an activated ability's cost.
 ---@param letter string
@@ -623,7 +628,7 @@ GameOpsTable.ExileUntilSourceLeaves = nil
 --- script run, enters-tapped/enters-with-counters effects applied and its enters triggers firing. Instants and
 --- sorceries stay put (CR 400.4a). An Aura with one legal host enters attached; with none (or, TODO, two or more)
 --- it stays in the graveyard. Must be called: `Game.Ops.ReturnToBattlefield()`, passing it bare is a script error.
----@param opts? { control?: "You"|"Owner", tapped?: boolean }  control defaults to "You" (the effect's controller)
+---@param opts? { control?: "you"|"owner", tapped?: boolean }  control defaults to "you" (the effect's controller)
 ---@return GameOpsValue
 function GameOpsTable.ReturnToBattlefield(opts) end
 
@@ -631,7 +636,7 @@ function GameOpsTable.ReturnToBattlefield(opts) end
 --- steps as ReturnToBattlefield, applied to each matching card in turn. Must be called.
 ---@param filter table  same shape as DestroyAll's filter (`controller` is read off the object's controller)
 ---@param zone? string  "Graveyard" (default, every player's) or "Exile"
----@param opts? { control?: "You"|"Owner", tapped?: boolean }
+---@param opts? { control?: "you"|"owner", tapped?: boolean }
 ---@return GameOpsValue
 function GameOpsTable.ReturnAllToBattlefield(filter, zone, opts) end
 
@@ -689,16 +694,16 @@ function GameOpsTable.Chain(...) end
 ---@return GameOpsValue
 function GameOpsTable.ChainEach(...) end
 
---- CR 122.1a. `kind` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
----@param kind CounterKind
+--- CR 122.1a. `counter` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
+---@param counter CounterKind
 ---@param amount integer
 ---@return GameOpsValue
-function GameOpsTable.Counters(kind, amount) end
+function GameOpsTable.Counters(counter, amount) end
 
---- CR 702.79a, 702.93a: Persist/Undying's "return this to the battlefield under its owner's control". `kind` is the counter kind checked by `Game.Conditions.HadNoCounters(kind)`.
----@param kind CounterKind
+--- CR 702.79a, 702.93a: Persist/Undying's "return this to the battlefield under its owner's control". `counter` is the counter kind checked by `Game.Conditions.HadNoCounters(counter)`.
+---@param counter CounterKind
 ---@return GameOpsValue
-function GameOpsTable.ReturnSelfWithCounter(kind) end
+function GameOpsTable.ReturnSelfWithCounter(counter) end
 
 --- "Target creature gets +X/+Y until `duration`." Every legal target gets its own independent effect.
 ---@param power integer
@@ -754,10 +759,10 @@ function GameOpsTable.Scry(n) end
 ---@return GameOpsValue
 function GameOpsTable.Surveil(n) end
 
---- destination default "hand"; shuffle default true.
+--- destination default "Hand"; shuffle default true.
 ---@param filter FilterTable
 ---@param count integer
----@param opts? { destination?: "hand"|"battlefield", tapped?: boolean, enters_attached?: boolean, shuffle?: boolean }
+---@param opts? { destination?: "Hand"|"Battlefield", tapped?: boolean, enters_attached?: boolean, shuffle?: boolean }
 ---@return GameOpsValue
 function GameOpsTable.Search(filter, count, opts) end
 
@@ -954,15 +959,20 @@ local GameReplacementPayloadsTable = {}
 ---@return GameReplacementPayloadsValue
 function GameReplacementPayloadsTable.ReplaceZoneDestination(zone) end
 
----@param kind CounterKind
+---@param counter CounterKind
 ---@param amount integer
 ---@return GameReplacementPayloadsValue
-function GameReplacementPayloadsTable.EntersWithCounters(kind, amount) end
+function GameReplacementPayloadsTable.EntersWithCounters(counter, amount) end
 
----@param kind CounterKind
+---@param counter CounterKind
 ---@param amount integer
 ---@return GameReplacementPayloadsValue
-function GameReplacementPayloadsTable.EntersWithCountersBloodthirst(kind, amount) end
+function GameReplacementPayloadsTable.EntersWithCountersBloodthirst(counter, amount) end
+
+---@param counter CounterKind
+---@param amount integer
+---@return GameReplacementPayloadsValue
+function GameReplacementPayloadsTable.EntersWithCountersEscape(counter, amount) end
 
 ---@param perCreature integer
 ---@return GameReplacementPayloadsValue
