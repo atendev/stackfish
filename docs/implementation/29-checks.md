@@ -1,0 +1,8 @@
+# 29 — Checks: hook, CI and toolchain pin
+
+- `tools/check.sh` is the one entry point. No argument (or `--fast`) runs `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings`. `--full` adds `cargo test --workspace` and `python3 -m unittest discover -s tools`. It stops at the first failure and prints `check failed: <name>`.
+- `tools/hooks/pre-commit` runs the fast mode. `tools/install-hooks.sh` copies it into the clone's hooks dir, backs up a different existing hook to `pre-commit.bak` (or `.bak.N`), and refuses when `core.hooksPath` is set. It never touches the Git LFS hooks.
+- The hook checks the working tree, not the staged snapshot, so unstaged edits can hide a staged problem. CI on `master` still catches it.
+- `.github/workflows/ci.yml` runs `tools/check.sh --full` on push to `master` and on manual dispatch. `rustup toolchain install` reads `rust-toolchain.toml` (1.98.0 with rustfmt and clippy), and a step asserts the version so a runner default cannot slip in.
+- Known gap: CI does not check out the private, LFS-tracked `stackfish-db`, so `db_scripts_smoke.rs` skips there. `check.sh --full` prints a `::notice::` annotation when that happens, using the same test as the smoke file (missing file, under 16 bytes, or no `SQLite format 3\0` header). `STACKFISH_DB_DIR` overrides the path for the script's own tests only; the Rust test always uses `../stackfish-db`. A token and a strict missing-db mode are an open decision.
+- `tools/test_check_sh.py` covers the script with stub `cargo` and `python3` on `PATH`, and the installer and hook in throwaway git repos.

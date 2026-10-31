@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rustup reads rust-toolchain.toml; no toolchain action, so nothing overrides the pin.
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - name: Assert toolchain version
+        run: |
+          rustc --version
+          rustc --version | grep -q '^rustc 1\.98\.0 '
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Checks
+        run: tools/check.sh --full
