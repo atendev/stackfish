@@ -155,11 +155,6 @@ impl GameObject {
             entered_via_escape: false,
         }
     }
-
-    /// On the battlefield (CR 110.1).
-    pub fn is_permanent(&self) -> bool {
-        self.zone == ZoneKind::Battlefield
-    }
 }
 
 #[cfg(test)]
@@ -258,30 +253,6 @@ mod tests {
         };
         assert!(policy.is_visible_to(PlayerId(0)));
         assert!(!policy.is_visible_to(PlayerId(1)));
-    }
-
-    #[test]
-    fn new_object_starts_as_permanent_only_on_battlefield() {
-        let state = dummy_state();
-        let battlefield = GameObject::new(
-            ObjectId(0),
-            dummy_definition(),
-            PlayerId(0),
-            ZoneKind::Battlefield,
-            SequenceNo(0),
-            &state,
-        );
-        assert!(battlefield.is_permanent());
-
-        let hand = GameObject::new(
-            ObjectId(1),
-            dummy_definition(),
-            PlayerId(0),
-            ZoneKind::Hand,
-            SequenceNo(0),
-            &state,
-        );
-        assert!(!hand.is_permanent());
     }
 
     #[test]

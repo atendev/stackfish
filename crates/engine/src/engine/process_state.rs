@@ -2,7 +2,6 @@
 //! and `DESIGN.md`.
 
 use std::collections::VecDeque;
-use std::ops::Range;
 
 use crate::commands::{Internal, PaymentResolution};
 use crate::replacement;
@@ -223,10 +222,8 @@ pub enum StepStatus {
     },
 }
 
-/// Result of one `step()`. `events_added` indexes into the ledger rather than
-/// cloning events out.
+/// Result of one `step()`.
 pub struct StepResult {
-    pub events_added: Range<usize>,
     pub status: StepStatus,
 }
 

@@ -115,7 +115,6 @@ pub fn collect_triggers(
                     source: ability.source,
                     controller,
                     event: Some(event),
-                    chosen_targets: Vec::new(),
                 };
                 let matched = match runtime.invoke_condition(*handle, &ctx) {
                     Ok(v) => v,

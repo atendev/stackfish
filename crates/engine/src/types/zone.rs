@@ -58,10 +58,6 @@ impl Zone {
     pub fn is_empty(&self) -> bool {
         self.contents.is_empty()
     }
-
-    pub fn top(&self) -> Option<ObjectId> {
-        self.contents.front().copied()
-    }
 }
 
 #[cfg(test)]
@@ -128,17 +124,5 @@ mod tests {
         zone.push_top(a);
         assert!(zone.contains(a));
         assert_eq!(zone.len(), 1);
-    }
-
-    #[test]
-    fn top_returns_front_or_none() {
-        let mut zone = Zone::new(ZoneKind::Library, Some(PlayerId(0)));
-        assert_eq!(zone.top(), None);
-
-        let a = ObjectId(0);
-        let b = ObjectId(1);
-        zone.push_bottom(a);
-        zone.push_top(b);
-        assert_eq!(zone.top(), Some(b));
     }
 }

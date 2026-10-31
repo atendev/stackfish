@@ -77,7 +77,6 @@ Added `Phase::PreGame` (engine-only) for setup before first `Beginning`.
 
 ### Engine loop
 - `engine::Engine` wraps `GameState` with `submit_action` / `step`.
-- `StepResult.events_added` is `Range<usize>` into `state.ledger`.
 - `commands::execute_command` mutates state and appends events.
 - `layers::effective_characteristics` is the CR 613 query.
 - `replacement::apply_replacements` noted needing CR 616.1 player choice (later fixed).

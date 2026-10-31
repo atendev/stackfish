@@ -169,20 +169,6 @@ pub enum RejectionCode {
     Internal,
 }
 
-impl RejectionCode {
-    /// The snake_case name hosts see.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            RejectionCode::WrongSeat => "wrong_seat",
-            RejectionCode::NotOpen => "not_open",
-            RejectionCode::InvalidChoice => "invalid_choice",
-            RejectionCode::StaleDecision => "stale_decision",
-            RejectionCode::WrongAnswerShape => "wrong_answer_shape",
-            RejectionCode::Internal => "internal",
-        }
-    }
-}
-
 /// A refused Answer: a stable `code` for hosts to branch on and a `message`
 /// for people.
 #[derive(Clone, Debug)]

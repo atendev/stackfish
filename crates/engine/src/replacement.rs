@@ -33,8 +33,6 @@ pub enum ReplacementOutcome {
         event: GameEventKind,
         candidates: Vec<ReplacementCandidate>,
         excluded: Vec<ReplacementCandidate>,
-        /// Carried so the resumed call rechecks with the same destroy meaning.
-        is_destroy: bool,
     },
 }
 
@@ -318,7 +316,6 @@ pub(crate) fn apply_replacements_from(
                     event,
                     candidates: matching,
                     excluded,
-                    is_destroy,
                 };
             }
         }
