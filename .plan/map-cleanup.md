@@ -41,6 +41,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 057: Added `[workspace.dependencies]` for `serde`, `serde_json` and `rusqlite`, cleared every clippy error under `-D warnings` (hand fixes plus per-site `#[allow]` for long signatures, big variants and large `Err` types), and ran `cargo fmt --all` over 344 files as its own commit. `cargo test --workspace` passes with 2315 tests, and `cargo machete` removed one unused dependency. Visibility narrowing and dead helpers moved to 064. [closed/057-apply-workspace-lints.md]
 - 064: `EngineCommand`, `CommandOutcome`, `ProcessState` and `execute_command` narrow to `pub(crate)`. Other items narrow only when the compiler proves it, and scenario `schema.rs` stays `pub`. Dead helpers are deleted unless they carry a TODO or documented intent. `unreachable_pub` becomes a workspace lint for the non-engine crates. The build is 065. [closed/064-narrow-visibility-remove-dead-helpers.md]
 - 065: Built the 064 decisions on `phase5/narrow-visibility`: dead items deleted, engine, carddb, scenario, host and godot items narrowed to what the compiler proves, and `unreachable_pub` is a workspace lint for host, godot, carddb and scenario. Three test-only constructors are `cfg(test)` rather than deleted. [closed/065-build-narrow-visibility.md]
+- 059: A versioned pre-commit hook runs fmt and clippy, and a GitHub Actions workflow on push to `master` adds `cargo test --workspace` and the `tools` unittest. Both go through one `tools/check.sh`. `rust-toolchain.toml` pins 1.98.0, `comment_diff.py` stays manual, and CI skips the private `stackfish-db` smoke test as a known gap. The build is 066. [closed/059-precommit-or-ci-check.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -97,15 +98,17 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 - 064 Decide nameability of `EngineCommand`, `CommandOutcome` and `ProcessState`, then narrow `pub` visibility and remove dead helpers. Type grilling, HITL. Split from 057. Closed. The build is 065.
 - 065 Build narrow pub visibility and delete dead helpers. Type task, HITL. Follows 064. Closed.
 - 058 Update `docs/DESIGN.md` to reflect the new module layout. Type task, HITL. Blocked by 038, 040, 041, 046.
-- 059 Decide on a pre-commit or CI check for `fmt`, `clippy`, and `comment_diff.py`. Type grilling, HITL. Blocked by 057.
+- 059 Decide on a pre-commit or CI check for `fmt`, `clippy`, and `comment_diff.py`. Type grilling, HITL. Blocked by 057. Closed. The build is 066.
+- 066 Build the check script, pre-commit hook, toolchain pin and CI workflow. Type task, HITL. Follows 059.
+- 067 Decide whether CI gets read access to `stackfish-db` and a strict missing-db mode. Type grilling, HITL. Blocked by 066. Optional.
 
 ## Frontier
 
 Open and unblocked:
 
-- 059, 060
+- 060, 066
 
-059 is unblocked now that 057 is closed.
+Blocked: 067 waits on 066.
 
 ## Not yet specified
 
