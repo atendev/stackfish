@@ -24,7 +24,7 @@ Every ticket runs this loop without waiting on me, except for the two button pro
 2. Spawn a subagent (default `haiku`) to audit the report. It is read-only: it may not edit files. It returns `APPROVE` or a list of required changes. Apply the changes and re-audit until it approves.
 3. Create a local branch `phase5/<feature-name>`. Do not push it to origin.
 4. Implement the feature. Mark every stubbed part with a TODO (eg: PlayLand has no "play additional lands" effects yet, so the PlayLand action gets a TODO). Commit on the branch at sensible points without asking.
-5. Spawn a subagent (default `sonnet`) to audit the work. It is read-only. It runs the tests, checks the code against the approved report and the comp rules, checks the comment rules and, for Lua API changes, the game stub in the docs. It returns `APPROVE` or a list of problems. Fix them and re-audit until it approves.
+5. Spawn a subagent (default `sonnet`) to audit the work. It is read-only. It runs `tools/check.sh --full`, checks the code against the approved report and the comp rules, checks the comment rules and, for Lua API changes, the game stub in the docs. It returns `APPROVE` or a list of problems. Fix them and re-audit until it approves.
 6. Report in the chat as the workflow document describes, then ask with `AskUserQuestion`: options `Merge` and `Don't merge`.
 7. On `Merge`: merge into master, push master, then delete the local branch. On `Don't merge`: keep the branch and wait for my instructions.
 
@@ -39,6 +39,12 @@ Every ticket runs this loop without waiting on me, except for the two button pro
 
 ### Final summary
 End every ticket, of either type, with a summary of the changes in five sentences or fewer. Run `unslop` on it before sending.
+
+## Checks
+- Run `tools/install-hooks.sh` once per clone. The pre-commit hook runs `tools/check.sh` with no arguments: `cargo fmt --check` and `cargo clippy -D warnings`.
+- `tools/check.sh --full` adds `cargo test --workspace` and the `tools` unittests. CI runs it on every push to `master`.
+- CI has no `stackfish-db`, so `db_scripts_smoke.rs` skips there. `comment_diff.py` is not automatic; run it after comment-only passes.
+- `rust-toolchain.toml` pins the compiler. Move the pin in its own commit.
 
 ## IMPORTANT
 - Always use the unslop skill
