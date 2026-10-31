@@ -17,8 +17,8 @@ mod schema;
 
 pub use assertions::AssertionOutcome;
 pub use build::build_initial_state;
-pub use db_tests::{run_db_tests, DbTestOutcome, DbTestResult};
+pub use db_tests::{DbTestOutcome, DbTestResult, run_db_tests};
 pub use load::{load, parse};
-pub use report::{run, run_path, EntryOutcome, EntryReport, ScenarioReport};
+pub use report::{EntryOutcome, EntryReport, ScenarioReport, run, run_path};
 pub use run::StepOutcome;
 pub use schema::*;

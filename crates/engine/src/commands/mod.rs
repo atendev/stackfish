@@ -23,24 +23,27 @@ mod zone_ops;
 
 // Re-exports keep `crate::commands::X` resolving for the engine and for the
 // integration test that reaches `propose_attach` and `AttachProposal`.
+pub use attach::{AttachProposal, propose_attach};
 pub(crate) use attach::{
     apply_copy_additional_counters, attach_permanent, attach_permanent_to_player, find_ability,
-    find_ability_by_id, grant_linked_copy_ability, is_aura, is_equipment, legal_aura_entry_candidates, legal_entry_attach_candidates,
-    next_active_player, non_eliminated_players, purge_granted_abilities, remap_abilities, retire_object,
+    find_ability_by_id, grant_linked_copy_ability, is_aura, is_equipment,
+    legal_aura_entry_candidates, legal_entry_attach_candidates, next_active_player,
+    non_eliminated_players, purge_granted_abilities, remap_abilities, retire_object,
 };
-pub use attach::{propose_attach, AttachProposal};
 pub(crate) use combat::{
-    attacker_entries, blocker_entries, damage_split_entries, execute_assign_combat_damage, mark_effect_blocked,
-    next_blocking_player,
+    attacker_entries, blocker_entries, damage_split_entries, execute_assign_combat_damage,
+    mark_effect_blocked, next_blocking_player,
 };
 pub(crate) use entries::priority_entries;
 pub(crate) use legality::{
-    attachment_target_is_legal, combine_chosen_modes, effective_keywords, effective_power, is_ability_stack_entry, is_modal_placeholder_requirement, is_modal_resolvable, mode_can_join_others, solo_only_modes,
-    legal_target_candidates_for_spec, split_targets_by_requirement, target_is_legal, target_spec_minimums,
-    validate_targets,
+    attachment_target_is_legal, combine_chosen_modes, effective_keywords, effective_power,
+    is_ability_stack_entry, is_modal_placeholder_requirement, is_modal_resolvable,
+    legal_target_candidates_for_spec, mode_can_join_others, solo_only_modes,
+    split_targets_by_requirement, target_is_legal, target_spec_minimums, validate_targets,
 };
 pub(crate) use zone_ops::{
-    apply_damage_event, collect_cost_zone_moves, commit_payment, commit_zone_move, propose_draw, propose_zone_move,
+    apply_damage_event, collect_cost_zone_moves, commit_payment, commit_zone_move, propose_draw,
+    propose_zone_move,
 };
 
 /// Why a command was turned down before it changed anything (CR 733.1, 733.2).
@@ -155,7 +158,10 @@ pub enum PaymentResolution {
     /// execution time (a fixed `AddMana` list, or an `AddManaChoice` with
     /// validated `chosen_colors`), since paying does not change which mana comes
     /// out.
-    ManaAbility { controller: PlayerId, units: Vec<ManaUnit> },
+    ManaAbility {
+        controller: PlayerId,
+        units: Vec<ManaUnit>,
+    },
 }
 
 /// A command that passed validation, holding everything its apply step needs
@@ -183,38 +189,51 @@ pub(crate) fn validate_command(
     action: PlayerActionKind,
 ) -> Result<Validated, Rejected> {
     match action {
-        PlayerActionKind::PassPriority => land::validate_pass_priority(state, script_runtime, actor),
+        PlayerActionKind::PassPriority => {
+            land::validate_pass_priority(state, script_runtime, actor)
+        }
         PlayerActionKind::MakeChoice { .. } => Ok(Validated::MakeChoice),
         PlayerActionKind::PlayLand { card } => land::validate_play_land(state, actor, card),
-        PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost, pay_buyback } => {
-            cast::validate_cast_spell(
-                state,
-                script_runtime,
-                actor,
-                card,
-                modes,
-                targets,
-                x_value,
-                alternative_cost,
-                pay_buyback,
-            )
-        }
-        PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors, x_value } => {
-            activate::validate_activate_ability(
-                state,
-                script_runtime,
-                actor,
-                source,
-                ability_index,
-                targets,
-                chosen_colors,
-                x_value,
-            )
-        }
+        PlayerActionKind::CastSpell {
+            card,
+            modes,
+            targets,
+            x_value,
+            alternative_cost,
+            pay_buyback,
+        } => cast::validate_cast_spell(
+            state,
+            script_runtime,
+            actor,
+            card,
+            modes,
+            targets,
+            x_value,
+            alternative_cost,
+            pay_buyback,
+        ),
+        PlayerActionKind::ActivateAbility {
+            source,
+            ability_index,
+            targets,
+            chosen_colors,
+            x_value,
+        } => activate::validate_activate_ability(
+            state,
+            script_runtime,
+            actor,
+            source,
+            ability_index,
+            targets,
+            chosen_colors,
+            x_value,
+        ),
         PlayerActionKind::DeclareAttackers { attackers } => {
             combat::validate_declare_attackers(state, script_runtime, actor, attackers)
         }
-        PlayerActionKind::DeclareBands { bands } => combat::validate_declare_bands(state, script_runtime, actor, bands),
+        PlayerActionKind::DeclareBands { bands } => {
+            combat::validate_declare_bands(state, script_runtime, actor, bands)
+        }
         PlayerActionKind::DeclareBlockers { blocks } => {
             combat::validate_declare_blockers(state, script_runtime, actor, blocks)
         }
@@ -224,19 +243,24 @@ pub(crate) fn validate_command(
         // `submit_action` turns the pregame actions away before a command is
         // built, and a payment is answered through `Engine::submit_payment`,
         // never as a `PlayerActionKind`.
-        PlayerActionKind::KeepHand | PlayerActionKind::TakeMulligan | PlayerActionKind::BottomCards { .. } => {
-            Err(Rejected::IllegalAction("pregame actions use submit_mulligan_decision / submit_bottom_cards".to_string()))
-        }
-        PlayerActionKind::SubmitPayment { .. } => {
-            Err(Rejected::IllegalAction("a payment is answered through submit_payment".to_string()))
-        }
+        PlayerActionKind::KeepHand
+        | PlayerActionKind::TakeMulligan
+        | PlayerActionKind::BottomCards { .. } => Err(Rejected::IllegalAction(
+            "pregame actions use submit_mulligan_decision / submit_bottom_cards".to_string(),
+        )),
+        PlayerActionKind::SubmitPayment { .. } => Err(Rejected::IllegalAction(
+            "a payment is answered through submit_payment".to_string(),
+        )),
     }
 }
 
 /// Carries out a command that passed `validate_command`. The only failure is
 /// `Internal`: a broken invariant, since validation already ruled out every
 /// bad input.
-pub(crate) fn apply_command(state: &mut GameState, validated: Validated) -> Result<CommandOutcome, Internal> {
+pub(crate) fn apply_command(
+    state: &mut GameState,
+    validated: Validated,
+) -> Result<CommandOutcome, Internal> {
     match validated {
         Validated::PassPriority { actor } => land::apply_pass_priority(state, actor),
         Validated::MakeChoice => land::apply_make_choice(),

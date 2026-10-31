@@ -152,7 +152,11 @@ fn branches(symbol: &str) -> Option<Vec<Branch>> {
         [single] => vec![half(single)?],
         [color, "P"] => vec![Branch::Color(color_index(color)?), Branch::Life],
         [a, b] => vec![half(a)?, half(b)?],
-        [a, b, "P"] => vec![Branch::Color(color_index(a)?), Branch::Color(color_index(b)?), Branch::Life],
+        [a, b, "P"] => vec![
+            Branch::Color(color_index(a)?),
+            Branch::Color(color_index(b)?),
+            Branch::Life,
+        ],
         _ => return None,
     };
     let rank = |branch: &Branch| match branch {
@@ -165,7 +169,10 @@ fn branches(symbol: &str) -> Option<Vec<Branch>> {
 }
 
 fn symbols(mana: &str) -> Option<Vec<&str>> {
-    mana.split('{').skip(1).map(|part| part.strip_suffix('}')).collect()
+    mana.split('{')
+        .skip(1)
+        .map(|part| part.strip_suffix('}'))
+        .collect()
 }
 
 pub(crate) fn resolve_x(mana: &str, x: u32) -> String {
@@ -197,7 +204,14 @@ struct Search {
 
 impl Search {
     // Generic mana is paid last, from what is left, plain units before snow ones.
-    fn pay(&self, index: usize, left: Pool, units: &mut Vec<Unit>, generic: u32, life: u32) -> Option<u32> {
+    fn pay(
+        &self,
+        index: usize,
+        left: Pool,
+        units: &mut Vec<Unit>,
+        generic: u32,
+        life: u32,
+    ) -> Option<u32> {
         let Some(branches) = self.options.get(index) else {
             return self.pay_generic(left, units, generic).then_some(life);
         };
@@ -206,8 +220,14 @@ impl Search {
             let mut next = left;
             let (mut more_generic, mut more_life) = (0, 0);
             let found = match branch {
-                Branch::Color(i) => next.take_colored(*i).map(|snow| units.push(Unit::Colored(*i, snow))).is_some(),
-                Branch::Colorless => next.take_colorless().map(|snow| units.push(Unit::Colorless(snow))).is_some(),
+                Branch::Color(i) => next
+                    .take_colored(*i)
+                    .map(|snow| units.push(Unit::Colored(*i, snow)))
+                    .is_some(),
+                Branch::Colorless => next
+                    .take_colorless()
+                    .map(|snow| units.push(Unit::Colorless(snow)))
+                    .is_some(),
                 Branch::Snow => {
                     if let Some(i) = (0..5).find(|i| next.snow_colored[*i] > 0) {
                         next.colored[i] -= 1;
@@ -233,7 +253,13 @@ impl Search {
                 }
             };
             if found
-                && let Some(total) = self.pay(index + 1, next, units, generic + more_generic, life + more_life)
+                && let Some(total) = self.pay(
+                    index + 1,
+                    next,
+                    units,
+                    generic + more_generic,
+                    life + more_life,
+                )
             {
                 return Some(total);
             }
@@ -246,7 +272,10 @@ impl Search {
         for _ in 0..generic {
             let unit = if let Some(snow) = left.take_colorless() {
                 Unit::Colorless(snow)
-            } else if let Some(i) = (0..5).filter(|i| left.colored[*i] > 0).max_by_key(|i| (left.plain_colored(*i), left.colored[*i])) {
+            } else if let Some(i) = (0..5)
+                .filter(|i| left.colored[*i] > 0)
+                .max_by_key(|i| (left.plain_colored(*i), left.colored[*i]))
+            {
                 let snow = left.take_colored(i).unwrap_or(false);
                 Unit::Colored(i, snow)
             } else {
@@ -260,7 +289,12 @@ impl Search {
 
 /// A plan for `cost` from `pool`, or `None` if the bot cannot make one. `life_budget` caps
 /// the life spent on Phyrexian symbols.
-pub(crate) fn plan_payment(cost: &Value, pool: &Pool, life_budget: u32, source: Option<&Value>) -> Option<(Vec<Value>, Pool)> {
+pub(crate) fn plan_payment(
+    cost: &Value,
+    pool: &Pool,
+    life_budget: u32,
+    source: Option<&Value>,
+) -> Option<(Vec<Value>, Pool)> {
     let mut payments = Vec::new();
     let mut spent = Pool::default();
     let mut life_for_costs = 0;
@@ -274,7 +308,10 @@ pub(crate) fn plan_payment(cost: &Value, pool: &Pool, life_budget: u32, source: 
     let mana = cost["mana"].as_str().unwrap_or_default();
     if !mana.is_empty() {
         let search = Search {
-            options: symbols(mana)?.into_iter().map(branches).collect::<Option<_>>()?,
+            options: symbols(mana)?
+                .into_iter()
+                .map(branches)
+                .collect::<Option<_>>()?,
             life_budget: life_budget.saturating_sub(life_for_costs),
         };
         let mut units = Vec::new();
@@ -323,7 +360,12 @@ mod tests {
     }
 
     fn plan(mana: &str, units: &[Value], life: u32) -> Option<(Vec<Value>, Pool)> {
-        plan_payment(&json!({ "mana": mana, "additional": [] }), &pool(units), life, None)
+        plan_payment(
+            &json!({ "mana": mana, "additional": [] }),
+            &pool(units),
+            life,
+            None,
+        )
     }
 
     fn mana_payment(plan: &(Vec<Value>, Pool)) -> &Value {
@@ -332,17 +374,33 @@ mod tests {
 
     #[test]
     fn plain_symbols_still_pay() {
-        let plan = plan("{1}{R}", &[colored("red"), colored("red")], 0).expect("two red pay {1}{R}");
+        let plan =
+            plan("{1}{R}", &[colored("red"), colored("red")], 0).expect("two red pay {1}{R}");
         assert_eq!(mana_payment(&plan)["units"].as_array().unwrap().len(), 2);
         assert_eq!(mana_payment(&plan)["phyrexian_life"], 0);
-        assert!(super::plan_payment(&json!({ "mana": "{R}", "additional": [] }), &Pool::default(), 0, None).is_none());
+        assert!(
+            super::plan_payment(
+                &json!({ "mana": "{R}", "additional": [] }),
+                &Pool::default(),
+                0,
+                None
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn colorless_symbol_needs_colorless_mana() {
         assert!(plan("{C}", &[colored("red")], 0).is_none());
         assert!(plan("{2}{C}", &[colorless(), colored("red"), colored("red")], 0).is_some());
-        assert!(plan("{2}{C}", &[colored("red"), colored("red"), colored("red")], 0).is_none());
+        assert!(
+            plan(
+                "{2}{C}",
+                &[colored("red"), colored("red"), colored("red")],
+                0
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -365,18 +423,29 @@ mod tests {
     fn phyrexian_prefers_mana_and_falls_back_to_life() {
         let with_mana = plan("{B/P}", &[colored("black")], 10).unwrap();
         assert_eq!(mana_payment(&with_mana)["phyrexian_life"], 0);
-        assert_eq!(mana_payment(&with_mana)["units"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            mana_payment(&with_mana)["units"].as_array().unwrap().len(),
+            1
+        );
 
         let with_life = plan("{B/P}", &[], 10).unwrap();
         assert_eq!(mana_payment(&with_life)["phyrexian_life"], 2);
-        assert!(mana_payment(&with_life)["units"].as_array().unwrap().is_empty());
+        assert!(
+            mana_payment(&with_life)["units"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
     fn phyrexian_stays_inside_the_life_budget() {
         let plan_ = plan("{1}{B/P}{B/P}", &[colored("black"), colored("red")], 2).unwrap();
         assert_eq!(mana_payment(&plan_)["phyrexian_life"], 2);
-        assert!(plan("{B/P}", &[], 1).is_none(), "1 life cannot fund a 2 life pip");
+        assert!(
+            plan("{B/P}", &[], 1).is_none(),
+            "1 life cannot fund a 2 life pip"
+        );
         assert!(plan("{B/P}{B/P}", &[], 3).is_none());
     }
 
@@ -394,7 +463,12 @@ mod tests {
         let paid = plan("{S}", &[colored("green"), snow("green")], 0).unwrap();
         assert_eq!(mana_payment(&paid)["units"][0]["kind"], "snow_colored");
         let both = plan("{1}{S}", &[snow("green"), colored("green")], 0).unwrap();
-        let kinds: Vec<_> = mana_payment(&both)["units"].as_array().unwrap().iter().map(|u| u["kind"].clone()).collect();
+        let kinds: Vec<_> = mana_payment(&both)["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|u| u["kind"].clone())
+            .collect();
         assert_eq!(kinds.iter().filter(|k| *k == "snow_colored").count(), 1);
     }
 
@@ -407,7 +481,13 @@ mod tests {
     #[test]
     fn spending_a_plan_removes_its_units_from_the_pool() {
         let mut have = pool(&[snow("green"), colored("green"), colorless()]);
-        let (_, spent) = plan_payment(&json!({ "mana": "{G}{S}", "additional": [] }), &have, 0, None).unwrap();
+        let (_, spent) = plan_payment(
+            &json!({ "mana": "{G}{S}", "additional": [] }),
+            &have,
+            0,
+            None,
+        )
+        .unwrap();
         have.spend(&spent);
         assert_eq!(have.total(), 1);
     }
@@ -415,8 +495,18 @@ mod tests {
     #[test]
     fn x_is_resolved_before_planning() {
         assert_eq!(resolve_x("{X}{X}{R}", 2), "{2}{2}{R}");
-        assert!(plan("{X}{R}", &[colored("red")], 0).is_none(), "an unresolved X is not payable");
-        assert!(plan(&resolve_x("{X}{R}", 2), &[colored("red"), colorless(), colorless()], 0).is_some());
+        assert!(
+            plan("{X}{R}", &[colored("red")], 0).is_none(),
+            "an unresolved X is not payable"
+        );
+        assert!(
+            plan(
+                &resolve_x("{X}{R}", 2),
+                &[colored("red"), colorless(), colorless()],
+                0
+            )
+            .is_some()
+        );
     }
 
     #[test]
@@ -433,7 +523,8 @@ mod tests {
     fn additional_costs_keep_their_order_after_mana() {
         let cost = json!({ "mana": "{R}", "additional": [{ "kind": "tap_self" }, { "kind": "life_payment", "amount": 3 }] });
         let source = json!("7");
-        let (payments, _) = plan_payment(&cost, &pool(&[colored("red")]), 0, Some(&source)).unwrap();
+        let (payments, _) =
+            plan_payment(&cost, &pool(&[colored("red")]), 0, Some(&source)).unwrap();
         let kinds: Vec<_> = payments.iter().map(|p| p["kind"].clone()).collect();
         assert_eq!(kinds, ["mana", "tap", "life"]);
     }

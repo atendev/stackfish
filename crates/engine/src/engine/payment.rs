@@ -11,18 +11,31 @@ use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
 use crate::types::stack::StackEntryKind;
 use crate::types::zone::ZoneKind;
 
-use super::{Engine, PaymentError, PendingZoneMove, ProcessState, ReplacementResumeTarget, SuspendedPayment};
+use super::{
+    Engine, PaymentError, PendingZoneMove, ProcessState, ReplacementResumeTarget, SuspendedPayment,
+};
 
 /// CR 702.29c: the `Cycled` marker for a cost zone-move of `cycling_source`,
 /// `None` for any other payment. Shared with the `CostZoneMove` resume arm.
-pub(super) fn cycled_marker_event(event: &GameEventKind, cycling_source: Option<ObjectId>) -> Option<GameEventKind> {
-    let GameEventKind::ZoneChange { object, last_known_info: Some(lki), .. } = event else {
+pub(super) fn cycled_marker_event(
+    event: &GameEventKind,
+    cycling_source: Option<ObjectId>,
+) -> Option<GameEventKind> {
+    let GameEventKind::ZoneChange {
+        object,
+        last_known_info: Some(lki),
+        ..
+    } = event
+    else {
         return None;
     };
     if Some(*object) != cycling_source {
         return None;
     }
-    Some(GameEventKind::Cycled { object: *object, last_known_info: lki.clone() })
+    Some(GameEventKind::Cycled {
+        object: *object,
+        last_known_info: lki.clone(),
+    })
 }
 
 impl Engine {
@@ -50,10 +63,14 @@ impl Engine {
             let ProcessState::AwaitingPayment { cost, .. } = &self.process_state else {
                 unreachable!("checked above");
             };
-            cost.additional.iter().any(|c| matches!(c, AdditionalCost::DiscardSelf)).then_some(source)
+            cost.additional
+                .iter()
+                .any(|c| matches!(c, AdditionalCost::DiscardSelf))
+                .then_some(source)
         };
-        let ProcessState::AwaitingPayment { stack_id, on_paid, .. } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingPayment {
+            stack_id, on_paid, ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
@@ -61,10 +78,11 @@ impl Engine {
         // CR 601.2h: mana, tap and life commit immediately; sacrifices and
         // discards are queued because each is its own replaceable zone change
         // (CR 616.1).
-        let pending_zone_moves: VecDeque<PendingZoneMove> = commands::collect_cost_zone_moves(&plan.payments)
-            .into_iter()
-            .map(|(id, from, to)| PendingZoneMove { id, from, to })
-            .collect();
+        let pending_zone_moves: VecDeque<PendingZoneMove> =
+            commands::collect_cost_zone_moves(&plan.payments)
+                .into_iter()
+                .map(|(id, from, to)| PendingZoneMove { id, from, to })
+                .collect();
         let immediate_events = commands::commit_payment(&mut self.state, payer, &plan.payments);
         if let Some(stack_object) = self.state.stack.iter_mut().find(|s| s.stack_id == stack_id) {
             stack_object.costs_paid = plan.payments;
@@ -82,7 +100,13 @@ impl Engine {
         }
 
         // Resumes where `CommitEvents` would have gone had no payment been pending.
-        self.process_state = self.continue_cost_zone_moves(pending_zone_moves, payer, stack_id, on_paid, cycling_source);
+        self.process_state = self.continue_cost_zone_moves(
+            pending_zone_moves,
+            payer,
+            stack_id,
+            on_paid,
+            cycling_source,
+        );
         Ok(())
     }
 
@@ -101,12 +125,19 @@ impl Engine {
         cycling_source: Option<ObjectId>,
     ) -> ProcessState {
         while let Some(pending) = remaining.pop_front() {
-            let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from, pending.to) else {
+            let Some(proposed) =
+                commands::propose_zone_move(&self.state, pending.id, pending.from, pending.to)
+            else {
                 // Already gone; `PaymentPlan::validate` confirmed it existed.
                 continue;
             };
             // CR 614.8: neither sacrifice nor discard is destruction.
-            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+            match replacement::apply_replacements(
+                &mut self.state,
+                &self.script_runtime,
+                proposed,
+                false,
+            ) {
                 ReplacementOutcome::Resolved(event) => {
                     let cycled = cycled_marker_event(&event, cycling_source);
                     // CR 702.35a: derived before commit purges the object's replacement effects.
@@ -121,13 +152,25 @@ impl Engine {
                     }
                     self.state.ledger.push(committed);
                 }
-                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                ReplacementOutcome::NeedsOrderingChoice {
+                    affected_player,
+                    event,
+                    candidates,
+                    excluded,
+                    ..
+                } => {
                     return ProcessState::AwaitingReplacementChoice {
                         affected_player,
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid, cycling_source },
+                        resume: ReplacementResumeTarget::CostZoneMove {
+                            remaining,
+                            payer,
+                            stack_id,
+                            on_paid,
+                            cycling_source,
+                        },
                     };
                 }
             }
@@ -145,7 +188,10 @@ impl Engine {
             self.state.ledger.push(GameEvent {
                 event_id,
                 sequence_no,
-                kind: GameEventKind::ManaAdded { player: *controller, units: units.clone() },
+                kind: GameEventKind::ManaAdded {
+                    player: *controller,
+                    units: units.clone(),
+                },
                 caused_by_command: None,
                 parent_event: None,
             });
@@ -161,7 +207,12 @@ impl Engine {
         });
         // CR 601.2i: a spell is cast once its costs are paid. `CostPaid` alone
         // can't mark it because activated abilities log one too.
-        if self.state.stack.iter().any(|s| s.stack_id == stack_id && matches!(s.kind, StackEntryKind::Spell)) {
+        if self
+            .state
+            .stack
+            .iter()
+            .any(|s| s.stack_id == stack_id && matches!(s.kind, StackEntryKind::Spell))
+        {
             self.log_events(vec![GameEventKind::SpellCast { object: stack_id }]);
         }
         // CR 603.2: the targets become targeted once the object is fully announced and paid.
@@ -173,15 +224,30 @@ impl Engine {
     /// the pipeline fields the nested run overwrote, or returns `fallback` when
     /// nothing is suspended.
     pub(super) fn resume_suspended_payment_or(&mut self, fallback: ProcessState) -> ProcessState {
-        let Some(SuspendedPayment { request, pipeline_context, pipeline_exit }) =
-            self.suspended_payments.pop()
+        let Some(SuspendedPayment {
+            request,
+            pipeline_context,
+            pipeline_exit,
+        }) = self.suspended_payments.pop()
         else {
             return fallback;
         };
         self.pipeline_context = pipeline_context;
         self.pipeline_exit = pipeline_exit;
-        let PendingPaymentRequest { stack_id, payer, cost, source, on_paid } = request;
-        ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid }
+        let PendingPaymentRequest {
+            stack_id,
+            payer,
+            cost,
+            source,
+            on_paid,
+        } = request;
+        ProcessState::AwaitingPayment {
+            stack_id,
+            payer,
+            cost,
+            source,
+            on_paid,
+        }
     }
 
     /// Abandons the cast or activation because the caller cannot or will not pay
@@ -205,10 +271,10 @@ impl Engine {
         let stack_object = self.state.stack.remove(idx);
 
         let mut events = Vec::new();
-        if matches!(stack_object.kind, StackEntryKind::Spell) {
-            if let Some(event) = self.move_resolving_spell(stack_id, ZoneKind::Hand, false, false) {
-                events.push(event);
-            }
+        if matches!(stack_object.kind, StackEntryKind::Spell)
+            && let Some(event) = self.move_resolving_spell(stack_id, ZoneKind::Hand, false, false)
+        {
+            events.push(event);
         }
         events.push(GameEventKind::CastingUnwound { stack_id });
 
@@ -250,7 +316,9 @@ impl Engine {
         let new_id = self.state.allocate_object_id();
         let mut new_object = last_known_info.clone();
         new_object.object_id = new_id;
-        new_object.lineage = ObjectLineage { previous: Some(stack_id) };
+        new_object.lineage = ObjectLineage {
+            previous: Some(stack_id),
+        };
         new_object.zone = destination;
         new_object.timestamp = self.state.allocate_sequence_no();
         // CR 302.6: only a permanent entering the battlefield is summoning sick.
@@ -262,14 +330,20 @@ impl Engine {
 
         self.state.objects.remove(&stack_id);
         // CR 608.2b: a fizzled spell never runs its script.
-        let definition_for_script = if run_script { Some(new_object.definition.clone()) } else { None };
+        let definition_for_script = if run_script {
+            Some(new_object.definition.clone())
+        } else {
+            None
+        };
         if let Some(zone) = self.state.zone_mut(destination, destination_owner) {
             zone.push_bottom(new_id);
             self.state.objects.insert(new_id, new_object);
         }
         commands::remap_abilities(&mut self.state, stack_id, new_id);
         if let Some(definition) = definition_for_script {
-            let result = self.script_runtime.run_card_script(&mut self.state, &definition, new_id);
+            let result = self
+                .script_runtime
+                .run_card_script(&mut self.state, &definition, new_id);
             self.record_script_error(new_id, &definition.script_ref, result);
         }
 

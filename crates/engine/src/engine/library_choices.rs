@@ -14,8 +14,9 @@ use crate::types::zone::ZoneKind;
 
 use super::triggers_pipeline::is_exact_partition;
 use super::{
-    AmplifyChoiceError, AttachChoiceError, DevourChoiceError, Engine, ProcessState, ScriptedZoneMoveKind,
-    ScriptedZoneMoveThen, ScryChoiceError, SearchChoiceError, SurveilChoiceError,
+    AmplifyChoiceError, AttachChoiceError, DevourChoiceError, Engine, ProcessState,
+    ScriptedZoneMoveKind, ScriptedZoneMoveThen, ScryChoiceError, SearchChoiceError,
+    SurveilChoiceError,
 };
 
 impl Engine {
@@ -33,8 +34,12 @@ impl Engine {
         if !is_exact_partition(&kept_on_top, &put_bottom, cards) {
             return Err(ScryChoiceError::WrongCards);
         }
-        let ProcessState::AwaitingScryChoice { stack_id, controller, mut events_so_far, cards } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingScryChoice {
+            stack_id,
+            controller,
+            mut events_so_far,
+            cards,
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
@@ -57,8 +62,10 @@ impl Engine {
             put_bottom,
         });
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
-        self.process_state =
-            ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        self.process_state = ProcessState::ReplacementCheck {
+            remaining: events_so_far.into(),
+            checked: Vec::new(),
+        };
         Ok(())
     }
 
@@ -75,8 +82,12 @@ impl Engine {
         if !is_exact_partition(&kept_on_top, &put_graveyard, cards) {
             return Err(SurveilChoiceError::WrongCards);
         }
-        let ProcessState::AwaitingSurveilChoice { stack_id, controller, mut events_so_far, cards } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingSurveilChoice {
+            stack_id,
+            controller,
+            mut events_so_far,
+            cards,
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
@@ -93,14 +104,19 @@ impl Engine {
 
         let mut new_ids = Vec::with_capacity(put_graveyard.len());
         for card in &put_graveyard {
-            let last_known_info =
-                self.state.object(*card).expect("validated by is_exact_partition above").clone();
+            let last_known_info = self
+                .state
+                .object(*card)
+                .expect("validated by is_exact_partition above")
+                .clone();
             let owner = last_known_info.owner;
 
             let new_id = self.state.allocate_object_id();
             let mut new_object = last_known_info.clone();
             new_object.object_id = new_id;
-            new_object.lineage = ObjectLineage { previous: Some(*card) };
+            new_object.lineage = ObjectLineage {
+                previous: Some(*card),
+            };
             new_object.zone = ZoneKind::Graveyard;
             new_object.timestamp = self.state.allocate_sequence_no();
 
@@ -127,8 +143,10 @@ impl Engine {
             put_graveyard: new_ids,
         });
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
-        self.process_state =
-            ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        self.process_state = ProcessState::ReplacementCheck {
+            remaining: events_so_far.into(),
+            checked: Vec::new(),
+        };
         Ok(())
     }
 
@@ -136,7 +154,10 @@ impl Engine {
     /// at most `count` of them; fewer, including none, is legal (CR 701.23b). The
     /// library is shuffled afterwards if the search says so (CR 701.24a).
     pub fn submit_search_choice(&mut self, chosen: Vec<ObjectId>) -> Result<(), SearchChoiceError> {
-        let ProcessState::AwaitingSearchChoice { candidates, count, .. } = &self.process_state else {
+        let ProcessState::AwaitingSearchChoice {
+            candidates, count, ..
+        } = &self.process_state
+        else {
             return Err(SearchChoiceError::NotAwaitingChoice);
         };
         if chosen.len() > *count as usize {
@@ -150,7 +171,12 @@ impl Engine {
             seen.push(id);
         }
         let ProcessState::AwaitingSearchChoice {
-            stack_id, controller, events_so_far, destination, shuffle_after, ..
+            stack_id,
+            controller,
+            events_so_far,
+            destination,
+            shuffle_after,
+            ..
         } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
@@ -180,8 +206,11 @@ impl Engine {
         mut events_so_far: Vec<GameEventKind>,
     ) -> ProcessState {
         while let Some(card) = remaining.pop_front() {
-            let last_known_info =
-                self.state.object(card).expect("validated against candidates above").clone();
+            let last_known_info = self
+                .state
+                .object(card)
+                .expect("validated against candidates above")
+                .clone();
             let owner = last_known_info.owner;
 
             match destination {
@@ -189,7 +218,9 @@ impl Engine {
                     let new_id = self.state.allocate_object_id();
                     let mut new_object = last_known_info.clone();
                     new_object.object_id = new_id;
-                    new_object.lineage = ObjectLineage { previous: Some(card) };
+                    new_object.lineage = ObjectLineage {
+                        previous: Some(card),
+                    };
                     new_object.timestamp = self.state.allocate_sequence_no();
                     new_object.zone = ZoneKind::Hand;
                     self.state
@@ -212,7 +243,10 @@ impl Engine {
                         last_known_info: Some(last_known_info),
                     });
                 }
-                SearchDestination::Battlefield { tapped, enters_attached } => {
+                SearchDestination::Battlefield {
+                    tapped,
+                    enters_attached,
+                } => {
                     // CR 303.4f, 301.5e: computed before the permanent gets its new id so
                     // it can't be a candidate of its own scan.
                     let attach_candidates = enters_attached
@@ -237,7 +271,9 @@ impl Engine {
                     let new_id = self.state.allocate_object_id();
                     let mut new_object = last_known_info.clone();
                     new_object.object_id = new_id;
-                    new_object.lineage = ObjectLineage { previous: Some(card) };
+                    new_object.lineage = ObjectLineage {
+                        previous: Some(card),
+                    };
                     new_object.timestamp = self.state.allocate_sequence_no();
                     new_object.zone = ZoneKind::Battlefield;
                     new_object.tapped = tapped;
@@ -254,7 +290,11 @@ impl Engine {
                         .push_bottom(new_id);
                     self.state.objects.insert(new_id, new_object);
                     commands::remap_abilities(&mut self.state, card, new_id);
-                    let result = self.script_runtime.run_card_script(&mut self.state, &definition_for_script, new_id);
+                    let result = self.script_runtime.run_card_script(
+                        &mut self.state,
+                        &definition_for_script,
+                        new_id,
+                    );
                     self.record_script_error(new_id, &definition_for_script.script_ref, result);
                     events_so_far.push(GameEventKind::ZoneChange {
                         object: new_id,
@@ -321,15 +361,26 @@ impl Engine {
                             1 => match candidates[0] {
                                 Target::Object(target_id) => {
                                     commands::attach_permanent(&mut self.state, new_id, target_id);
-                                    events_so_far
-                                        .push(GameEventKind::Attached { object: new_id, attached_to: target_id });
+                                    events_so_far.push(GameEventKind::Attached {
+                                        object: new_id,
+                                        attached_to: target_id,
+                                    });
                                 }
                                 Target::Player(player) => {
-                                    commands::attach_permanent_to_player(&mut self.state, new_id, player);
-                                    events_so_far.push(GameEventKind::AttachedToPlayer { object: new_id, player });
+                                    commands::attach_permanent_to_player(
+                                        &mut self.state,
+                                        new_id,
+                                        player,
+                                    );
+                                    events_so_far.push(GameEventKind::AttachedToPlayer {
+                                        object: new_id,
+                                        player,
+                                    });
                                 }
                                 // Attach candidates are objects or players only.
-                                Target::Ability(_) => unreachable!("attach candidates are never abilities"),
+                                Target::Ability(_) => {
+                                    unreachable!("attach candidates are never abilities")
+                                }
                             },
                             _ => {
                                 // CR 303.4f: with 2+ candidates the entering player chooses; the
@@ -356,7 +407,10 @@ impl Engine {
         }
 
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
-        ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
+        ProcessState::ReplacementCheck {
+            remaining: events_so_far.into(),
+            checked: Vec::new(),
+        }
     }
 
     /// Answers an entry-attach pause (CR 303.4f) and resumes the search with the
@@ -369,7 +423,14 @@ impl Engine {
             return Err(AttachChoiceError::InvalidCandidate);
         }
         let ProcessState::AwaitingEntryAttachChoice {
-            attaching, controller, stack_id, mut events_so_far, remaining, destination, shuffle_after, ..
+            attaching,
+            controller,
+            stack_id,
+            mut events_so_far,
+            remaining,
+            destination,
+            shuffle_after,
+            ..
         } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
@@ -377,24 +438,40 @@ impl Engine {
         match chosen {
             Target::Object(target_id) => {
                 commands::attach_permanent(&mut self.state, attaching, target_id);
-                events_so_far.push(GameEventKind::Attached { object: attaching, attached_to: target_id });
+                events_so_far.push(GameEventKind::Attached {
+                    object: attaching,
+                    attached_to: target_id,
+                });
             }
             Target::Player(player) => {
                 commands::attach_permanent_to_player(&mut self.state, attaching, player);
-                events_so_far.push(GameEventKind::AttachedToPlayer { object: attaching, player });
+                events_so_far.push(GameEventKind::AttachedToPlayer {
+                    object: attaching,
+                    player,
+                });
             }
             // Candidates hold objects and players only.
             Target::Ability(_) => unreachable!("attach candidates are never abilities"),
         }
-        self.process_state =
-            self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);
+        self.process_state = self.continue_search_battlefield_entry(
+            remaining,
+            destination,
+            controller,
+            stack_id,
+            shuffle_after,
+            events_so_far,
+        );
         Ok(())
     }
 
     /// Answers a devour pause raised mid-search (CR 702.82a). The sacrifices
     /// resume the search afterwards instead of finalizing the resolution.
-    pub fn submit_search_devour_choice(&mut self, sacrificed: Vec<ObjectId>) -> Result<(), DevourChoiceError> {
-        let ProcessState::AwaitingSearchDevourChoice { candidates, .. } = &self.process_state else {
+    pub fn submit_search_devour_choice(
+        &mut self,
+        sacrificed: Vec<ObjectId>,
+    ) -> Result<(), DevourChoiceError> {
+        let ProcessState::AwaitingSearchDevourChoice { candidates, .. } = &self.process_state
+        else {
             return Err(DevourChoiceError::NotAwaitingChoice);
         };
         if !sacrificed.iter().all(|id| candidates.contains(id)) {
@@ -418,17 +495,31 @@ impl Engine {
         else {
             unreachable!("checked above");
         };
-        let candidate_event =
-            GameEventKind::ZoneChange { object, from: ZoneKind::Library, to: ZoneKind::Battlefield, last_known_info: None };
+        let candidate_event = GameEventKind::ZoneChange {
+            object,
+            from: ZoneKind::Library,
+            to: ZoneKind::Battlefield,
+            last_known_info: None,
+        };
         replacement::apply_one_replacement(&mut self.state, object, candidate_event);
         let amount = per_creature * sacrificed.len() as i32;
         if amount > 0 {
-            events_so_far.push(GameEventKind::CounterAdded { object, kind: CounterKind::PlusOnePlusOne, amount });
+            events_so_far.push(GameEventKind::CounterAdded {
+                object,
+                kind: CounterKind::PlusOnePlusOne,
+                amount,
+            });
         }
         self.process_state = self.continue_scripted_zone_move(
             ScriptedZoneMoveKind::Sacrifice,
             sacrificed.into(),
-            ScriptedZoneMoveThen::SearchResume { controller, remaining, destination, stack_id, shuffle_after },
+            ScriptedZoneMoveThen::SearchResume {
+                controller,
+                remaining,
+                destination,
+                stack_id,
+                shuffle_after,
+            },
             events_so_far,
         );
         Ok(())
@@ -436,8 +527,12 @@ impl Engine {
 
     /// Answers an amplify pause raised mid-search (CR 702.38a). Revealing moves
     /// nothing, so it resumes the search directly.
-    pub fn submit_search_amplify_choice(&mut self, revealed: Vec<ObjectId>) -> Result<(), AmplifyChoiceError> {
-        let ProcessState::AwaitingSearchAmplifyChoice { candidates, .. } = &self.process_state else {
+    pub fn submit_search_amplify_choice(
+        &mut self,
+        revealed: Vec<ObjectId>,
+    ) -> Result<(), AmplifyChoiceError> {
+        let ProcessState::AwaitingSearchAmplifyChoice { candidates, .. } = &self.process_state
+        else {
             return Err(AmplifyChoiceError::NotAwaitingChoice);
         };
         if !revealed.iter().all(|id| candidates.contains(id)) {
@@ -461,15 +556,29 @@ impl Engine {
         else {
             unreachable!("checked above");
         };
-        let candidate_event =
-            GameEventKind::ZoneChange { object, from: ZoneKind::Library, to: ZoneKind::Battlefield, last_known_info: None };
+        let candidate_event = GameEventKind::ZoneChange {
+            object,
+            from: ZoneKind::Library,
+            to: ZoneKind::Battlefield,
+            last_known_info: None,
+        };
         replacement::apply_one_replacement(&mut self.state, object, candidate_event);
         let amount = per_card * revealed.len() as i32;
         if amount > 0 {
-            events_so_far.push(GameEventKind::CounterAdded { object, kind: CounterKind::PlusOnePlusOne, amount });
+            events_so_far.push(GameEventKind::CounterAdded {
+                object,
+                kind: CounterKind::PlusOnePlusOne,
+                amount,
+            });
         }
-        self.process_state =
-            self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);
+        self.process_state = self.continue_search_battlefield_entry(
+            remaining,
+            destination,
+            controller,
+            stack_id,
+            shuffle_after,
+            events_so_far,
+        );
         Ok(())
     }
 }

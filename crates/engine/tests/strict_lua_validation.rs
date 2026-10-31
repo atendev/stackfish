@@ -46,7 +46,12 @@ fn game_ops_search_rejects_unknown_option_key() {
 fn game_ops_search_rejects_unknown_destination() {
     assert_load_error(
         "return Game.Ops.Search({}, 1, { destination = \"library\" })",
-        &["Game.Ops.Search destination", "library", "Hand", "Battlefield"],
+        &[
+            "Game.Ops.Search destination",
+            "library",
+            "Hand",
+            "Battlefield",
+        ],
     );
 }
 
@@ -54,7 +59,12 @@ fn game_ops_search_rejects_unknown_destination() {
 fn game_ops_search_rejects_lowercase_destination() {
     assert_load_error(
         "return Game.Ops.Search({}, 1, { destination = \"battlefield\" })",
-        &["Game.Ops.Search destination", "battlefield", "Hand", "Battlefield"],
+        &[
+            "Game.Ops.Search destination",
+            "battlefield",
+            "Hand",
+            "Battlefield",
+        ],
     );
 }
 

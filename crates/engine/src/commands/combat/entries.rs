@@ -21,8 +21,14 @@ use super::predicate::{blockable_attackers, legal_defenders, required_attackers}
 /// The active player's attackers while attackers can still be declared, or
 /// an empty list. An empty list means no Decision is needed. An attacker that
 /// must attack (CR 508.1d) is marked `required`.
-pub(crate) fn attacker_entries(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<AttackerEntry> {
-    if state.phase != Phase::Combat || state.step != Step::DeclareAttackers || state.combat.is_some() {
+pub(crate) fn attacker_entries(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> Vec<AttackerEntry> {
+    if state.phase != Phase::Combat
+        || state.step != Step::DeclareAttackers
+        || state.combat.is_some()
+    {
         return Vec::new();
     }
     let actor = state.active_player;
@@ -35,23 +41,38 @@ pub(crate) fn attacker_entries(state: &GameState, script_runtime: &ScriptRuntime
     ids.sort();
     ids.into_iter()
         .filter(|&id| attacker_can_attack(state, script_runtime, actor, id).is_ok())
-        .map(|attacker| AttackerEntry { attacker, defenders: defenders.clone(), required: required.contains(&attacker) })
+        .map(|attacker| AttackerEntry {
+            attacker,
+            defenders: defenders.clone(),
+            required: required.contains(&attacker),
+        })
         .collect()
 }
 
 /// `player`'s blockers while they still owe a declaration, or an empty list.
 /// An attacker is listed only if enough creatures could block it for some
 /// declaration to block it at all (menace needs two).
-pub(crate) fn blocker_entries(state: &GameState, script_runtime: &ScriptRuntime, player: PlayerId) -> Vec<BlockerEntry> {
+pub(crate) fn blocker_entries(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    player: PlayerId,
+) -> Vec<BlockerEntry> {
     if state.phase != Phase::Combat || state.step != Step::DeclareBlockers {
         return Vec::new();
     }
-    let Some(combat) = state.combat.as_ref() else { return Vec::new() };
-    if combat.declared_defenders.contains(&player) || !is_defending_player(state, script_runtime, combat, player) {
+    let Some(combat) = state.combat.as_ref() else {
+        return Vec::new();
+    };
+    if combat.declared_defenders.contains(&player)
+        || !is_defending_player(state, script_runtime, combat, player)
+    {
         return Vec::new();
     }
     let blockable = blockable_attackers(state, script_runtime, player, combat);
-    let mut blockers: Vec<ObjectId> = blockable.iter().flat_map(|(_, blockers)| blockers.iter().copied()).collect();
+    let mut blockers: Vec<ObjectId> = blockable
+        .iter()
+        .flat_map(|(_, blockers)| blockers.iter().copied())
+        .collect();
     blockers.sort();
     blockers.dedup();
     blockers
@@ -69,8 +90,14 @@ pub(crate) fn blocker_entries(state: &GameState, script_runtime: &ScriptRuntime,
 
 /// The first defending player, in turn order from the active player, who still
 /// owes a declaration and has a creature that may block.
-pub(crate) fn next_blocking_player(state: &GameState, script_runtime: &ScriptRuntime) -> Option<PlayerId> {
-    let start = state.turn_order.iter().position(|&p| p == state.active_player)?;
+pub(crate) fn next_blocking_player(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> Option<PlayerId> {
+    let start = state
+        .turn_order
+        .iter()
+        .position(|&p| p == state.active_player)?;
     let (after, before) = state.turn_order.split_at(start);
     before
         .iter()
@@ -89,15 +116,20 @@ pub(crate) fn damage_split_entries(
 ) -> Option<(PlayerId, Vec<DamageSplitEntry>)> {
     let plan = plan_damage_splits(state, script_runtime).ok().flatten()?;
     let submitted: HashSet<ObjectId> = plan.combat.pending_damage_splits.keys().copied().collect();
-    let mut missing: Vec<ObjectId> =
-        plan.requires_assignment.iter().copied().filter(|id| !submitted.contains(id)).collect();
+    let mut missing: Vec<ObjectId> = plan
+        .requires_assignment
+        .iter()
+        .copied()
+        .filter(|id| !submitted.contains(id))
+        .collect();
     missing.sort();
     let chooser = *plan.required_actor_by_id.get(missing.first()?)?;
     let entries = missing
         .into_iter()
         .filter(|id| plan.required_actor_by_id.get(id) == Some(&chooser))
         .map(|source| {
-            let power = effective_power(state, script_runtime, source).map_or(0, |p| p.max(0) as u32);
+            let power =
+                effective_power(state, script_runtime, source).map_or(0, |p| p.max(0) as u32);
             match plan.blockers_by_attacker.get(&source) {
                 Some(blockers) => DamageSplitEntry {
                     source,
@@ -105,13 +137,23 @@ pub(crate) fn damage_split_entries(
                     recipients: blockers.clone(),
                     spill: effective_keywords(state, script_runtime, source)
                         .contains(KeywordSet::TRAMPLE)
-                        .then(|| plan.combat.attackers.iter().find(|(id, _)| *id == source).map(|(_, target)| *target))
+                        .then(|| {
+                            plan.combat
+                                .attackers
+                                .iter()
+                                .find(|(id, _)| *id == source)
+                                .map(|(_, target)| *target)
+                        })
                         .flatten(),
                 },
                 None => DamageSplitEntry {
                     source,
                     power,
-                    recipients: plan.attackers_by_blocker.get(&source).cloned().unwrap_or_default(),
+                    recipients: plan
+                        .attackers_by_blocker
+                        .get(&source)
+                        .cloned()
+                        .unwrap_or_default(),
                     spill: None,
                 },
             }

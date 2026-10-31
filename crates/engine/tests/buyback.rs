@@ -25,11 +25,13 @@
 //! permanent_entry`'s normal-resolution path, not `resolve/mod.rs`'s
 //! CR 608.2b fizzle branch.
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+};
 
 /// "Test Buyback Bolt": `{1}{R}` instant, targets a creature, with a
 /// buyback cost of a bare `{2}`.
@@ -56,13 +58,26 @@ fn bolt_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_buyback_bolt".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: Some(CardTypeSet::CREATURE),
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
-        buyback_cost: Some(ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(2))] }),
+        buyback_cost: Some(ManaCost {
+            symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(2))],
+        }),
         effect: Some(AbilityEffect::Damage(3)),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -72,14 +87,19 @@ fn bolt_definition() -> CardDefinition {
 /// A plain `{1}{R}` instant with no buyback cost at all - for the rejection
 /// test.
 fn no_buyback_bolt_definition() -> CardDefinition {
-    CardDefinition { buyback_cost: None, ..bolt_definition() }
+    CardDefinition {
+        buyback_cost: None,
+        ..bolt_definition()
+    }
 }
 
 fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Bear".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -108,27 +128,66 @@ fn two_player_state(pool: ManaPool) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![PlayerState { mana_pool: pool, ..player_state(p0) }, player_state(p1)],
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile]))
+        players: vec![
+            PlayerState {
+                mana_pool: pool,
+                ..player_state(p0)
+            },
+            player_state(p1),
+        ],
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>, pay_buyback: bool) {
+fn cast_spell(
+    engine: &mut Engine,
+    player: PlayerId,
+    card: ObjectId,
+    targets: Vec<Target>,
+    pay_buyback: bool,
+) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None, pay_buyback },
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
-fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>, pay_buyback: bool) -> Result<(), ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None, pay_buyback },
-        })
-        
+fn try_cast_spell(
+    engine: &mut Engine,
+    player: PlayerId,
+    card: ObjectId,
+    targets: Vec<Target>,
+    pay_buyback: bool,
+) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::CastSpell {
+            card,
+            modes: Vec::new(),
+            targets,
+            x_value: None,
+            alternative_cost: None,
+            pay_buyback,
+        },
+    })
 }
 
 /// Finds the `ZoneChange` whose origin is the stack - i.e. the resolving
@@ -136,7 +195,13 @@ fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets
 /// creature death) that might also land in the ledger.
 fn stack_departure(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange { object, from: ZoneKind::Stack, to, .. } = event.kind {
+        if let GameEventKind::ZoneChange {
+            object,
+            from: ZoneKind::Stack,
+            to,
+            ..
+        } = event.kind
+        {
             return (object, ZoneKind::Stack, to);
         }
     }
@@ -144,9 +209,19 @@ fn stack_departure(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
 }
 
 fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -158,11 +233,27 @@ fn cast_without_paying_buyback_resolves_to_graveyard_as_normal() {
     let p1 = PlayerId(1);
     let creature = ObjectId(0);
     let card = ObjectId(1);
-    let mut state = two_player_state(ManaPool { red: 1, colorless: 1, ..ManaPool::default() });
-    state.objects.insert(creature, card_object(creature, creature_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
-    state.objects.insert(card, card_object(card, bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mut state = two_player_state(ManaPool {
+        red: 1,
+        colorless: 1,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        creature,
+        card_object(creature, creature_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
+    state.objects.insert(
+        card,
+        card_object(card, bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], false);
@@ -171,14 +262,26 @@ fn cast_without_paying_buyback_resolves_to_graveyard_as_normal() {
 
     let units = vec![ManaUnit::Colored(Color::Red), ManaUnit::Colorless];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units,
+                phyrexian_life: 0,
+            }],
+        })
         .expect("{1}{R} paid with 1 red + 1 generic - buyback not paid, so no extra {2} owed");
     drain(&mut engine);
     pass_both(&mut engine, p0, p1);
 
     let (new_id, from, to) = stack_departure(&engine);
     assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard));
-    assert!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.contains(&new_id));
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .contains(&new_id)
+    );
 }
 
 /// Paying buyback enforces the combined `{1}{R}` + `{2}` cost, and the spell
@@ -189,11 +292,27 @@ fn cast_paying_buyback_returns_to_hand_on_resolution() {
     let p1 = PlayerId(1);
     let creature = ObjectId(0);
     let card = ObjectId(1);
-    let mut state = two_player_state(ManaPool { red: 1, colorless: 3, ..ManaPool::default() });
-    state.objects.insert(creature, card_object(creature, creature_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
-    state.objects.insert(card, card_object(card, bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mut state = two_player_state(ManaPool {
+        red: 1,
+        colorless: 3,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        creature,
+        card_object(creature, creature_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
+    state.objects.insert(
+        card,
+        card_object(card, bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], true);
@@ -201,23 +320,55 @@ fn cast_paying_buyback_returns_to_hand_on_resolution() {
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }));
 
     // {1}{R} (mana cost) + {2} (buyback) = {3}{R} total: 1 red + 3 generic.
-    let units = vec![ManaUnit::Colored(Color::Red), ManaUnit::Colorless, ManaUnit::Colorless, ManaUnit::Colorless];
+    let units = vec![
+        ManaUnit::Colored(Color::Red),
+        ManaUnit::Colorless,
+        ManaUnit::Colorless,
+        ManaUnit::Colorless,
+    ];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units,
+                phyrexian_life: 0,
+            }],
+        })
         .expect("the combined {3}{R} cost is payable with 1 red + 3 generic");
     drain(&mut engine);
     pass_both(&mut engine, p0, p1);
 
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "no combat/direct damage to p0");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "no combat/direct damage to p0"
+    );
     assert_eq!(
         engine.state().object(creature).map(|o| o.damage_marked),
         Some(3),
         "the spell's own effect still resolved normally"
     );
     let (new_id, from, to) = stack_departure(&engine);
-    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Hand), "bought back - returns to hand, not the graveyard");
-    assert!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.contains(&new_id));
-    assert!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty());
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Stack, ZoneKind::Hand),
+        "bought back - returns to hand, not the graveyard"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Hand, Some(p0))
+            .unwrap()
+            .contents
+            .contains(&new_id)
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .is_empty()
+    );
 }
 
 /// Paying an insufficient amount for the combined cost is rejected the same
@@ -228,11 +379,27 @@ fn underpaying_the_combined_buyback_cost_is_rejected() {
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
     let card = ObjectId(1);
-    let mut state = two_player_state(ManaPool { red: 1, colorless: 3, ..ManaPool::default() });
-    state.objects.insert(creature, card_object(creature, creature_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
-    state.objects.insert(card, card_object(card, bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mut state = two_player_state(ManaPool {
+        red: 1,
+        colorless: 3,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        creature,
+        card_object(creature, creature_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
+    state.objects.insert(
+        card,
+        card_object(card, bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], true);
@@ -241,7 +408,12 @@ fn underpaying_the_combined_buyback_cost_is_rejected() {
     // Only the bare {1}{R} - missing the {2} buyback component.
     let units = vec![ManaUnit::Colored(Color::Red), ManaUnit::Colorless];
     let err = engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units,
+                phyrexian_life: 0,
+            }],
+        })
         .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
 }
@@ -253,16 +425,40 @@ fn pay_buyback_on_a_card_with_no_buyback_cost_is_rejected() {
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
     let card = ObjectId(1);
-    let mut state = two_player_state(ManaPool { red: 1, colorless: 1, ..ManaPool::default() });
-    state.objects.insert(creature, card_object(creature, creature_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
-    state.objects.insert(card, card_object(card, no_buyback_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mut state = two_player_state(ManaPool {
+        red: 1,
+        colorless: 1,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        creature,
+        card_object(creature, creature_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
+    state.objects.insert(
+        card,
+        card_object(card, no_buyback_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], true).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "card untouched");
+    let err =
+        try_cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], true).unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert_eq!(
+        engine.state().object(card).unwrap().zone,
+        ZoneKind::Hand,
+        "card untouched"
+    );
     assert!(engine.state().stack.is_empty(), "never pushed");
 }
 
@@ -275,34 +471,86 @@ fn a_fizzled_bought_back_spell_still_goes_to_the_graveyard() {
     let p1 = PlayerId(1);
     let creature = ObjectId(0);
     let card = ObjectId(1);
-    let mut state = two_player_state(ManaPool { red: 1, colorless: 3, ..ManaPool::default() });
-    state.objects.insert(creature, card_object(creature, creature_definition(), p1, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
-    state.objects.insert(card, card_object(card, bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mut state = two_player_state(ManaPool {
+        red: 1,
+        colorless: 3,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        creature,
+        card_object(creature, creature_definition(), p1, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
+    state.objects.insert(
+        card,
+        card_object(card, bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], true);
     drain(&mut engine);
-    let units = vec![ManaUnit::Colored(Color::Red), ManaUnit::Colorless, ManaUnit::Colorless, ManaUnit::Colorless];
+    let units = vec![
+        ManaUnit::Colored(Color::Red),
+        ManaUnit::Colorless,
+        ManaUnit::Colorless,
+        ManaUnit::Colorless,
+    ];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units,
+                phyrexian_life: 0,
+            }],
+        })
         .unwrap();
     drain(&mut engine);
 
     // Target leaves the battlefield before this resolves - same technique
     // flashback_alternative_costs.rs's own fizzle test uses.
-    engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(creature);
+    engine
+        .state_mut()
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .remove(creature);
     engine.state_mut().objects.remove(&creature);
 
     let status = pass_both(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    let fizzled = engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. }));
+    let fizzled = engine
+        .state()
+        .ledger
+        .iter()
+        .any(|e| matches!(e.kind, GameEventKind::Fizzled { .. }));
     assert!(fizzled, "expected a Fizzled event");
 
     let (new_id, from, to) = stack_departure(&engine);
-    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard), "buyback doesn't apply to a fizzled spell");
-    assert!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.contains(&new_id));
-    assert!(!engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.contains(&new_id));
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Stack, ZoneKind::Graveyard),
+        "buyback doesn't apply to a fizzled spell"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .contains(&new_id)
+    );
+    assert!(
+        !engine
+            .state()
+            .zone(ZoneKind::Hand, Some(p0))
+            .unwrap()
+            .contents
+            .contains(&new_id)
+    );
 }

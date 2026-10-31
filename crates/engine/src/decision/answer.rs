@@ -20,7 +20,12 @@ impl Engine {
     pub fn open_decision(&mut self) -> Option<Decision> {
         let described = open::describe(self)?;
         let id = self.decisions.open_id();
-        Some(Decision { id, player: described.player, mechanic: described.mechanic, shape: described.shape })
+        Some(Decision {
+            id,
+            player: described.player,
+            mechanic: described.mechanic,
+            shape: described.shape,
+        })
     }
 
     /// Routes `answer` from `player` to the engine entry point for the open
@@ -33,19 +38,28 @@ impl Engine {
     /// The engine's own validation covers the rest without touching the pause.
     pub fn answer(&mut self, player: PlayerId, answer: Answer) -> Result<(), Rejection> {
         let Some(described) = open::describe(self) else {
-            return Err(Rejection::new(RejectionCode::NotOpen, "no Decision is open"));
+            return Err(Rejection::new(
+                RejectionCode::NotOpen,
+                "no Decision is open",
+            ));
         };
         let open_id = self.decisions.open_id();
         if answer.decision != open_id {
             return Err(Rejection::new(
                 RejectionCode::StaleDecision,
-                format!("Decision {} is not the open Decision, which is {}", answer.decision.0, open_id.0),
+                format!(
+                    "Decision {} is not the open Decision, which is {}",
+                    answer.decision.0, open_id.0
+                ),
             ));
         }
         if player != described.player {
             return Err(Rejection::new(
                 RejectionCode::WrongSeat,
-                format!("Decision {} is for player {}, not player {}", open_id.0, described.player.0, player.0),
+                format!(
+                    "Decision {} is for player {}, not player {}",
+                    open_id.0, described.player.0, player.0
+                ),
             ));
         }
         if !shape_matches(&described.shape, &answer.reply) {
@@ -59,19 +73,29 @@ impl Engine {
         Ok(())
     }
 
-    fn route(&mut self, player: PlayerId, described: Described, reply: Reply) -> Result<(), Rejection> {
+    fn route(
+        &mut self,
+        player: PlayerId,
+        described: Described,
+        reply: Reply,
+    ) -> Result<(), Rejection> {
         let Described { shape, route, .. } = described;
         match (route, reply) {
             (Route::Priority, Reply::Action(action)) => {
                 if action.player != player {
-                    return Err(Rejection::new(RejectionCode::WrongSeat, "the action names a different player"));
+                    return Err(Rejection::new(
+                        RejectionCode::WrongSeat,
+                        "the action names a different player",
+                    ));
                 }
                 let ReplyShape::Action { entries } = &shape else {
                     unreachable!("route and shape come from the same pause");
                 };
                 check::check_action(entries, &action.kind)?;
                 self.submit_action(action).map_err(|e| match e {
-                    ActionError::NotYourTurn => Rejection::new(RejectionCode::WrongSeat, "it is not your priority"),
+                    ActionError::NotYourTurn => {
+                        Rejection::new(RejectionCode::WrongSeat, "it is not your priority")
+                    }
                     other => invalid(other),
                 })
             }
@@ -80,66 +104,97 @@ impl Engine {
                     unreachable!("route and shape come from the same pause");
                 };
                 check::check_attackers(entries, &attackers)?;
-                self.submit_action(PlayerAction::new(player, PlayerActionKind::DeclareAttackers { attackers }))
-                    .map_err(invalid)
+                self.submit_action(PlayerAction::new(
+                    player,
+                    PlayerActionKind::DeclareAttackers { attackers },
+                ))
+                .map_err(invalid)
             }
             (Route::DeclareBlockers, Reply::DeclareBlockers(blocks)) => {
                 let ReplyShape::DeclareBlockers { blockers } = &shape else {
                     unreachable!("route and shape come from the same pause");
                 };
                 check::check_blockers(blockers, &blocks)?;
-                self.submit_action(PlayerAction::new(player, PlayerActionKind::DeclareBlockers { blocks }))
-                    .map_err(invalid)
+                self.submit_action(PlayerAction::new(
+                    player,
+                    PlayerActionKind::DeclareBlockers { blocks },
+                ))
+                .map_err(invalid)
             }
             (Route::AssignDamage, Reply::AssignDamage(assignments)) => {
                 let ReplyShape::AssignDamage { splits } = &shape else {
                     unreachable!("route and shape come from the same pause");
                 };
                 check::check_splits(splits, &assignments)?;
-                self.submit_action(PlayerAction::new(player, PlayerActionKind::AssignCombatDamage { assignments }))
-                    .map_err(invalid)
+                self.submit_action(PlayerAction::new(
+                    player,
+                    PlayerActionKind::AssignCombatDamage { assignments },
+                ))
+                .map_err(invalid)
             }
 
             (Route::Mulligan, Reply::YesNo(take_mulligan)) => {
-                let kind = if take_mulligan { PlayerActionKind::TakeMulligan } else { PlayerActionKind::KeepHand };
-                self.submit_mulligan_decision(PlayerAction::new(player, kind)).map_err(invalid)
+                let kind = if take_mulligan {
+                    PlayerActionKind::TakeMulligan
+                } else {
+                    PlayerActionKind::KeepHand
+                };
+                self.submit_mulligan_decision(PlayerAction::new(player, kind))
+                    .map_err(invalid)
             }
             (Route::BottomCards, Reply::Pick(chosen)) => {
                 let cards = pick_objects(&shape, &chosen)?;
-                self.submit_bottom_cards(PlayerAction::new(player, PlayerActionKind::BottomCards { cards }))
-                    .map_err(invalid)
+                self.submit_bottom_cards(PlayerAction::new(
+                    player,
+                    PlayerActionKind::BottomCards { cards },
+                ))
+                .map_err(invalid)
             }
             (Route::CleanupDiscard, Reply::Pick(chosen)) => {
                 let cards = pick_objects(&shape, &chosen)?;
                 self.submit_discard(cards).map_err(invalid)
             }
 
-            (Route::Payment, Reply::Payment(Some(plan))) => self.submit_payment(plan).map_err(invalid),
-            (Route::Payment, Reply::Payment(None)) => self.unwind_payment().map_err(invalid),
-            (Route::UnlessPaid, Reply::Payment(Some(plan))) => {
-                self.submit_unless_paid_payment(player, plan).map_err(invalid)
+            (Route::Payment, Reply::Payment(Some(plan))) => {
+                self.submit_payment(plan).map_err(invalid)
             }
-            (Route::UnlessPaid, Reply::Payment(None)) => self.decline_unless_paid(player).map_err(invalid),
+            (Route::Payment, Reply::Payment(None)) => self.unwind_payment().map_err(invalid),
+            (Route::UnlessPaid, Reply::Payment(Some(plan))) => self
+                .submit_unless_paid_payment(player, plan)
+                .map_err(invalid),
+            (Route::UnlessPaid, Reply::Payment(None)) => {
+                self.decline_unless_paid(player).map_err(invalid)
+            }
 
             (Route::Madness, Reply::MayCast(None)) => self.decline_madness_cast().map_err(invalid),
-            (Route::Madness, Reply::MayCast(Some(cast))) => {
-                self.submit_madness_cast(cast.modes, cast.targets, cast.x_value).map_err(madness_error)
-            }
+            (Route::Madness, Reply::MayCast(Some(cast))) => self
+                .submit_madness_cast(cast.modes, cast.targets, cast.x_value)
+                .map_err(madness_error),
             (Route::Cascade, Reply::MayCast(None)) => self.decline_cascade_cast().map_err(invalid),
-            (Route::Cascade, Reply::MayCast(Some(cast))) => {
-                self.submit_cascade_cast(cast.modes, cast.targets, cast.x_value).map_err(cascade_error)
+            (Route::Cascade, Reply::MayCast(Some(cast))) => self
+                .submit_cascade_cast(cast.modes, cast.targets, cast.x_value)
+                .map_err(cascade_error),
+
+            (Route::CommanderReturn, Reply::YesNo(returned)) => self
+                .submit_commander_return_choice(returned)
+                .map_err(invalid),
+            (Route::ScriptMay, Reply::YesNo(chosen)) => {
+                self.submit_script_may_choice(chosen).map_err(invalid)
             }
 
-            (Route::CommanderReturn, Reply::YesNo(returned)) => {
-                self.submit_commander_return_choice(returned).map_err(invalid)
+            (Route::SpellMode, Reply::Modes(modes)) => {
+                self.submit_mode_choice(modes).map_err(invalid)
             }
-            (Route::ScriptMay, Reply::YesNo(chosen)) => self.submit_script_may_choice(chosen).map_err(invalid),
+            (Route::TriggerMode, Reply::Modes(modes)) => {
+                self.submit_trigger_mode_choice(modes).map_err(invalid)
+            }
 
-            (Route::SpellMode, Reply::Modes(modes)) => self.submit_mode_choice(modes).map_err(invalid),
-            (Route::TriggerMode, Reply::Modes(modes)) => self.submit_trigger_mode_choice(modes).map_err(invalid),
-
-            (Route::Scry, Reply::Partition { top, rest }) => self.submit_scry_choice(top, rest).map_err(invalid),
-            (Route::Surveil, Reply::Partition { top, rest }) => self.submit_surveil_choice(top, rest).map_err(invalid),
+            (Route::Scry, Reply::Partition { top, rest }) => {
+                self.submit_scry_choice(top, rest).map_err(invalid)
+            }
+            (Route::Surveil, Reply::Partition { top, rest }) => {
+                self.submit_surveil_choice(top, rest).map_err(invalid)
+            }
 
             (Route::TriggerOrder(group), Reply::Order(indices)) => {
                 let order = order_from_indices(&group, &indices)?;
@@ -152,10 +207,15 @@ impl Engine {
                 if per_word.len() != candidates.len() {
                     return Err(Rejection::new(
                         RejectionCode::InvalidChoice,
-                        format!("expected {} target lists, got {}", candidates.len(), per_word.len()),
+                        format!(
+                            "expected {} target lists, got {}",
+                            candidates.len(),
+                            per_word.len()
+                        ),
                     ));
                 }
-                self.submit_trigger_targets(per_word.into_iter().flatten().collect()).map_err(invalid)
+                self.submit_trigger_targets(per_word.into_iter().flatten().collect())
+                    .map_err(invalid)
             }
 
             (Route::ReplacementChoice, Reply::Pick(chosen)) => {
@@ -193,21 +253,21 @@ impl Engine {
                 let copied = pick_objects(&shape, &chosen)?.first().copied();
                 self.submit_copy_choice(copied).map_err(invalid)
             }
-            (Route::Devour, Reply::Pick(chosen)) => {
-                self.submit_devour_choice(pick_objects(&shape, &chosen)?).map_err(invalid)
-            }
-            (Route::Amplify, Reply::Pick(chosen)) => {
-                self.submit_amplify_choice(pick_objects(&shape, &chosen)?).map_err(invalid)
-            }
-            (Route::SearchDevour, Reply::Pick(chosen)) => {
-                self.submit_search_devour_choice(pick_objects(&shape, &chosen)?).map_err(invalid)
-            }
-            (Route::SearchAmplify, Reply::Pick(chosen)) => {
-                self.submit_search_amplify_choice(pick_objects(&shape, &chosen)?).map_err(invalid)
-            }
-            (Route::Search, Reply::Pick(chosen)) => {
-                self.submit_search_choice(pick_objects(&shape, &chosen)?).map_err(invalid)
-            }
+            (Route::Devour, Reply::Pick(chosen)) => self
+                .submit_devour_choice(pick_objects(&shape, &chosen)?)
+                .map_err(invalid),
+            (Route::Amplify, Reply::Pick(chosen)) => self
+                .submit_amplify_choice(pick_objects(&shape, &chosen)?)
+                .map_err(invalid),
+            (Route::SearchDevour, Reply::Pick(chosen)) => self
+                .submit_search_devour_choice(pick_objects(&shape, &chosen)?)
+                .map_err(invalid),
+            (Route::SearchAmplify, Reply::Pick(chosen)) => self
+                .submit_search_amplify_choice(pick_objects(&shape, &chosen)?)
+                .map_err(invalid),
+            (Route::Search, Reply::Pick(chosen)) => self
+                .submit_search_choice(pick_objects(&shape, &chosen)?)
+                .map_err(invalid),
 
             // `shape_matches` already confirmed the reply variant fits the
             // shape, and each route has exactly one shape.
@@ -228,8 +288,14 @@ fn shape_matches(shape: &ReplyShape, reply: &Reply) -> bool {
             | (ReplyShape::Targets { .. }, Reply::Targets(_))
             | (ReplyShape::MayCast { .. }, Reply::MayCast(_))
             | (ReplyShape::Action { .. }, Reply::Action(_))
-            | (ReplyShape::DeclareAttackers { .. }, Reply::DeclareAttackers(_))
-            | (ReplyShape::DeclareBlockers { .. }, Reply::DeclareBlockers(_))
+            | (
+                ReplyShape::DeclareAttackers { .. },
+                Reply::DeclareAttackers(_)
+            )
+            | (
+                ReplyShape::DeclareBlockers { .. },
+                Reply::DeclareBlockers(_)
+            )
             | (ReplyShape::AssignDamage { .. }, Reply::AssignDamage(_))
     )
 }
@@ -258,23 +324,37 @@ fn cascade_error(error: CascadeChoiceError) -> Rejection {
 // choice. The `NotAwaiting*`, `NotCurrentPlayer` and `WrongPlayer` variants
 // cannot occur because the open pause and the player were already confirmed.
 fn invalid<E: Debug>(error: E) -> Rejection {
-    Rejection::new(RejectionCode::InvalidChoice, format!("the engine rejected the answer: {error:?}"))
+    Rejection::new(
+        RejectionCode::InvalidChoice,
+        format!("the engine rejected the answer: {error:?}"),
+    )
 }
 
 fn not_a_candidate() -> Rejection {
-    Rejection::new(RejectionCode::InvalidChoice, "the reply names something that is not a candidate")
+    Rejection::new(
+        RejectionCode::InvalidChoice,
+        "the reply names something that is not a candidate",
+    )
 }
 
 /// A Pick reply holds between `min` and `max` entries, each a listed
 /// candidate, with no entry twice.
 fn check_pick(shape: &ReplyShape, chosen: &[Candidate]) -> Result<(), Rejection> {
-    let ReplyShape::Pick { candidates, min, max } = shape else {
+    let ReplyShape::Pick {
+        candidates,
+        min,
+        max,
+    } = shape
+    else {
         unreachable!("Pick routes always have a Pick shape");
     };
     if chosen.len() < *min || chosen.len() > *max {
         return Err(Rejection::new(
             RejectionCode::InvalidChoice,
-            format!("expected between {min} and {max} choices, got {}", chosen.len()),
+            format!(
+                "expected between {min} and {max} choices, got {}",
+                chosen.len()
+            ),
         ));
     }
     for (i, choice) in chosen.iter().enumerate() {
@@ -282,7 +362,10 @@ fn check_pick(shape: &ReplyShape, chosen: &[Candidate]) -> Result<(), Rejection>
             return Err(not_a_candidate());
         }
         if chosen[..i].contains(choice) {
-            return Err(Rejection::new(RejectionCode::InvalidChoice, "the reply names the same candidate twice"));
+            return Err(Rejection::new(
+                RejectionCode::InvalidChoice,
+                "the reply names the same candidate twice",
+            ));
         }
     }
     Ok(())
@@ -310,8 +393,16 @@ fn pick_objects(shape: &ReplyShape, chosen: &[Candidate]) -> Result<Vec<ObjectId
 }
 
 /// `indices` must be a permutation of `0..group.len()`.
-fn order_from_indices(group: &[PendingTrigger], indices: &[usize]) -> Result<Vec<PendingTrigger>, Rejection> {
-    let bad = || Rejection::new(RejectionCode::InvalidChoice, "the order must use each index exactly once");
+fn order_from_indices(
+    group: &[PendingTrigger],
+    indices: &[usize],
+) -> Result<Vec<PendingTrigger>, Rejection> {
+    let bad = || {
+        Rejection::new(
+            RejectionCode::InvalidChoice,
+            "the order must use each index exactly once",
+        )
+    };
     if indices.len() != group.len() {
         return Err(bad());
     }

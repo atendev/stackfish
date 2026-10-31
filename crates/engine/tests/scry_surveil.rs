@@ -4,18 +4,20 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use stackfish_engine::engine::{
-    Engine, ScryChoiceError, StepStatus, SurveilChoiceError,
-};
+use stackfish_engine::engine::{Engine, ScryChoiceError, StepStatus, SurveilChoiceError};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 fn library_card_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::LAND,
@@ -40,7 +42,9 @@ fn scry_spell_definition(n: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 30,
         name: "Test Scry Spell".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -65,7 +69,9 @@ fn surveil_spell_definition(n: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 31,
         name: "Test Surveil Spell".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -90,7 +96,11 @@ fn two_player_state(library: Vec<ObjectId>) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let mut zones = hand_battlefield_graveyard_zones(p0, p1);
-    zones.push(Zone { kind: ZoneKind::Library, owner: Some(p0), contents: VecDeque::from(library) });
+    zones.push(Zone {
+        kind: ZoneKind::Library,
+        owner: Some(p0),
+        contents: VecDeque::from(library),
+    });
     zones.push(Zone::new(ZoneKind::Library, Some(p1)));
     GameState {
         step: Step::PreCombatMain,
@@ -108,7 +118,8 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -116,20 +127,44 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
 fn library_order(engine: &Engine, player: PlayerId) -> Vec<ObjectId> {
-    engine.state().zone(ZoneKind::Library, Some(player)).unwrap().contents.iter().copied().collect()
+    engine
+        .state()
+        .zone(ZoneKind::Library, Some(player))
+        .unwrap()
+        .contents
+        .iter()
+        .copied()
+        .collect()
 }
 
 fn scried_events(engine: &Engine) -> Vec<(PlayerId, Vec<ObjectId>, Vec<ObjectId>)> {
@@ -138,9 +173,11 @@ fn scried_events(engine: &Engine) -> Vec<(PlayerId, Vec<ObjectId>, Vec<ObjectId>
         .ledger
         .iter()
         .filter_map(|e| match &e.kind {
-            GameEventKind::CardsScried { player, kept_on_top, put_bottom } => {
-                Some((*player, kept_on_top.clone(), put_bottom.clone()))
-            }
+            GameEventKind::CardsScried {
+                player,
+                kept_on_top,
+                put_bottom,
+            } => Some((*player, kept_on_top.clone(), put_bottom.clone())),
             _ => None,
         })
         .collect()
@@ -152,9 +189,11 @@ fn surveiled_events(engine: &Engine) -> Vec<(PlayerId, Vec<ObjectId>, Vec<Object
         .ledger
         .iter()
         .filter_map(|e| match &e.kind {
-            GameEventKind::CardsSurveiled { player, kept_on_top, put_graveyard } => {
-                Some((*player, kept_on_top.clone(), put_graveyard.clone()))
-            }
+            GameEventKind::CardsSurveiled {
+                player,
+                kept_on_top,
+                put_graveyard,
+            } => Some((*player, kept_on_top.clone(), put_graveyard.clone())),
             _ => None,
         })
         .collect()
@@ -170,10 +209,24 @@ fn scry_two_keep_both_on_top_reorders_in_chosen_order() {
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0, lib1, lib2]);
     for (id, name) in [(lib0, "Lib0"), (lib1, "Lib1"), (lib2, "Lib2")] {
-        state.objects.insert(id, card_object(id, library_card_definition(id.0, name), p0, ZoneKind::Library));
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                library_card_definition(id.0, name),
+                p0,
+                ZoneKind::Library,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, scry_spell_definition(2), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, scry_spell_definition(2), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -186,12 +239,21 @@ fn scry_two_keep_both_on_top_reorders_in_chosen_order() {
     assert_eq!(cards, vec![lib0, lib1], "top 2 cards, front = top");
 
     // Reverse the offered order to prove the chosen order is respected.
-    engine.submit_scry_choice(vec![lib1, lib0], Vec::new()).expect("kept_on_top+put_bottom together are exactly cards");
+    engine
+        .submit_scry_choice(vec![lib1, lib0], Vec::new())
+        .expect("kept_on_top+put_bottom together are exactly cards");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert_eq!(library_order(&engine, p0), vec![lib1, lib0, lib2], "reordered top 2, untouched rest below");
-    assert_eq!(scried_events(&engine), vec![(p0, vec![lib1, lib0], Vec::new())]);
+    assert_eq!(
+        library_order(&engine, p0),
+        vec![lib1, lib0, lib2],
+        "reordered top 2, untouched rest below"
+    );
+    assert_eq!(
+        scried_events(&engine),
+        vec![(p0, vec![lib1, lib0], Vec::new())]
+    );
 }
 
 #[test]
@@ -204,21 +266,44 @@ fn scry_two_put_both_to_bottom_in_chosen_order() {
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0, lib1, lib2]);
     for (id, name) in [(lib0, "Lib0"), (lib1, "Lib1"), (lib2, "Lib2")] {
-        state.objects.insert(id, card_object(id, library_card_definition(id.0, name), p0, ZoneKind::Library));
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                library_card_definition(id.0, name),
+                p0,
+                ZoneKind::Library,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, scry_spell_definition(2), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, scry_spell_definition(2), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    engine.submit_scry_choice(Vec::new(), vec![lib1, lib0]).expect("both to bottom");
+    engine
+        .submit_scry_choice(Vec::new(), vec![lib1, lib0])
+        .expect("both to bottom");
     drain(&mut engine);
 
-    assert_eq!(library_order(&engine, p0), vec![lib2, lib1, lib0], "lib2 was never touched, stays on top; bottom pile in chosen order");
-    assert_eq!(scried_events(&engine), vec![(p0, Vec::new(), vec![lib1, lib0])]);
+    assert_eq!(
+        library_order(&engine, p0),
+        vec![lib2, lib1, lib0],
+        "lib2 was never touched, stays on top; bottom pile in chosen order"
+    );
+    assert_eq!(
+        scried_events(&engine),
+        vec![(p0, Vec::new(), vec![lib1, lib0])]
+    );
 }
 
 #[test]
@@ -231,10 +316,24 @@ fn scry_three_splits_between_top_and_bottom() {
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0, lib1, lib2]);
     for (id, name) in [(lib0, "Lib0"), (lib1, "Lib1"), (lib2, "Lib2")] {
-        state.objects.insert(id, card_object(id, library_card_definition(id.0, name), p0, ZoneKind::Library));
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                library_card_definition(id.0, name),
+                p0,
+                ZoneKind::Library,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, scry_spell_definition(3), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, scry_spell_definition(3), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -245,7 +344,9 @@ fn scry_three_splits_between_top_and_bottom() {
     };
     assert_eq!(cards, vec![lib0, lib1, lib2]);
 
-    engine.submit_scry_choice(vec![lib0], vec![lib1, lib2]).expect("1 top / 2 bottom, exactly partitions cards");
+    engine
+        .submit_scry_choice(vec![lib0], vec![lib1, lib2])
+        .expect("1 top / 2 bottom, exactly partitions cards");
     drain(&mut engine);
 
     assert_eq!(library_order(&engine, p0), vec![lib0, lib1, lib2]);
@@ -258,18 +359,38 @@ fn scry_zero_resolves_synchronously_with_no_pause_or_event() {
     let lib0 = ObjectId(10);
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0]);
-    state.objects.insert(lib0, card_object(lib0, library_card_definition(lib0.0, "Lib0"), p0, ZoneKind::Library));
-    state.objects.insert(card, card_object(card, scry_spell_definition(0), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        lib0,
+        card_object(
+            lib0,
+            library_card_definition(lib0.0, "Lib0"),
+            p0,
+            ZoneKind::Library,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, scry_spell_definition(0), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "CR 701.22b: Scry 0 is a no-op, no pause");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "CR 701.22b: Scry 0 is a no-op, no pause"
+    );
     assert_eq!(library_order(&engine, p0), vec![lib0], "untouched");
-    assert!(scried_events(&engine).is_empty(), "CR 701.22b: no scry event occurs");
+    assert!(
+        scried_events(&engine).is_empty(),
+        "CR 701.22b: no scry event occurs"
+    );
 }
 
 #[test]
@@ -281,10 +402,24 @@ fn scry_n_greater_than_library_size_takes_however_many_exist() {
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0, lib1]);
     for (id, name) in [(lib0, "Lib0"), (lib1, "Lib1")] {
-        state.objects.insert(id, card_object(id, library_card_definition(id.0, name), p0, ZoneKind::Library));
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                library_card_definition(id.0, name),
+                p0,
+                ZoneKind::Library,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, scry_spell_definition(5), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, scry_spell_definition(5), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -295,7 +430,9 @@ fn scry_n_greater_than_library_size_takes_however_many_exist() {
     };
     assert_eq!(cards, vec![lib0, lib1], "only as many as exist, no panic");
 
-    engine.submit_scry_choice(cards, Vec::new()).expect("offering back the exact offered cards");
+    engine
+        .submit_scry_choice(cards, Vec::new())
+        .expect("offering back the exact offered cards");
     drain(&mut engine);
     assert_eq!(library_order(&engine, p0), vec![lib0, lib1]);
 }
@@ -309,10 +446,24 @@ fn submit_scry_choice_rejects_wrong_cards_and_leaves_the_pause_open() {
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0, lib1]);
     for (id, name) in [(lib0, "Lib0"), (lib1, "Lib1")] {
-        state.objects.insert(id, card_object(id, library_card_definition(id.0, name), p0, ZoneKind::Library));
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                library_card_definition(id.0, name),
+                p0,
+                ZoneKind::Library,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, scry_spell_definition(2), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, scry_spell_definition(2), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -320,13 +471,20 @@ fn submit_scry_choice_rejects_wrong_cards_and_leaves_the_pause_open() {
     pass_both_and_drain(&mut engine, p0, p1);
 
     // Missing lib1 entirely - not a valid partition of the offered cards.
-    let err = engine.submit_scry_choice(vec![lib0], Vec::new()).unwrap_err();
+    let err = engine
+        .submit_scry_choice(vec![lib0], Vec::new())
+        .unwrap_err();
     assert!(matches!(err, ScryChoiceError::WrongCards));
 
     // The pause is still open - a subsequent correct answer still works.
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingScryChoice { .. }), "a rejected answer must leave the pause untouched");
-    engine.submit_scry_choice(vec![lib0, lib1], Vec::new()).expect("a correct answer still resumes normally");
+    assert!(
+        matches!(status, StepStatus::AwaitingScryChoice { .. }),
+        "a rejected answer must leave the pause untouched"
+    );
+    engine
+        .submit_scry_choice(vec![lib0, lib1], Vec::new())
+        .expect("a correct answer still resumes normally");
     drain(&mut engine);
     assert_eq!(library_order(&engine, p0), vec![lib0, lib1]);
 }
@@ -338,9 +496,23 @@ fn submit_surveil_choice_rejects_a_pending_scry_pause() {
     let lib0 = ObjectId(10);
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0]);
-    state.objects.insert(lib0, card_object(lib0, library_card_definition(lib0.0, "Lib0"), p0, ZoneKind::Library));
-    state.objects.insert(card, card_object(card, scry_spell_definition(1), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        lib0,
+        card_object(
+            lib0,
+            library_card_definition(lib0.0, "Lib0"),
+            p0,
+            ZoneKind::Library,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, scry_spell_definition(1), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -348,8 +520,13 @@ fn submit_surveil_choice_rejects_a_pending_scry_pause() {
     let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingScryChoice { .. }));
 
-    let err = engine.submit_surveil_choice(vec![lib0], Vec::new()).unwrap_err();
-    assert!(matches!(err, SurveilChoiceError::NotAwaitingChoice), "a Scry pause isn't a Surveil pause");
+    let err = engine
+        .submit_surveil_choice(vec![lib0], Vec::new())
+        .unwrap_err();
+    assert!(
+        matches!(err, SurveilChoiceError::NotAwaitingChoice),
+        "a Scry pause isn't a Surveil pause"
+    );
 }
 
 #[test]
@@ -361,10 +538,24 @@ fn surveil_two_keep_both_on_top_is_a_pure_reorder_no_graveyard_move() {
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0, lib1]);
     for (id, name) in [(lib0, "Lib0"), (lib1, "Lib1")] {
-        state.objects.insert(id, card_object(id, library_card_definition(id.0, name), p0, ZoneKind::Library));
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                library_card_definition(id.0, name),
+                p0,
+                ZoneKind::Library,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, surveil_spell_definition(2), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, surveil_spell_definition(2), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -376,15 +567,27 @@ fn surveil_two_keep_both_on_top_is_a_pure_reorder_no_graveyard_move() {
     assert_eq!(player, p0);
     assert_eq!(cards, vec![lib0, lib1]);
 
-    engine.submit_surveil_choice(vec![lib1, lib0], Vec::new()).expect("both kept on top, reversed order");
+    engine
+        .submit_surveil_choice(vec![lib1, lib0], Vec::new())
+        .expect("both kept on top, reversed order");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert_eq!(library_order(&engine, p0), vec![lib1, lib0], "reordered, still in the library");
+    assert_eq!(
+        library_order(&engine, p0),
+        vec![lib1, lib0],
+        "reordered, still in the library"
+    );
     // The resolved instant (CR 608.2m) also lands in the graveyard, but neither surveiled library card does.
     let graveyard = engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap();
-    assert!(!graveyard.contents.contains(&lib0) && !graveyard.contents.contains(&lib1), "neither kept-on-top card left the library");
-    assert_eq!(surveiled_events(&engine), vec![(p0, vec![lib1, lib0], Vec::new())]);
+    assert!(
+        !graveyard.contents.contains(&lib0) && !graveyard.contents.contains(&lib1),
+        "neither kept-on-top card left the library"
+    );
+    assert_eq!(
+        surveiled_events(&engine),
+        vec![(p0, vec![lib1, lib0], Vec::new())]
+    );
 }
 
 #[test]
@@ -396,59 +599,108 @@ fn surveil_two_to_graveyard_is_a_real_zone_change_with_new_ids() {
     let card = ObjectId(2);
     let mut state = two_player_state(vec![lib0, lib1]);
     for (id, name) in [(lib0, "Lib0"), (lib1, "Lib1")] {
-        state.objects.insert(id, card_object(id, library_card_definition(id.0, name), p0, ZoneKind::Library));
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                library_card_definition(id.0, name),
+                p0,
+                ZoneKind::Library,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, surveil_spell_definition(2), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, surveil_spell_definition(2), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    engine.submit_surveil_choice(Vec::new(), vec![lib0, lib1]).expect("both to graveyard");
+    engine
+        .submit_surveil_choice(Vec::new(), vec![lib0, lib1])
+        .expect("both to graveyard");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(library_order(&engine, p0).is_empty(), "both cards left the library");
-    assert!(engine.state().object(lib0).is_none(), "old id retired (CR 400.7)");
-    assert!(engine.state().object(lib1).is_none(), "old id retired (CR 400.7)");
+    assert!(
+        library_order(&engine, p0).is_empty(),
+        "both cards left the library"
+    );
+    assert!(
+        engine.state().object(lib0).is_none(),
+        "old id retired (CR 400.7)"
+    );
+    assert!(
+        engine.state().object(lib1).is_none(),
+        "old id retired (CR 400.7)"
+    );
 
     // 3 and not 2: the resolved instant (CR 608.2m) also lands in the owner's graveyard.
     let graveyard = engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap();
-    assert_eq!(graveyard.contents.len(), 3, "both surveiled cards, plus the resolved instant itself");
+    assert_eq!(
+        graveyard.contents.len(),
+        3,
+        "both surveiled cards, plus the resolved instant itself"
+    );
 
     let zone_changes: Vec<_> = engine
         .state()
         .ledger
         .iter()
         .filter_map(|e| match e.kind {
-            GameEventKind::ZoneChange { object, from: ZoneKind::Library, to: ZoneKind::Graveyard, .. } => Some(object),
+            GameEventKind::ZoneChange {
+                object,
+                from: ZoneKind::Library,
+                to: ZoneKind::Graveyard,
+                ..
+            } => Some(object),
             _ => None,
         })
         .collect();
-    assert_eq!(zone_changes.len(), 2, "one real ZoneChange per surveiled-to-graveyard card");
+    assert_eq!(
+        zone_changes.len(),
+        2,
+        "one real ZoneChange per surveiled-to-graveyard card"
+    );
 
     let surveiled = surveiled_events(&engine);
     assert_eq!(surveiled.len(), 1);
     let (player, kept_on_top, put_graveyard) = &surveiled[0];
     assert_eq!(*player, p0);
     assert!(kept_on_top.is_empty());
-    assert_eq!(put_graveyard, &zone_changes, "the summary event's put_graveyard carries the new ids, not the old ones");
+    assert_eq!(
+        put_graveyard, &zone_changes,
+        "the summary event's put_graveyard carries the new ids, not the old ones"
+    );
 }
 
 #[test]
 fn game_ops_scry_decodes_to_the_ability_effect_primitive() {
     let mut runtime = ScriptRuntime::new();
-    let (effect, handle) = runtime.load_operation("return Game.Ops.Scry(3)").expect("primitive loads");
+    let (effect, handle) = runtime
+        .load_operation("return Game.Ops.Scry(3)")
+        .expect("primitive loads");
     assert!(matches!(effect, Some(AbilityEffect::Scry(3))));
-    assert_eq!(handle, ScriptHandle(0), "the operation handle is an unused placeholder when effect is Some");
+    assert_eq!(
+        handle,
+        ScriptHandle(0),
+        "the operation handle is an unused placeholder when effect is Some"
+    );
 }
 
 #[test]
 fn game_ops_surveil_decodes_to_the_ability_effect_primitive() {
     let mut runtime = ScriptRuntime::new();
-    let (effect, handle) = runtime.load_operation("return Game.Ops.Surveil(2)").expect("primitive loads");
+    let (effect, handle) = runtime
+        .load_operation("return Game.Ops.Surveil(2)")
+        .expect("primitive loads");
     assert!(matches!(effect, Some(AbilityEffect::Surveil(2))));
     assert_eq!(handle, ScriptHandle(0));
 }

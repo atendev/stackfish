@@ -11,7 +11,9 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::turn::{Phase, Step};
 
-use super::super::legality::{effective_keywords, effective_power, lethal_damage_needed, participates_in_damage_step};
+use super::super::legality::{
+    effective_keywords, effective_power, lethal_damage_needed, participates_in_damage_step,
+};
 use super::super::{CommandOutcome, Internal, PriorityHandoff, Rejected, Validated};
 
 /// Who takes part in this damage step and which of them need a chosen split
@@ -47,8 +49,7 @@ pub(crate) fn plan_damage_splits<'a>(
         || !matches!(state.step, Step::CombatDamage | Step::FirstStrikeDamage)
     {
         return Err(Rejected::IllegalAction(
-            "combat damage can only be assigned during a combat damage step"
-                .to_string(),
+            "combat damage can only be assigned during a combat damage step".to_string(),
         ));
     }
     let combat = state.combat.as_ref().ok_or_else(|| {
@@ -124,7 +125,10 @@ pub(crate) fn plan_damage_splits<'a>(
     // attacker's damage still has to go somewhere.
     let mut blockers_by_attacker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     for (blocker, attacker) in &alive_blocks {
-        blockers_by_attacker.entry(*attacker).or_default().push(*blocker);
+        blockers_by_attacker
+            .entry(*attacker)
+            .or_default()
+            .push(*blocker);
     }
     // Scoped to attackers that participate this step (alive and step-eligible): a
     // dead or step-ineligible attacker deals no damage, so it needs no split.
@@ -148,10 +152,16 @@ pub(crate) fn plan_damage_splits<'a>(
     // deals damage this step can need one.
     let mut attackers_by_blocker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     for (blocker, attacker) in &blocks {
-        attackers_by_blocker.entry(*blocker).or_default().push(*attacker);
+        attackers_by_blocker
+            .entry(*blocker)
+            .or_default()
+            .push(*attacker);
     }
     requires_assignment.extend(
-        attackers_by_blocker.iter().filter(|(_, attackers)| attackers.len() >= 2).map(|(blocker, _)| *blocker),
+        attackers_by_blocker
+            .iter()
+            .filter(|(_, attackers)| attackers.len() >= 2)
+            .map(|(blocker, _)| *blocker),
     );
 
     // CR 702.22j/k
@@ -161,26 +171,38 @@ pub(crate) fn plan_damage_splits<'a>(
     // names, as `PlayerActionKind::DeclareBands`'s quality check does.
     let has_bands_with_other_pair = |ids: &[ObjectId]| -> bool {
         ids.iter().any(|x| {
-            let x_characteristics = crate::layers::effective_characteristics(state, script_runtime, *x);
-            let subtype_match = x_characteristics.bands_with_other_subtypes.iter().any(|quality| {
-                ids.iter().any(|y| {
-                    y != x
-                        && crate::layers::effective_characteristics(state, script_runtime, *y)
-                            .subtypes
-                            .contains(quality)
-                })
-            });
+            let x_characteristics =
+                crate::layers::effective_characteristics(state, script_runtime, *x);
+            let subtype_match = x_characteristics
+                .bands_with_other_subtypes
+                .iter()
+                .any(|quality| {
+                    ids.iter().any(|y| {
+                        y != x
+                            && crate::layers::effective_characteristics(state, script_runtime, *y)
+                                .subtypes
+                                .contains(quality)
+                    })
+                });
             // CR 702.22c/j/k
             // The supertype form: the same pairwise check against each candidate's
             // `supertypes` bitset instead of a `Vec<Subtype>`.
-            let supertype_match = x_characteristics.bands_with_other_supertypes.iter().any(|quality| {
-                ids.iter().any(|y| {
-                    y != x
-                        && crate::layers::effective_characteristics(state, script_runtime, *y)
-                            .supertypes
-                            .contains(quality)
-                })
-            });
+            let supertype_match =
+                x_characteristics
+                    .bands_with_other_supertypes
+                    .iter()
+                    .any(|quality| {
+                        ids.iter().any(|y| {
+                            y != x
+                                && crate::layers::effective_characteristics(
+                                    state,
+                                    script_runtime,
+                                    *y,
+                                )
+                                .supertypes
+                                .contains(quality)
+                        })
+                    });
             subtype_match || supertype_match
         })
     };
@@ -194,14 +216,21 @@ pub(crate) fn plan_damage_splits<'a>(
     // active player (702.22k). This also covers a band-forced blocker, since every
     // band has at least one banding member.
     let attacker_defending_player = |attacker: &ObjectId| -> PlayerId {
-        let (_, target) =
-            combat.attackers.iter().find(|(id, _)| id == attacker).expect("attacker is attacking");
+        let (_, target) = combat
+            .attackers
+            .iter()
+            .find(|(id, _)| id == attacker)
+            .expect("attacker is attacking");
         match target {
             Target::Player(pid) => *pid,
-            Target::Object(target_id) => crate::layers::effective_controller(state, script_runtime, *target_id),
+            Target::Object(target_id) => {
+                crate::layers::effective_controller(state, script_runtime, *target_id)
+            }
             // Structurally unreachable: DeclareAttackers already rejects
             // Target::Ability (an attacker never targets an ability).
-            Target::Ability(_) => unreachable!("an attacker's own combat target is never an ability"),
+            Target::Ability(_) => {
+                unreachable!("an attacker's own combat target is never an ability")
+            }
         }
     };
     // CR 510.1c/d/702.22j/k
@@ -211,10 +240,9 @@ pub(crate) fn plan_damage_splits<'a>(
     let mut required_actor_by_id: HashMap<ObjectId, PlayerId> = HashMap::new();
     for id in &requires_assignment {
         let actor_for_id = if let Some(blockers) = blockers_by_attacker.get(id) {
-            let banding_blocker = blockers
-                .iter()
-                .any(|b| effective_keywords(state, script_runtime, *b).contains(KeywordSet::BANDING))
-                || has_bands_with_other_pair(blockers);
+            let banding_blocker = blockers.iter().any(|b| {
+                effective_keywords(state, script_runtime, *b).contains(KeywordSet::BANDING)
+            }) || has_bands_with_other_pair(blockers);
             if banding_blocker {
                 attacker_defending_player(id)
             } else {
@@ -222,11 +250,13 @@ pub(crate) fn plan_damage_splits<'a>(
             }
         } else {
             let attackers_for_blocker = &attackers_by_blocker[id];
-            let banding_attacker = attackers_for_blocker
-                .iter()
-                .find(|a| effective_keywords(state, script_runtime, **a).contains(KeywordSet::BANDING));
+            let banding_attacker = attackers_for_blocker.iter().find(|a| {
+                effective_keywords(state, script_runtime, **a).contains(KeywordSet::BANDING)
+            });
             match banding_attacker {
-                Some(attacker) => crate::layers::effective_controller(state, script_runtime, *attacker),
+                Some(attacker) => {
+                    crate::layers::effective_controller(state, script_runtime, *attacker)
+                }
                 None if has_bands_with_other_pair(attackers_for_blocker) => state.active_player,
                 None => crate::layers::effective_controller(state, script_runtime, *id),
             }
@@ -251,7 +281,9 @@ pub(crate) enum DamagePlan {
     /// This step's damage was already dealt, so a repeat submission does nothing.
     AlreadyAssigned,
     /// This actor's share is recorded while another chooser's share is still missing.
-    Record { assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)> },
+    Record {
+        assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+    },
     /// Every required share is in. The damage events are built and the step is marked done.
     Deal { events: Vec<GameEventKind> },
 }
@@ -278,7 +310,10 @@ pub(crate) fn validate_assign_combat_damage(
     validate_damage(state, script_runtime, actor, assignments).map(Validated::AssignCombatDamage)
 }
 
-pub(crate) fn apply_assign_combat_damage(state: &mut GameState, plan: DamagePlan) -> Result<CommandOutcome, Internal> {
+pub(crate) fn apply_assign_combat_damage(
+    state: &mut GameState,
+    plan: DamagePlan,
+) -> Result<CommandOutcome, Internal> {
     apply_damage(state, plan)
 }
 
@@ -307,8 +342,11 @@ fn validate_damage(
     // more than one player). Cloned so nothing below juggles a `state.combat`
     // borrow beside the `effective_*(state, ...)` calls.
     let already_submitted = combat.pending_damage_splits.clone();
-    let still_needed: HashSet<ObjectId> =
-        requires_assignment.iter().copied().filter(|id| !already_submitted.contains_key(id)).collect();
+    let still_needed: HashSet<ObjectId> = requires_assignment
+        .iter()
+        .copied()
+        .filter(|id| !already_submitted.contains_key(id))
+        .collect();
     // This actor's remaining share: not the whole step's `requires_assignment`
     // (which may include ids a different actor chooses) and not ids an earlier call
     // covered.
@@ -358,7 +396,9 @@ fn validate_damage(
         // CR 510.1a
         // Power of 0 or less assigns no damage. Reads effective_power (CR 613 layer 7c)
         // so validation matches the damage amounts computed below.
-        let power = effective_power(state, script_runtime, *id).map(|p| p.max(0) as u32).unwrap_or(0);
+        let power = effective_power(state, script_runtime, *id)
+            .map(|p| p.max(0) as u32)
+            .unwrap_or(0);
 
         if let Some(blockers) = blockers_by_attacker.get(id) {
             let attacker_keywords = effective_keywords(state, script_runtime, *id);
@@ -370,8 +410,7 @@ fn validate_damage(
             for (blocker, amount) in splits {
                 if !blockers.contains(blocker) {
                     return Err(Rejected::IllegalAction(
-                        "a split entry's blocker isn't actually blocking that attacker"
-                            .to_string(),
+                        "a split entry's blocker isn't actually blocking that attacker".to_string(),
                     ));
                 }
                 if seen.contains(blocker) {
@@ -384,8 +423,7 @@ fn validate_damage(
             }
             if seen.len() != blockers.len() {
                 return Err(Rejected::IllegalAction(
-                    "a split must assign an amount (possibly zero) to every blocker"
-                        .to_string(),
+                    "a split must assign an amount (possibly zero) to every blocker".to_string(),
                 ));
             }
             if !has_trample {
@@ -596,8 +634,10 @@ fn apply_damage(state: &mut GameState, plan: DamagePlan) -> Result<CommandOutcom
     let events = match plan {
         DamagePlan::AlreadyAssigned => Vec::new(),
         DamagePlan::Record { assignments } => {
-            let combat =
-                state.combat.as_mut().ok_or_else(|| Internal::new("assign damage: the validated combat is gone"))?;
+            let combat = state
+                .combat
+                .as_mut()
+                .ok_or_else(|| Internal::new("assign damage: the validated combat is gone"))?;
             for (id, splits) in assignments {
                 combat.pending_damage_splits.insert(id, splits);
             }
@@ -608,8 +648,10 @@ fn apply_damage(state: &mut GameState, plan: DamagePlan) -> Result<CommandOutcom
             // submission) hits the no-op guard above and does not deal damage twice. This
             // also clears the consumed accumulator; both reset on the next transition into a
             // damage step (engine/turn.rs).
-            let combat =
-                state.combat.as_mut().ok_or_else(|| Internal::new("assign damage: the validated combat is gone"))?;
+            let combat = state
+                .combat
+                .as_mut()
+                .ok_or_else(|| Internal::new("assign damage: the validated combat is gone"))?;
             combat.damage_assigned_this_step = true;
             combat.pending_damage_splits.clear();
             events

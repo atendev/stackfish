@@ -4,13 +4,15 @@
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -35,7 +37,9 @@ fn aura_definition(script_ref: ScriptReference) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Aura".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -57,22 +61,46 @@ fn aura_definition(script_ref: ScriptReference) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    card_object(id, creature_definition(power, toughness), owner, ZoneKind::Battlefield)
+    card_object(
+        id,
+        creature_definition(power, toughness),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
-fn attached_aura(id: ObjectId, owner: PlayerId, enchanted: ObjectId, script_ref: ScriptReference) -> GameObject {
-    GameObject { attached_to: Some(enchanted), ..card_object(id, aura_definition(script_ref), owner, ZoneKind::Battlefield) }
+fn attached_aura(
+    id: ObjectId,
+    owner: PlayerId,
+    enchanted: ObjectId,
+    script_ref: ScriptReference,
+) -> GameObject {
+    GameObject {
+        attached_to: Some(enchanted),
+        ..card_object(
+            id,
+            aura_definition(script_ref),
+            owner,
+            ZoneKind::Battlefield,
+        )
+    }
 }
 
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    GameState { step: Step::PreCombatMain, ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard])) }
+    GameState {
+        step: Step::PreCombatMain,
+        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
+    }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -93,11 +121,28 @@ fn enchanted_only_matches_only_the_attached_object() {
     let p0 = PlayerId(0);
     let creature_a = creature(ObjectId(1), p0, 2, 2);
     let creature_b = creature(ObjectId(2), p0, 2, 2);
-    let aura = attached_aura(ObjectId(3), p0, ObjectId(1), ScriptReference::ByKey("vanilla".to_string()));
-    let effect = enchanted_effect(ObjectId(3), EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }));
+    let aura = attached_aura(
+        ObjectId(3),
+        p0,
+        ObjectId(1),
+        ScriptReference::ByKey("vanilla".to_string()),
+    );
+    let effect = enchanted_effect(
+        ObjectId(3),
+        EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        }),
+    );
 
-    assert!(effect.applies_to(&creature_a, &aura), "creature A is what the aura is attached to");
-    assert!(!effect.applies_to(&creature_b, &aura), "creature B is a different object entirely");
+    assert!(
+        effect.applies_to(&creature_a, &aura),
+        "creature A is what the aura is attached to"
+    );
+    assert!(
+        !effect.applies_to(&creature_b, &aura),
+        "creature B is a different object entirely"
+    );
 }
 
 #[test]
@@ -105,10 +150,24 @@ fn enchanted_only_matches_nothing_when_the_source_is_unattached() {
     let p0 = PlayerId(0);
     let creature_a = creature(ObjectId(1), p0, 2, 2);
     // A source with attached_to: None, such as an Aura that lost its target before SBA cleaned it up.
-    let unattached = card_object(ObjectId(3), aura_definition(ScriptReference::ByKey("vanilla".to_string())), p0, ZoneKind::Battlefield);
-    let effect = enchanted_effect(ObjectId(3), EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }));
+    let unattached = card_object(
+        ObjectId(3),
+        aura_definition(ScriptReference::ByKey("vanilla".to_string())),
+        p0,
+        ZoneKind::Battlefield,
+    );
+    let effect = enchanted_effect(
+        ObjectId(3),
+        EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        }),
+    );
 
-    assert!(!effect.applies_to(&creature_a, &unattached), "nothing is enchanted, so nothing can match");
+    assert!(
+        !effect.applies_to(&creature_a, &unattached),
+        "nothing is enchanted, so nothing can match"
+    );
 }
 
 #[test]
@@ -120,15 +179,34 @@ fn enchanted_only_applies_through_effective_characteristics() {
     let aura = ObjectId(3);
     put_on_battlefield(&mut state, creature(creature_a, p0, 2, 2));
     put_on_battlefield(&mut state, creature(creature_b, p0, 2, 2));
-    put_on_battlefield(&mut state, attached_aura(aura, p0, creature_a, ScriptReference::ByKey("vanilla".to_string())));
+    put_on_battlefield(
+        &mut state,
+        attached_aura(
+            aura,
+            p0,
+            creature_a,
+            ScriptReference::ByKey("vanilla".to_string()),
+        ),
+    );
     state.continuous_effects.push(enchanted_effect(
         aura,
-        EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
+        EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        }),
     ));
 
     let script_runtime = ScriptRuntime::new();
-    assert_eq!(effective_characteristics(&state, &script_runtime, creature_a).power, Some(3), "enchanted creature gets +1/+1");
-    assert_eq!(effective_characteristics(&state, &script_runtime, creature_b).power, Some(2), "a different creature is untouched");
+    assert_eq!(
+        effective_characteristics(&state, &script_runtime, creature_a).power,
+        Some(3),
+        "enchanted creature gets +1/+1"
+    );
+    assert_eq!(
+        effective_characteristics(&state, &script_runtime, creature_b).power,
+        Some(2),
+        "a different creature is untouched"
+    );
 }
 
 #[test]
@@ -142,11 +220,22 @@ fn invoke_continuous_affects_receives_the_enchanted_argument() {
     let source = ObjectId(1);
     let creature_a = ObjectId(2);
     assert!(
-        runtime.invoke_continuous_affects(handle, &state, creature_a, source, PlayerId(0), Some(creature_a)).unwrap(),
+        runtime
+            .invoke_continuous_affects(
+                handle,
+                &state,
+                creature_a,
+                source,
+                PlayerId(0),
+                Some(creature_a)
+            )
+            .unwrap(),
         "object matches the enchanted id"
     );
     assert!(
-        !runtime.invoke_continuous_affects(handle, &state, creature_a, source, PlayerId(0), None).unwrap(),
+        !runtime
+            .invoke_continuous_affects(handle, &state, creature_a, source, PlayerId(0), None)
+            .unwrap(),
         "nil enchanted (nothing attached) never matches a real object id"
     );
 }
@@ -164,10 +253,26 @@ fn invoke_continuous_effect_receives_the_enchanted_argument() {
         .unwrap();
 
     let state = base_state();
-    let decoded_attached = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), Some(ObjectId(5))).unwrap();
-    assert_eq!(decoded_attached, Some(EffectPrimitive::ModifyPT { power: 9, toughness: 9 }));
-    let decoded_unattached = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
-    assert_eq!(decoded_unattached, Some(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }));
+    let decoded_attached = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), Some(ObjectId(5)))
+        .unwrap();
+    assert_eq!(
+        decoded_attached,
+        Some(EffectPrimitive::ModifyPT {
+            power: 9,
+            toughness: 9
+        })
+    );
+    let decoded_unattached = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .unwrap();
+    assert_eq!(
+        decoded_unattached,
+        Some(EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: 0
+        })
+    );
 }
 
 const SCRIPT_ENCHANTED_ONLY: &str = r#"
@@ -188,13 +293,24 @@ fn run_card_script_self_registers_an_enchanted_only_affects_filter() {
     let p0 = PlayerId(0);
     let aura = ObjectId(3);
     let definition = aura_definition(ScriptReference::Inline(SCRIPT_ENCHANTED_ONLY.to_string()));
-    put_on_battlefield(&mut state, GameObject { attached_to: Some(ObjectId(1)), ..card_object(aura, definition.clone(), p0, ZoneKind::Battlefield) });
+    put_on_battlefield(
+        &mut state,
+        GameObject {
+            attached_to: Some(ObjectId(1)),
+            ..card_object(aura, definition.clone(), p0, ZoneKind::Battlefield)
+        },
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, aura).expect("Register() succeeds with { enchanted_only = true }");
+    runtime
+        .run_card_script(&mut state, &definition, aura)
+        .expect("Register() succeeds with { enchanted_only = true }");
 
     assert_eq!(state.continuous_effects.len(), 1);
-    assert!(matches!(state.continuous_effects[0].affected, AffectedFilter::EnchantedOnly));
+    assert!(matches!(
+        state.continuous_effects[0].affected,
+        AffectedFilter::EnchantedOnly
+    ));
 }
 
 #[test]
@@ -207,13 +323,29 @@ fn scripted_enchanted_only_registration_applies_through_effective_characteristic
     put_on_battlefield(&mut state, creature(creature_a, p0, 2, 2));
     put_on_battlefield(&mut state, creature(creature_b, p0, 2, 2));
     let definition = aura_definition(ScriptReference::Inline(SCRIPT_ENCHANTED_ONLY.to_string()));
-    put_on_battlefield(&mut state, GameObject { attached_to: Some(creature_a), ..card_object(aura, definition.clone(), p0, ZoneKind::Battlefield) });
+    put_on_battlefield(
+        &mut state,
+        GameObject {
+            attached_to: Some(creature_a),
+            ..card_object(aura, definition.clone(), p0, ZoneKind::Battlefield)
+        },
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, aura).expect("Register() succeeds");
+    runtime
+        .run_card_script(&mut state, &definition, aura)
+        .expect("Register() succeeds");
 
-    assert_eq!(effective_characteristics(&state, &runtime, creature_a).power, Some(3), "the enchanted creature is buffed");
-    assert_eq!(effective_characteristics(&state, &runtime, creature_b).power, Some(2), "an unenchanted creature is untouched");
+    assert_eq!(
+        effective_characteristics(&state, &runtime, creature_a).power,
+        Some(3),
+        "the enchanted creature is buffed"
+    );
+    assert_eq!(
+        effective_characteristics(&state, &runtime, creature_b).power,
+        Some(2),
+        "an unenchanted creature is untouched"
+    );
 }
 
 #[test]
@@ -223,7 +355,15 @@ fn state_snapshot_exposes_attached_to_and_attachments() {
     let creature_a = ObjectId(1);
     let aura = ObjectId(3);
     put_on_battlefield(&mut state, creature(creature_a, p0, 2, 2));
-    put_on_battlefield(&mut state, attached_aura(aura, p0, creature_a, ScriptReference::ByKey("vanilla".to_string())));
+    put_on_battlefield(
+        &mut state,
+        attached_aura(
+            aura,
+            p0,
+            creature_a,
+            ScriptReference::ByKey("vanilla".to_string()),
+        ),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let source = "return function(object, source, controller, state) \
@@ -237,7 +377,9 @@ fn state_snapshot_exposes_attached_to_and_attachments() {
     let handle = runtime.load_function(source).unwrap();
 
     assert!(
-        runtime.invoke_continuous_affects(handle, &state, creature_a, aura, p0, Some(creature_a)).unwrap(),
+        runtime
+            .invoke_continuous_affects(handle, &state, creature_a, aura, p0, Some(creature_a))
+            .unwrap(),
         "creature has no attached_to, the aura's own attached_to points at the creature's id"
     );
 }

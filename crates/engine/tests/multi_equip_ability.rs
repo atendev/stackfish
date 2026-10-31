@@ -2,18 +2,22 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 fn creature_definition(id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -39,7 +43,9 @@ fn equipment_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
         name: "Test Dual Equipment".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ARTIFACT,
@@ -70,15 +76,20 @@ fn equip_any(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None,
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
-                supertypes: None, excluded_supertypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
                 controller: Some(FilterController::You),
                 zone: None,
             },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),
@@ -97,15 +108,20 @@ fn equip_dragon(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None,
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: Some(vec![Subtype("Dragon".to_string())]),
-                supertypes: None, excluded_supertypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
                 controller: Some(FilterController::You),
                 zone: None,
             },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),
@@ -120,7 +136,10 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
 
 fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     let id = obj.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, obj);
 }
 
@@ -134,39 +153,74 @@ fn base_state() -> GameState {
     }
 }
 
-fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, ability_index: u32, targets: Vec<Target>) {
+fn activate(
+    engine: &mut Engine,
+    player: PlayerId,
+    source: ObjectId,
+    ability_index: u32,
+    targets: Vec<Target>,
+) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index,
+                targets,
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");
 }
 
-fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, ability_index: u32, targets: Vec<Target>) -> Result<(), ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors: Vec::new(),
+fn try_activate(
+    engine: &mut Engine,
+    player: PlayerId,
+    source: ObjectId,
+    ability_index: u32,
+    targets: Vec<Target>,
+) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::ActivateAbility {
+            source,
+            ability_index,
+            targets,
+            chosen_colors: Vec::new(),
             x_value: None,
-            },
-        })
-        
+        },
+    })
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the ability's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the ability's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -178,8 +232,18 @@ fn either_of_two_equip_abilities_may_be_activated_keeping_its_own_restriction() 
     let bear = ObjectId(0);
     let dragon = ObjectId(1);
     let equipment = ObjectId(2);
-    put_on_battlefield(&mut state, permanent(bear, creature_definition(1, "Test Bear", Vec::new()), p0));
-    put_on_battlefield(&mut state, permanent(dragon, creature_definition(2, "Test Dragon", vec![Subtype("Dragon".to_string())]), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, creature_definition(1, "Test Bear", Vec::new()), p0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            dragon,
+            creature_definition(2, "Test Dragon", vec![Subtype("Dragon".to_string())]),
+            p0,
+        ),
+    );
     put_on_battlefield(&mut state, permanent(equipment, equipment_definition(), p0));
     // Registration order fixes the index: equip_any is 0, equip_dragon is 1.
     state.abilities.push(equip_any(equipment));
@@ -191,18 +255,28 @@ fn either_of_two_equip_abilities_may_be_activated_keeping_its_own_restriction() 
     activate(&mut engine, p0, equipment, 0, vec![Target::Object(bear)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
-    assert_eq!(engine.state().object(equipment).unwrap().attached_to, Some(bear), "index 0's own \"any creature\" restriction should have accepted the bear");
+    assert_eq!(
+        engine.state().object(equipment).unwrap().attached_to,
+        Some(bear),
+        "index 0's own \"any creature\" restriction should have accepted the bear"
+    );
 
     // Index 1 retargets the same Equipment to the Dragon, a separate ability and not index 0 reused.
     activate(&mut engine, p0, equipment, 1, vec![Target::Object(dragon)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
-    assert_eq!(engine.state().object(equipment).unwrap().attached_to, Some(dragon), "index 1 should have reattached to the Dragon it targeted");
+    assert_eq!(
+        engine.state().object(equipment).unwrap().attached_to,
+        Some(dragon),
+        "index 1 should have reattached to the Dragon it targeted"
+    );
 
     // Index 1 rejects the non-Dragon bear, so its own restriction is real.
     let err = try_activate(&mut engine, p0, equipment, 1, vec![Target::Object(bear)]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
-        "\"Equip Dragon\" (index 1) must reject a non-Dragon creature, got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "\"Equip Dragon\" (index 1) must reject a non-Dragon creature, got {err:?}"
+    );
 }
 
 const TWO_EQUIP_ABILITIES: &str = r#"
@@ -227,12 +301,21 @@ fn a_script_can_self_register_two_distinct_equip_abilities_on_one_card() {
     let equipment = ObjectId(0);
     let mut definition = equipment_definition();
     definition.script_ref = ScriptReference::Inline(TWO_EQUIP_ABILITIES.to_string());
-    put_on_battlefield(&mut state, permanent(equipment, definition.clone(), PlayerId(0)));
+    put_on_battlefield(
+        &mut state,
+        permanent(equipment, definition.clone(), PlayerId(0)),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, equipment).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, equipment)
+        .expect("script self-registers cleanly");
 
-    assert_eq!(state.abilities.len(), 2, "both Register() calls must produce their own RegisteredAbility entry");
+    assert_eq!(
+        state.abilities.len(),
+        2,
+        "both Register() calls must produce their own RegisteredAbility entry"
+    );
     assert!(matches!(
         &state.abilities[0].target,
         Some(TargetSpec::Primitive(req)) if matches!(&req.filter, TargetFilter::Object { mana_value: None, subtypes: None, .. })

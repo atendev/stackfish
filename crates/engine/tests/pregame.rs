@@ -7,7 +7,9 @@ fn plain_card_def(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 0,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -35,13 +37,17 @@ fn two_player_config(p0_cards: usize, p1_cards: usize, settings: GameSettings) -
         players: vec![
             PlayerConfig {
                 player_id: p0,
-                library: (0..p0_cards).map(|i| plain_card_def(&format!("p0_card_{i}"))).collect(),
+                library: (0..p0_cards)
+                    .map(|i| plain_card_def(&format!("p0_card_{i}")))
+                    .collect(),
                 commanders: Vec::new(),
                 life_override: None,
             },
             PlayerConfig {
                 player_id: p1,
-                library: (0..p1_cards).map(|i| plain_card_def(&format!("p1_card_{i}"))).collect(),
+                library: (0..p1_cards)
+                    .map(|i| plain_card_def(&format!("p1_card_{i}")))
+                    .collect(),
                 commanders: Vec::new(),
                 life_override: None,
             },
@@ -78,7 +84,10 @@ fn library_size(engine: &Engine, player: PlayerId) -> usize {
 
 #[test]
 fn skip_mulligan_auto_advances_to_beginning() {
-    let settings = GameSettings { skip_mulligan: true, ..GameSettings::default() };
+    let settings = GameSettings {
+        skip_mulligan: true,
+        ..GameSettings::default()
+    };
     let mut engine = Engine::new_game(two_player_config(10, 10, settings));
 
     let status = run_until_pause(&mut engine);
@@ -94,7 +103,10 @@ fn skip_mulligan_auto_advances_to_beginning() {
 
 #[test]
 fn opening_hands_drawn() {
-    let settings = GameSettings { skip_mulligan: true, ..GameSettings::default() };
+    let settings = GameSettings {
+        skip_mulligan: true,
+        ..GameSettings::default()
+    };
     let mut engine = Engine::new_game(two_player_config(10, 10, settings));
     run_until_pause(&mut engine);
 
@@ -131,7 +143,10 @@ fn shuffle_disabled_preserves_library_order() {
 fn life_override_per_player() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    let settings = GameSettings { skip_mulligan: true, ..GameSettings::default() };
+    let settings = GameSettings {
+        skip_mulligan: true,
+        ..GameSettings::default()
+    };
     let config = GameConfig {
         players: vec![
             PlayerConfig {
@@ -160,13 +175,19 @@ fn life_override_per_player() {
 
 #[test]
 fn draw_skip_seeded_for_starting_player() {
-    let settings = GameSettings { skip_mulligan: true, ..GameSettings::default() };
+    let settings = GameSettings {
+        skip_mulligan: true,
+        ..GameSettings::default()
+    };
     let mut engine = Engine::new_game(two_player_config(10, 10, settings));
     run_until_pause(&mut engine);
 
     let p0 = PlayerId(0);
     assert!(
-        engine.state().pending_step_skips.contains(&(p0, Step::Draw)),
+        engine
+            .state()
+            .pending_step_skips
+            .contains(&(p0, Step::Draw)),
         "starting player's draw skip must be seeded by the PreGame→Beginning transition"
     );
 }
@@ -190,7 +211,10 @@ fn keep_advances_to_next_player() {
     run_until_pause(&mut engine);
 
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::KeepHand,
+        })
         .expect("keep should be accepted");
 
     let status = run_until_pause(&mut engine);
@@ -209,7 +233,10 @@ fn keep_wrong_player_rejected() {
     run_until_pause(&mut engine);
 
     let err = engine
-        .submit_mulligan_decision(PlayerAction { player: p1, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap_err();
     assert!(matches!(err, MulliganError::WrongPlayer));
 }
@@ -223,7 +250,10 @@ fn take_mulligan_redraws_and_increments() {
     run_until_pause(&mut engine); // paused at P0
 
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::TakeMulligan })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::TakeMulligan,
+        })
         .expect("mulligan should be accepted");
     run_until_pause(&mut engine); // advance past internal state change, land at P1 (or back to P0)
 
@@ -240,11 +270,17 @@ fn both_keep_immediately_skips_bottoming() {
 
     run_until_pause(&mut engine); // P0 decision
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap();
     run_until_pause(&mut engine); // P1 decision
     engine
-        .submit_mulligan_decision(PlayerAction { player: p1, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap();
     let status = run_until_pause(&mut engine);
 
@@ -261,17 +297,26 @@ fn one_paid_mulligan_requires_bottoming() {
     // P0 mulligans → engine advances to P1's decision
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::TakeMulligan })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::TakeMulligan,
+        })
         .unwrap();
     // P1 keeps → engine advances back to P0 (still !hand_kept)
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p1, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap();
     // P0 keeps their redrawn hand → transition_to_bottoming (1 paid mulligan)
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap();
     let status = run_until_pause(&mut engine);
     assert!(
@@ -289,14 +334,20 @@ fn bottoming_moves_card_to_library() {
     // Drive P0 to take 1 mulligan then keep, P1 keeps
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::TakeMulligan })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::TakeMulligan,
+        })
         .unwrap();
     run_until_pause(&mut engine);
     // handle ordering: keep whoever the engine asks for
     let status = run_until_pause(&mut engine);
     if let StepStatus::AwaitingMulliganDecision { player } = status {
         engine
-            .submit_mulligan_decision(PlayerAction { player, kind: PlayerActionKind::KeepHand })
+            .submit_mulligan_decision(PlayerAction {
+                player,
+                kind: PlayerActionKind::KeepHand,
+            })
             .unwrap();
         let status2 = run_until_pause(&mut engine);
         if let StepStatus::AwaitingMulliganDecision { player: player2 } = status2 {
@@ -311,18 +362,29 @@ fn bottoming_moves_card_to_library() {
     }
 
     // Now at AwaitingBottomCardChoice
-    let hand = engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.clone();
+    let hand = engine
+        .state()
+        .zone(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .contents
+        .clone();
     let card_to_bottom = hand[0];
     let lib_before = library_size(&engine, p0);
 
     engine
         .submit_bottom_cards(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::BottomCards { cards: vec![card_to_bottom] },
+            kind: PlayerActionKind::BottomCards {
+                cards: vec![card_to_bottom],
+            },
         })
         .expect("valid bottom submission");
 
-    assert_eq!(library_size(&engine, p0), lib_before + 1, "library grew by 1");
+    assert_eq!(
+        library_size(&engine, p0),
+        lib_before + 1,
+        "library grew by 1"
+    );
     assert_eq!(hand_size(&engine, p0), 6, "hand shrank by 1");
     // Card is at the very bottom of the library
     let lib = engine.state().zone(ZoneKind::Library, Some(p0)).unwrap();
@@ -340,15 +402,24 @@ fn bottoming_wrong_count_rejected() {
     // Drive to bottoming: P0 mulligans, P1 keeps, P0 keeps
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::TakeMulligan })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::TakeMulligan,
+        })
         .unwrap();
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p1, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap();
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap();
     run_until_pause(&mut engine); // now at AwaitingBottomCardChoice { P0, 1 }
 
@@ -359,34 +430,56 @@ fn bottoming_wrong_count_rejected() {
             kind: PlayerActionKind::BottomCards { cards: vec![] },
         })
         .unwrap_err();
-    assert!(matches!(err, BottomCardsError::WrongCount { expected: 1, got: 0 }));
+    assert!(matches!(
+        err,
+        BottomCardsError::WrongCount {
+            expected: 1,
+            got: 0
+        }
+    ));
 }
 
 #[test]
 fn free_mulligan_skips_bottoming() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    let settings = GameSettings { free_mulligans: 1, ..GameSettings::default() };
+    let settings = GameSettings {
+        free_mulligans: 1,
+        ..GameSettings::default()
+    };
     let mut engine = Engine::new_game(two_player_config(14, 7, settings));
 
     // P0 mulligans once (free) → P1 decision window
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::TakeMulligan })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::TakeMulligan,
+        })
         .unwrap();
     // P1 keeps → back to P0
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p1, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap();
     // P0 keeps their redrawn hand → free mulligan → no bottoming
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::KeepHand,
+        })
         .unwrap();
     let status = run_until_pause(&mut engine);
 
-    assert_eq!(engine.state().phase, Phase::Beginning, "no bottoming when mulligan was free");
+    assert_eq!(
+        engine.state().phase,
+        Phase::Beginning,
+        "no bottoming when mulligan was free"
+    );
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
 }
 
@@ -394,23 +487,35 @@ fn free_mulligan_skips_bottoming() {
 fn max_mulligans_enforced() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    let settings = GameSettings { max_mulligans: Some(1), ..GameSettings::default() };
+    let settings = GameSettings {
+        max_mulligans: Some(1),
+        ..GameSettings::default()
+    };
     let mut engine = Engine::new_game(two_player_config(21, 7, settings));
 
     // P0 takes first (and only allowed) mulligan → engine moves to P1
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::TakeMulligan })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::TakeMulligan,
+        })
         .expect("first mulligan allowed");
     // P1 keeps → back to P0 for their next decision
     run_until_pause(&mut engine);
     engine
-        .submit_mulligan_decision(PlayerAction { player: p1, kind: PlayerActionKind::KeepHand })
+        .submit_mulligan_decision(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::KeepHand,
+        })
         .expect("P1 keep");
     // P0's second decision: TakeMulligan must be rejected (max reached)
     run_until_pause(&mut engine);
     let err = engine
-        .submit_mulligan_decision(PlayerAction { player: p0, kind: PlayerActionKind::TakeMulligan })
+        .submit_mulligan_decision(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::TakeMulligan,
+        })
         .unwrap_err();
     assert!(matches!(err, MulliganError::MaxMulligansReached));
 }
@@ -418,7 +523,10 @@ fn max_mulligans_enforced() {
 #[test]
 fn pass_priority_rejected_during_pregame() {
     let p0 = PlayerId(0);
-    let settings = GameSettings { skip_mulligan: false, ..GameSettings::default() };
+    let settings = GameSettings {
+        skip_mulligan: false,
+        ..GameSettings::default()
+    };
     let mut engine = Engine::new_game(two_player_config(7, 7, settings));
     // Don't run step() yet — engine is in Phase::PreGame, process_state is
     // PriorityWindow initially but step() should bypass it for pregame.
@@ -430,5 +538,8 @@ fn pass_priority_rejected_during_pregame() {
         player: p0,
         kind: PlayerActionKind::PassPriority,
     });
-    assert!(err.is_err(), "submit_action should be rejected during pregame decision window");
+    assert!(
+        err.is_err(),
+        "submit_action should be rejected during pregame decision window"
+    );
 }

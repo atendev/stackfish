@@ -283,11 +283,10 @@ pub fn effective_characteristics(
         if matches!(
             resolve_primitive(effect, state, script_runtime, obj.controller),
             Some(EffectPrimitive::SwitchPT)
-        ) {
-            if let (Some(p), Some(t)) = (power, toughness) {
-                power = Some(t);
-                toughness = Some(p);
-            }
+        ) && let (Some(p), Some(t)) = (power, toughness)
+        {
+            power = Some(t);
+            toughness = Some(p);
         }
     }
 

@@ -60,7 +60,9 @@ pub enum TargetFilter {
     },
     /// "Target player" or "target opponent" (CR 115.1). `None` is any player,
     /// and `controller` is relative to the caster or activator.
-    Player { controller: Option<FilterController> },
+    Player {
+        controller: Option<FilterController>,
+    },
     /// CR 115.4: creature, player, planeswalker or battle.
     /// TODO: planeswalkers and battles are non-goals in DESIGN.md, so their type bits are classified here and nowhere else treats them as permanents
     AnyTarget,

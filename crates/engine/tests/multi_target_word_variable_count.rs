@@ -3,17 +3,21 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: Some(ColorSet::GREEN),
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -38,7 +42,9 @@ fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::LAND,
@@ -60,7 +66,8 @@ fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
 }
 
 fn creature_filter() -> TargetFilter {
-    TargetFilter::Object { mana_value: None,
+    TargetFilter::Object {
+        mana_value: None,
         card_types: Some(CardTypeSet::CREATURE),
         excluded_card_types: None,
         subtypes: None,
@@ -73,7 +80,8 @@ fn creature_filter() -> TargetFilter {
 }
 
 fn land_filter() -> TargetFilter {
-    TargetFilter::Object { mana_value: None,
+    TargetFilter::Object {
+        mana_value: None,
         card_types: Some(CardTypeSet::LAND),
         excluded_card_types: None,
         subtypes: None,
@@ -86,22 +94,42 @@ fn land_filter() -> TargetFilter {
 }
 
 fn up_to_two_creatures_word() -> TargetRequirement {
-    TargetRequirement { filter: creature_filter(), count: 2, up_to: true, at_least: false, exclude_source: false }
+    TargetRequirement {
+        filter: creature_filter(),
+        count: 2,
+        up_to: true,
+        at_least: false,
+        exclude_source: false,
+    }
 }
 
 fn at_least_one_creature_word() -> TargetRequirement {
-    TargetRequirement { filter: creature_filter(), count: 1, up_to: false, at_least: true, exclude_source: false }
+    TargetRequirement {
+        filter: creature_filter(),
+        count: 1,
+        up_to: false,
+        at_least: true,
+        exclude_source: false,
+    }
 }
 
 fn land_word() -> TargetRequirement {
-    TargetRequirement { filter: land_filter(), count: 1, up_to: false, at_least: false, exclude_source: false }
+    TargetRequirement {
+        filter: land_filter(),
+        count: 1,
+        up_to: false,
+        at_least: false,
+        exclude_source: false,
+    }
 }
 
 fn up_to_then_exact_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
         name: "Test Up To Then Exact".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::SORCERY,
@@ -113,7 +141,10 @@ fn up_to_then_exact_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_up_to_then_exact".to_string()),
         keywords: KeywordSet::empty(),
-        target_requirement: Some(TargetSpec::Multiple(vec![up_to_two_creatures_word(), land_word()])),
+        target_requirement: Some(TargetSpec::Multiple(vec![
+            up_to_two_creatures_word(),
+            land_word(),
+        ])),
         alternative_costs: Vec::new(),
         buyback_cost: None,
         effect: Some(AbilityEffect::Destroy),
@@ -126,7 +157,9 @@ fn exact_then_up_to_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
         name: "Test Exact Then Up To".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::SORCERY,
@@ -138,7 +171,10 @@ fn exact_then_up_to_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_exact_then_up_to".to_string()),
         keywords: KeywordSet::empty(),
-        target_requirement: Some(TargetSpec::Multiple(vec![land_word(), up_to_two_creatures_word()])),
+        target_requirement: Some(TargetSpec::Multiple(vec![
+            land_word(),
+            up_to_two_creatures_word(),
+        ])),
         alternative_costs: Vec::new(),
         buyback_cost: None,
         effect: Some(AbilityEffect::Destroy),
@@ -151,7 +187,9 @@ fn at_least_then_exact_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 22,
         name: "Test At Least Then Exact".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::SORCERY,
@@ -163,7 +201,10 @@ fn at_least_then_exact_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_at_least_then_exact".to_string()),
         keywords: KeywordSet::empty(),
-        target_requirement: Some(TargetSpec::Multiple(vec![at_least_one_creature_word(), land_word()])),
+        target_requirement: Some(TargetSpec::Multiple(vec![
+            at_least_one_creature_word(),
+            land_word(),
+        ])),
         alternative_costs: Vec::new(),
         buyback_cost: None,
         effect: Some(AbilityEffect::Destroy),
@@ -173,12 +214,19 @@ fn at_least_then_exact_definition() -> CardDefinition {
 }
 
 fn two_variable_words_definition() -> CardDefinition {
-    let up_to_two_lands_word =
-        TargetRequirement { filter: land_filter(), count: 2, up_to: true, at_least: false, exclude_source: false };
+    let up_to_two_lands_word = TargetRequirement {
+        filter: land_filter(),
+        count: 2,
+        up_to: true,
+        at_least: false,
+        exclude_source: false,
+    };
     CardDefinition {
         definition_id: 23,
         name: "Test Two Variable Words".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::SORCERY,
@@ -190,7 +238,10 @@ fn two_variable_words_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_two_variable_words".to_string()),
         keywords: KeywordSet::empty(),
-        target_requirement: Some(TargetSpec::Multiple(vec![up_to_two_creatures_word(), up_to_two_lands_word])),
+        target_requirement: Some(TargetSpec::Multiple(vec![
+            up_to_two_creatures_word(),
+            up_to_two_lands_word,
+        ])),
         alternative_costs: Vec::new(),
         buyback_cost: None,
         effect: Some(AbilityEffect::Destroy),
@@ -211,7 +262,10 @@ fn two_player_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -219,31 +273,65 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
-fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
-        })
-        
+fn try_cast_spell(
+    engine: &mut Engine,
+    player: PlayerId,
+    card: ObjectId,
+    targets: Vec<Target>,
+) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::CastSpell {
+            card,
+            modes: Vec::new(),
+            targets,
+            x_value: None,
+            alternative_cost: None,
+            pay_buyback: false,
+        },
+    })
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -256,21 +344,69 @@ fn up_to_word_first_claims_the_remainder_after_the_exact_word() {
     let land = ObjectId(2);
     let card = ObjectId(3);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(bear, creature_definition(1, "Bear"), p1, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(wolf, creature_definition(2, "Wolf"), p1, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(land, land_definition(3, "Forest"), p1, ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, up_to_then_exact_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear,
+            creature_definition(1, "Bear"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            wolf,
+            creature_definition(2, "Wolf"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            land,
+            land_definition(3, "Forest"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, up_to_then_exact_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // 2 creatures + 1 land: the up_to word (max 2) claims both creatures and the exact word claims the land.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(land)]);
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![
+            Target::Object(bear),
+            Target::Object(wolf),
+            Target::Object(land),
+        ],
+    );
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(engine.state().object(bear).is_none(), "first up_to target destroyed");
-    assert!(engine.state().object(wolf).is_none(), "second up_to target destroyed");
-    assert!(engine.state().object(land).is_none(), "exact word's own target destroyed");
+    assert!(
+        engine.state().object(bear).is_none(),
+        "first up_to target destroyed"
+    );
+    assert!(
+        engine.state().object(wolf).is_none(),
+        "second up_to target destroyed"
+    );
+    assert!(
+        engine.state().object(land).is_none(),
+        "exact word's own target destroyed"
+    );
 }
 
 #[test]
@@ -280,9 +416,23 @@ fn up_to_word_can_claim_zero() {
     let land = ObjectId(0);
     let card = ObjectId(1);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(land, land_definition(1, "Forest"), p1, ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, up_to_then_exact_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            land,
+            land_definition(1, "Forest"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, up_to_then_exact_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // Only the land submitted - the up_to word legally claims zero.
@@ -290,7 +440,10 @@ fn up_to_word_can_claim_zero() {
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(engine.state().object(land).is_none(), "exact word's own target still destroyed");
+    assert!(
+        engine.state().object(land).is_none(),
+        "exact word's own target still destroyed"
+    );
 }
 
 #[test]
@@ -302,21 +455,69 @@ fn up_to_word_second_still_derives_correctly_regardless_of_position() {
     let land = ObjectId(2);
     let card = ObjectId(3);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(bear, creature_definition(1, "Bear"), p1, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(wolf, creature_definition(2, "Wolf"), p1, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(land, land_definition(3, "Forest"), p1, ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, exact_then_up_to_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear,
+            creature_definition(1, "Bear"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            wolf,
+            creature_definition(2, "Wolf"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            land,
+            land_definition(3, "Forest"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, exact_then_up_to_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // Submitted in word order: land first, then both creatures.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(land), Target::Object(bear), Target::Object(wolf)]);
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![
+            Target::Object(land),
+            Target::Object(bear),
+            Target::Object(wolf),
+        ],
+    );
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(engine.state().object(land).is_none(), "exact word's own target destroyed");
-    assert!(engine.state().object(bear).is_none(), "up_to word's first target destroyed");
-    assert!(engine.state().object(wolf).is_none(), "up_to word's second target destroyed");
+    assert!(
+        engine.state().object(land).is_none(),
+        "exact word's own target destroyed"
+    );
+    assert!(
+        engine.state().object(bear).is_none(),
+        "up_to word's first target destroyed"
+    );
+    assert!(
+        engine.state().object(wolf).is_none(),
+        "up_to word's second target destroyed"
+    );
 }
 
 #[test]
@@ -329,18 +530,58 @@ fn up_to_word_exceeding_its_own_bound_is_rejected() {
     let card = ObjectId(4);
     let mut state = two_player_state();
     for (id, name) in [(bear, "Bear"), (wolf, "Wolf"), (fox, "Fox")] {
-        put_on_battlefield(&mut state, card_object(id, creature_definition(id.0, name), PlayerId(1), ZoneKind::Battlefield));
+        put_on_battlefield(
+            &mut state,
+            card_object(
+                id,
+                creature_definition(id.0, name),
+                PlayerId(1),
+                ZoneKind::Battlefield,
+            ),
+        );
     }
-    put_on_battlefield(&mut state, card_object(land, land_definition(4, "Forest"), PlayerId(1), ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, up_to_then_exact_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            land,
+            land_definition(4, "Forest"),
+            PlayerId(1),
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, up_to_then_exact_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // 3 creatures + 1 land: the derived up_to count is 3, over its max of 2.
-    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox), Target::Object(land)]).unwrap_err();
+    let err = try_cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![
+            Target::Object(bear),
+            Target::Object(wolf),
+            Target::Object(fox),
+            Target::Object(land),
+        ],
+    )
+    .unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
-    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::InvalidTarget)
+    ));
+    assert_eq!(
+        engine.state().object(card).unwrap().zone,
+        ZoneKind::Hand,
+        "state untouched"
+    );
 }
 
 #[test]
@@ -349,16 +590,37 @@ fn at_least_word_below_its_own_bound_is_rejected() {
     let land = ObjectId(0);
     let card = ObjectId(1);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(land, land_definition(1, "Forest"), PlayerId(1), ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, at_least_then_exact_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            land,
+            land_definition(1, "Forest"),
+            PlayerId(1),
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, at_least_then_exact_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // Only the land: the derived at_least count is 0, under its minimum of 1.
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(land)]).unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
-    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::InvalidTarget)
+    ));
+    assert_eq!(
+        engine.state().object(card).unwrap().zone,
+        ZoneKind::Hand,
+        "state untouched"
+    );
 }
 
 #[test]
@@ -370,15 +632,54 @@ fn at_least_word_meeting_its_own_bound_resolves() {
     let land = ObjectId(2);
     let card = ObjectId(3);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(bear, creature_definition(1, "Bear"), p1, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(wolf, creature_definition(2, "Wolf"), p1, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(land, land_definition(3, "Forest"), p1, ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, at_least_then_exact_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear,
+            creature_definition(1, "Bear"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            wolf,
+            creature_definition(2, "Wolf"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            land,
+            land_definition(3, "Forest"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, at_least_then_exact_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // 2 creatures + 1 land: the derived at_least count is 2, satisfying "at least one."
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(land)]);
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![
+            Target::Object(bear),
+            Target::Object(wolf),
+            Target::Object(land),
+        ],
+    );
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
@@ -395,33 +696,75 @@ fn two_variable_words_with_disjoint_filters_resolves_via_filter_assignment() {
     let land = ObjectId(1);
     let card = ObjectId(2);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(bear, creature_definition(1, "Bear"), PlayerId(1), ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(land, land_definition(2, "Forest"), PlayerId(1), ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, two_variable_words_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear,
+            creature_definition(1, "Bear"),
+            PlayerId(1),
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            land,
+            land_definition(2, "Forest"),
+            PlayerId(1),
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, two_variable_words_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // The bear can satisfy only the creature word and the land only the land word.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(land)]);
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![Target::Object(bear), Target::Object(land)],
+    );
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(engine.state().object(bear).is_none(), "the creature word's own target destroyed");
-    assert!(engine.state().object(land).is_none(), "the land word's own target destroyed");
+    assert!(
+        engine.state().object(bear).is_none(),
+        "the creature word's own target destroyed"
+    );
+    assert!(
+        engine.state().object(land).is_none(),
+        "the land word's own target destroyed"
+    );
 }
 
 // Two variable words with the same filter: nothing says which creature goes where, and what matters is whether some split meets both minimums.
 fn two_at_least_two_creatures_definition() -> CardDefinition {
-    let word = TargetRequirement { filter: creature_filter(), count: 2, up_to: false, at_least: true, exclude_source: false };
+    let word = TargetRequirement {
+        filter: creature_filter(),
+        count: 2,
+        up_to: false,
+        at_least: true,
+        exclude_source: false,
+    };
     CardDefinition {
         definition_id: 24,
         name: "Test Two At Least Two Creatures".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::SORCERY,
         subtypes: Vec::new(),
-        oracle_text: "Destroy at least two target creatures and at least two target creatures.".to_string(),
+        oracle_text: "Destroy at least two target creatures and at least two target creatures."
+            .to_string(),
         power: None,
         toughness: None,
         loyalty: None,
@@ -448,19 +791,51 @@ fn two_variable_words_with_overlapping_filters_resolves_when_a_split_exists() {
     let card = ObjectId(4);
     let mut state = two_player_state();
     for (id, name) in [(bear, "Bear"), (wolf, "Wolf"), (fox, "Fox"), (hare, "Hare")] {
-        put_on_battlefield(&mut state, card_object(id, creature_definition(id.0, name), p1, ZoneKind::Battlefield));
+        put_on_battlefield(
+            &mut state,
+            card_object(
+                id,
+                creature_definition(id.0, name),
+                p1,
+                ZoneKind::Battlefield,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, two_at_least_two_creatures_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            two_at_least_two_creatures_definition(),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // 4 creatures: both "at least two" words are satisfied at 2 each though every target fits both.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox), Target::Object(hare)]);
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![
+            Target::Object(bear),
+            Target::Object(wolf),
+            Target::Object(fox),
+            Target::Object(hare),
+        ],
+    );
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
     for id in [bear, wolf, fox, hare] {
-        assert!(engine.state().object(id).is_none(), "every submitted creature was destroyed");
+        assert!(
+            engine.state().object(id).is_none(),
+            "every submitted creature was destroyed"
+        );
     }
 }
 
@@ -473,15 +848,51 @@ fn two_variable_words_with_no_valid_assignment_is_still_rejected() {
     let card = ObjectId(3);
     let mut state = two_player_state();
     for (id, name) in [(bear, "Bear"), (wolf, "Wolf"), (fox, "Fox")] {
-        put_on_battlefield(&mut state, card_object(id, creature_definition(id.0, name), PlayerId(1), ZoneKind::Battlefield));
+        put_on_battlefield(
+            &mut state,
+            card_object(
+                id,
+                creature_definition(id.0, name),
+                PlayerId(1),
+                ZoneKind::Battlefield,
+            ),
+        );
     }
-    state.objects.insert(card, card_object(card, two_at_least_two_creatures_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            two_at_least_two_creatures_definition(),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     // Only 3 creatures cannot meet both minimums (4 total), so it is infeasible and rejected.
-    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox)]).unwrap_err();
+    let err = try_cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![
+            Target::Object(bear),
+            Target::Object(wolf),
+            Target::Object(fox),
+        ],
+    )
+    .unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
-    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::InvalidTarget)
+    ));
+    assert_eq!(
+        engine.state().object(card).unwrap().zone,
+        ZoneKind::Hand,
+        "state untouched"
+    );
 }

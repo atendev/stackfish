@@ -11,11 +11,14 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::object::GameObject;
 use crate::types::stack::StackEntryKind;
-use crate::types::target::{ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement, TargetSpec};
+use crate::types::target::{
+    ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement,
+    TargetSpec,
+};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
-use super::{non_eliminated_players, Rejected};
+use super::{Rejected, non_eliminated_players};
 
 /// CR 117.1a sorcery-speed window: `player` may take a sorcery-speed action
 /// (play a land, cast a sorcery, most activated abilities) only when they hold
@@ -62,7 +65,11 @@ pub(crate) fn has_summoning_sickness(
 /// Returns `KeywordSet::empty()` for a missing `id` where
 /// `effective_characteristics` would panic, since callers reject a missing id
 /// separately with `Rejected::InvalidTarget`.
-pub(crate) fn effective_keywords(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> KeywordSet {
+pub(crate) fn effective_keywords(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    id: ObjectId,
+) -> KeywordSet {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).keywords
     } else {
@@ -75,7 +82,11 @@ pub(crate) fn effective_keywords(state: &GameState, script_runtime: &ScriptRunti
 /// (only Defender's attack check does) must combine this with
 /// `effective_keywords`: the keyword must be present there and absent here. Same
 /// missing-`id` fallback as `effective_keywords`.
-pub(crate) fn ignored_keywords(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> KeywordSet {
+pub(crate) fn ignored_keywords(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    id: ObjectId,
+) -> KeywordSet {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).ignored_keywords
     } else {
@@ -90,8 +101,13 @@ pub(crate) fn ignored_keywords(state: &GameState, script_runtime: &ScriptRuntime
 /// in both steps.
 pub(in crate::commands) fn participates_in_damage_step(keywords: KeywordSet, step: Step) -> bool {
     match step {
-        Step::FirstStrikeDamage => keywords.intersects(KeywordSet::FIRST_STRIKE | KeywordSet::DOUBLE_STRIKE),
-        _ => !keywords.contains(KeywordSet::FIRST_STRIKE) || keywords.contains(KeywordSet::DOUBLE_STRIKE),
+        Step::FirstStrikeDamage => {
+            keywords.intersects(KeywordSet::FIRST_STRIKE | KeywordSet::DOUBLE_STRIKE)
+        }
+        _ => {
+            !keywords.contains(KeywordSet::FIRST_STRIKE)
+                || keywords.contains(KeywordSet::DOUBLE_STRIKE)
+        }
     }
 }
 
@@ -100,7 +116,11 @@ pub(in crate::commands) fn participates_in_damage_step(keywords: KeywordSet, ste
 /// `SetPT` effect, via `layers::effective_characteristics`. `None` for a missing
 /// `id` or an unresolved characteristic-defining base, so callers skip rather
 /// than guess and avoid its panic on a missing id.
-pub(crate) fn effective_power(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> Option<i32> {
+pub(crate) fn effective_power(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    id: ObjectId,
+) -> Option<i32> {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).power
     } else {
@@ -110,7 +130,11 @@ pub(crate) fn effective_power(state: &GameState, script_runtime: &ScriptRuntime,
 
 /// Same as `effective_power` above, for toughness — used by trample's
 /// lethal-damage check (CR 702.19b).
-fn effective_toughness(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> Option<i32> {
+fn effective_toughness(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    id: ObjectId,
+) -> Option<i32> {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).toughness
     } else {
@@ -164,18 +188,22 @@ fn target_has_protection_from(
     let Some(source_obj) = state.object(source) else {
         return false;
     };
-    let target_characteristics = crate::layers::effective_characteristics(state, script_runtime, target_id);
+    let target_characteristics =
+        crate::layers::effective_characteristics(state, script_runtime, target_id);
     if target_characteristics.protection_everything {
         return true;
     }
     if !target_characteristics.protection_players.is_empty() {
         let target_controller = state.object(target_id).map(|o| o.controller);
         if target_controller.is_some_and(|target_controller| {
-            target_characteristics.protection_players.iter().any(|who| match who {
-                FilterController::You => source_obj.controller == target_controller,
-                FilterController::Opponent => source_obj.controller != target_controller,
-                FilterController::Any => false,
-            })
+            target_characteristics
+                .protection_players
+                .iter()
+                .any(|who| match who {
+                    FilterController::You => source_obj.controller == target_controller,
+                    FilterController::Opponent => source_obj.controller != target_controller,
+                    FilterController::Any => false,
+                })
         }) {
             return true;
         }
@@ -187,14 +215,21 @@ fn target_has_protection_from(
     {
         return false;
     }
-    let source_characteristics = crate::layers::effective_characteristics(state, script_runtime, source);
-    target_characteristics.protection_colors.intersects(source_characteristics.colors)
-        || target_characteristics.protection_card_types.intersects(source_characteristics.card_types)
+    let source_characteristics =
+        crate::layers::effective_characteristics(state, script_runtime, source);
+    target_characteristics
+        .protection_colors
+        .intersects(source_characteristics.colors)
+        || target_characteristics
+            .protection_card_types
+            .intersects(source_characteristics.card_types)
         || target_characteristics
             .protection_subtypes
             .iter()
             .any(|s| source_characteristics.subtypes.contains(s))
-        || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name)
+        || target_characteristics
+            .protection_names
+            .contains(&source_characteristics.name)
 }
 
 /// CR 702.11b/702.18a: whether `id` cannot be chosen as a target by a spell or
@@ -218,7 +253,9 @@ fn target_blocked_by_hexproof_or_shroud(
     id: ObjectId,
     caster: PlayerId,
 ) -> bool {
-    let Some(obj) = state.object(id) else { return false };
+    let Some(obj) = state.object(id) else {
+        return false;
+    };
     if obj.zone != ZoneKind::Battlefield {
         return false;
     }
@@ -234,6 +271,7 @@ fn target_blocked_by_hexproof_or_shroud(
 /// activation, trigger candidate scan, CR 608.2b recheck): the filter, the
 /// protection check and the hexproof/shroud check. Attachment legality
 /// that isn't targeting uses `attachment_target_is_legal` instead.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn target_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -244,7 +282,17 @@ pub(crate) fn target_is_legal(
     exclude_source: bool,
     caster_x_value: Option<u32>,
 ) -> bool {
-    target_is_legal_impl(state, script_runtime, target, filter, caster, source, exclude_source, caster_x_value, true)
+    target_is_legal_impl(
+        state,
+        script_runtime,
+        target,
+        filter,
+        caster,
+        source,
+        exclude_source,
+        caster_x_value,
+        true,
+    )
 }
 
 /// `target_is_legal` without the hexproof/shroud check, for "is this a legal
@@ -252,6 +300,7 @@ pub(crate) fn target_is_legal(
 /// rechecks of an attached Aura or Equipment and the CR 303.4f scan for an Aura
 /// entering uncast. An Aura permanent does not target (CR 115.1b), so hexproof
 /// and shroud do not apply. Protection still does (CR 702.16d).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn attachment_target_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -262,7 +311,17 @@ pub(crate) fn attachment_target_is_legal(
     exclude_source: bool,
     caster_x_value: Option<u32>,
 ) -> bool {
-    target_is_legal_impl(state, script_runtime, target, filter, caster, source, exclude_source, caster_x_value, false)
+    target_is_legal_impl(
+        state,
+        script_runtime,
+        target,
+        filter,
+        caster,
+        source,
+        exclude_source,
+        caster_x_value,
+        false,
+    )
 }
 
 /// CR 115/601.2c-e: whether `target` satisfies `filter` against current `state`,
@@ -271,6 +330,7 @@ pub(crate) fn attachment_target_is_legal(
 /// `FilterController::You` and `Opponent` are relative to who casts or activates
 /// and not to the target.
 /// TODO: the zone-change half of CR 608.2b (CR 115.2) is not checked, because this asks only whether the target is legal now; the two coincide for every current filter since an `Object` filter's `zone` is fixed
+#[allow(clippy::too_many_arguments)]
 fn target_is_legal_impl(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -296,7 +356,9 @@ fn target_is_legal_impl(
     }
     match filter {
         TargetFilter::Player { controller } => {
-            let Target::Player(pid) = target else { return false };
+            let Target::Player(pid) = target else {
+                return false;
+            };
             if state.player(pid).is_none() {
                 return false;
             }
@@ -307,9 +369,23 @@ fn target_is_legal_impl(
                 Some(FilterController::Any) => true,
             }
         }
-        TargetFilter::Object { card_types, excluded_card_types, subtypes, excluded_subtypes, supertypes, excluded_supertypes, controller, zone, mana_value } => {
-            let Target::Object(id) = target else { return false };
-            let Some(obj) = state.object(id) else { return false };
+        TargetFilter::Object {
+            card_types,
+            excluded_card_types,
+            subtypes,
+            excluded_subtypes,
+            supertypes,
+            excluded_supertypes,
+            controller,
+            zone,
+            mana_value,
+        } => {
+            let Target::Object(id) = target else {
+                return false;
+            };
+            let Some(obj) = state.object(id) else {
+                return false;
+            };
             if obj.zone != zone.unwrap_or(ZoneKind::Battlefield) {
                 return false;
             }
@@ -318,8 +394,12 @@ fn target_is_legal_impl(
                 // A candidate's mana value uses a real X only on the stack
                 // (`StackObject::x_value`, set at cast time). Every other zone treats `{X}` as
                 // 0, as in `ManaCost::mana_value`.
-                let candidate_x =
-                    state.stack.iter().find(|so| so.stack_id == id).and_then(|so| so.x_value).unwrap_or(0);
+                let candidate_x = state
+                    .stack
+                    .iter()
+                    .find(|so| so.stack_id == id)
+                    .and_then(|so| so.x_value)
+                    .unwrap_or(0);
                 let candidate_mv = obj.definition.mana_cost.resolve_x(candidate_x).mana_value();
                 let bound = match req.bound {
                     ManaValueBound::Fixed(n) => n,
@@ -342,50 +422,50 @@ fn target_is_legal_impl(
                 || excluded_supertypes.is_some()
             {
                 let effective = crate::layers::effective_characteristics(state, script_runtime, id);
-                if let Some(types) = card_types {
-                    if !effective.card_types.intersects(*types) {
-                        return false;
-                    }
+                if let Some(types) = card_types
+                    && !effective.card_types.intersects(*types)
+                {
+                    return false;
                 }
                 // CR 601.2c/115
                 // The negated form (a nonland target). Independent of `card_types` above, so a
                 // filter can combine a positive card_types with an excluded_subtypes.
-                if let Some(types) = excluded_card_types {
-                    if effective.card_types.intersects(*types) {
-                        return false;
-                    }
+                if let Some(types) = excluded_card_types
+                    && effective.card_types.intersects(*types)
+                {
+                    return false;
                 }
                 // CR 205.4b
                 // Matches if the target has any subtype in the list (or, not and, as in
                 // cost.rs's FilterSpec::subtypes). Checked against effective_characteristics
                 // like card_types above, not the raw CardDefinition.
-                if let Some(subtypes) = subtypes {
-                    if !subtypes.iter().any(|s| effective.subtypes.contains(s)) {
-                        return false;
-                    }
+                if let Some(subtypes) = subtypes
+                    && !subtypes.iter().any(|s| effective.subtypes.contains(s))
+                {
+                    return false;
                 }
                 // CR 601.2c/115/205.4b
                 // The negated form: rejects if the target has any subtype in the list.
-                if let Some(excluded) = excluded_subtypes {
-                    if excluded.iter().any(|s| effective.subtypes.contains(s)) {
-                        return false;
-                    }
+                if let Some(excluded) = excluded_subtypes
+                    && excluded.iter().any(|s| effective.subtypes.contains(s))
+                {
+                    return false;
                 }
                 // CR 205.4a
                 // The same intersection against effective_characteristics as card_types,
                 // mirroring cost.rs's FilterSpec::matches.
-                if let Some(types) = supertypes {
-                    if !effective.supertypes.intersects(*types) {
-                        return false;
-                    }
+                if let Some(types) = supertypes
+                    && !effective.supertypes.intersects(*types)
+                {
+                    return false;
                 }
                 // CR 601.2c/115/205.4a
                 // The negated form: rejects if the target's supertypes intersect this set.
                 // Checked independently of `supertypes`, so a filter can combine both.
-                if let Some(types) = excluded_supertypes {
-                    if effective.supertypes.intersects(*types) {
-                        return false;
-                    }
+                if let Some(types) = excluded_supertypes
+                    && effective.supertypes.intersects(*types)
+                {
+                    return false;
                 }
             }
             if let Some(fc) = controller {
@@ -393,7 +473,8 @@ fn target_is_legal_impl(
                 // `You` and `Opponent` resolve against the live controller
                 // (layers::effective_controller), not the raw GameObject.controller, so a
                 // control-changed permanent follows its current controller.
-                let effective_controller = crate::layers::effective_controller(state, script_runtime, id);
+                let effective_controller =
+                    crate::layers::effective_controller(state, script_runtime, id);
                 let matches_controller = match fc {
                     FilterController::You => effective_controller == caster,
                     FilterController::Opponent => effective_controller != caster,
@@ -406,7 +487,9 @@ fn target_is_legal_impl(
             if target_has_protection_from(state, script_runtime, id, source) {
                 return false;
             }
-            if enforce_targetability && target_blocked_by_hexproof_or_shroud(state, script_runtime, id, caster) {
+            if enforce_targetability
+                && target_blocked_by_hexproof_or_shroud(state, script_runtime, id, caster)
+            {
                 return false;
             }
             true
@@ -416,7 +499,9 @@ fn target_is_legal_impl(
         TargetFilter::AnyTarget => match target {
             Target::Player(pid) => state.player(pid).is_some(),
             Target::Object(id) => {
-                let Some(obj) = state.object(id) else { return false };
+                let Some(obj) = state.object(id) else {
+                    return false;
+                };
                 if obj.zone != ZoneKind::Battlefield {
                     return false;
                 }
@@ -439,40 +524,57 @@ fn target_is_legal_impl(
         // `TargetFilter::Script`). Object-only; a nonexistent object is rejected before
         // the script runs, so Lua is never invoked on a dead id.
         TargetFilter::Script(handle) => {
-            let Target::Object(id) = target else { return false };
+            let Target::Object(id) = target else {
+                return false;
+            };
             if state.object(id).is_none() {
                 return false;
             }
             if target_has_protection_from(state, script_runtime, id, source) {
                 return false;
             }
-            if enforce_targetability && target_blocked_by_hexproof_or_shroud(state, script_runtime, id, caster) {
+            if enforce_targetability
+                && target_blocked_by_hexproof_or_shroud(state, script_runtime, id, caster)
+            {
                 return false;
             }
-            script_runtime.invoke_target_legal(*handle, state, id, source, caster).unwrap_or(false)
+            script_runtime
+                .invoke_target_legal(*handle, state, id, source, caster)
+                .unwrap_or(false)
         }
         // The player-candidate twin of `Script`: no protection check, because
         // player-side protection is not modeled, plus the script predicate.
         TargetFilter::PlayerScript(handle) => {
-            let Target::Player(pid) = target else { return false };
+            let Target::Player(pid) = target else {
+                return false;
+            };
             if state.player(pid).is_none() {
                 return false;
             }
-            script_runtime.invoke_player_target_legal(*handle, state, pid, source, caster).unwrap_or(false)
+            script_runtime
+                .invoke_player_target_legal(*handle, state, pid, source, caster)
+                .unwrap_or(false)
         }
         // CR 113.9/701.6a
         // Matched against state.stack directly, because an ability's stack_id never
         // appears in state.objects (see TargetFilter::Ability). A Spell entry is never
         // a candidate, since CR 113.9 keeps the categories disjoint.
         TargetFilter::Ability => {
-            let Target::Ability(stack_id) = target else { return false };
-            state.stack.iter().any(|so| so.stack_id == stack_id && is_ability_stack_entry(&so.kind))
+            let Target::Ability(stack_id) = target else {
+                return false;
+            };
+            state
+                .stack
+                .iter()
+                .any(|so| so.stack_id == stack_id && is_ability_stack_entry(&so.kind))
         }
         // CR 702.21a: the triggering spell or ability, whichever kind it is.
         // Which one it is was settled when the trigger was put on the stack;
         // here it only has to still be there.
         TargetFilter::TriggeringStackObject => {
-            let (Target::Object(id) | Target::Ability(id)) = target else { return false };
+            let (Target::Object(id) | Target::Ability(id)) = target else {
+                return false;
+            };
             state.stack.iter().any(|so| so.stack_id == id)
         }
     }
@@ -509,7 +611,13 @@ pub(crate) fn legal_target_candidates(
 pub(crate) fn requirement_depends_on_x(requirement: &TargetRequirement) -> bool {
     matches!(
         requirement.filter,
-        TargetFilter::Object { mana_value: Some(ManaValueRequirement { bound: ManaValueBound::X, .. }), .. }
+        TargetFilter::Object {
+            mana_value: Some(ManaValueRequirement {
+                bound: ManaValueBound::X,
+                ..
+            }),
+            ..
+        }
     )
 }
 
@@ -540,7 +648,9 @@ pub(crate) fn legal_target_candidates_for_x(
     let mut object_ids: Vec<ObjectId> = state.objects.keys().copied().collect();
     object_ids.sort();
     let object_candidates = object_ids.into_iter().map(Target::Object);
-    let player_candidates = non_eliminated_players(state).into_iter().map(Target::Player);
+    let player_candidates = non_eliminated_players(state)
+        .into_iter()
+        .map(Target::Player);
     // CR 113.9
     // An ability's StackObject has no matching GameObject, so it needs its own
     // candidate source (see TargetFilter::Ability).
@@ -556,7 +666,16 @@ pub(crate) fn legal_target_candidates_for_x(
             // CR 603.3d
             // A triggered ability has no CastSpell to announce an X, so `None` (a
             // `mana_value` filter's X bound resolves as 0; see `target_is_legal`).
-            target_is_legal(state, script_runtime, target, &requirement.filter, caster, source, requirement.exclude_source, None)
+            target_is_legal(
+                state,
+                script_runtime,
+                target,
+                &requirement.filter,
+                caster,
+                source,
+                requirement.exclude_source,
+                None,
+            )
         })
         .collect()
 }
@@ -577,7 +696,10 @@ pub(crate) fn legal_target_candidates_for_spec(
         TargetSpec::Primitive(req) => vec![req],
         TargetSpec::Multiple(reqs) => reqs.iter().collect(),
     };
-    requirements.into_iter().map(|req| legal_target_candidates(state, script_runtime, req, caster, source)).collect()
+    requirements
+        .into_iter()
+        .map(|req| legal_target_candidates(state, script_runtime, req, caster, source))
+        .collect()
 }
 
 /// The minimum legal-candidate count for each word in `spec`: `0` for `up_to`,
@@ -591,7 +713,10 @@ pub(crate) fn target_spec_minimums(spec: &TargetSpec) -> Vec<u32> {
         TargetSpec::Primitive(req) => vec![req],
         TargetSpec::Multiple(reqs) => reqs.iter().collect(),
     };
-    requirements.into_iter().map(|req| if req.up_to { 0 } else { req.count }).collect()
+    requirements
+        .into_iter()
+        .map(|req| if req.up_to { 0 } else { req.count })
+        .collect()
 }
 
 /// CR 601.2c/601.2e (spells) and CR 602.2b (activated abilities): validates the
@@ -630,15 +755,29 @@ pub(crate) fn validate_targets(
                 Err(Rejected::InvalidTarget)
             }
         }
-        Some(TargetSpec::Primitive(req)) => {
-            validate_one_target_requirement(state, script_runtime, req, targets, caster, source, caster_x_value)
-        }
+        Some(TargetSpec::Primitive(req)) => validate_one_target_requirement(
+            state,
+            script_runtime,
+            req,
+            targets,
+            caster,
+            source,
+            caster_x_value,
+        ),
         Some(TargetSpec::Multiple(reqs)) => {
             // CR 601.2c
             // A flat submitted-targets list split into one chunk per requirement:
             // positionally for 0 or 1 variable words, by filter assignment for 2 or more
             // (see `split_targets_by_requirement`).
-            let Some(chunks) = split_targets_by_requirement(state, script_runtime, reqs, targets, caster, source, caster_x_value) else {
+            let Some(chunks) = split_targets_by_requirement(
+                state,
+                script_runtime,
+                reqs,
+                targets,
+                caster,
+                source,
+                caster_x_value,
+            ) else {
                 return Err(Rejected::InvalidTarget);
             };
             // CR 115.3/601.2c
@@ -646,7 +785,15 @@ pub(crate) fn validate_targets(
             // set each call), so the same object or player may legally appear in two
             // words' chunks.
             for (req, chunk) in reqs.iter().zip(chunks) {
-                validate_one_target_requirement(state, script_runtime, req, &chunk, caster, source, caster_x_value)?;
+                validate_one_target_requirement(
+                    state,
+                    script_runtime,
+                    req,
+                    &chunk,
+                    caster,
+                    source,
+                    caster_x_value,
+                )?;
             }
             Ok(())
         }
@@ -687,7 +834,16 @@ fn validate_one_target_requirement(
         }
     }
     for t in targets {
-        if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source, caster_x_value) {
+        if !target_is_legal(
+            state,
+            script_runtime,
+            *t,
+            &req.filter,
+            caster,
+            source,
+            req.exclude_source,
+            caster_x_value,
+        ) {
             return Err(Rejected::InvalidTarget);
         }
     }
@@ -724,23 +880,37 @@ pub(crate) fn split_targets_by_requirement(
             if req.up_to || req.at_least {
                 if found.is_some() {
                     // A second variable entry: hand off to filter assignment instead of guessing.
-                    return assign_targets_by_filter(state, script_runtime, reqs, targets, caster, source, caster_x_value);
+                    return assign_targets_by_filter(
+                        state,
+                        script_runtime,
+                        reqs,
+                        targets,
+                        caster,
+                        source,
+                        caster_x_value,
+                    );
                 }
                 found = Some(i);
             }
         }
         found
     };
-    let exact_total: usize =
-        reqs.iter().filter(|r| !(r.up_to || r.at_least)).map(|r| r.count as usize).sum();
+    let exact_total: usize = reqs
+        .iter()
+        .filter(|r| !(r.up_to || r.at_least))
+        .map(|r| r.count as usize)
+        .sum();
     if targets.len() < exact_total {
         return None;
     }
     let remainder = targets.len() - exact_total;
     if let Some(i) = variable_index {
         let req = &reqs[i];
-        let bound_ok =
-            if req.up_to { remainder <= req.count as usize } else { remainder >= req.count as usize };
+        let bound_ok = if req.up_to {
+            remainder <= req.count as usize
+        } else {
+            remainder >= req.count as usize
+        };
         if !bound_ok {
             return None;
         }
@@ -749,7 +919,11 @@ pub(crate) fn split_targets_by_requirement(
     let mut rest = targets;
     let mut chunks = Vec::with_capacity(reqs.len());
     for (i, req) in reqs.iter().enumerate() {
-        let n = if Some(i) == variable_index { remainder } else { req.count as usize };
+        let n = if Some(i) == variable_index {
+            remainder
+        } else {
+            req.count as usize
+        };
         if rest.len() < n {
             return None;
         }
@@ -757,11 +931,7 @@ pub(crate) fn split_targets_by_requirement(
         chunks.push(chunk.to_vec());
         rest = remaining;
     }
-    if rest.is_empty() {
-        Some(chunks)
-    } else {
-        None
-    }
+    if rest.is_empty() { Some(chunks) } else { None }
 }
 
 /// CR 601.2c, for 2 or more variable-count words: assigns each submitted target
@@ -794,13 +964,30 @@ fn assign_targets_by_filter(
         .map(|t| {
             reqs.iter()
                 .enumerate()
-                .filter(|(_, req)| target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source, caster_x_value))
+                .filter(|(_, req)| {
+                    target_is_legal(
+                        state,
+                        script_runtime,
+                        *t,
+                        &req.filter,
+                        caster,
+                        source,
+                        req.exclude_source,
+                        caster_x_value,
+                    )
+                })
                 .map(|(i, _)| i)
                 .collect()
         })
         .collect();
 
-    fn backtrack(idx: usize, targets: &[Target], reqs: &[TargetRequirement], legal_words: &[Vec<usize>], buckets: &mut [Vec<Target>]) -> bool {
+    fn backtrack(
+        idx: usize,
+        targets: &[Target],
+        reqs: &[TargetRequirement],
+        legal_words: &[Vec<usize>],
+        buckets: &mut [Vec<Target>],
+    ) -> bool {
         if idx == targets.len() {
             return reqs.iter().enumerate().all(|(w, req)| {
                 let n = buckets[w].len();
@@ -815,7 +1002,11 @@ fn assign_targets_by_filter(
         }
         for &w in &legal_words[idx] {
             // Prune: an exact or up_to word can never exceed its max.
-            let max = if reqs[w].at_least { usize::MAX } else { reqs[w].count as usize };
+            let max = if reqs[w].at_least {
+                usize::MAX
+            } else {
+                reqs[w].count as usize
+            };
             if buckets[w].len() >= max {
                 continue;
             }
@@ -1024,17 +1215,24 @@ pub(crate) fn combine_chosen_modes(
             }
         }
     }
-    let effects: Vec<Option<AbilityEffect>> = chosen_modes.iter().map(|m| m.effect.clone()).collect();
-    Ok((Some(TargetSpec::Multiple(reqs)), Some(AbilityEffect::Modal { effects, words })))
+    let effects: Vec<Option<AbilityEffect>> =
+        chosen_modes.iter().map(|m| m.effect.clone()).collect();
+    Ok((
+        Some(TargetSpec::Multiple(reqs)),
+        Some(AbilityEffect::Modal { effects, words }),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::ability::AbilityEffect;
-    use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SpellMode, SupertypeSet as SupertypeSetT};
-    use crate::types::counter::CounterSet;
+    use crate::types::card::{
+        CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SpellMode,
+        SupertypeSet as SupertypeSetT,
+    };
     use crate::types::cost::FilterController;
+    use crate::types::counter::CounterSet;
     use crate::types::game::{GameState, RngState};
     use crate::types::ids::{ObjectId, PlayerId, SequenceNo, Target};
     use crate::types::mana::{Color, ManaCost, ManaPool, ManaUnit};
@@ -1062,14 +1260,21 @@ mod tests {
         }
     }
 
-    fn object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet, zone: ZoneKind) -> GameObject {
+    fn object(
+        id: ObjectId,
+        controller: PlayerId,
+        card_types: CardTypeSet,
+        zone: ZoneKind,
+    ) -> GameObject {
         GameObject {
             object_id: id,
             lineage: crate::types::ids::ObjectLineage { previous: None },
             definition: CardDefinition {
                 definition_id: 1,
                 name: "Test Object".to_string(),
-                mana_cost: ManaCost { symbols: Vec::new() },
+                mana_cost: ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator: None,
                 supertypes: SupertypeSetT::empty(),
                 card_types,
@@ -1106,13 +1311,21 @@ mod tests {
             controlled_since_turn: 0,
             is_commander: false,
             is_token: false,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
     }
 
-    fn creature_with_pt(id: ObjectId, controller: PlayerId, power: i32, toughness: i32) -> GameObject {
+    fn creature_with_pt(
+        id: ObjectId,
+        controller: PlayerId,
+        power: i32,
+        toughness: i32,
+    ) -> GameObject {
         let mut obj = object(id, controller, CardTypeSet::CREATURE, ZoneKind::Battlefield);
         obj.definition.power = Some(PTValue::Fixed(power));
         obj.definition.toughness = Some(PTValue::Fixed(toughness));
@@ -1145,7 +1358,10 @@ mod tests {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: RngState { seed: 1, draws_consumed: 0 },
+            rng: RngState {
+                seed: 1,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no: 10,
             next_object_id: 1000,
@@ -1249,16 +1465,34 @@ mod tests {
 
     #[test]
     fn first_strike_participation_requires_first_strike_or_double_strike() {
-        assert!(participates_in_damage_step(KeywordSet::FIRST_STRIKE, Step::FirstStrikeDamage));
-        assert!(participates_in_damage_step(KeywordSet::DOUBLE_STRIKE, Step::FirstStrikeDamage));
-        assert!(!participates_in_damage_step(KeywordSet::empty(), Step::FirstStrikeDamage));
+        assert!(participates_in_damage_step(
+            KeywordSet::FIRST_STRIKE,
+            Step::FirstStrikeDamage
+        ));
+        assert!(participates_in_damage_step(
+            KeywordSet::DOUBLE_STRIKE,
+            Step::FirstStrikeDamage
+        ));
+        assert!(!participates_in_damage_step(
+            KeywordSet::empty(),
+            Step::FirstStrikeDamage
+        ));
     }
 
     #[test]
     fn normal_damage_participation_excludes_first_strike_without_double_strike() {
-        assert!(!participates_in_damage_step(KeywordSet::FIRST_STRIKE, Step::CombatDamage));
-        assert!(participates_in_damage_step(KeywordSet::DOUBLE_STRIKE, Step::CombatDamage));
-        assert!(participates_in_damage_step(KeywordSet::empty(), Step::CombatDamage));
+        assert!(!participates_in_damage_step(
+            KeywordSet::FIRST_STRIKE,
+            Step::CombatDamage
+        ));
+        assert!(participates_in_damage_step(
+            KeywordSet::DOUBLE_STRIKE,
+            Step::CombatDamage
+        ));
+        assert!(participates_in_damage_step(
+            KeywordSet::empty(),
+            Step::CombatDamage
+        ));
     }
 
     #[test]
@@ -1266,7 +1500,10 @@ mod tests {
         let p0 = PlayerId(0);
         let id = ObjectId(1);
         let state = state_with(vec![creature_with_pt(id, p0, 2, 4)]);
-        assert_eq!(lethal_damage_needed(&state, &ScriptRuntime::new(), id, false), 4);
+        assert_eq!(
+            lethal_damage_needed(&state, &ScriptRuntime::new(), id, false),
+            4
+        );
     }
 
     #[test]
@@ -1276,19 +1513,31 @@ mod tests {
         let mut overmarked = creature_with_pt(id, p0, 2, 1);
         overmarked.damage_marked = 3;
         let state = state_with(vec![overmarked]);
-        assert_eq!(lethal_damage_needed(&state, &ScriptRuntime::new(), id, false), 0);
+        assert_eq!(
+            lethal_damage_needed(&state, &ScriptRuntime::new(), id, false),
+            0
+        );
 
         let mut injured = creature_with_pt(ObjectId(2), p0, 2, 5);
         injured.damage_marked = 1;
         let state2 = state_with(vec![injured]);
-        assert_eq!(lethal_damage_needed(&state2, &ScriptRuntime::new(), ObjectId(2), false), 4);
-        assert_eq!(lethal_damage_needed(&state2, &ScriptRuntime::new(), ObjectId(2), true), 1);
+        assert_eq!(
+            lethal_damage_needed(&state2, &ScriptRuntime::new(), ObjectId(2), false),
+            4
+        );
+        assert_eq!(
+            lethal_damage_needed(&state2, &ScriptRuntime::new(), ObjectId(2), true),
+            1
+        );
     }
 
     #[test]
     fn lethal_damage_for_missing_object_is_max() {
         let state = state_with(Vec::new());
-        assert_eq!(lethal_damage_needed(&state, &ScriptRuntime::new(), ObjectId(99), false), u32::MAX);
+        assert_eq!(
+            lethal_damage_needed(&state, &ScriptRuntime::new(), ObjectId(99), false),
+            u32::MAX
+        );
     }
 
     #[test]
@@ -1300,9 +1549,18 @@ mod tests {
         let reqs = vec![player_req(None), player_req(None)];
         let targets = vec![Target::Player(p0), Target::Player(p1)];
         let chunks = split_targets_by_requirement(
-            &state, &ScriptRuntime::new(), &reqs, &targets, p0, ObjectId(1), None,
+            &state,
+            &ScriptRuntime::new(),
+            &reqs,
+            &targets,
+            p0,
+            ObjectId(1),
+            None,
         );
-        assert_eq!(chunks, Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]]));
+        assert_eq!(
+            chunks,
+            Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]])
+        );
     }
 
     #[test]
@@ -1318,9 +1576,18 @@ mod tests {
         let reqs = vec![exact, variable];
         let targets = vec![Target::Player(p0), Target::Player(p1)];
         let chunks = split_targets_by_requirement(
-            &state, &ScriptRuntime::new(), &reqs, &targets, p0, ObjectId(1), None,
+            &state,
+            &ScriptRuntime::new(),
+            &reqs,
+            &targets,
+            p0,
+            ObjectId(1),
+            None,
         );
-        assert_eq!(chunks, Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]]));
+        assert_eq!(
+            chunks,
+            Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]])
+        );
     }
 
     #[test]
@@ -1338,9 +1605,18 @@ mod tests {
         let reqs = vec![req0, req1];
         let targets = vec![Target::Player(p0), Target::Player(p1)];
         let chunks = split_targets_by_requirement(
-            &state, &ScriptRuntime::new(), &reqs, &targets, p0, ObjectId(1), None,
+            &state,
+            &ScriptRuntime::new(),
+            &reqs,
+            &targets,
+            p0,
+            ObjectId(1),
+            None,
         );
-        assert_eq!(chunks, Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]]));
+        assert_eq!(
+            chunks,
+            Some(vec![vec![Target::Player(p0)], vec![Target::Player(p1)]])
+        );
     }
 
     #[test]
@@ -1355,10 +1631,18 @@ mod tests {
             exclude_source: false,
         }];
         let targets = vec![Target::Player(p0)];
-        assert!(split_targets_by_requirement(
-            &state, &ScriptRuntime::new(), &reqs, &targets, p0, ObjectId(1), None,
-        )
-        .is_none());
+        assert!(
+            split_targets_by_requirement(
+                &state,
+                &ScriptRuntime::new(),
+                &reqs,
+                &targets,
+                p0,
+                ObjectId(1),
+                None,
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1380,7 +1664,9 @@ mod tests {
 
     #[test]
     fn mode_with_unresolvable_effect_cannot_join() {
-        let mode = mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::White)]));
+        let mode = mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(
+            Color::White,
+        )]));
         assert!(!mode_can_join_others(&mode));
     }
 
@@ -1388,7 +1674,9 @@ mod tests {
     fn solo_only_modes_lists_only_non_joining_indices() {
         let modes = vec![
             mode_with_effect(AbilityEffect::Damage(3)),
-            mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::White)])),
+            mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(
+                Color::White,
+            )])),
         ];
         assert_eq!(solo_only_modes(&modes), vec![1]);
     }
@@ -1396,7 +1684,7 @@ mod tests {
     #[test]
     fn combine_single_mode_returns_its_own_target_and_effect() {
         let mode = mode_with_effect(AbilityEffect::Damage(3));
-        let result = combine_chosen_modes(&[mode.clone()], &[0]).unwrap();
+        let result = combine_chosen_modes(std::slice::from_ref(&mode), &[0]).unwrap();
         assert_eq!(result.0, None);
         assert_eq!(result.1, Some(AbilityEffect::Damage(3)));
     }
@@ -1419,7 +1707,9 @@ mod tests {
     #[test]
     fn combine_chosen_modes_errors_when_solo_only_mode_is_combined() {
         let m1 = mode_with_effect(AbilityEffect::Damage(3));
-        let m2 = mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::White)]));
+        let m2 = mode_with_effect(AbilityEffect::AddMana(vec![ManaUnit::Colored(
+            Color::White,
+        )]));
         assert!(combine_chosen_modes(&[m1, m2], &[0, 1]).is_err());
     }
 }

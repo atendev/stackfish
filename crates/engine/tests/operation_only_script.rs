@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state};
+use stackfish_testutil::{
+    card_object, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state,
+};
 
 const OPERATION_ONLY: &str = r#"
 local s = {}
@@ -30,11 +32,24 @@ fn run(script: &str) -> (Result<(), stackfish_engine::script::ScriptError>, Game
     };
     let definition = CardDefinition {
         script_ref: ScriptReference::Inline(script.to_string()),
-        ..minimal_card_definition(1, "Test Spell", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::SORCERY)
+        ..minimal_card_definition(
+            1,
+            "Test Spell",
+            "unused",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::SORCERY,
+        )
     };
     let id = ObjectId(0);
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(id);
-    state.objects.insert(id, card_object(id, definition.clone(), p0, ZoneKind::Hand));
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(id);
+    state
+        .objects
+        .insert(id, card_object(id, definition.clone(), p0, ZoneKind::Hand));
     let result = ScriptRuntime::new().run_card_script(&mut state, &definition, id);
     (result, state)
 }
@@ -50,5 +65,8 @@ fn a_script_without_register_abilities_registers_nothing_and_does_not_fail() {
 #[test]
 fn a_register_abilities_that_is_not_a_function_is_still_a_load_error() {
     let (result, _) = run(NOT_A_FUNCTION);
-    assert!(result.is_err(), "register_abilities = 5 is a script bug, not an absent function");
+    assert!(
+        result.is_err(),
+        "register_abilities = 5 is a script bug, not an absent function"
+    );
 }

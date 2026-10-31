@@ -24,7 +24,9 @@ fn bear_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Bear".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -49,7 +51,9 @@ fn salamander_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Salamander".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -74,7 +78,9 @@ fn doppelganger_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 3,
         name: "Doppelganger".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -100,7 +106,9 @@ fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinit
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -125,7 +133,10 @@ fn become_copy_ability(source: ObjectId) -> RegisteredAbility {
     become_copy_ability_with_exceptions(source, CopyExceptions::default())
 }
 
-fn become_copy_ability_with_exceptions(source: ObjectId, exceptions: CopyExceptions) -> RegisteredAbility {
+fn become_copy_ability_with_exceptions(
+    source: ObjectId,
+    exceptions: CopyExceptions,
+) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -135,9 +146,20 @@ fn become_copy_ability_with_exceptions(source: ObjectId, exceptions: CopyExcepti
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: Some(CardTypeSet::CREATURE),
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),
@@ -179,7 +201,11 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         combat: None,
         last_active_turn_number: HashMap::from([(p0, 1)]),
         objects: objects_map,
-        zones: vec![Zone { kind: ZoneKind::Battlefield, owner: None, contents: bf_contents }],
+        zones: vec![Zone {
+            kind: ZoneKind::Battlefield,
+            owner: None,
+            contents: bf_contents,
+        }],
         stack: Vec::new(),
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
@@ -190,7 +216,10 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         land_play_modifiers: Vec::new(),
         abilities,
         ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
+        rng: RngState {
+            seed: 1,
+            draws_consumed: 0,
+        },
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 1000,
@@ -213,7 +242,17 @@ fn two_player_state() -> GameState {
     GameState {
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Library,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
@@ -221,8 +260,12 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets,
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");
@@ -230,15 +273,32 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected payment pause, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("free cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected payment pause, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("free cost");
     drain(engine)
 }
 
-fn activate_pay_and_resolve(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) {
+fn activate_pay_and_resolve(
+    engine: &mut Engine,
+    player: PlayerId,
+    source: ObjectId,
+    targets: Vec<Target>,
+) {
     activate(engine, player, source, targets);
     pay_free_and_drain(engine);
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
 }
 
@@ -246,15 +306,32 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority");
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -302,19 +379,48 @@ fn become_copy_bumps_copy_generation() {
         vec![become_copy_ability(doppel)],
     );
     let mut engine = Engine::new(state);
-    assert_eq!(engine.state().object(doppel).unwrap().copy_generation, 0, "never copied yet");
+    assert_eq!(
+        engine.state().object(doppel).unwrap().copy_generation,
+        0,
+        "never copied yet"
+    );
 
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(target_a)]);
-    assert_eq!(engine.state().object(doppel).unwrap().copy_generation, 1, "one real copy application");
-    assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Salamander");
+    assert_eq!(
+        engine.state().object(doppel).unwrap().copy_generation,
+        1,
+        "one real copy application"
+    );
+    assert_eq!(
+        effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name,
+        "Salamander"
+    );
 
     // become_copy_ability was purged with the pre-copy abilities, so it is re-granted to drive a second BecomeCopy.
     let target_b = ObjectId(2);
-    engine.state_mut().objects.insert(target_b, card_object(target_b, doppelganger_definition(), p0, ZoneKind::Battlefield));
-    engine.state_mut().abilities.push(become_copy_ability(doppel));
+    engine.state_mut().objects.insert(
+        target_b,
+        card_object(
+            target_b,
+            doppelganger_definition(),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    engine
+        .state_mut()
+        .abilities
+        .push(become_copy_ability(doppel));
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(target_b)]);
-    assert_eq!(engine.state().object(doppel).unwrap().copy_generation, 2, "a second, distinct copy application");
-    assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Doppelganger");
+    assert_eq!(
+        engine.state().object(doppel).unwrap().copy_generation,
+        2,
+        "a second, distinct copy application"
+    );
+    assert_eq!(
+        effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name,
+        "Doppelganger"
+    );
 }
 
 // CR 707.9a
@@ -324,26 +430,58 @@ fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let target_a = ObjectId(1);
-    let exceptions = CopyExceptions { grant_recurring_copy_trigger: true, ..CopyExceptions::default() };
+    let exceptions = CopyExceptions {
+        grant_recurring_copy_trigger: true,
+        ..CopyExceptions::default()
+    };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
             card_object(target_a, salamander_definition(), p0, ZoneKind::Battlefield),
         ],
-        vec![become_copy_ability_with_exceptions(doppel, exceptions.clone())],
+        vec![become_copy_ability_with_exceptions(
+            doppel,
+            exceptions.clone(),
+        )],
     );
     let mut engine = Engine::new(state);
 
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(target_a)]);
-    let linked_after_first: Vec<_> =
-        engine.state().abilities.iter().filter(|a| a.source == doppel && a.kind == AbilityKind::Triggered).collect();
-    assert_eq!(linked_after_first.len(), 1, "the linked ability was granted");
+    let linked_after_first: Vec<_> = engine
+        .state()
+        .abilities
+        .iter()
+        .filter(|a| a.source == doppel && a.kind == AbilityKind::Triggered)
+        .collect();
+    assert_eq!(
+        linked_after_first.len(),
+        1,
+        "the linked ability was granted"
+    );
     let first_id = linked_after_first[0].id;
-    assert_eq!(engine.state().linked_ability_generation.get(&first_id).copied(), Some(1));
+    assert_eq!(
+        engine
+            .state()
+            .linked_ability_generation
+            .get(&first_id)
+            .copied(),
+        Some(1)
+    );
 
     let target_b = ObjectId(2);
-    engine.state_mut().objects.insert(target_b, card_object(target_b, doppelganger_definition(), p0, ZoneKind::Battlefield));
-    engine.state_mut().abilities.push(become_copy_ability_with_exceptions(doppel, exceptions));
+    engine.state_mut().objects.insert(
+        target_b,
+        card_object(
+            target_b,
+            doppelganger_definition(),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    engine
+        .state_mut()
+        .abilities
+        .push(become_copy_ability_with_exceptions(doppel, exceptions));
     // ability_index 1, since the linked ability from the first copy sits at index 0 until this activation purges it.
     engine
         .submit_action(PlayerAction {
@@ -358,16 +496,43 @@ fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_
         })
         .expect("player holds priority");
     pay_free_and_drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
-    let linked_after_second: Vec<_> =
-        engine.state().abilities.iter().filter(|a| a.source == doppel && a.kind == AbilityKind::Triggered).collect();
-    assert_eq!(linked_after_second.len(), 1, "still exactly one linked ability, not two stacked");
-    assert_ne!(linked_after_second[0].id, first_id, "the first application's own ability was purged outright, not left in place");
-    assert_eq!(engine.state().linked_ability_generation.get(&linked_after_second[0].id).copied(), Some(2));
+    let linked_after_second: Vec<_> = engine
+        .state()
+        .abilities
+        .iter()
+        .filter(|a| a.source == doppel && a.kind == AbilityKind::Triggered)
+        .collect();
     assert_eq!(
-        engine.state().linked_ability_generation.get(&first_id).copied(),
+        linked_after_second.len(),
+        1,
+        "still exactly one linked ability, not two stacked"
+    );
+    assert_ne!(
+        linked_after_second[0].id, first_id,
+        "the first application's own ability was purged outright, not left in place"
+    );
+    assert_eq!(
+        engine
+            .state()
+            .linked_ability_generation
+            .get(&linked_after_second[0].id)
+            .copied(),
+        Some(2)
+    );
+    assert_eq!(
+        engine
+            .state()
+            .linked_ability_generation
+            .get(&first_id)
+            .copied(),
         Some(1),
         "the old tag entry is never removed (linked_ability_generation only ever grows), but its own ability is long gone"
     );
@@ -391,9 +556,21 @@ fn become_copy_purges_old_abilities_and_registers_the_copys_own() {
 
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
 
-    let doppel_abilities: Vec<_> = engine.state().abilities.iter().filter(|a| a.source == doppel).collect();
-    assert_eq!(doppel_abilities.len(), 1, "exactly Bear's granted ability, not both old and new");
-    assert!(matches!(doppel_abilities[0].effect, Some(AbilityEffect::GainLife(1))));
+    let doppel_abilities: Vec<_> = engine
+        .state()
+        .abilities
+        .iter()
+        .filter(|a| a.source == doppel)
+        .collect();
+    assert_eq!(
+        doppel_abilities.len(),
+        1,
+        "exactly Bear's granted ability, not both old and new"
+    );
+    assert!(matches!(
+        doppel_abilities[0].effect,
+        Some(AbilityEffect::GainLife(1))
+    ));
 
     let events: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
     assert!(events.iter().any(|e| matches!(e, GameEventKind::BecameCopy { object, copied } if *object == doppel && *copied == bear)));
@@ -406,7 +583,14 @@ fn become_copy_with_pt_exception_overrides_base_power_and_toughness() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false, grant_recurring_copy_trigger: false, enters_with_additional_counters: None };
+    let exceptions = CopyExceptions {
+        set_power_toughness: Some((1, 1)),
+        add_keywords: KeywordSet::empty(),
+        retain_name: false,
+        retain_color: false,
+        grant_recurring_copy_trigger: false,
+        enters_with_additional_counters: None,
+    };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -419,10 +603,16 @@ fn become_copy_with_pt_exception_overrides_base_power_and_toughness() {
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
 
     let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
-    assert_eq!(chars.name, "Bear", "name still comes from the copied object");
+    assert_eq!(
+        chars.name, "Bear",
+        "name still comes from the copied object"
+    );
     assert_eq!(chars.power, Some(1), "overridden by the P/T exception");
     assert_eq!(chars.toughness, Some(1), "overridden by the P/T exception");
-    assert!(chars.keywords.contains(KeywordSet::FLYING), "keywords still come from the copied object");
+    assert!(
+        chars.keywords.contains(KeywordSet::FLYING),
+        "keywords still come from the copied object"
+    );
 }
 
 // CR 707.9a
@@ -432,11 +622,23 @@ fn become_copy_with_keyword_exception_adds_the_keyword() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let salamander = ObjectId(1);
-    let exceptions = CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::TRAMPLE, retain_name: false, retain_color: false, grant_recurring_copy_trigger: false, enters_with_additional_counters: None };
+    let exceptions = CopyExceptions {
+        set_power_toughness: None,
+        add_keywords: KeywordSet::TRAMPLE,
+        retain_name: false,
+        retain_color: false,
+        grant_recurring_copy_trigger: false,
+        enters_with_additional_counters: None,
+    };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
-            card_object(salamander, salamander_definition(), p0, ZoneKind::Battlefield),
+            card_object(
+                salamander,
+                salamander_definition(),
+                p0,
+                ZoneKind::Battlefield,
+            ),
         ],
         vec![become_copy_ability_with_exceptions(doppel, exceptions)],
     );
@@ -446,8 +648,15 @@ fn become_copy_with_keyword_exception_adds_the_keyword() {
 
     let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
     assert_eq!(chars.name, "Salamander");
-    assert_eq!(chars.power, Some(5), "P/T still comes from the copied object - no P/T exception this time");
-    assert!(chars.keywords.contains(KeywordSet::TRAMPLE), "granted by the keyword exception");
+    assert_eq!(
+        chars.power,
+        Some(5),
+        "P/T still comes from the copied object - no P/T exception this time"
+    );
+    assert!(
+        chars.keywords.contains(KeywordSet::TRAMPLE),
+        "granted by the keyword exception"
+    );
 }
 
 // CR 707.9e
@@ -457,7 +666,13 @@ fn become_copy_with_additional_counter_exception_adds_a_real_counter() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { enters_with_additional_counters: Some((CounterKind::PlusOnePlusOne, CounterAmount::Fixed(1))), ..CopyExceptions::default() };
+    let exceptions = CopyExceptions {
+        enters_with_additional_counters: Some((
+            CounterKind::PlusOnePlusOne,
+            CounterAmount::Fixed(1),
+        )),
+        ..CopyExceptions::default()
+    };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -470,9 +685,17 @@ fn become_copy_with_additional_counter_exception_adds_a_real_counter() {
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
 
     let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
-    assert_eq!(chars.name, "Bear", "the copy itself still applies as normal");
     assert_eq!(
-        engine.state().object(doppel).unwrap().counters.count(&CounterKind::PlusOnePlusOne),
+        chars.name, "Bear",
+        "the copy itself still applies as normal"
+    );
+    assert_eq!(
+        engine
+            .state()
+            .object(doppel)
+            .unwrap()
+            .counters
+            .count(&CounterKind::PlusOnePlusOne),
         1,
         "the additional-effect exception granted a real counter"
     );
@@ -495,7 +718,15 @@ fn become_copy_without_the_exception_grants_no_counter() {
 
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
 
-    assert_eq!(engine.state().object(doppel).unwrap().counters.count(&CounterKind::PlusOnePlusOne), 0);
+    assert_eq!(
+        engine
+            .state()
+            .object(doppel)
+            .unwrap()
+            .counters
+            .count(&CounterKind::PlusOnePlusOne),
+        0
+    );
 }
 
 // CR 707.3
@@ -505,19 +736,40 @@ fn become_copy_of_a_copy_uses_its_current_copiable_values() {
     let p0 = PlayerId(0);
     let clone_obj = ObjectId(0);
     let already_copied = ObjectId(1);
-    let mut already_copied_obj = card_object(already_copied, doppelganger_definition(), p0, ZoneKind::Battlefield);
+    let mut already_copied_obj = card_object(
+        already_copied,
+        doppelganger_definition(),
+        p0,
+        ZoneKind::Battlefield,
+    );
     // already_copied has become a copy of Bear before this BecomeCopy resolves.
     already_copied_obj.copiable_override = Some(bear_definition());
     let state = one_player_state(
-        vec![card_object(clone_obj, doppelganger_definition(), p0, ZoneKind::Battlefield), already_copied_obj],
+        vec![
+            card_object(
+                clone_obj,
+                doppelganger_definition(),
+                p0,
+                ZoneKind::Battlefield,
+            ),
+            already_copied_obj,
+        ],
         vec![become_copy_ability(clone_obj)],
     );
     let mut engine = Engine::new(state);
 
-    activate_pay_and_resolve(&mut engine, p0, clone_obj, vec![Target::Object(already_copied)]);
+    activate_pay_and_resolve(
+        &mut engine,
+        p0,
+        clone_obj,
+        vec![Target::Object(already_copied)],
+    );
 
     let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), clone_obj);
-    assert_eq!(chars.name, "Bear", "should copy Bear's values, not the Doppelganger's own printed name");
+    assert_eq!(
+        chars.name, "Bear",
+        "should copy Bear's values, not the Doppelganger's own printed name"
+    );
 }
 
 // CR 707.2b
@@ -537,11 +789,21 @@ fn copying_the_original_again_later_does_not_change_an_earlier_copy() {
     let mut engine = Engine::new(state);
 
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
-    assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Bear");
+    assert_eq!(
+        effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name,
+        "Bear"
+    );
 
     // `bear` itself now becomes a copy of something else entirely.
-    engine.state_mut().object_mut(bear).unwrap().copiable_override = Some(salamander_definition());
-    assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), bear).name, "Salamander");
+    engine
+        .state_mut()
+        .object_mut(bear)
+        .unwrap()
+        .copiable_override = Some(salamander_definition());
+    assert_eq!(
+        effective_characteristics(engine.state(), &ScriptRuntime::new(), bear).name,
+        "Salamander"
+    );
 
     // `doppel`'s own earlier copy is unaffected - still Bear, not Salamander.
     assert_eq!(
@@ -580,7 +842,10 @@ fn become_copy_with_no_object_target_is_a_no_op() {
 
     activate_pay_and_resolve(&mut engine, p0, doppel, Vec::new());
 
-    assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Doppelganger");
+    assert_eq!(
+        effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name,
+        "Doppelganger"
+    );
 }
 
 // CR 707.10f, 707.2a
@@ -591,20 +856,36 @@ fn copy_token_matches_source_characteristics_and_abilities() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
 
     let card = ObjectId(1);
     state.objects.insert(
         card,
         card_object(
             card,
-            instant_definition(10, "Clone Spell", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(bear, CopyExceptions::default()), count: 1 }),
+            instant_definition(
+                10,
+                "Clone Spell",
+                AbilityEffect::CreateToken {
+                    spec: TokenSpec::CopyOf(bear, CopyExceptions::default()),
+                    count: 1,
+                },
+            ),
             p0,
             ZoneKind::Hand,
         ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -612,16 +893,33 @@ fn copy_token_matches_source_characteristics_and_abilities() {
     pass_both_and_drain(&mut engine, p0, p1);
 
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
-    let token_id = bf.contents.iter().find(|&&id| id != bear).copied().expect("the copy token landed");
+    let token_id = bf
+        .contents
+        .iter()
+        .find(|&&id| id != bear)
+        .copied()
+        .expect("the copy token landed");
     let token = engine.state().object(token_id).unwrap();
     assert!(token.is_token);
     assert_eq!(token.definition.name, "Bear");
     assert!(matches!(token.definition.power, Some(PTValue::Fixed(2))));
     assert!(token.definition.keywords.contains(KeywordSet::FLYING));
 
-    let token_abilities: Vec<_> = engine.state().abilities.iter().filter(|a| a.source == token_id).collect();
-    assert_eq!(token_abilities.len(), 1, "the copy token self-registered Bear's granted ability");
-    assert!(matches!(token_abilities[0].effect, Some(AbilityEffect::GainLife(1))));
+    let token_abilities: Vec<_> = engine
+        .state()
+        .abilities
+        .iter()
+        .filter(|a| a.source == token_id)
+        .collect();
+    assert_eq!(
+        token_abilities.len(),
+        1,
+        "the copy token self-registered Bear's granted ability"
+    );
+    assert!(matches!(
+        token_abilities[0].effect,
+        Some(AbilityEffect::GainLife(1))
+    ));
 }
 
 // CR 707.9b
@@ -632,21 +930,44 @@ fn copy_token_with_pt_exception_overrides_base_power_and_toughness() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
 
-    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false, grant_recurring_copy_trigger: false, enters_with_additional_counters: None };
+    let exceptions = CopyExceptions {
+        set_power_toughness: Some((1, 1)),
+        add_keywords: KeywordSet::empty(),
+        retain_name: false,
+        retain_color: false,
+        grant_recurring_copy_trigger: false,
+        enters_with_additional_counters: None,
+    };
     let card = ObjectId(1);
     state.objects.insert(
         card,
         card_object(
             card,
-            instant_definition(10, "Clone Spell", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(bear, exceptions), count: 1 }),
+            instant_definition(
+                10,
+                "Clone Spell",
+                AbilityEffect::CreateToken {
+                    spec: TokenSpec::CopyOf(bear, exceptions),
+                    count: 1,
+                },
+            ),
             p0,
             ZoneKind::Hand,
         ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -654,11 +975,25 @@ fn copy_token_with_pt_exception_overrides_base_power_and_toughness() {
     pass_both_and_drain(&mut engine, p0, p1);
 
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
-    let token_id = bf.contents.iter().find(|&&id| id != bear).copied().expect("the copy token landed");
+    let token_id = bf
+        .contents
+        .iter()
+        .find(|&&id| id != bear)
+        .copied()
+        .expect("the copy token landed");
     let token = engine.state().object(token_id).unwrap();
-    assert_eq!(token.definition.name, "Bear", "name still comes from the copied object");
-    assert!(matches!(token.definition.power, Some(PTValue::Fixed(1))), "overridden by the P/T exception");
-    assert!(matches!(token.definition.toughness, Some(PTValue::Fixed(1))), "overridden by the P/T exception");
+    assert_eq!(
+        token.definition.name, "Bear",
+        "name still comes from the copied object"
+    );
+    assert!(
+        matches!(token.definition.power, Some(PTValue::Fixed(1))),
+        "overridden by the P/T exception"
+    );
+    assert!(
+        matches!(token.definition.toughness, Some(PTValue::Fixed(1))),
+        "overridden by the P/T exception"
+    );
 }
 
 // A CopyOf naming an unresolvable ObjectId creates no token.
@@ -674,26 +1009,46 @@ fn copy_token_of_a_missing_source_creates_nothing() {
         card,
         card_object(
             card,
-            instant_definition(10, "Clone Spell", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(missing, CopyExceptions::default()), count: 1 }),
+            instant_definition(
+                10,
+                "Clone Spell",
+                AbilityEffect::CreateToken {
+                    spec: TokenSpec::CopyOf(missing, CopyExceptions::default()),
+                    count: 1,
+                },
+            ),
             p0,
             ZoneKind::Hand,
         ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty(), "no token was created");
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Battlefield, None)
+            .unwrap()
+            .contents
+            .is_empty(),
+        "no token was created"
+    );
 }
 
 #[test]
 fn game_ops_become_copy_decodes_pt_and_keyword_exceptions() {
     let mut runtime = ScriptRuntime::new();
     let (effect, _handle) = runtime
-        .load_operation(r#"return Game.Ops.BecomeCopy({ power = 1, toughness = 1, keywords = { "Trample" } })"#)
+        .load_operation(
+            r#"return Game.Ops.BecomeCopy({ power = 1, toughness = 1, keywords = { "Trample" } })"#,
+        )
         .expect("primitive loads");
     let Some(AbilityEffect::BecomeCopy(exceptions)) = effect else {
         panic!("expected Some(AbilityEffect::BecomeCopy(_)), got {effect:?}")
@@ -705,7 +1060,9 @@ fn game_ops_become_copy_decodes_pt_and_keyword_exceptions() {
 #[test]
 fn game_ops_become_copy_with_no_opts_is_a_bare_copy() {
     let mut runtime = ScriptRuntime::new();
-    let (effect, _handle) = runtime.load_operation("return Game.Ops.BecomeCopy()").expect("primitive loads");
+    let (effect, _handle) = runtime
+        .load_operation("return Game.Ops.BecomeCopy()")
+        .expect("primitive loads");
     let Some(AbilityEffect::BecomeCopy(exceptions)) = effect else {
         panic!("expected Some(AbilityEffect::BecomeCopy(_)), got {effect:?}")
     };
@@ -717,5 +1074,8 @@ fn game_ops_become_copy_with_no_opts_is_a_bare_copy() {
 fn game_ops_become_copy_rejects_power_without_toughness() {
     let mut runtime = ScriptRuntime::new();
     let result = runtime.load_operation("return Game.Ops.BecomeCopy({ power = 1 })");
-    assert!(result.is_err(), "power/toughness must be set together, not just one");
+    assert!(
+        result.is_err(),
+        "power/toughness must be set together, not just one"
+    );
 }

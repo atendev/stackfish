@@ -6,7 +6,10 @@ use std::ops::ControlFlow;
 use crate::commands;
 use crate::replacement;
 use crate::types::ability::{AbilityEffect, AbilityKind, NamedToken, RegisteredAbility, TokenSpec};
-use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, Subtype, SupertypeSet};
+use crate::types::card::{
+    CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, Subtype,
+    SupertypeSet,
+};
 use crate::types::cost::{AdditionalCost, CostSpec};
 use crate::types::counter::CounterSet;
 use crate::types::event::GameEventKind;
@@ -37,14 +40,24 @@ impl Engine {
         let controller = top.controller;
         let copy_snapshot = match spec {
             TokenSpec::CopyOf(source_id, exceptions) => self.state.object(*source_id).map(|obj| {
-                let mut snapshot = obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone());
+                let mut snapshot = obj
+                    .copiable_override
+                    .clone()
+                    .unwrap_or_else(|| obj.definition.clone());
                 // CR 707.9c: a new token has no prior identity to retain a name or color from.
                 exceptions.apply(&mut snapshot, None);
                 snapshot
             }),
             _ => None,
         };
-        self.continue_create_token(spec, &copy_snapshot, count, controller, top.stack_id, events)
+        self.continue_create_token(
+            spec,
+            &copy_snapshot,
+            count,
+            controller,
+            top.stack_id,
+            events,
+        )
     }
 
     /// The resumable body of the token loop, called fresh (`remaining == count`) and
@@ -72,8 +85,13 @@ impl Engine {
             };
             let token_id = self.state.allocate_object_id();
             // CR 303.4f: scanned before the token exists so it can't be its own candidate.
-            let attach_candidates =
-                commands::legal_entry_attach_candidates(&self.state, &self.script_runtime, &token_def, controller, token_id);
+            let attach_candidates = commands::legal_entry_attach_candidates(
+                &self.state,
+                &self.script_runtime,
+                &token_def,
+                controller,
+                token_id,
+            );
             if let Some(candidates) = &attach_candidates {
                 // CR 303.4g: an Aura token with no legal host isn't created. Equipment
                 // and Fortification still enter unattached (CR 301.5e).
@@ -98,12 +116,16 @@ impl Engine {
                 deathtouched: false,
                 counters: CounterSet::new(),
                 attachments: Vec::new(),
-                attached_to: None, attached_to_player: None,
+                attached_to: None,
+                attached_to_player: None,
                 timestamp: ts,
                 controlled_since_turn: self.state.turn_number,
                 is_token: true,
                 is_commander: false,
-                visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+                visibility: VisibilityPolicy {
+                    public: true,
+                    visible_to: Vec::new(),
+                },
                 copy_generation: 0,
                 entered_via_escape: false,
             };
@@ -113,7 +135,9 @@ impl Engine {
             }
             register_token_abilities(&mut self.state, token_id, spec, controller);
             if matches!(spec, TokenSpec::CopyOf(_, _)) {
-                let result = self.script_runtime.run_card_script(&mut self.state, &token_def, token_id);
+                let result =
+                    self.script_runtime
+                        .run_card_script(&mut self.state, &token_def, token_id);
                 self.record_script_error(token_id, &token_def.script_ref, result);
             }
             // Checked after self-registration so a `CopyOf` token's script effects are in place.
@@ -139,11 +163,17 @@ impl Engine {
                     1 => match candidates[0] {
                         Target::Object(target_id) => {
                             commands::attach_permanent(&mut self.state, token_id, target_id);
-                            events.push(GameEventKind::Attached { object: token_id, attached_to: target_id });
+                            events.push(GameEventKind::Attached {
+                                object: token_id,
+                                attached_to: target_id,
+                            });
                         }
                         Target::Player(player) => {
                             commands::attach_permanent_to_player(&mut self.state, token_id, player);
-                            events.push(GameEventKind::AttachedToPlayer { object: token_id, player });
+                            events.push(GameEventKind::AttachedToPlayer {
+                                object: token_id,
+                                player,
+                            });
                         }
                         // Candidates are objects or players only.
                         Target::Ability(_) => unreachable!("attach candidates are never abilities"),
@@ -180,7 +210,9 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
         TokenSpec::Named(NamedToken::Clue) => CardDefinition {
             definition_id: 0,
             name: "Clue".to_string(),
-            mana_cost: ManaCost { symbols: Vec::new() },
+            mana_cost: ManaCost {
+                symbols: Vec::new(),
+            },
             color_indicator: None,
             supertypes: SupertypeSet::empty(),
             card_types: CardTypeSet::ARTIFACT,
@@ -202,7 +234,9 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
         TokenSpec::Named(NamedToken::Food) => CardDefinition {
             definition_id: 0,
             name: "Food".to_string(),
-            mana_cost: ManaCost { symbols: Vec::new() },
+            mana_cost: ManaCost {
+                symbols: Vec::new(),
+            },
             color_indicator: None,
             supertypes: SupertypeSet::empty(),
             card_types: CardTypeSet::ARTIFACT,
@@ -224,7 +258,9 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
         TokenSpec::Named(NamedToken::Treasure) => CardDefinition {
             definition_id: 0,
             name: "Treasure".to_string(),
-            mana_cost: ManaCost { symbols: Vec::new() },
+            mana_cost: ManaCost {
+                symbols: Vec::new(),
+            },
             color_indicator: None,
             supertypes: SupertypeSet::empty(),
             card_types: CardTypeSet::ARTIFACT,
@@ -245,11 +281,17 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
         },
         TokenSpec::Creature(spec) => {
             let name = spec.name.clone().unwrap_or_else(|| spec.subtypes.join(" "));
-            let color_indicator = if spec.colors.is_empty() { None } else { Some(spec.colors) };
+            let color_indicator = if spec.colors.is_empty() {
+                None
+            } else {
+                Some(spec.colors)
+            };
             CardDefinition {
                 definition_id: 0,
                 name,
-                mana_cost: ManaCost { symbols: Vec::new() },
+                mana_cost: ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator,
                 supertypes: spec.additional_supertypes,
                 card_types: CardTypeSet::CREATURE | spec.additional_types,
@@ -274,7 +316,12 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
 
 /// Registers a named token's activated abilities (Clue, Food) as native
 /// `RegisteredAbility`s. Creature tokens have none to register.
-fn register_token_abilities(state: &mut GameState, token_id: ObjectId, spec: &TokenSpec, _controller: PlayerId) {
+fn register_token_abilities(
+    state: &mut GameState,
+    token_id: ObjectId,
+    spec: &TokenSpec,
+    _controller: PlayerId,
+) {
     match spec {
         TokenSpec::Named(NamedToken::Clue) => {
             let id = state.allocate_ability_id();
@@ -334,7 +381,10 @@ fn register_token_abilities(state: &mut GameState, token_id: ObjectId, spec: &To
                 }),
                 target: None,
                 operation: ScriptHandle(0),
-                effect: Some(AbilityEffect::AddManaChoice { count: 1, choices: ColorSet::all() }),
+                effect: Some(AbilityEffect::AddManaChoice {
+                    count: 1,
+                    choices: ColorSet::all(),
+                }),
                 intervening_if: None,
             });
         }

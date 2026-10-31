@@ -9,8 +9,10 @@ fn fixture_db() -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir()
-        .join(format!("stackfish-host-carddb-test-{}-{n}.sqlite", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "stackfish-host-carddb-test-{}-{n}.sqlite",
+        std::process::id()
+    ));
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch(
         "
@@ -116,5 +118,10 @@ fn missing_db_card_returns_setup_error() {
     };
     let value: serde_json::Value = serde_json::from_slice(&response).unwrap();
     assert_eq!(value["body"]["status"], "error");
-    assert!(value["body"]["error"]["message"].as_str().unwrap().contains("not-in-db"));
+    assert!(
+        value["body"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not-in-db")
+    );
 }

@@ -6,13 +6,15 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: id.0,
         name: "Test Card".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -31,14 +33,19 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     };
-    GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Hand) }
+    GameObject {
+        controlled_since_turn: 1,
+        ..card_object(id, definition, owner, ZoneKind::Hand)
+    }
 }
 
 fn ward_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 999,
         name: "Ward".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -68,10 +75,29 @@ fn state_at_end_step() -> GameState {
         phase: Phase::Ending,
         step: Step::End,
         last_active_turn_number: HashMap::from([(p0, 2), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Battlefield, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Library,
+                ZoneKind::Hand,
+                ZoneKind::Graveyard,
+                ZoneKind::Battlefield,
+                ZoneKind::Exile,
+            ],
+        ))
     };
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(ward);
-    state.objects.insert(ward, GameObject { controlled_since_turn: 1, ..card_object(ward, ward_definition(""), p0, ZoneKind::Battlefield) });
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(ward);
+    state.objects.insert(
+        ward,
+        GameObject {
+            controlled_since_turn: 1,
+            ..card_object(ward, ward_definition(""), p0, ZoneKind::Battlefield)
+        },
+    );
     state
 }
 
@@ -80,7 +106,10 @@ fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) -> V
     for i in 0..count {
         let id = ObjectId(100 + i as u64);
         state.objects.insert(id, vanilla_card(id, player));
-        state.zone_mut(ZoneKind::Hand, Some(player)).unwrap().push_bottom(id);
+        state
+            .zone_mut(ZoneKind::Hand, Some(player))
+            .unwrap()
+            .push_bottom(id);
         ids.push(id);
     }
     ids
@@ -96,15 +125,26 @@ fn step_until_pause(engine: &mut Engine) -> StepStatus {
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).expect("PassPriority should be accepted");
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .expect("PassPriority should be accepted");
 }
 
 fn pass_to_cleanup_discard(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     let s = step_until_pause(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p0), "expected p0 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p0),
+        "expected p0 end-step priority, got {s:?}"
+    );
     pass(engine, p0);
     let s = step_until_pause(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p1), "expected p1 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p1),
+        "expected p1 end-step priority, got {s:?}"
+    );
     pass(engine, p1);
     step_until_pause(engine)
 }
@@ -131,29 +171,54 @@ fn a_cleanup_discard_is_replacement_checked_for_real() {
     let ward = ObjectId(999);
     let ward_def = ward_definition(DISCARDED_CARD_GOES_TO_EXILE);
     state.object_mut(ward).unwrap().definition = ward_def.clone();
-    ScriptRuntime::new().run_card_script(&mut state, &ward_def, ward).expect("ward script self-registers cleanly");
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &ward_def, ward)
+        .expect("ward script self-registers cleanly");
     assert_eq!(state.replacement_effects.len(), 1);
 
     let mut engine = Engine::new(state);
     let status = pass_to_cleanup_discard(&mut engine, p0, p1);
-    let StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } = status else {
+    let StepStatus::AwaitingDiscard {
+        player,
+        hand_size: 8,
+        max_hand_size: 7,
+    } = status
+    else {
         panic!("expected an AwaitingDiscard pause for 1 excess card, got {status:?}");
     };
     assert_eq!(player, p0);
 
     // Discards any one of the 8, which are all the same vanilla Creature.
-    engine.submit_discard(vec![hand_ids[0]]).expect("valid discard");
+    engine
+        .submit_discard(vec![hand_ids[0]])
+        .expect("valid discard");
     let status = step_until_pause(&mut engine);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "expected the next turn's upkeep priority, got {status:?}");
-    assert!(engine.state().object(hand_ids[0]).is_none(), "the original hand card id is retired");
     assert!(
-        engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty(),
+        matches!(status, StepStatus::AwaitingAction { player } if player == p1),
+        "expected the next turn's upkeep priority, got {status:?}"
+    );
+    assert!(
+        engine.state().object(hand_ids[0]).is_none(),
+        "the original hand card id is retired"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .is_empty(),
         "the ward's WouldMoveZone(Hand, Graveyard) + ReplaceZoneDestination(Exile) must have kept \
          the discarded card out of the graveyard entirely"
     );
     assert_eq!(
-        engine.state().zone(ZoneKind::Exile, None).unwrap().contents.len(),
+        engine
+            .state()
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .len(),
         1,
         "the discarded card must have landed in exile instead"
     );
@@ -171,11 +236,29 @@ fn a_cleanup_discard_without_a_matching_replacement_lands_in_the_graveyard_norma
     let status = pass_to_cleanup_discard(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingDiscard { .. }));
 
-    engine.submit_discard(vec![hand_ids[0]]).expect("valid discard");
+    engine
+        .submit_discard(vec![hand_ids[0]])
+        .expect("valid discard");
     step_until_pause(&mut engine);
 
-    assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 1, "no replacement registered - the card lands in the graveyard as normal");
-    assert!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty());
+    assert_eq!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .len(),
+        1,
+        "no replacement registered - the card lands in the graveyard as normal"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .is_empty()
+    );
 }
 
 #[test]
@@ -188,17 +271,33 @@ fn two_matching_wards_pause_the_cleanup_discard_for_a_cr_616_1_choice() {
     let ward_a = ObjectId(999);
     let ward_a_def = ward_definition(DISCARDED_CARD_GOES_TO_EXILE);
     state.object_mut(ward_a).unwrap().definition = ward_a_def.clone();
-    ScriptRuntime::new().run_card_script(&mut state, &ward_a_def, ward_a).expect("ward A self-registers cleanly");
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &ward_a_def, ward_a)
+        .expect("ward A self-registers cleanly");
 
     let ward_b = ObjectId(1001);
-    state.objects.insert(ward_b, GameObject { object_id: ward_b, ..state.objects[&ward_a].clone() });
+    state.objects.insert(
+        ward_b,
+        GameObject {
+            object_id: ward_b,
+            ..state.objects[&ward_a].clone()
+        },
+    );
     state.replacement_effects.push(ReplacementEffect {
         source: ward_b,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldMoveZone {
                 from: Some(ZoneKind::Hand),
                 to: Some(ZoneKind::Graveyard),
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: Some(CardTypeSet::CREATURE),
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         },
@@ -210,19 +309,40 @@ fn two_matching_wards_pause_the_cleanup_discard_for_a_cr_616_1_choice() {
     let status = pass_to_cleanup_discard(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingDiscard { .. }));
 
-    engine.submit_discard(vec![hand_ids[0]]).expect("valid discard");
+    engine
+        .submit_discard(vec![hand_ids[0]])
+        .expect("valid discard");
     let status = step_until_pause(&mut engine);
     let StepStatus::AwaitingReplacementChoice { player, candidates } = status else {
-        panic!("two matching replacement effects on a cleanup discard must pause for a CR 616.1 choice, got {status:?}");
+        panic!(
+            "two matching replacement effects on a cleanup discard must pause for a CR 616.1 choice, got {status:?}"
+        );
     };
     assert_eq!(player, p0);
     assert_eq!(candidates.len(), 2);
-    assert!(engine.state().object(hand_ids[0]).is_some(), "nothing committed yet");
+    assert!(
+        engine.state().object(hand_ids[0]).is_some(),
+        "nothing committed yet"
+    );
 
-    engine.submit_replacement_choice(ReplacementCandidate::Registered(ward_b)).expect("ward_b is a real candidate");
+    engine
+        .submit_replacement_choice(ReplacementCandidate::Registered(ward_b))
+        .expect("ward_b is a real candidate");
     let status = step_until_pause(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "discard should finish resolving after the choice, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p1),
+        "discard should finish resolving after the choice, got {status:?}"
+    );
 
     assert!(engine.state().object(hand_ids[0]).is_none());
-    assert_eq!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.len(), 1, "both wards redirect to Exile - either choice ends up there");
+    assert_eq!(
+        engine
+            .state()
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .len(),
+        1,
+        "both wards redirect to Exile - either choice ends up there"
+    );
 }

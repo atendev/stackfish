@@ -11,7 +11,9 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -33,7 +35,12 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    card_object(id, creature_definition(power, toughness), owner, ZoneKind::Battlefield)
+    card_object(
+        id,
+        creature_definition(power, toughness),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
 fn base_state() -> GameState {
@@ -49,15 +56,30 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
+    EffectFilter {
+        controller: None,
+        card_types: None,
+        self_only: false,
+        subtypes: None,
+        excluded_subtypes: None,
+        supertypes: None,
+        excluded_supertypes: None,
+    }
 }
 
-fn continuous_effect(source: ObjectId, effect: EffectPrimitive, timestamp: u64) -> ContinuousEffect {
+fn continuous_effect(
+    source: ObjectId,
+    effect: EffectPrimitive,
+    timestamp: u64,
+) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
@@ -70,11 +92,19 @@ fn continuous_effect(source: ObjectId, effect: EffectPrimitive, timestamp: u64) 
 }
 
 fn modify(source: ObjectId, power: i32, toughness: i32, timestamp: u64) -> ContinuousEffect {
-    continuous_effect(source, EffectPrimitive::ModifyPT { power, toughness }, timestamp)
+    continuous_effect(
+        source,
+        EffectPrimitive::ModifyPT { power, toughness },
+        timestamp,
+    )
 }
 
 fn double(source: ObjectId, power: bool, toughness: bool, timestamp: u64) -> ContinuousEffect {
-    continuous_effect(source, EffectPrimitive::DoublePT { power, toughness }, timestamp)
+    continuous_effect(
+        source,
+        EffectPrimitive::DoublePT { power, toughness },
+        timestamp,
+    )
 }
 
 fn scripted(source: ObjectId, handle: ScriptHandle, timestamp: u64) -> ContinuousEffect {
@@ -165,7 +195,9 @@ fn scripted_double_pt_waits_for_a_later_timestamp_modify_it_depends_on() {
 
     let mut script_runtime = ScriptRuntime::new();
     let handle = script_runtime
-        .load_function("return function(source, controller) return Game.Effects.DoublePT(true, true) end")
+        .load_function(
+            "return function(source, controller) return Game.Effects.DoublePT(true, true) end",
+        )
         .unwrap();
     state.continuous_effects.push(scripted(bear, handle, 0));
     state.continuous_effects.push(modify(bear, 2, 2, 1));

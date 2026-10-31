@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, single_player_state};
@@ -29,7 +29,9 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -51,7 +53,15 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -> GameObject {
-    GameObject { damage_marked, ..card_object(id, creature_definition(2, toughness), owner, ZoneKind::Battlefield) }
+    GameObject {
+        damage_marked,
+        ..card_object(
+            id,
+            creature_definition(2, toughness),
+            owner,
+            ZoneKind::Battlefield,
+        )
+    }
 }
 
 fn base_state() -> GameState {
@@ -59,20 +69,32 @@ fn base_state() -> GameState {
     GameState {
         phase: Phase::Combat,
         step: Step::CombatDamage,
-        ..single_player_state(p0, vec![Zone::new(ZoneKind::Battlefield, None), Zone::new(ZoneKind::Graveyard, Some(p0))])
+        ..single_player_state(
+            p0,
+            vec![
+                Zone::new(ZoneKind::Battlefield, None),
+                Zone::new(ZoneKind::Graveyard, Some(p0)),
+            ],
+        )
     }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
 // One solo-player PassPriority plus drain advances exactly one step transition.
 fn pass(engine: &mut Engine, player: PlayerId) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
         .expect("solo player always holds priority when awaiting an action");
     drain(engine)
 }
@@ -86,8 +108,17 @@ fn lethal_marked_damage_destroys_creature() {
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
-    assert!(state.object(bear).is_none(), "old id should no longer resolve");
-    assert!(!state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&bear));
+    assert!(
+        state.object(bear).is_none(),
+        "old id should no longer resolve"
+    );
+    assert!(
+        !state
+            .zone(ZoneKind::Battlefield, None)
+            .unwrap()
+            .contents
+            .contains(&bear)
+    );
     let gy = state.zone(ZoneKind::Graveyard, Some(p0)).unwrap();
     assert_eq!(gy.contents.len(), 1);
     let new_id = gy.contents[0];
@@ -95,7 +126,12 @@ fn lethal_marked_damage_destroys_creature() {
 
     assert_eq!(events.len(), 1);
     match &events[0].kind {
-        GameEventKind::ZoneChange { object, from, to, last_known_info } => {
+        GameEventKind::ZoneChange {
+            object,
+            from,
+            to,
+            last_known_info,
+        } => {
             assert_eq!(*object, new_id);
             assert_eq!(*from, ZoneKind::Battlefield);
             assert_eq!(*to, ZoneKind::Graveyard);
@@ -145,7 +181,14 @@ fn two_lethally_damaged_creatures_die_in_the_same_pass() {
     assert!(state.object(a).is_none());
     assert!(state.object(b).is_none());
     assert_eq!(events.len(), 2);
-    assert_eq!(state.zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 2);
+    assert_eq!(
+        state
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .len(),
+        2
+    );
 }
 
 // Creatures that die together get new ids in ascending order of their old ids, since an unordered walk of the objects HashMap would fail this about 11 times in 12.
@@ -162,7 +205,9 @@ fn creatures_that_die_together_leave_in_id_order() {
     let old_ids: Vec<ObjectId> = events
         .iter()
         .map(|e| match &e.kind {
-            GameEventKind::ZoneChange { last_known_info, .. } => last_known_info.as_ref().unwrap().object_id,
+            GameEventKind::ZoneChange {
+                last_known_info, ..
+            } => last_known_info.as_ref().unwrap().object_id,
             other => panic!("expected ZoneChange, got {other:?}"),
         })
         .collect();
@@ -175,8 +220,10 @@ fn creature_with_characteristic_defining_toughness_is_skipped() {
     let p0 = PlayerId(0);
     let star = ObjectId(0);
     let mut object = creature(star, p0, 0, 0);
-    object.definition.toughness =
-        Some(PTValue::CharacteristicDefining { display: "*".to_string(), script: None });
+    object.definition.toughness = Some(PTValue::CharacteristicDefining {
+        display: "*".to_string(),
+        script: None,
+    });
     put_on_battlefield(&mut state, object);
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
@@ -221,7 +268,10 @@ fn already_eliminated_player_does_not_re_emit_on_next_pass() {
     assert_eq!(first.len(), 1);
 
     let second = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert!(second.is_empty(), "fixed-point loop must terminate, not re-eliminate every pass");
+    assert!(
+        second.is_empty(),
+        "fixed-point loop must terminate, not re-eliminate every pass"
+    );
 }
 
 // CR 704.5b
@@ -230,7 +280,11 @@ fn drawing_from_an_empty_library_sets_the_flag_but_does_not_eliminate_yet() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     state.phase = Phase::PreGame;
-    state.zones.push(Zone { kind: ZoneKind::Library, owner: Some(p0), contents: VecDeque::new() });
+    state.zones.push(Zone {
+        kind: ZoneKind::Library,
+        owner: Some(p0),
+        contents: VecDeque::new(),
+    });
     // A 1-player turn order reaches a real Draw-step draw on turn 1, since the CR 103.8a skip applies only to a 2-player game.
 
     let mut engine = Engine::new(state);
@@ -262,9 +316,17 @@ fn drawing_a_real_card_does_not_set_the_flag() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     state.phase = Phase::PreGame;
-    state.zones.push(Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() });
+    state.zones.push(Zone {
+        kind: ZoneKind::Hand,
+        owner: Some(p0),
+        contents: VecDeque::new(),
+    });
     let card = ObjectId(0);
-    let mut library = Zone { kind: ZoneKind::Library, owner: Some(p0), contents: VecDeque::new() };
+    let mut library = Zone {
+        kind: ZoneKind::Library,
+        owner: Some(p0),
+        contents: VecDeque::new(),
+    };
     library.push_bottom(card);
     state.zones.push(library);
     let mut card_object = creature(card, p0, 2, 0);
@@ -286,7 +348,11 @@ fn drawing_a_real_card_does_not_set_the_flag() {
 fn nine_poison_counters_is_untouched() {
     let mut state = base_state();
     let p0 = PlayerId(0);
-    state.player_mut(p0).unwrap().counters.add(CounterKind::Poison, 9, SequenceNo(0));
+    state
+        .player_mut(p0)
+        .unwrap()
+        .counters
+        .add(CounterKind::Poison, 9, SequenceNo(0));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
@@ -298,7 +364,11 @@ fn nine_poison_counters_is_untouched() {
 fn ten_poison_counters_eliminates() {
     let mut state = base_state();
     let p0 = PlayerId(0);
-    state.player_mut(p0).unwrap().counters.add(CounterKind::Poison, 10, SequenceNo(0));
+    state
+        .player_mut(p0)
+        .unwrap()
+        .counters
+        .add(CounterKind::Poison, 10, SequenceNo(0));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
@@ -319,7 +389,10 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
         attackers: vec![(infector, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
     let mut object = creature(infector, p0, 3, 0);
     // 10 power in one unblocked AssignCombatDamage pass reaches the 10-poison threshold.
@@ -331,7 +404,9 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::AssignCombatDamage { assignments: Vec::new() },
+            kind: PlayerActionKind::AssignCombatDamage {
+                assignments: Vec::new(),
+            },
         })
         .expect("turn-based action, no priority required");
     let status = loop {
@@ -343,9 +418,24 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
     // CR 704.5c eliminates p1, which ends a two-player game (CR 104.2a).
     assert!(matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p0));
 
-    assert_eq!(engine.state().player(p1).unwrap().life, 20, "702.90b: infect damage doesn't cause life loss");
-    assert_eq!(engine.state().player(p1).unwrap().counters.count(&CounterKind::Poison), 10);
-    assert!(engine.state().player(p1).unwrap().eliminated, "704.5c should fire through the real SbaLoop pipeline");
+    assert_eq!(
+        engine.state().player(p1).unwrap().life,
+        20,
+        "702.90b: infect damage doesn't cause life loss"
+    );
+    assert_eq!(
+        engine
+            .state()
+            .player(p1)
+            .unwrap()
+            .counters
+            .count(&CounterKind::Poison),
+        10
+    );
+    assert!(
+        engine.state().player(p1).unwrap().eliminated,
+        "704.5c should fire through the real SbaLoop pipeline"
+    );
 }
 
 // CR 903.10a
@@ -353,7 +443,9 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
 fn commander_damage_from_finds_the_matching_source_or_zero() {
     let mut player = player_state(PlayerId(0));
     let commander = "Test Commander";
-    player.commander_damage_taken.push((commander.to_string(), 15));
+    player
+        .commander_damage_taken
+        .push((commander.to_string(), 15));
 
     assert_eq!(player.commander_damage_from(commander), 15);
     assert_eq!(player.commander_damage_from("Some Other Commander"), 0);
@@ -364,7 +456,11 @@ fn twenty_commander_damage_is_untouched() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let commander = "Test Commander";
-    state.player_mut(p0).unwrap().commander_damage_taken.push((commander.to_string(), 20));
+    state
+        .player_mut(p0)
+        .unwrap()
+        .commander_damage_taken
+        .push((commander.to_string(), 20));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
@@ -377,7 +473,11 @@ fn twenty_one_commander_damage_eliminates() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let commander = "Test Commander";
-    state.player_mut(p0).unwrap().commander_damage_taken.push((commander.to_string(), 21));
+    state
+        .player_mut(p0)
+        .unwrap()
+        .commander_damage_taken
+        .push((commander.to_string(), 21));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
@@ -411,7 +511,10 @@ fn lethal_damage_dies_through_the_real_engine_pipeline() {
 
     let mut engine = Engine::new(state);
     engine
-        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority })
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
         .expect("p0 holds priority");
     let status = loop {
         match engine.step().status {
@@ -422,12 +525,20 @@ fn lethal_damage_dies_through_the_real_engine_pipeline() {
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
 
     assert!(engine.state().object(bear).is_none());
-    assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 1);
-    assert!(
+    assert_eq!(
         engine
             .state()
-            .ledger
-            .iter()
-            .any(|e| matches!(e.kind, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }))
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .len(),
+        1
     );
+    assert!(engine.state().ledger.iter().any(|e| matches!(
+        e.kind,
+        GameEventKind::ZoneChange {
+            to: ZoneKind::Graveyard,
+            ..
+        }
+    )));
 }

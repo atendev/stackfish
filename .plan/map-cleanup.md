@@ -38,6 +38,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 058: Updated `docs/DESIGN.md` to reflect the post-cleanup module layout, replaced broken `docs/implementation.md` references with numbered `docs/implementation/*.md` notes, added `docs/implementation/28-module-layout.md`, and updated `docs/implementation/index.md`. [closed/058-update-design-doc-module-layout.md]
 - 055: Audited `pub` visibility and dead helpers across all seven crates. About 424 items and fields can narrow to `pub(crate)` (engine 85, scenario 137, host 187), 9 items are dead (engine 5 plus `invoke_cost` stub, host 3), and 6 more are test-only (engine 5, host 1). Decide nameability of `EngineCommand`, `CommandOutcome` and `ProcessState` before narrowing. [closed/055-audit-visibility-dead-helpers.md]
 - 056: Audited workspace `Cargo.toml` hygiene. No shared `[workspace.dependencies]`; `cargo fmt --check` has ~7.3k diffs; `cargo clippy --workspace --all-targets -- -D warnings` has 77 errors all in `stackfish-engine`. `cargo-machete`/`cargo-udeps` are not installed; manual inspection found no obvious unused deps. `cargo test --workspace` passes. [closed/056-audit-workspace-cargo.md]
+- 057: Added `[workspace.dependencies]` for `serde`, `serde_json` and `rusqlite`, cleared every clippy error under `-D warnings` (hand fixes plus per-site `#[allow]` for long signatures, big variants and large `Err` types), and ran `cargo fmt --all` over 344 files as its own commit. `cargo test --workspace` passes with 2315 tests, and `cargo machete` removed one unused dependency. Visibility narrowing and dead helpers moved to 064. [closed/057-apply-workspace-lints.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -90,7 +91,8 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 - 055 Audit `pub` vs `pub(crate)` visibility and dead helpers across `crates/`. Type research, AFK. Blocked by 038, 040, 041. Closed.
 - 056 Audit workspace `Cargo.toml` dependencies, lints, and formatting. Type research, AFK.
   - Check shared `[workspace.dependencies]`, unused dependencies, `cargo clippy` warnings, and `cargo fmt --check` status across all crates.
-- 057 Tighten visibility, remove dead helpers, and apply workspace lints. Type task, HITL. Blocked by 055 and 056.
+- 057 Apply workspace dependencies, clippy fixes and rustfmt. Type task, HITL. Blocked by 055 and 056. Closed.
+- 064 Decide nameability of `EngineCommand`, `CommandOutcome` and `ProcessState`, then narrow `pub` visibility and remove dead helpers. Type grilling, HITL. Split from 057.
 - 058 Update `docs/DESIGN.md` to reflect the new module layout. Type task, HITL. Blocked by 038, 040, 041, 046.
 - 059 Decide on a pre-commit or CI check for `fmt`, `clippy`, and `comment_diff.py`. Type grilling, HITL. Blocked by 057.
 
@@ -98,9 +100,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 057, 060
+- 059, 060, 064
 
-057 is unblocked now that 055 and 056 are closed.
+059 is unblocked now that 057 is closed.
 
 ## Not yet specified
 

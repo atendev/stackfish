@@ -2,17 +2,21 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -37,12 +41,15 @@ fn volley_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
         name: "Test Volley".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
         subtypes: Vec::new(),
-        oracle_text: "Test Volley deals 1 damage to each of two or more target creatures.".to_string(),
+        oracle_text: "Test Volley deals 1 damage to each of two or more target creatures."
+            .to_string(),
         power: None,
         toughness: None,
         loyalty: None,
@@ -50,7 +57,17 @@ fn volley_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_volley".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: Some(CardTypeSet::CREATURE),
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
             count: 2,
             up_to: false,
             at_least: true,
@@ -78,40 +95,82 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
-fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
-        })
-        
+fn try_cast_spell(
+    engine: &mut Engine,
+    player: PlayerId,
+    card: ObjectId,
+    targets: Vec<Target>,
+) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::CastSpell {
+            card,
+            modes: Vec::new(),
+            targets,
+            x_value: None,
+            alternative_cost: None,
+            pay_buyback: false,
+        },
+    })
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
 fn fizzled(engine: &Engine) -> bool {
-    engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. }))
+    engine
+        .state()
+        .ledger
+        .iter()
+        .any(|e| matches!(e.kind, GameEventKind::Fizzled { .. }))
 }
 
 fn damage_marked_on(engine: &Engine, id: ObjectId) -> u32 {
-    engine.state().object(id).map(|o| o.damage_marked).unwrap_or(0)
+    engine
+        .state()
+        .object(id)
+        .map(|o| o.damage_marked)
+        .unwrap_or(0)
 }
 
 fn setup_with_creatures(n: u32) -> (GameState, Vec<ObjectId>, ObjectId) {
@@ -121,13 +180,30 @@ fn setup_with_creatures(n: u32) -> (GameState, Vec<ObjectId>, ObjectId) {
     let mut ids = Vec::new();
     for i in 0..n {
         let id = ObjectId(i as u64);
-        state.objects.insert(id, card_object(id, creature_definition((i + 1) as u64, &format!("Bear {i}")), p1, ZoneKind::Battlefield));
-        state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                creature_definition((i + 1) as u64, &format!("Bear {i}")),
+                p1,
+                ZoneKind::Battlefield,
+            ),
+        );
+        state
+            .zone_mut(ZoneKind::Battlefield, None)
+            .unwrap()
+            .push_bottom(id);
         ids.push(id);
     }
     let card = ObjectId(1000);
-    state.objects.insert(card, card_object(card, volley_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, volley_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
     (state, ids, card)
 }
 
@@ -138,7 +214,12 @@ fn casting_with_exactly_the_minimum_is_legal() {
     let p1 = PlayerId(1);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, targets.iter().map(|id| Target::Object(*id)).collect());
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        targets.iter().map(|id| Target::Object(*id)).collect(),
+    );
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
@@ -155,7 +236,12 @@ fn casting_with_more_than_the_minimum_is_legal() {
     let p1 = PlayerId(1);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, targets.iter().map(|id| Target::Object(*id)).collect());
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        targets.iter().map(|id| Target::Object(*id)).collect(),
+    );
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
@@ -173,8 +259,15 @@ fn casting_with_fewer_than_the_minimum_is_rejected() {
     let mut engine = Engine::new(state);
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(targets[0])]).unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
-    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "cast never happened");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "got {err:?}"
+    );
+    assert_eq!(
+        engine.state().object(card).unwrap().zone,
+        ZoneKind::Hand,
+        "cast never happened"
+    );
 }
 
 #[test]
@@ -185,8 +278,10 @@ fn casting_with_zero_targets_is_rejected() {
     let mut engine = Engine::new(state);
     let err = try_cast_spell(&mut engine, p0, card, Vec::new()).unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
-        "\"N or more\" with N=2 still requires at least 2, unlike \"up to N\" which allows zero - got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "\"N or more\" with N=2 still requires at least 2, unlike \"up to N\" which allows zero - got {err:?}"
+    );
 }
 
 #[test]
@@ -195,9 +290,18 @@ fn casting_with_a_duplicate_target_is_rejected() {
     let p0 = PlayerId(0);
 
     let mut engine = Engine::new(state);
-    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(targets[0]), Target::Object(targets[0])]).unwrap_err();
+    let err = try_cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![Target::Object(targets[0]), Target::Object(targets[0])],
+    )
+    .unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -207,14 +311,26 @@ fn one_of_several_chosen_targets_becoming_illegal_partially_fizzles() {
     let p1 = PlayerId(1);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, targets.iter().map(|id| Target::Object(*id)).collect());
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        targets.iter().map(|id| Target::Object(*id)).collect(),
+    );
     pay_free_and_drain(&mut engine);
 
-    engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(targets[0]);
+    engine
+        .state_mut()
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .remove(targets[0]);
     engine.state_mut().objects.remove(&targets[0]);
 
     pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(!fizzled(&engine), "one of two targets is still legal - CR 608.2b: the spell still resolves against it");
+    assert!(
+        !fizzled(&engine),
+        "one of two targets is still legal - CR 608.2b: the spell still resolves against it"
+    );
     assert_eq!(damage_marked_on(&engine, targets[1]), 1);
 }

@@ -1,5 +1,5 @@
-use super::*;
 use super::triggers_pipeline::is_permutation;
+use super::*;
 use crate::replacement;
 use crate::triggers::PendingTrigger;
 use crate::types::cost::{CostPayment, PaymentPlan};
@@ -50,7 +50,10 @@ pub(super) fn minimal_state() -> GameState {
         land_play_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
-        rng: crate::types::game::RngState { seed: 1, draws_consumed: 0 },
+        rng: crate::types::game::RngState {
+            seed: 1,
+            draws_consumed: 0,
+        },
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 0,
@@ -68,7 +71,13 @@ pub(super) fn minimal_state() -> GameState {
 }
 
 pub(super) fn trigger(id: u64, controller: PlayerId) -> PendingTrigger {
-    PendingTrigger { source: ObjectId(id), controller, ability: AbilityId(id), once_per_turn: false, triggering_stack: None }
+    PendingTrigger {
+        source: ObjectId(id),
+        controller,
+        ability: AbilityId(id),
+        once_per_turn: false,
+        triggering_stack: None,
+    }
 }
 
 #[test]
@@ -78,7 +87,10 @@ fn is_permutation_accepts_reorderings_and_rejects_substitutions() {
     assert!(is_permutation(&[group[1], group[0]], &group));
     // Same length but a substituted element must be rejected - length
     // alone can't catch this.
-    assert!(!is_permutation(&[group[0], trigger(3, PlayerId(0))], &group));
+    assert!(!is_permutation(
+        &[group[0], trigger(3, PlayerId(0))],
+        &group
+    ));
     // A duplicate of one element instead of using both must be rejected.
     assert!(!is_permutation(&[group[0], group[0]], &group));
     // Wrong length, caught the same way as before.
@@ -103,17 +115,27 @@ fn submit_trigger_order_rejects_non_permutation_and_accepts_real_reordering() {
 
     // Engine must still be sitting in AwaitTriggerOrderChoice - a
     // rejected answer must not have consumed the pending state.
-    assert!(matches!(engine.process_state, ProcessState::AwaitTriggerOrderChoice { .. }));
+    assert!(matches!(
+        engine.process_state,
+        ProcessState::AwaitTriggerOrderChoice { .. }
+    ));
 
     let reordered = vec![group[1], group[0]];
-    engine.submit_trigger_order(reordered).expect("a true reordering must be accepted");
-    assert!(matches!(engine.process_state, ProcessState::PutTriggersApnap { .. }));
+    engine
+        .submit_trigger_order(reordered)
+        .expect("a true reordering must be accepted");
+    assert!(matches!(
+        engine.process_state,
+        ProcessState::PutTriggersApnap { .. }
+    ));
 }
 
 // Replacement and prevention, driven directly through the pipeline
 
 fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::GameObject {
-    use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
+    use crate::types::card::{
+        CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet,
+    };
     use crate::types::object::VisibilityPolicy;
     crate::types::object::GameObject {
         object_id: id,
@@ -121,7 +143,9 @@ fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::Gam
         definition: crate::types::card::CardDefinition {
             definition_id: 1,
             name: "Test Object".to_string(),
-            mana_cost: crate::types::mana::ManaCost { symbols: Vec::new() },
+            mana_cost: crate::types::mana::ManaCost {
+                symbols: Vec::new(),
+            },
             color_indicator: None,
             supertypes: SupertypeSet::empty(),
             card_types: CardTypeSet::ARTIFACT,
@@ -152,12 +176,16 @@ fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::Gam
         deathtouched: false,
         counters: CounterSet::new(),
         attachments: Vec::new(),
-        attached_to: None, attached_to_player: None,
+        attached_to: None,
+        attached_to_player: None,
         timestamp: crate::types::ids::SequenceNo(0),
         controlled_since_turn: 0,
         is_commander: false,
         is_token: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+        visibility: VisibilityPolicy {
+            public: true,
+            visible_to: Vec::new(),
+        },
         copy_generation: 0,
         entered_via_escape: false,
     }
@@ -169,7 +197,15 @@ fn prevent_all_damage(source: ObjectId) -> crate::types::effect::ReplacementEffe
         source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::PreventDamage,
         },
@@ -182,22 +218,32 @@ fn replacement_check_applies_single_match_and_commits_rewritten_event() {
     let p0 = PlayerId(0);
     let effect_source = ObjectId(0);
     let mut state = minimal_state();
-    state.objects.insert(effect_source, dummy_object(effect_source, p0));
-    state.replacement_effects.push(prevent_all_damage(effect_source));
+    state
+        .objects
+        .insert(effect_source, dummy_object(effect_source, p0));
+    state
+        .replacement_effects
+        .push(prevent_all_damage(effect_source));
 
     let mut engine = Engine::new(state);
-    let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(p0), amount: 7, is_combat_damage: false };
-    engine.process_state =
-        ProcessState::ReplacementCheck { remaining: VecDeque::from([event]), checked: Vec::new() };
+    let event = GameEventKind::DamageDealt {
+        source: ObjectId(1),
+        target: Target::Player(p0),
+        amount: 7,
+        is_combat_damage: false,
+    };
+    engine.process_state = ProcessState::ReplacementCheck {
+        remaining: VecDeque::from([event]),
+        checked: Vec::new(),
+    };
 
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            _ => break,
-        }
-    }
+    while let StepStatus::Progressed = engine.step().status {}
 
-    let last = engine.state().ledger.last().expect("CommitEvents must have appended the resolved event");
+    let last = engine
+        .state()
+        .ledger
+        .last()
+        .expect("CommitEvents must have appended the resolved event");
     assert!(
         matches!(last.kind, GameEventKind::DamageDealt { amount: 0, .. }),
         "the registered PreventDamage effect must have zeroed the committed event's amount"
@@ -207,7 +253,9 @@ fn replacement_check_applies_single_match_and_commits_rewritten_event() {
 #[test]
 fn submit_replacement_choice_rejects_invalid_candidate_and_not_awaiting() {
     let mut engine = Engine::new(minimal_state());
-    let err = engine.submit_replacement_choice(replacement::ReplacementCandidate::Registered(ObjectId(0))).unwrap_err();
+    let err = engine
+        .submit_replacement_choice(replacement::ReplacementCandidate::Registered(ObjectId(0)))
+        .unwrap_err();
     assert!(matches!(err, ReplacementChoiceError::NotAwaitingChoice));
 
     engine.process_state = ProcessState::AwaitingReplacementChoice {
@@ -223,14 +271,20 @@ fn submit_replacement_choice_rejects_invalid_candidate_and_not_awaiting() {
             replacement::ReplacementCandidate::Registered(ObjectId(2)),
         ],
         excluded: Vec::new(),
-        resume: ReplacementResumeTarget::ReplacementCheck { remaining: VecDeque::new(), checked: Vec::new() },
+        resume: ReplacementResumeTarget::ReplacementCheck {
+            remaining: VecDeque::new(),
+            checked: Vec::new(),
+        },
     };
     let err = engine
         .submit_replacement_choice(replacement::ReplacementCandidate::Registered(ObjectId(99)))
         .unwrap_err();
     assert!(matches!(err, ReplacementChoiceError::InvalidCandidate));
     // A rejected answer must not have consumed the pending state.
-    assert!(matches!(engine.process_state, ProcessState::AwaitingReplacementChoice { .. }));
+    assert!(matches!(
+        engine.process_state,
+        ProcessState::AwaitingReplacementChoice { .. }
+    ));
 }
 
 #[test]
@@ -245,9 +299,16 @@ fn submit_replacement_choice_applies_chosen_then_resolves_the_other_and_commits(
     state.replacement_effects.push(prevent_all_damage(b));
 
     let mut engine = Engine::new(state);
-    let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p0), amount: 7, is_combat_damage: false };
-    engine.process_state =
-        ProcessState::ReplacementCheck { remaining: VecDeque::from([event]), checked: Vec::new() };
+    let event = GameEventKind::DamageDealt {
+        source: ObjectId(2),
+        target: Target::Player(p0),
+        amount: 7,
+        is_combat_damage: false,
+    };
+    engine.process_state = ProcessState::ReplacementCheck {
+        remaining: VecDeque::from([event]),
+        checked: Vec::new(),
+    };
 
     // Both effects match unrestricted - one step() call should pause on
     // the CR 616.1 ordering choice rather than guessing an order.
@@ -263,15 +324,17 @@ fn submit_replacement_choice_applies_chosen_then_resolves_the_other_and_commits(
     // b still matches the (already-prevented) event since it isn't
     // excluded yet - this drains it too, then commits once nothing else
     // matches (CR 616.1: a is now excluded and can't reapply).
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            _ => break,
-        }
-    }
+    while let StepStatus::Progressed = engine.step().status {}
 
-    let last = engine.state().ledger.last().expect("CommitEvents must have appended the resolved event");
-    assert!(matches!(last.kind, GameEventKind::DamageDealt { amount: 0, .. }));
+    let last = engine
+        .state()
+        .ledger
+        .last()
+        .expect("CommitEvents must have appended the resolved event");
+    assert!(matches!(
+        last.kind,
+        GameEventKind::DamageDealt { amount: 0, .. }
+    ));
 }
 
 // CR 303.4d attach choice, driven by constructing the pause directly since no effect produces one
@@ -290,7 +353,10 @@ fn submit_attach_choice_rejects_invalid_candidate_and_not_awaiting() {
     let err = engine.submit_attach_choice(ObjectId(99)).unwrap_err();
     assert!(matches!(err, AttachChoiceError::InvalidCandidate));
     // A rejected answer must not have consumed the pending state.
-    assert!(matches!(engine.process_state, ProcessState::AwaitingAttachChoice { .. }));
+    assert!(matches!(
+        engine.process_state,
+        ProcessState::AwaitingAttachChoice { .. }
+    ));
 }
 
 #[test]
@@ -301,8 +367,12 @@ fn attach_choice_surfaces_via_step_and_a_valid_answer_attaches_and_resumes() {
     let candidate_b = ObjectId(2);
     let mut state = minimal_state();
     state.objects.insert(aura, dummy_object(aura, p0));
-    state.objects.insert(candidate_a, dummy_object(candidate_a, p0));
-    state.objects.insert(candidate_b, dummy_object(candidate_b, p0));
+    state
+        .objects
+        .insert(candidate_a, dummy_object(candidate_a, p0));
+    state
+        .objects
+        .insert(candidate_b, dummy_object(candidate_b, p0));
 
     let mut engine = Engine::new(state);
     engine.process_state = ProcessState::AwaitingAttachChoice {
@@ -312,18 +382,42 @@ fn attach_choice_surfaces_via_step_and_a_valid_answer_attaches_and_resumes() {
     };
 
     let status = engine.step().status;
-    let StepStatus::AwaitingAttachChoice { player, aura: paused_aura, candidates } = status else {
+    let StepStatus::AwaitingAttachChoice {
+        player,
+        aura: paused_aura,
+        candidates,
+    } = status
+    else {
         panic!("expected AwaitingAttachChoice, got {status:?}");
     };
     assert_eq!(player, p0);
     assert_eq!(paused_aura, aura);
     assert_eq!(candidates, vec![candidate_a, candidate_b]);
 
-    engine.submit_attach_choice(candidate_a).expect("candidate_a is a real candidate");
+    engine
+        .submit_attach_choice(candidate_a)
+        .expect("candidate_a is a real candidate");
     assert!(matches!(engine.process_state, ProcessState::PriorityWindow));
-    assert_eq!(engine.state().object(aura).unwrap().attached_to, Some(candidate_a));
-    assert!(engine.state().object(candidate_a).unwrap().attachments.contains(&aura));
-    assert!(!engine.state().object(candidate_b).unwrap().attachments.contains(&aura));
+    assert_eq!(
+        engine.state().object(aura).unwrap().attached_to,
+        Some(candidate_a)
+    );
+    assert!(
+        engine
+            .state()
+            .object(candidate_a)
+            .unwrap()
+            .attachments
+            .contains(&aura)
+    );
+    assert!(
+        !engine
+            .state()
+            .object(candidate_b)
+            .unwrap()
+            .attachments
+            .contains(&aura)
+    );
 }
 
 // CR 118.12 `payer_queue`, driven directly since both producers build single-element queues
@@ -354,7 +448,9 @@ fn multi_player_state(n: u32) -> GameState {
 }
 
 fn one_generic_cost() -> crate::types::cost::CostSpec {
-    crate::types::cost::CostSpec::mana_only(crate::types::mana::ManaCost::parse("{1}").expect("valid mana cost"))
+    crate::types::cost::CostSpec::mana_only(
+        crate::types::mana::ManaCost::parse("{1}").expect("valid mana cost"),
+    )
 }
 
 fn unless_paid_choice(
@@ -384,12 +480,18 @@ fn decline_unless_paid_advances_the_queue_without_dispatching_otherwise() {
     let mut engine = Engine::new(state);
     engine.process_state = unless_paid_choice(VecDeque::from([p0, p1, p2]), source, ObjectId(99));
 
-    engine.decline_unless_paid(p0).expect("p0 is the current front");
+    engine
+        .decline_unless_paid(p0)
+        .expect("p0 is the current front");
     let ProcessState::AwaitingUnlessPaidChoice { payer_queue, .. } = &engine.process_state else {
         panic!("must still be awaiting - 2 candidates left");
     };
     assert_eq!(payer_queue.front(), Some(&p1));
-    assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield, "otherwise must not fire early");
+    assert_eq!(
+        engine.state().object(source).unwrap().zone,
+        ZoneKind::Battlefield,
+        "otherwise must not fire early"
+    );
 }
 
 #[test]
@@ -407,7 +509,11 @@ fn decline_unless_paid_rejects_a_payer_not_at_the_front_of_the_queue() {
     let ProcessState::AwaitingUnlessPaidChoice { payer_queue, .. } = &engine.process_state else {
         panic!("a rejected answer must not have consumed the pending state");
     };
-    assert_eq!(payer_queue.front(), Some(&p0), "unanswered - the queue is untouched");
+    assert_eq!(
+        payer_queue.front(),
+        Some(&p0),
+        "unanswered - the queue is untouched"
+    );
 }
 
 #[test]
@@ -421,10 +527,19 @@ fn submit_unless_paid_payment_rejects_a_payer_not_at_the_front_of_the_queue() {
     let mut engine = Engine::new(state);
     engine.process_state = unless_paid_choice(VecDeque::from([p0, p1]), source, ObjectId(99));
 
-    let plan = PaymentPlan { payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colorless], phyrexian_life: 0 }] };
+    let plan = PaymentPlan {
+        payments: vec![CostPayment::Mana {
+            units: vec![ManaUnit::Colorless],
+            phyrexian_life: 0,
+        }],
+    };
     let err = engine.submit_unless_paid_payment(p1, plan).unwrap_err();
     assert!(matches!(err, UnlessPaidError::NotCurrentPayer));
-    assert_eq!(engine.state().player(p1).unwrap().mana_pool.colorless, 1, "no deduction on a rejected submission");
+    assert_eq!(
+        engine.state().player(p1).unwrap().mana_pool.colorless,
+        1,
+        "no deduction on a rejected submission"
+    );
 }
 
 #[test]
@@ -439,20 +554,40 @@ fn all_candidates_declining_dispatches_otherwise_only_once_the_queue_is_empty() 
     let mut engine = Engine::new(state);
     engine.process_state = unless_paid_choice(VecDeque::from([p0, p1, p2]), source, stack_id);
 
-    engine.decline_unless_paid(p0).expect("p0 is the current front");
-    assert!(matches!(engine.process_state, ProcessState::AwaitingUnlessPaidChoice { .. }), "2 candidates left");
-    engine.decline_unless_paid(p1).expect("p1 is the current front");
-    assert!(matches!(engine.process_state, ProcessState::AwaitingUnlessPaidChoice { .. }), "1 candidate left");
-    assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield, "otherwise must not fire early");
+    engine
+        .decline_unless_paid(p0)
+        .expect("p0 is the current front");
+    assert!(
+        matches!(
+            engine.process_state,
+            ProcessState::AwaitingUnlessPaidChoice { .. }
+        ),
+        "2 candidates left"
+    );
+    engine
+        .decline_unless_paid(p1)
+        .expect("p1 is the current front");
+    assert!(
+        matches!(
+            engine.process_state,
+            ProcessState::AwaitingUnlessPaidChoice { .. }
+        ),
+        "1 candidate left"
+    );
+    assert_eq!(
+        engine.state().object(source).unwrap().zone,
+        ZoneKind::Battlefield,
+        "otherwise must not fire early"
+    );
 
-    engine.decline_unless_paid(p2).expect("p2 is the current front");
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            _ => break,
-        }
-    }
-    assert!(engine.state().object(source).is_none(), "otherwise finally fires once every candidate has declined");
+    engine
+        .decline_unless_paid(p2)
+        .expect("p2 is the current front");
+    while let StepStatus::Progressed = engine.step().status {}
+    assert!(
+        engine.state().object(source).is_none(),
+        "otherwise finally fires once every candidate has declined"
+    );
     let resolved = engine
         .state()
         .ledger
@@ -474,12 +609,34 @@ fn a_later_candidate_paying_stops_the_queue_before_otherwise_fires() {
     let mut engine = Engine::new(state);
     engine.process_state = unless_paid_choice(VecDeque::from([p0, p1, p2]), source, stack_id);
 
-    engine.decline_unless_paid(p0).expect("p0 is the current front");
-    engine.decline_unless_paid(p1).expect("p1 is the current front");
-    let plan = PaymentPlan { payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colorless], phyrexian_life: 0 }] };
-    engine.submit_unless_paid_payment(p2, plan).expect("p2 can afford {1}");
+    engine
+        .decline_unless_paid(p0)
+        .expect("p0 is the current front");
+    engine
+        .decline_unless_paid(p1)
+        .expect("p1 is the current front");
+    let plan = PaymentPlan {
+        payments: vec![CostPayment::Mana {
+            units: vec![ManaUnit::Colorless],
+            phyrexian_life: 0,
+        }],
+    };
+    engine
+        .submit_unless_paid_payment(p2, plan)
+        .expect("p2 can afford {1}");
 
-    assert!(matches!(engine.process_state, ProcessState::ReplacementCheck { .. }));
-    assert_eq!(engine.state().player(p2).unwrap().mana_pool.colorless, 0, "p2's mana was actually spent");
-    assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield, "otherwise never fires - p2 paid");
+    assert!(matches!(
+        engine.process_state,
+        ProcessState::ReplacementCheck { .. }
+    ));
+    assert_eq!(
+        engine.state().player(p2).unwrap().mana_pool.colorless,
+        0,
+        "p2's mana was actually spent"
+    );
+    assert_eq!(
+        engine.state().object(source).unwrap().zone,
+        ZoneKind::Battlefield,
+        "otherwise never fires - p2 paid"
+    );
 }

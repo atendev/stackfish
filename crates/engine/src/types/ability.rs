@@ -1,7 +1,7 @@
 use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, SpellMode, SupertypeSet};
 use crate::types::cost::{CostSpec, FilterSpec};
-use crate::types::effect::EffectFilter;
 use crate::types::counter::CounterKind;
+use crate::types::effect::EffectFilter;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{ColorSet, ManaUnit};
@@ -118,7 +118,11 @@ pub enum AbilityEffect {
     /// `duration` drains through `EffectDuration` (`UntilEndOfTurn`,
     /// `UntilYourNextTurn`, `UntilEndOfCombat`, `Permanent`). A non-object
     /// target is skipped silently, as in every object-targeted primitive here.
-    Pump { power: i32, toughness: i32, duration: crate::types::effect::EffectDuration },
+    Pump {
+        power: i32,
+        toughness: i32,
+        duration: crate::types::effect::EffectDuration,
+    },
     /// `Game.Ops.GainControl(duration)` (CR 108.4, 613.1 layer 2): "gain
     /// control of target creature until end of turn". Builds a per-target
     /// `ContinuousEffect` like `Pump`, but with `Layer::ControlChangingEffects`
@@ -229,7 +233,10 @@ pub enum AbilityEffect {
     /// simultaneous, replacement-checked and fire departed triggers.
     /// `filter.controller` is read off the object's controller, which equals
     /// its owner outside the battlefield.
-    ReturnAllToHand { filter: EffectFilter, zone: ZoneKind },
+    ReturnAllToHand {
+        filter: EffectFilter,
+        zone: ZoneKind,
+    },
     /// `Game.Ops.ExileSelf`: "exile this card from your graveyard" (CR 406.2).
     /// The source goes through `ScriptedZoneMoveKind::Exile`. A source that
     /// changed zones is a new object (CR 400.7), so the effect does nothing.
@@ -243,7 +250,10 @@ pub enum AbilityEffect {
     /// `ScriptedZoneMoveKind::Exile`, so the moves are simultaneous,
     /// replacement-checked and fire departed triggers.
     // TODO: Hand and Library sources (`accepts_source_zone` rejects them)
-    ExileAll { filter: EffectFilter, zone: ZoneKind },
+    ExileAll {
+        filter: EffectFilter,
+        zone: ZoneKind,
+    },
     /// `Game.Ops.ExileUntilSourceLeaves` (CR 610.3): "exile target creature
     /// until ~ leaves the battlefield". Targeted and battlefield-only like
     /// `Exile`, but each exiled card is linked to the ability's source in
@@ -290,7 +300,12 @@ pub enum AbilityEffect {
     /// `ReturnToBattlefield`. `filter.controller` is read off the object's
     /// controller, its owner outside the battlefield.
     // TODO: entries are processed one after another and not as one simultaneous event, so an earlier arrival's replacement can affect a later one (CR 603.6a, 614.12)
-    ReturnAllToBattlefield { filter: EffectFilter, zone: ZoneKind, control: EntryControl, tapped: bool },
+    ReturnAllToBattlefield {
+        filter: EffectFilter,
+        zone: ZoneKind,
+        control: EntryControl,
+        tapped: bool,
+    },
     /// `Game.Ops.Tap` (CR 701.26a): taps every legal object target. Only an
     /// untapped battlefield permanent changes (CR 110.5d), and a no-op pushes
     /// no `Tapped` event, so a "becomes tapped" trigger can't fire on it
@@ -372,7 +387,10 @@ pub enum AbilityEffect {
     /// source through `ScriptedZoneMoveThen::StackResolution`.
     // TODO: Condescend's {X} is an amount announced when the countering spell was cast; `ManaCost` can't parse `{X}` from a Lua string and this variant can't read `top.x_value` at resolution, so only Mana Leak's fixed number works
     // TODO: `payer_queue` has one element for both producers (Ward's targeted player, Echo's controller); an "any player may pay" or "each opponent may pay" keyword isn't wired from Lua or TOML
-    UnlessPaid { cost: CostSpec, otherwise: UnlessPaidConsequence },
+    UnlessPaid {
+        cost: CostSpec,
+        otherwise: UnlessPaidConsequence,
+    },
     /// `Game.Ops.CreateToken()`: creates `count` token permanents under the
     /// controller's control (CR 111). Named tokens (Clue, Food, Treasure) are
     /// complete, and creature tokens support arbitrary subtypes, colors, P/T,
@@ -416,7 +434,12 @@ pub enum AbilityEffect {
     // TODO: reveal the found card (CR 701.23e); there is no reveal concept yet
     // TODO: an effect that redirects "search" to "the top N instead" (CR 701.23f); it needs its own `EventFilter::Search`
     // TODO: simultaneous multiplayer search in APNAP order (CR 701.23i)
-    Search { filter: FilterSpec, count: u32, destination: SearchDestination, shuffle_after: bool },
+    Search {
+        filter: FilterSpec,
+        count: u32,
+        destination: SearchDestination,
+        shuffle_after: bool,
+    },
     /// `Game.Ops.BecomeCopy()` (CR 707.2, 707.3, layer 1): the source becomes
     /// a copy of its first chosen target's current copiable values (Vesuvan
     /// Doppelganger). A toggle with no fields, and the target lives on the
@@ -518,7 +541,10 @@ pub enum AbilityEffect {
     /// placeholder, CR 700.2c) or a single `Primitive`, and n for a `Multiple`
     /// of n words. `commands::split_targets_by_requirement` gives one chunk per
     /// word. The sum of `words` is the length of the flat list.
-    Modal { effects: Vec<Option<AbilityEffect>>, words: Vec<usize> },
+    Modal {
+        effects: Vec<Option<AbilityEffect>>,
+        words: Vec<usize>,
+    },
     /// CR 608.2c: several effects of one spell or ability, in the order
     /// written (`Game.Ops.Chain(a, b, ...)`). Each entry is accepted by
     /// `commands::is_modal_resolvable`, so a chain never nests, holds a
@@ -537,7 +563,10 @@ pub enum AbilityEffect {
     /// sum to the declared word count, which `script::decode::check_chain_words`
     /// checks at registration or spell load.
     // TODO: a word shared by two entries ("destroy target creature, then its controller gains 3 life"), and a chain inside `ForEachPlayer` or as a mode of a `Modal`
-    Chain { entries: Vec<AbilityEffect>, words: Option<Vec<usize>> },
+    Chain {
+        entries: Vec<AbilityEffect>,
+        words: Option<Vec<usize>>,
+    },
     /// A plain spell's resolution effect (CR 608.2m), declared by the script's
     /// optional `s.operation()` (a sibling of `s.register_abilities(c)`) when
     /// it returns a custom Lua function and not a `Game.Ops.*` tag. It is the
@@ -659,7 +688,10 @@ pub enum SearchDestination {
     /// legal enchant candidates as it enters. With none, it stays in the
     /// library (CR 303.4g). A non-Aura with this set enters unattached.
     /// `false` is the plain fetch-land search.
-    Battlefield { tapped: bool, enters_attached: bool },
+    Battlefield {
+        tapped: bool,
+        enters_attached: bool,
+    },
 }
 
 /// Which named token to create — covers the fixed-spec artifact tokens.
@@ -790,7 +822,11 @@ impl CopyExceptions {
     /// machinery), `None` only for `TokenSpec::CopyOf`, where a new token has
     /// no identity to retain. `retain_name` and `retain_color` are a tested
     /// no-op in that case.
-    pub fn apply(&self, snapshot: &mut crate::types::card::CardDefinition, original: Option<&crate::types::card::CardDefinition>) {
+    pub fn apply(
+        &self,
+        snapshot: &mut crate::types::card::CardDefinition,
+        original: Option<&crate::types::card::CardDefinition>,
+    ) {
         if let Some((power, toughness)) = self.set_power_toughness {
             snapshot.power = Some(crate::types::card::PTValue::Fixed(power));
             snapshot.toughness = Some(crate::types::card::PTValue::Fixed(toughness));
@@ -812,7 +848,10 @@ impl CopyExceptions {
 /// `CardDefinition` fields that stand in for rules text (see
 /// `AbilityEffect::ExchangeTextBoxes`). Overwrites `snapshot`'s with `other`'s
 /// and leaves the rest alone, unlike the full copy of `CopyExceptions`.
-pub fn apply_text_box(snapshot: &mut crate::types::card::CardDefinition, other: &crate::types::card::CardDefinition) {
+pub fn apply_text_box(
+    snapshot: &mut crate::types::card::CardDefinition,
+    other: &crate::types::card::CardDefinition,
+) {
     snapshot.oracle_text = other.oracle_text.clone();
     snapshot.keywords = other.keywords;
     snapshot.script_ref = other.script_ref.clone();
@@ -1037,7 +1076,11 @@ impl ConditionPrimitive {
             ),
             ConditionPrimitive::EachDrawsCard => matches!(
                 event,
-                GameEventKind::ZoneChange { from: ZoneKind::Library, to: ZoneKind::Hand, .. }
+                GameEventKind::ZoneChange {
+                    from: ZoneKind::Library,
+                    to: ZoneKind::Hand,
+                    ..
+                }
             ),
             ConditionPrimitive::DiscardsCard => matches!(
                 event,
@@ -1046,7 +1089,11 @@ impl ConditionPrimitive {
             ),
             ConditionPrimitive::EachDiscardsCard => matches!(
                 event,
-                GameEventKind::ZoneChange { from: ZoneKind::Hand, to: ZoneKind::Graveyard, .. }
+                GameEventKind::ZoneChange {
+                    from: ZoneKind::Hand,
+                    to: ZoneKind::Graveyard,
+                    ..
+                }
             ),
             ConditionPrimitive::Discarded => matches!(
                 event,
@@ -1072,10 +1119,20 @@ impl ConditionPrimitive {
             ),
             ConditionPrimitive::BeginningOfYourCombat => {
                 controller == active_player
-                    && matches!(event, GameEventKind::StepStarted { step: Step::BeginningOfCombat })
+                    && matches!(
+                        event,
+                        GameEventKind::StepStarted {
+                            step: Step::BeginningOfCombat
+                        }
+                    )
             }
             ConditionPrimitive::BeginningOfEachCombat => {
-                matches!(event, GameEventKind::StepStarted { step: Step::BeginningOfCombat })
+                matches!(
+                    event,
+                    GameEventKind::StepStarted {
+                        step: Step::BeginningOfCombat
+                    }
+                )
             }
             ConditionPrimitive::BeginningOfYourEndStep => {
                 controller == active_player
@@ -1093,7 +1150,9 @@ impl ConditionPrimitive {
                 event,
                 GameEventKind::CardsSurveiled { player, .. } if *player == controller
             ),
-            ConditionPrimitive::EachSurveils => matches!(event, GameEventKind::CardsSurveiled { .. }),
+            ConditionPrimitive::EachSurveils => {
+                matches!(event, GameEventKind::CardsSurveiled { .. })
+            }
             // CR 700.4, 603.10: matched in the live-source loop against a separate watching ability, whose `controller` gives `FilterController::You` and `Any` their meaning. `Dies` instead matches by identity in the departed/LKI loop.
             ConditionPrimitive::DiesMatching(filter) => matches!(
                 event,
@@ -1150,7 +1209,10 @@ pub enum InterveningIfPrimitive {
     ControllerAtOrBelowLife(i32),
     /// CR 611.2c's overwhelmingly common real shape: "as long as you
     /// control `count` or more permanents matching `filter`."
-    ControllerControlsAtLeast { filter: FilterSpec, count: u32 },
+    ControllerControlsAtLeast {
+        filter: FilterSpec,
+        count: u32,
+    },
     /// CR 603.4, 702.138b: "if it escaped" (Kroxa, Uro), an ordinary ETB
     /// trigger's intervening-if. CR 702.138c and 702.138d's "escapes with"
     /// templates are `ReplacementPayload::EntersWithCountersEscape`. Checked
@@ -1178,9 +1240,9 @@ impl InterveningIfPrimitive {
         lki: Option<&crate::types::object::GameObject>,
     ) -> bool {
         match self {
-            InterveningIfPrimitive::ControllerAtOrBelowLife(threshold) => {
-                state.player(controller).is_some_and(|p| p.life <= *threshold)
-            }
+            InterveningIfPrimitive::ControllerAtOrBelowLife(threshold) => state
+                .player(controller)
+                .is_some_and(|p| p.life <= *threshold),
             InterveningIfPrimitive::ControllerControlsAtLeast { filter, count } => {
                 let matching = state
                     .objects
@@ -1195,7 +1257,9 @@ impl InterveningIfPrimitive {
             }
             InterveningIfPrimitive::HadNoCountersOfKind(kind) => match lki {
                 Some(lki) => lki.counters.count(kind) == 0,
-                None => state.object(source).is_some_and(|o| o.counters.count(kind) == 0),
+                None => state
+                    .object(source)
+                    .is_some_and(|o| o.counters.count(kind) == 0),
             },
         }
     }
@@ -1288,7 +1352,12 @@ mod tests {
     fn deals_damage_matches_when_source_is_the_dealer() {
         let source = ObjectId(0);
         let other = ObjectId(1);
-        let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3, is_combat_damage: false };
+        let event = GameEventKind::DamageDealt {
+            source,
+            target: Target::Object(other),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(ConditionPrimitive::DealsDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
@@ -1296,26 +1365,54 @@ mod tests {
     fn deals_damage_does_not_match_a_different_dealer() {
         let source = ObjectId(0);
         let dealer = ObjectId(1);
-        let event =
-            GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3, is_combat_damage: false };
-        assert!(!ConditionPrimitive::DealsDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        let event = GameEventKind::DamageDealt {
+            source: dealer,
+            target: Target::Object(source),
+            amount: 3,
+            is_combat_damage: false,
+        };
+        assert!(!ConditionPrimitive::DealsDamage.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
     fn is_dealt_damage_matches_when_source_is_the_target() {
         let source = ObjectId(0);
         let dealer = ObjectId(1);
-        let event =
-            GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3, is_combat_damage: false };
-        assert!(ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        let event = GameEventKind::DamageDealt {
+            source: dealer,
+            target: Target::Object(source),
+            amount: 3,
+            is_combat_damage: false,
+        };
+        assert!(ConditionPrimitive::IsDealtDamage.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
     fn is_dealt_damage_does_not_match_a_different_target() {
         let source = ObjectId(0);
         let other = ObjectId(1);
-        let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3, is_combat_damage: false };
-        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        let event = GameEventKind::DamageDealt {
+            source,
+            target: Target::Object(other),
+            amount: 3,
+            is_combat_damage: false,
+        };
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1323,16 +1420,39 @@ mod tests {
         // A player being dealt damage is never "this" for a permanent's ability.
         let source = ObjectId(0);
         let dealer = ObjectId(1);
-        let event = GameEventKind::DamageDealt { source: dealer, target: Target::Player(PlayerId(0)), amount: 3, is_combat_damage: false };
-        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        let event = GameEventKind::DamageDealt {
+            source: dealer,
+            target: Target::Player(PlayerId(0)),
+            amount: 3,
+            is_combat_damage: false,
+        };
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
     fn deals_damage_and_is_dealt_damage_dont_match_unrelated_events() {
         let source = ObjectId(0);
-        let event = GameEventKind::LifeChanged { player: PlayerId(0), delta: -1 };
-        assert!(!ConditionPrimitive::DealsDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
-        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        let event = GameEventKind::LifeChanged {
+            player: PlayerId(0),
+            delta: -1,
+        };
+        assert!(!ConditionPrimitive::DealsDamage.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1349,7 +1469,12 @@ mod tests {
         let controller = PlayerId(0);
         let active_player = PlayerId(1);
         let event = GameEventKind::StepStarted { step: Step::Upkeep };
-        assert!(!ConditionPrimitive::BeginningOfYourUpkeep.matches(source, controller, active_player, &event));
+        assert!(!ConditionPrimitive::BeginningOfYourUpkeep.matches(
+            source,
+            controller,
+            active_player,
+            &event
+        ));
     }
 
     #[test]
@@ -1366,14 +1491,24 @@ mod tests {
         let controller = PlayerId(0);
         let active_player = PlayerId(1);
         let event = GameEventKind::StepStarted { step: Step::Upkeep };
-        assert!(ConditionPrimitive::BeginningOfEachUpkeep.matches(source, controller, active_player, &event));
+        assert!(ConditionPrimitive::BeginningOfEachUpkeep.matches(
+            source,
+            controller,
+            active_player,
+            &event
+        ));
     }
 
     #[test]
     fn beginning_of_each_upkeep_does_not_match_a_different_step() {
         let source = ObjectId(0);
         let event = GameEventKind::StepStarted { step: Step::End };
-        assert!(!ConditionPrimitive::BeginningOfEachUpkeep.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::BeginningOfEachUpkeep.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1390,7 +1525,12 @@ mod tests {
         let controller = PlayerId(0);
         let active_player = PlayerId(1);
         let event = GameEventKind::StepStarted { step: Step::Untap };
-        assert!(!ConditionPrimitive::BeginningOfYourUntap.matches(source, controller, active_player, &event));
+        assert!(!ConditionPrimitive::BeginningOfYourUntap.matches(
+            source,
+            controller,
+            active_player,
+            &event
+        ));
     }
 
     #[test]
@@ -1407,20 +1547,32 @@ mod tests {
         let controller = PlayerId(0);
         let active_player = PlayerId(1);
         let event = GameEventKind::StepStarted { step: Step::Untap };
-        assert!(ConditionPrimitive::BeginningOfEachUntap.matches(source, controller, active_player, &event));
+        assert!(ConditionPrimitive::BeginningOfEachUntap.matches(
+            source,
+            controller,
+            active_player,
+            &event
+        ));
     }
 
     #[test]
     fn beginning_of_each_untap_does_not_match_a_different_step() {
         let source = ObjectId(0);
         let event = GameEventKind::StepStarted { step: Step::Upkeep };
-        assert!(!ConditionPrimitive::BeginningOfEachUntap.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::BeginningOfEachUntap.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     // Dies and LeavesBattlefield match only last_known_info, since the object is already gone (CR 603.10).
     fn dummy_last_known_info(object_id: ObjectId) -> crate::types::object::GameObject {
         use crate::types::card::CardDefinition;
-        use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
+        use crate::types::card::{
+            CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet,
+        };
         use crate::types::counter::CounterSet;
         use crate::types::ids::ObjectLineage;
         use crate::types::mana::ManaCost;
@@ -1432,7 +1584,9 @@ mod tests {
             definition: CardDefinition {
                 definition_id: 1,
                 name: "Test Creature".to_string(),
-                mana_cost: ManaCost { symbols: Vec::new() },
+                mana_cost: ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator: None,
                 supertypes: SupertypeSet::empty(),
                 card_types: CardTypeSet::CREATURE,
@@ -1463,12 +1617,16 @@ mod tests {
             deathtouched: false,
             counters: CounterSet::new(),
             attachments: Vec::new(),
-            attached_to: None, attached_to_player: None,
+            attached_to: None,
+            attached_to_player: None,
             timestamp: crate::types::ids::SequenceNo(0),
             controlled_since_turn: 0,
             is_commander: false,
             is_token: false,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
@@ -1521,7 +1679,12 @@ mod tests {
             to: ZoneKind::Exile,
             last_known_info: Some(dummy_last_known_info(source)),
         };
-        assert!(ConditionPrimitive::LeavesBattlefield.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(ConditionPrimitive::LeavesBattlefield.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1533,7 +1696,12 @@ mod tests {
             to: ZoneKind::Battlefield,
             last_known_info: Some(dummy_last_known_info(source)),
         };
-        assert!(!ConditionPrimitive::LeavesBattlefield.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::LeavesBattlefield.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     fn drawn_card_last_known_info(drawer: PlayerId) -> crate::types::object::GameObject {
@@ -1595,7 +1763,12 @@ mod tests {
             to: ZoneKind::Hand,
             last_known_info: Some(drawn_card_last_known_info(drawer)),
         };
-        assert!(ConditionPrimitive::EachDrawsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+        assert!(ConditionPrimitive::EachDrawsCard.matches(
+            source,
+            controller,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1607,7 +1780,12 @@ mod tests {
             to: ZoneKind::Graveyard,
             last_known_info: None,
         };
-        assert!(!ConditionPrimitive::EachDrawsCard.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::EachDrawsCard.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     fn discarded_card_last_known_info(discarder: PlayerId) -> crate::types::object::GameObject {
@@ -1642,7 +1820,12 @@ mod tests {
             to: ZoneKind::Graveyard,
             last_known_info: Some(discarded_card_last_known_info(discarder)),
         };
-        assert!(!ConditionPrimitive::DiscardsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::DiscardsCard.matches(
+            source,
+            controller,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1655,7 +1838,12 @@ mod tests {
             to: ZoneKind::Hand,
             last_known_info: Some(discarded_card_last_known_info(controller)),
         };
-        assert!(!ConditionPrimitive::DiscardsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::DiscardsCard.matches(
+            source,
+            controller,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1669,7 +1857,12 @@ mod tests {
             to: ZoneKind::Graveyard,
             last_known_info: Some(discarded_card_last_known_info(discarder)),
         };
-        assert!(ConditionPrimitive::EachDiscardsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+        assert!(ConditionPrimitive::EachDiscardsCard.matches(
+            source,
+            controller,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1681,7 +1874,12 @@ mod tests {
             to: ZoneKind::Hand,
             last_known_info: None,
         };
-        assert!(!ConditionPrimitive::EachDiscardsCard.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::EachDiscardsCard.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1726,7 +1924,9 @@ mod tests {
     fn beginning_of_your_combat_matches_when_controller_is_active_player() {
         let source = ObjectId(0);
         let p0 = PlayerId(0);
-        let event = GameEventKind::StepStarted { step: Step::BeginningOfCombat };
+        let event = GameEventKind::StepStarted {
+            step: Step::BeginningOfCombat,
+        };
         assert!(ConditionPrimitive::BeginningOfYourCombat.matches(source, p0, p0, &event));
     }
 
@@ -1735,8 +1935,15 @@ mod tests {
         let source = ObjectId(0);
         let controller = PlayerId(0);
         let active_player = PlayerId(1);
-        let event = GameEventKind::StepStarted { step: Step::BeginningOfCombat };
-        assert!(!ConditionPrimitive::BeginningOfYourCombat.matches(source, controller, active_player, &event));
+        let event = GameEventKind::StepStarted {
+            step: Step::BeginningOfCombat,
+        };
+        assert!(!ConditionPrimitive::BeginningOfYourCombat.matches(
+            source,
+            controller,
+            active_player,
+            &event
+        ));
     }
 
     #[test]
@@ -1752,15 +1959,27 @@ mod tests {
         let source = ObjectId(0);
         let controller = PlayerId(0);
         let active_player = PlayerId(1);
-        let event = GameEventKind::StepStarted { step: Step::BeginningOfCombat };
-        assert!(ConditionPrimitive::BeginningOfEachCombat.matches(source, controller, active_player, &event));
+        let event = GameEventKind::StepStarted {
+            step: Step::BeginningOfCombat,
+        };
+        assert!(ConditionPrimitive::BeginningOfEachCombat.matches(
+            source,
+            controller,
+            active_player,
+            &event
+        ));
     }
 
     #[test]
     fn beginning_of_each_combat_does_not_match_a_different_step() {
         let source = ObjectId(0);
         let event = GameEventKind::StepStarted { step: Step::End };
-        assert!(!ConditionPrimitive::BeginningOfEachCombat.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::BeginningOfEachCombat.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     #[test]
@@ -1777,14 +1996,21 @@ mod tests {
         let controller = PlayerId(0);
         let active_player = PlayerId(1);
         let event = GameEventKind::StepStarted { step: Step::End };
-        assert!(!ConditionPrimitive::BeginningOfYourEndStep.matches(source, controller, active_player, &event));
+        assert!(!ConditionPrimitive::BeginningOfYourEndStep.matches(
+            source,
+            controller,
+            active_player,
+            &event
+        ));
     }
 
     #[test]
     fn beginning_of_your_end_step_does_not_match_a_different_step() {
         let source = ObjectId(0);
         let p0 = PlayerId(0);
-        let event = GameEventKind::StepStarted { step: Step::BeginningOfCombat };
+        let event = GameEventKind::StepStarted {
+            step: Step::BeginningOfCombat,
+        };
         assert!(!ConditionPrimitive::BeginningOfYourEndStep.matches(source, p0, p0, &event));
     }
 
@@ -1794,14 +2020,24 @@ mod tests {
         let controller = PlayerId(0);
         let active_player = PlayerId(1);
         let event = GameEventKind::StepStarted { step: Step::End };
-        assert!(ConditionPrimitive::BeginningOfEachEndStep.matches(source, controller, active_player, &event));
+        assert!(ConditionPrimitive::BeginningOfEachEndStep.matches(
+            source,
+            controller,
+            active_player,
+            &event
+        ));
     }
 
     #[test]
     fn beginning_of_each_end_step_does_not_match_a_different_step() {
         let source = ObjectId(0);
         let event = GameEventKind::StepStarted { step: Step::Upkeep };
-        assert!(!ConditionPrimitive::BeginningOfEachEndStep.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::BeginningOfEachEndStep.matches(
+            source,
+            CONTROLLER,
+            ACTIVE_PLAYER,
+            &event
+        ));
     }
 
     fn state_with_life(player: PlayerId, life: i32) -> crate::types::game::GameState {
@@ -1848,7 +2084,10 @@ mod tests {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: RngState { seed: 1, draws_consumed: 0 },
+            rng: RngState {
+                seed: 1,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no: 0,
             next_object_id: 0,
@@ -1869,21 +2108,36 @@ mod tests {
     fn controller_at_or_below_life_holds_when_life_is_at_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 5);
-        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0), None));
+        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(
+            &state,
+            p0,
+            ObjectId(0),
+            None
+        ));
     }
 
     #[test]
     fn controller_at_or_below_life_holds_when_life_is_below_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 3);
-        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0), None));
+        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(
+            &state,
+            p0,
+            ObjectId(0),
+            None
+        ));
     }
 
     #[test]
     fn controller_at_or_below_life_does_not_hold_when_life_is_above_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 6);
-        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0), None));
+        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(
+            &state,
+            p0,
+            ObjectId(0),
+            None
+        ));
     }
 
     #[test]
@@ -1891,12 +2145,21 @@ mod tests {
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let state = state_with_life(p0, 1);
-        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p1, ObjectId(0), None));
+        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(
+            &state,
+            p1,
+            ObjectId(0),
+            None
+        ));
     }
 
     /// A minimal battlefield permanent for `ControllerControlsAtLeast`
     /// fixtures, parameterized on controller and card types.
-    fn battlefield_object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet) -> crate::types::object::GameObject {
+    fn battlefield_object(
+        id: ObjectId,
+        controller: PlayerId,
+        card_types: CardTypeSet,
+    ) -> crate::types::object::GameObject {
         use crate::types::card::CardDefinition;
         use crate::types::card::{KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
         use crate::types::counter::CounterSet;
@@ -1910,7 +2173,9 @@ mod tests {
             definition: CardDefinition {
                 definition_id: 1,
                 name: "Test Permanent".to_string(),
-                mana_cost: ManaCost { symbols: Vec::new() },
+                mana_cost: ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator: None,
                 supertypes: SupertypeSet::empty(),
                 card_types,
@@ -1941,12 +2206,16 @@ mod tests {
             deathtouched: false,
             counters: CounterSet::new(),
             attachments: Vec::new(),
-            attached_to: None, attached_to_player: None,
+            attached_to: None,
+            attached_to_player: None,
             timestamp: crate::types::ids::SequenceNo(0),
             controlled_since_turn: 0,
             is_commander: false,
             is_token: false,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
@@ -1967,10 +2236,22 @@ mod tests {
     fn controls_at_least_holds_when_the_count_is_exactly_met() {
         let p0 = PlayerId(0);
         let mut state = state_with_life(p0, 20);
-        state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
-        state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
-        state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT));
-        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
+        state.objects.insert(
+            ObjectId(0),
+            battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT),
+        );
+        state.objects.insert(
+            ObjectId(1),
+            battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT),
+        );
+        state.objects.insert(
+            ObjectId(2),
+            battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT),
+        );
+        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast {
+            filter: artifacts_filter(),
+            count: 3,
+        };
         assert!(primitive.holds(&state, p0, ObjectId(0), None));
     }
 
@@ -1978,9 +2259,18 @@ mod tests {
     fn controls_at_least_does_not_hold_when_below_the_count() {
         let p0 = PlayerId(0);
         let mut state = state_with_life(p0, 20);
-        state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
-        state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
-        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
+        state.objects.insert(
+            ObjectId(0),
+            battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT),
+        );
+        state.objects.insert(
+            ObjectId(1),
+            battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT),
+        );
+        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast {
+            filter: artifacts_filter(),
+            count: 3,
+        };
         assert!(!primitive.holds(&state, p0, ObjectId(0), None));
     }
 
@@ -1988,15 +2278,33 @@ mod tests {
     fn controls_at_least_drops_the_instant_a_matching_permanent_leaves() {
         let p0 = PlayerId(0);
         let mut state = state_with_life(p0, 20);
-        state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
-        state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
-        state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT));
-        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
-        assert!(primitive.holds(&state, p0, ObjectId(0), None), "3 artifacts meets the threshold");
+        state.objects.insert(
+            ObjectId(0),
+            battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT),
+        );
+        state.objects.insert(
+            ObjectId(1),
+            battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT),
+        );
+        state.objects.insert(
+            ObjectId(2),
+            battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT),
+        );
+        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast {
+            filter: artifacts_filter(),
+            count: 3,
+        };
+        assert!(
+            primitive.holds(&state, p0, ObjectId(0), None),
+            "3 artifacts meets the threshold"
+        );
 
         // Removing one below the threshold flips the same query, with no cache to invalidate.
         state.objects.remove(&ObjectId(2));
-        assert!(!primitive.holds(&state, p0, ObjectId(0), None), "down to 2 artifacts, no longer holds");
+        assert!(
+            !primitive.holds(&state, p0, ObjectId(0), None),
+            "down to 2 artifacts, no longer holds"
+        );
     }
 
     #[test]
@@ -2004,10 +2312,22 @@ mod tests {
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let mut state = state_with_life(p0, 20);
-        state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
-        state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p1, CardTypeSet::ARTIFACT));
-        state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p1, CardTypeSet::ARTIFACT));
-        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
+        state.objects.insert(
+            ObjectId(0),
+            battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT),
+        );
+        state.objects.insert(
+            ObjectId(1),
+            battlefield_object(ObjectId(1), p1, CardTypeSet::ARTIFACT),
+        );
+        state.objects.insert(
+            ObjectId(2),
+            battlefield_object(ObjectId(2), p1, CardTypeSet::ARTIFACT),
+        );
+        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast {
+            filter: artifacts_filter(),
+            count: 3,
+        };
         assert!(
             !primitive.holds(&state, p0, ObjectId(0), None),
             "p0 controls only 1 artifact - the opponent's 2 don't count toward p0's threshold"

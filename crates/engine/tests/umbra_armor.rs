@@ -3,10 +3,12 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 const UMBRA_ARMOR_SELF: &str = r#"
 local s = {}
@@ -23,7 +25,9 @@ fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -48,7 +52,9 @@ fn umbra_armor_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Umbra Armor Aura".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -82,14 +88,20 @@ fn two_player_state() -> GameState {
 fn umbra_armor_effect(source: ObjectId) -> ReplacementEffect {
     ReplacementEffect {
         source,
-        spec: ReplacementSpec::Primitive { filter: EventFilter::WouldDieEnchanted, payload: ReplacementPayload::UmbraArmor },
+        spec: ReplacementSpec::Primitive {
+            filter: EventFilter::WouldDieEnchanted,
+            payload: ReplacementPayload::UmbraArmor,
+        },
         consumption: ConsumptionPolicy::Repeatable,
     }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -100,8 +112,19 @@ fn would_die_enchanted_matches_a_destroy_on_the_enchanted_creature_only() {
     let creature = ObjectId(0);
     let other_creature = ObjectId(1);
     let aura = ObjectId(2);
-    put_on_battlefield(&mut state, card_object(creature, creature_definition(2), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(other_creature, creature_definition(2), p0, ZoneKind::Battlefield));
+    put_on_battlefield(
+        &mut state,
+        card_object(creature, creature_definition(2), p0, ZoneKind::Battlefield),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            other_creature,
+            creature_definition(2),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
     let mut aura_obj = card_object(aura, umbra_armor_definition(""), p0, ZoneKind::Battlefield);
     aura_obj.attached_to = Some(creature);
     put_on_battlefield(&mut state, aura_obj);
@@ -115,7 +138,10 @@ fn would_die_enchanted_matches_a_destroy_on_the_enchanted_creature_only() {
         to: ZoneKind::Graveyard,
         last_known_info: None,
     };
-    assert!(effect.matches(&would_die_enchanted, true, &state, &script_runtime), "should match a genuine destroy of the enchanted creature");
+    assert!(
+        effect.matches(&would_die_enchanted, true, &state, &script_runtime),
+        "should match a genuine destroy of the enchanted creature"
+    );
 
     let not_enchanted = GameEventKind::ZoneChange {
         object: other_creature,
@@ -123,7 +149,10 @@ fn would_die_enchanted_matches_a_destroy_on_the_enchanted_creature_only() {
         to: ZoneKind::Graveyard,
         last_known_info: None,
     };
-    assert!(!effect.matches(&not_enchanted, true, &state, &script_runtime), "should not match a different creature's destruction");
+    assert!(
+        !effect.matches(&not_enchanted, true, &state, &script_runtime),
+        "should not match a different creature's destruction"
+    );
 
     assert!(
         !effect.matches(&would_die_enchanted, false, &state, &script_runtime),
@@ -137,7 +166,10 @@ fn umbra_armor_saves_the_enchanted_creature_and_destroys_the_aura_instead() {
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
     let aura = ObjectId(1);
-    put_on_battlefield(&mut state, card_object(creature, creature_definition(2), p0, ZoneKind::Battlefield));
+    put_on_battlefield(
+        &mut state,
+        card_object(creature, creature_definition(2), p0, ZoneKind::Battlefield),
+    );
     let mut aura_obj = card_object(aura, umbra_armor_definition(""), p0, ZoneKind::Battlefield);
     aura_obj.attached_to = Some(creature);
     put_on_battlefield(&mut state, aura_obj);
@@ -160,16 +192,28 @@ fn umbra_armor_saves_the_enchanted_creature_and_destroys_the_aura_instead() {
                 "expected the Aura's own real ZoneChange to the graveyard, got {events:?}"
             );
         }
-        SbaOutcome::NeedsOrderingChoice { .. } => panic!("fixture didn't expect a replacement ordering-choice pause"),
-        SbaOutcome::NeedsLegendRuleChoice { .. } => panic!("fixture didn't expect a legend-rule choice pause"),
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
 
     let creature_obj = state.object(creature).expect("the creature survives");
-    assert_eq!(creature_obj.damage_marked, 0, "CR 702.89a: all damage marked is removed");
+    assert_eq!(
+        creature_obj.damage_marked, 0,
+        "CR 702.89a: all damage marked is removed"
+    );
     assert_eq!(creature_obj.zone, ZoneKind::Battlefield);
 
-    assert!(state.object(aura).is_none(), "the Aura's own old id no longer resolves");
+    assert!(
+        state.object(aura).is_none(),
+        "the Aura's own old id no longer resolves"
+    );
     let graveyard_aura = state
         .objects
         .values()
@@ -183,7 +227,10 @@ fn without_umbra_armor_the_creature_dies_normally() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
-    put_on_battlefield(&mut state, card_object(creature, creature_definition(2), p0, ZoneKind::Battlefield));
+    put_on_battlefield(
+        &mut state,
+        card_object(creature, creature_definition(2), p0, ZoneKind::Battlefield),
+    );
     // No Aura, no replacement effect registered - a plain lethal-damage control case.
 
     let script_runtime = ScriptRuntime::new();
@@ -194,20 +241,35 @@ fn without_umbra_armor_the_creature_dies_normally() {
             assert!(
                 events.iter().any(|e| matches!(
                     e.kind,
-                    GameEventKind::ZoneChange { from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, .. }
+                    GameEventKind::ZoneChange {
+                        from: ZoneKind::Battlefield,
+                        to: ZoneKind::Graveyard,
+                        ..
+                    }
                 )),
                 "expected the creature to die for real, got {events:?}"
             );
             assert!(
-                !events.iter().any(|e| matches!(e.kind, GameEventKind::UmbraArmorConsumed { .. })),
+                !events
+                    .iter()
+                    .any(|e| matches!(e.kind, GameEventKind::UmbraArmorConsumed { .. })),
                 "no UmbraArmorConsumed event should fire without the Aura"
             );
         }
-        SbaOutcome::NeedsOrderingChoice { .. } => panic!("fixture didn't expect a replacement ordering-choice pause"),
-        SbaOutcome::NeedsLegendRuleChoice { .. } => panic!("fixture didn't expect a legend-rule choice pause"),
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
-    assert!(state.object(creature).is_none(), "the creature's own old id no longer resolves");
+    assert!(
+        state.object(creature).is_none(),
+        "the creature's own old id no longer resolves"
+    );
 }
 
 #[test]
@@ -215,17 +277,25 @@ fn run_card_script_self_registers_umbra_armor() {
     let mut state = two_player_state();
     let aura = ObjectId(0);
     let definition = umbra_armor_definition(UMBRA_ARMOR_SELF);
-    state.objects.insert(aura, card_object(aura, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        aura,
+        card_object(aura, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, aura).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, aura)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.replacement_effects.len(), 1);
     let effect = &state.replacement_effects[0];
     assert_eq!(effect.source, aura);
     assert_eq!(effect.consumption, ConsumptionPolicy::Repeatable);
     match &effect.spec {
-        ReplacementSpec::Primitive { filter: EventFilter::WouldDieEnchanted, payload: ReplacementPayload::UmbraArmor } => {}
+        ReplacementSpec::Primitive {
+            filter: EventFilter::WouldDieEnchanted,
+            payload: ReplacementPayload::UmbraArmor,
+        } => {}
         other => panic!("expected a WouldDieEnchanted/UmbraArmor primitive spec, got {other:?}"),
     }
 }

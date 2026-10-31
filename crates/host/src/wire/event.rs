@@ -174,7 +174,10 @@ impl From<&GameObject> for WireObjectSummary {
                 .counters
                 .totals()
                 .iter()
-                .map(|(kind, amount)| WireCounter { counter: kind.into(), amount: *amount })
+                .map(|(kind, amount)| WireCounter {
+                    counter: kind.into(),
+                    amount: *amount,
+                })
                 .collect(),
         }
     }
@@ -245,22 +248,64 @@ pub enum WireEventKind {
         #[serde(skip_serializing_if = "Option::is_none")]
         last_known_info: Option<WireObjectSummary>,
     },
-    LifeChanged { player: u32, delta: i32 },
-    DamageDealt { source: U64, target: WireTarget, amount: u32, is_combat_damage: bool },
-    CounterAdded { object: U64, counter: WireCounterKind, amount: i32 },
-    Tapped { object: U64 },
-    Untapped { object: U64 },
-    ManaAdded { player: u32, units: Vec<WireManaUnit> },
-    AttackerDeclared { attacker: U64, target: WireTarget },
-    BlockerDeclared { blocker: U64, attacker: U64 },
-    CostPaid { stack_id: U64, payer: u32 },
-    PrioritySet { player: u32 },
-    PriorityPassed { player: u32 },
-    StackObjectPushed { stack_id: U64 },
-    StackObjectResolved { stack_id: U64 },
-    Fizzled { stack_id: U64 },
-    Countered { stack_id: U64 },
-    CastingUnwound { stack_id: U64 },
+    LifeChanged {
+        player: u32,
+        delta: i32,
+    },
+    DamageDealt {
+        source: U64,
+        target: WireTarget,
+        amount: u32,
+        is_combat_damage: bool,
+    },
+    CounterAdded {
+        object: U64,
+        counter: WireCounterKind,
+        amount: i32,
+    },
+    Tapped {
+        object: U64,
+    },
+    Untapped {
+        object: U64,
+    },
+    ManaAdded {
+        player: u32,
+        units: Vec<WireManaUnit>,
+    },
+    AttackerDeclared {
+        attacker: U64,
+        target: WireTarget,
+    },
+    BlockerDeclared {
+        blocker: U64,
+        attacker: U64,
+    },
+    CostPaid {
+        stack_id: U64,
+        payer: u32,
+    },
+    PrioritySet {
+        player: u32,
+    },
+    PriorityPassed {
+        player: u32,
+    },
+    StackObjectPushed {
+        stack_id: U64,
+    },
+    StackObjectResolved {
+        stack_id: U64,
+    },
+    Fizzled {
+        stack_id: U64,
+    },
+    Countered {
+        stack_id: U64,
+    },
+    CastingUnwound {
+        stack_id: U64,
+    },
     /// `source` is absent for a Seat that cannot see the source object.
     TriggerQueued {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -273,24 +318,72 @@ pub enum WireEventKind {
         source: Option<U64>,
         original_event: U64,
     },
-    StateBasedActionApplied { description: String },
-    ScriptError { message: String },
-    TurnStarted { player: u32, turn_number: u32 },
-    PhaseStarted { phase: WirePhase },
-    StepStarted { step: WireStep },
-    PlayerEliminated { player: u32 },
-    RngDrawn { purpose: String, value: U64 },
-    LibraryShuffled { player: u32 },
-    CardsScried { player: u32, kept_on_top: Vec<U64>, put_bottom: Vec<U64> },
-    CardsSurveiled { player: u32, kept_on_top: Vec<U64>, put_graveyard: Vec<U64> },
-    BecameCopy { object: U64, copied: U64 },
-    TextBoxesExchanged { a: U64, b: U64 },
-    Regenerated { object: U64 },
-    TokenCeased { object: U64 },
-    Attached { object: U64, attached_to: U64 },
-    AttachedToPlayer { object: U64, player: u32 },
-    Unattached { object: U64, was_attached_to: U64 },
-    UmbraArmorConsumed { enchanted: U64, aura: U64 },
+    StateBasedActionApplied {
+        description: String,
+    },
+    ScriptError {
+        message: String,
+    },
+    TurnStarted {
+        player: u32,
+        turn_number: u32,
+    },
+    PhaseStarted {
+        phase: WirePhase,
+    },
+    StepStarted {
+        step: WireStep,
+    },
+    PlayerEliminated {
+        player: u32,
+    },
+    RngDrawn {
+        purpose: String,
+        value: U64,
+    },
+    LibraryShuffled {
+        player: u32,
+    },
+    CardsScried {
+        player: u32,
+        kept_on_top: Vec<U64>,
+        put_bottom: Vec<U64>,
+    },
+    CardsSurveiled {
+        player: u32,
+        kept_on_top: Vec<U64>,
+        put_graveyard: Vec<U64>,
+    },
+    BecameCopy {
+        object: U64,
+        copied: U64,
+    },
+    TextBoxesExchanged {
+        a: U64,
+        b: U64,
+    },
+    Regenerated {
+        object: U64,
+    },
+    TokenCeased {
+        object: U64,
+    },
+    Attached {
+        object: U64,
+        attached_to: U64,
+    },
+    AttachedToPlayer {
+        object: U64,
+        player: u32,
+    },
+    Unattached {
+        object: U64,
+        was_attached_to: U64,
+    },
+    UmbraArmorConsumed {
+        enchanted: U64,
+        aura: U64,
+    },
     /// `last_known_info` shows the card as it was in hand, so only a Seat that
     /// could see that hand gets it. `identity` goes to every Seat, because the
     /// card now lies in a public zone.
@@ -306,9 +399,19 @@ pub enum WireEventKind {
         #[serde(skip_serializing_if = "Option::is_none")]
         last_known_info: Option<WireObjectSummary>,
     },
-    SpellCast { object: U64 },
-    BecameTarget { object: U64, by: U64, by_controller: u32 },
-    Revealed { player: u32, zone: WireZone, cards: Vec<WireRevealedCard> },
+    SpellCast {
+        object: U64,
+    },
+    BecameTarget {
+        object: U64,
+        by: U64,
+        by_controller: u32,
+    },
+    Revealed {
+        player: u32,
+        zone: WireZone,
+        cards: Vec<WireRevealedCard>,
+    },
 }
 
 fn ids(ids: &[stackfish_engine::ObjectId]) -> Vec<U64> {
@@ -331,83 +434,171 @@ impl WireEventKind {
             | GameEventKind::Cycled { .. }
             | GameEventKind::MadnessExiled { .. }
             | GameEventKind::Revealed { .. } => return None,
-            GameEventKind::LifeChanged { player: p, delta } => W::LifeChanged { player: player(*p), delta: *delta },
-            GameEventKind::DamageDealt { source, target, amount, is_combat_damage } => W::DamageDealt {
+            GameEventKind::LifeChanged { player: p, delta } => W::LifeChanged {
+                player: player(*p),
+                delta: *delta,
+            },
+            GameEventKind::DamageDealt {
+                source,
+                target,
+                amount,
+                is_combat_damage,
+            } => W::DamageDealt {
                 source: (*source).into(),
                 target: (*target).into(),
                 amount: *amount,
                 is_combat_damage: *is_combat_damage,
             },
-            GameEventKind::CounterAdded { object, kind, amount } => {
-                W::CounterAdded { object: (*object).into(), counter: kind.into(), amount: *amount }
-            }
-            GameEventKind::Tapped { object } => W::Tapped { object: (*object).into() },
-            GameEventKind::Untapped { object } => W::Untapped { object: (*object).into() },
-            GameEventKind::ManaAdded { player: p, units } => {
-                W::ManaAdded { player: player(*p), units: units.iter().map(|u| (*u).into()).collect() }
-            }
-            GameEventKind::AttackerDeclared { attacker, target } => {
-                W::AttackerDeclared { attacker: (*attacker).into(), target: (*target).into() }
-            }
-            GameEventKind::BlockerDeclared { blocker, attacker } => {
-                W::BlockerDeclared { blocker: (*blocker).into(), attacker: (*attacker).into() }
-            }
-            GameEventKind::CostPaid { stack_id, payer } => {
-                W::CostPaid { stack_id: (*stack_id).into(), payer: player(*payer) }
-            }
+            GameEventKind::CounterAdded {
+                object,
+                kind,
+                amount,
+            } => W::CounterAdded {
+                object: (*object).into(),
+                counter: kind.into(),
+                amount: *amount,
+            },
+            GameEventKind::Tapped { object } => W::Tapped {
+                object: (*object).into(),
+            },
+            GameEventKind::Untapped { object } => W::Untapped {
+                object: (*object).into(),
+            },
+            GameEventKind::ManaAdded { player: p, units } => W::ManaAdded {
+                player: player(*p),
+                units: units.iter().map(|u| (*u).into()).collect(),
+            },
+            GameEventKind::AttackerDeclared { attacker, target } => W::AttackerDeclared {
+                attacker: (*attacker).into(),
+                target: (*target).into(),
+            },
+            GameEventKind::BlockerDeclared { blocker, attacker } => W::BlockerDeclared {
+                blocker: (*blocker).into(),
+                attacker: (*attacker).into(),
+            },
+            GameEventKind::CostPaid { stack_id, payer } => W::CostPaid {
+                stack_id: (*stack_id).into(),
+                payer: player(*payer),
+            },
             GameEventKind::PrioritySet { player: p } => W::PrioritySet { player: player(*p) },
             GameEventKind::PriorityPassed { player: p } => W::PriorityPassed { player: player(*p) },
-            GameEventKind::StackObjectPushed { stack_id } => W::StackObjectPushed { stack_id: (*stack_id).into() },
-            GameEventKind::StackObjectResolved { stack_id } => W::StackObjectResolved { stack_id: (*stack_id).into() },
-            GameEventKind::Fizzled { stack_id } => W::Fizzled { stack_id: (*stack_id).into() },
-            GameEventKind::Countered { stack_id } => W::Countered { stack_id: (*stack_id).into() },
-            GameEventKind::CastingUnwound { stack_id } => W::CastingUnwound { stack_id: (*stack_id).into() },
-            GameEventKind::TriggerQueued { source, controller } => {
-                W::TriggerQueued { source: Some((*source).into()), controller: player(*controller) }
+            GameEventKind::StackObjectPushed { stack_id } => W::StackObjectPushed {
+                stack_id: (*stack_id).into(),
+            },
+            GameEventKind::StackObjectResolved { stack_id } => W::StackObjectResolved {
+                stack_id: (*stack_id).into(),
+            },
+            GameEventKind::Fizzled { stack_id } => W::Fizzled {
+                stack_id: (*stack_id).into(),
+            },
+            GameEventKind::Countered { stack_id } => W::Countered {
+                stack_id: (*stack_id).into(),
+            },
+            GameEventKind::CastingUnwound { stack_id } => W::CastingUnwound {
+                stack_id: (*stack_id).into(),
+            },
+            GameEventKind::TriggerQueued { source, controller } => W::TriggerQueued {
+                source: Some((*source).into()),
+                controller: player(*controller),
+            },
+            GameEventKind::ReplacementApplied {
+                source,
+                original_event,
+            } => W::ReplacementApplied {
+                source: Some((*source).into()),
+                original_event: U64(original_event.0),
+            },
+            GameEventKind::StateBasedActionApplied { description } => W::StateBasedActionApplied {
+                description: description.clone(),
+            },
+            GameEventKind::ScriptError { message } => W::ScriptError {
+                message: message.clone(),
+            },
+            GameEventKind::TurnStarted {
+                player: p,
+                turn_number,
+            } => W::TurnStarted {
+                player: player(*p),
+                turn_number: *turn_number,
+            },
+            GameEventKind::PhaseStarted { phase } => W::PhaseStarted {
+                phase: (*phase).into(),
+            },
+            GameEventKind::StepStarted { step } => W::StepStarted {
+                step: (*step).into(),
+            },
+            GameEventKind::PlayerEliminated { player: p } => {
+                W::PlayerEliminated { player: player(*p) }
             }
-            GameEventKind::ReplacementApplied { source, original_event } => {
-                W::ReplacementApplied { source: Some((*source).into()), original_event: U64(original_event.0) }
+            GameEventKind::RngDrawn { purpose, value } => W::RngDrawn {
+                purpose: purpose.clone(),
+                value: U64(*value),
+            },
+            GameEventKind::LibraryShuffled { player: p } => {
+                W::LibraryShuffled { player: player(*p) }
             }
-            GameEventKind::StateBasedActionApplied { description } => {
-                W::StateBasedActionApplied { description: description.clone() }
-            }
-            GameEventKind::ScriptError { message } => W::ScriptError { message: message.clone() },
-            GameEventKind::TurnStarted { player: p, turn_number } => {
-                W::TurnStarted { player: player(*p), turn_number: *turn_number }
-            }
-            GameEventKind::PhaseStarted { phase } => W::PhaseStarted { phase: (*phase).into() },
-            GameEventKind::StepStarted { step } => W::StepStarted { step: (*step).into() },
-            GameEventKind::PlayerEliminated { player: p } => W::PlayerEliminated { player: player(*p) },
-            GameEventKind::RngDrawn { purpose, value } => W::RngDrawn { purpose: purpose.clone(), value: U64(*value) },
-            GameEventKind::LibraryShuffled { player: p } => W::LibraryShuffled { player: player(*p) },
-            GameEventKind::CardsScried { player: p, kept_on_top, put_bottom } => {
-                W::CardsScried { player: player(*p), kept_on_top: ids(kept_on_top), put_bottom: ids(put_bottom) }
-            }
-            GameEventKind::CardsSurveiled { player: p, kept_on_top, put_graveyard } => W::CardsSurveiled {
+            GameEventKind::CardsScried {
+                player: p,
+                kept_on_top,
+                put_bottom,
+            } => W::CardsScried {
+                player: player(*p),
+                kept_on_top: ids(kept_on_top),
+                put_bottom: ids(put_bottom),
+            },
+            GameEventKind::CardsSurveiled {
+                player: p,
+                kept_on_top,
+                put_graveyard,
+            } => W::CardsSurveiled {
                 player: player(*p),
                 kept_on_top: ids(kept_on_top),
                 put_graveyard: ids(put_graveyard),
             },
-            GameEventKind::BecameCopy { object, copied } => {
-                W::BecameCopy { object: (*object).into(), copied: (*copied).into() }
-            }
-            GameEventKind::TextBoxesExchanged { a, b } => W::TextBoxesExchanged { a: (*a).into(), b: (*b).into() },
-            GameEventKind::Regenerated { object } => W::Regenerated { object: (*object).into() },
-            GameEventKind::TokenCeased { object } => W::TokenCeased { object: (*object).into() },
-            GameEventKind::Attached { object, attached_to } => {
-                W::Attached { object: (*object).into(), attached_to: (*attached_to).into() }
-            }
-            GameEventKind::AttachedToPlayer { object, player: p } => {
-                W::AttachedToPlayer { object: (*object).into(), player: player(*p) }
-            }
-            GameEventKind::Unattached { object, was_attached_to } => {
-                W::Unattached { object: (*object).into(), was_attached_to: (*was_attached_to).into() }
-            }
-            GameEventKind::UmbraArmorConsumed { enchanted, aura } => {
-                W::UmbraArmorConsumed { enchanted: (*enchanted).into(), aura: (*aura).into() }
-            }
-            GameEventKind::SpellCast { object } => W::SpellCast { object: (*object).into() },
-            GameEventKind::BecameTarget { object, by, by_controller } => W::BecameTarget {
+            GameEventKind::BecameCopy { object, copied } => W::BecameCopy {
+                object: (*object).into(),
+                copied: (*copied).into(),
+            },
+            GameEventKind::TextBoxesExchanged { a, b } => W::TextBoxesExchanged {
+                a: (*a).into(),
+                b: (*b).into(),
+            },
+            GameEventKind::Regenerated { object } => W::Regenerated {
+                object: (*object).into(),
+            },
+            GameEventKind::TokenCeased { object } => W::TokenCeased {
+                object: (*object).into(),
+            },
+            GameEventKind::Attached {
+                object,
+                attached_to,
+            } => W::Attached {
+                object: (*object).into(),
+                attached_to: (*attached_to).into(),
+            },
+            GameEventKind::AttachedToPlayer { object, player: p } => W::AttachedToPlayer {
+                object: (*object).into(),
+                player: player(*p),
+            },
+            GameEventKind::Unattached {
+                object,
+                was_attached_to,
+            } => W::Unattached {
+                object: (*object).into(),
+                was_attached_to: (*was_attached_to).into(),
+            },
+            GameEventKind::UmbraArmorConsumed { enchanted, aura } => W::UmbraArmorConsumed {
+                enchanted: (*enchanted).into(),
+                aura: (*aura).into(),
+            },
+            GameEventKind::SpellCast { object } => W::SpellCast {
+                object: (*object).into(),
+            },
+            GameEventKind::BecameTarget {
+                object,
+                by,
+                by_controller,
+            } => W::BecameTarget {
                 object: (*object).into(),
                 by: (*by).into(),
                 by_controller: player(*by_controller),

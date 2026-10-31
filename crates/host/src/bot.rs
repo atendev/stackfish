@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{Value, json};
 
-use crate::envelope::PROTOCOL_VERSION;
 use crate::bot_payment::{Pool, mana_value, plan_payment, resolve_x};
+use crate::envelope::PROTOCOL_VERSION;
 use crate::illegal::illegal_replies;
 use crate::session::Session;
 
@@ -236,17 +236,30 @@ impl Bot {
 
     /// Finds the open Decision, reads it as its chooser, and answers it.
     pub fn step(&mut self, session: &mut Session) -> Result<Progress, BotError> {
-        let body = self.send(session, json!({ "v": PROTOCOL_VERSION, "kind": "advance", "body": {} }))?;
+        let body = self.send(
+            session,
+            json!({ "v": PROTOCOL_VERSION, "kind": "advance", "body": {} }),
+        )?;
         match body["status"].as_str() {
-            Some("game_over") => return Ok(Progress::GameOver(body["winner"].as_u64().map(|w| w as u32))),
+            Some("game_over") => {
+                return Ok(Progress::GameOver(
+                    body["winner"].as_u64().map(|w| w as u32),
+                ));
+            }
             Some("decision_open") => {}
             Some("still_running") => return Ok(Progress::Running),
             _ => return Err(self.failure(&body)),
         }
-        let seat = body["decision"]["player"].as_u64().ok_or_else(|| protocol("a Decision names no player"))? as u32;
-        let id = id_number(&body["decision"]["id"]).ok_or_else(|| protocol("a Decision has no id"))?;
+        let seat = body["decision"]["player"]
+            .as_u64()
+            .ok_or_else(|| protocol("a Decision names no player"))? as u32;
+        let id =
+            id_number(&body["decision"]["id"]).ok_or_else(|| protocol("a Decision has no id"))?;
         if self.last_decision.is_some_and(|last| id <= last) {
-            return Err(protocol(format!("Decision id {id} did not go up from {:?}", self.last_decision)));
+            return Err(protocol(format!(
+                "Decision id {id} did not go up from {:?}",
+                self.last_decision
+            )));
         }
         self.last_decision = Some(id);
         self.seats.insert(seat);
@@ -267,7 +280,9 @@ impl Bot {
         let answered = self.answer(session, seat, &decision, &reply)?;
         self.answers += 1;
         if answered["status"] == "game_over" {
-            return Ok(Progress::GameOver(answered["winner"].as_u64().map(|w| w as u32)));
+            return Ok(Progress::GameOver(
+                answered["winner"].as_u64().map(|w| w as u32),
+            ));
         }
         Ok(Progress::Answered)
     }
@@ -292,12 +307,16 @@ impl Bot {
             transcript.push(bytes);
             transcript.push(reply.clone());
         }
-        let value: Value = serde_json::from_slice(&reply).map_err(|e| protocol(format!("a response is not JSON: {e}")))?;
+        let value: Value = serde_json::from_slice(&reply)
+            .map_err(|e| protocol(format!("a response is not JSON: {e}")))?;
         Ok(value["body"].clone())
     }
 
     fn poll(&mut self, session: &mut Session, seat: u32) -> Result<Value, BotError> {
-        let body = self.send(session, json!({ "v": PROTOCOL_VERSION, "kind": "poll", "seat": seat, "body": {} }))?;
+        let body = self.send(
+            session,
+            json!({ "v": PROTOCOL_VERSION, "kind": "poll", "seat": seat, "body": {} }),
+        )?;
         if body["status"] == "error" {
             return Err(self.failure(&body));
         }
@@ -308,7 +327,11 @@ impl Bot {
     fn failure(&self, body: &Value) -> BotError {
         let error = &body["error"];
         let text = format!("{}: {}", error["code"], error["message"]);
-        if error["code"] == "pipeline_error" { BotError::Fatal(text) } else { protocol(text) }
+        if error["code"] == "pipeline_error" {
+            BotError::Fatal(text)
+        } else {
+            protocol(text)
+        }
     }
 
     fn pool(&mut self, seat: u32) -> &mut Pool {
@@ -322,7 +345,9 @@ impl Bot {
     }
 
     fn take_events(&mut self, seat: u32, body: &Value) {
-        let Some(events) = body["events"].as_array() else { return };
+        let Some(events) = body["events"].as_array() else {
+            return;
+        };
         for event in events {
             match event["kind"].as_str() {
                 Some("mana_added") if event["player"].as_u64() == Some(u64::from(seat)) => {
@@ -336,13 +361,19 @@ impl Bot {
                 }
                 // Damage to a player is not a `life_changed` event.
                 // TODO: gaining life emits no event, so the tracked life can sit below the real one
-                Some("damage_dealt") if event["target"]["kind"] == "player" && event["target"]["id"].as_u64() == Some(u64::from(seat)) => {
+                Some("damage_dealt")
+                    if event["target"]["kind"] == "player"
+                        && event["target"]["id"].as_u64() == Some(u64::from(seat)) =>
+                {
                     *self.life.entry(seat).or_default() -= event["amount"].as_i64().unwrap_or(0);
                 }
                 // CR 500.5
                 Some("step_started" | "phase_started") => *self.pool(seat) = Pool::default(),
                 Some("zone_change") => {
-                    if let (Some(object), Some(cost)) = (event["object"].as_str(), event["identity"]["mana_cost"].as_str()) {
+                    if let (Some(object), Some(cost)) = (
+                        event["object"].as_str(),
+                        event["identity"]["mana_cost"].as_str(),
+                    ) {
                         self.costs.insert(object.to_string(), cost.to_string());
                     }
                 }
@@ -350,12 +381,21 @@ impl Bot {
             }
         }
         if self.record {
-            self.events.entry(seat).or_default().extend(events.iter().cloned());
+            self.events
+                .entry(seat)
+                .or_default()
+                .extend(events.iter().cloned());
         }
     }
 
     // A rejected reply is retried once with a fallback that is always legal for its shape.
-    fn answer(&mut self, session: &mut Session, seat: u32, decision: &Value, reply: &Reply) -> Result<Value, BotError> {
+    fn answer(
+        &mut self,
+        session: &mut Session,
+        seat: u32,
+        decision: &Value,
+        reply: &Reply,
+    ) -> Result<Value, BotError> {
         let sent = self.send_answer(session, seat, decision, &reply.value)?;
         let Some(message) = rejection(&sent) else {
             self.accepted(seat, reply, &sent);
@@ -365,17 +405,37 @@ impl Bot {
         let fallback = match decision["shape"].as_str() {
             Some("action") => json!({ "kind": "action", "action": { "kind": "pass_priority" } }),
             Some("payment") => json!({ "kind": "payment", "plan": null }),
-            _ => return Err(BotError::Rejected(format!("{message} (shape {}, reply {})", decision["shape"], reply.value))),
+            _ => {
+                return Err(BotError::Rejected(format!(
+                    "{message} (shape {}, reply {})",
+                    decision["shape"], reply.value
+                )));
+            }
         };
         let sent = self.send_answer(session, seat, decision, &fallback)?;
         if let Some(again) = rejection(&sent) {
-            return Err(BotError::Rejected(format!("the fallback was rejected too: {again}")));
+            return Err(BotError::Rejected(format!(
+                "the fallback was rejected too: {again}"
+            )));
         }
-        self.accepted(seat, &Reply { value: fallback, spent: None }, &sent);
+        self.accepted(
+            seat,
+            &Reply {
+                value: fallback,
+                spent: None,
+            },
+            &sent,
+        );
         Ok(sent)
     }
 
-    fn send_illegal_answers(&mut self, session: &mut Session, seat: u32, decision: &Value, legal: &Value) -> Result<(), BotError> {
+    fn send_illegal_answers(
+        &mut self,
+        session: &mut Session,
+        seat: u32,
+        decision: &Value,
+        legal: &Value,
+    ) -> Result<(), BotError> {
         for illegal in illegal_replies(decision, legal) {
             let before = session.snapshot();
             let request = json!({
@@ -385,25 +445,42 @@ impl Bot {
                 "body": { "decision": decision["id"], "reply": illegal },
             });
             let body = self.send(session, request)?;
-            let context = format!("Decision {} ({}), reply {illegal}", decision["id"], decision["shape"]);
+            let context = format!(
+                "Decision {} ({}), reply {illegal}",
+                decision["id"], decision["shape"]
+            );
             if rejection(&body).is_none() {
                 return Err(BotError::NotAtomic(format!("accepted: {context}")));
             }
             if body["decision"]["id"] != decision["id"] {
-                return Err(BotError::NotAtomic(format!("the Decision did not stay open: {context}")));
+                return Err(BotError::NotAtomic(format!(
+                    "the Decision did not stay open: {context}"
+                )));
             }
             let after = session.snapshot();
             if before != after {
-                return Err(BotError::NotAtomic(format!("the engine changed: {context}")));
+                return Err(BotError::NotAtomic(format!(
+                    "the engine changed: {context}"
+                )));
             }
             self.illegal_rejected += 1;
-            let key = format!("{} ({})", decision["shape"].as_str().unwrap_or_default(), decision["mechanic"].as_str().unwrap_or_default());
+            let key = format!(
+                "{} ({})",
+                decision["shape"].as_str().unwrap_or_default(),
+                decision["mechanic"].as_str().unwrap_or_default()
+            );
             *self.illegal_by_shape.entry(key).or_default() += 1;
         }
         Ok(())
     }
 
-    fn send_answer(&mut self, session: &mut Session, seat: u32, decision: &Value, reply: &Value) -> Result<Value, BotError> {
+    fn send_answer(
+        &mut self,
+        session: &mut Session,
+        seat: u32,
+        decision: &Value,
+        reply: &Value,
+    ) -> Result<Value, BotError> {
         let request = json!({
             "v": PROTOCOL_VERSION,
             "kind": "answer",
@@ -436,7 +513,12 @@ impl Bot {
                 plain(json!({ "kind": "order", "order": order }))
             }
             "modes" => {
-                let modes = self.modes(&decision["mode_count"], &decision["min"], &decision["max"], &decision["solo_only"]);
+                let modes = self.modes(
+                    &decision["mode_count"],
+                    &decision["min"],
+                    &decision["max"],
+                    &decision["solo_only"],
+                );
                 plain(json!({ "kind": "modes", "modes": modes }))
             }
             "partition" => plain(self.partition(decision)),
@@ -462,17 +544,28 @@ impl Bot {
     fn count(&mut self, min: usize, max: Option<usize>, len: usize) -> usize {
         let upper = max.unwrap_or(len).min(len);
         let lower = min.min(upper);
-        if upper > lower && self.rng.chance(1, 2) { lower + self.rng.below(upper - lower + 1) } else { lower }
+        if upper > lower && self.rng.chance(1, 2) {
+            lower + self.rng.below(upper - lower + 1)
+        } else {
+            lower
+        }
     }
 
     fn sample(&mut self, items: &[Value], count: usize) -> Vec<Value> {
         let mut indices: Vec<usize> = (0..items.len()).collect();
         self.shuffle(&mut indices);
-        indices.into_iter().take(count).map(|i| items[i].clone()).collect()
+        indices
+            .into_iter()
+            .take(count)
+            .map(|i| items[i].clone())
+            .collect()
     }
 
     fn pick(&mut self, decision: &Value) -> Value {
-        let candidates = decision["candidates"].as_array().cloned().unwrap_or_default();
+        let candidates = decision["candidates"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let min = decision["min"].as_u64().unwrap_or(0) as usize;
         let max = decision["max"].as_u64().map(|m| m as usize);
         let count = self.count(min, max, candidates.len());
@@ -482,16 +575,30 @@ impl Bot {
     /// Distinct mode indices in ascending order, which is legal even for a repeatable
     /// range. A `solo_only` mode is picked only alone.
     // TODO: a pawprint budget is read as a plain count. CR 700.2i
-    fn modes(&mut self, mode_count: &Value, min: &Value, max: &Value, solo_only: &Value) -> Vec<u64> {
+    fn modes(
+        &mut self,
+        mode_count: &Value,
+        min: &Value,
+        max: &Value,
+        solo_only: &Value,
+    ) -> Vec<u64> {
         let total = mode_count.as_u64().unwrap_or(0) as usize;
-        let (min, max) = (min.as_u64().unwrap_or(0) as usize, max.as_u64().unwrap_or(0) as usize);
-        let solo: Vec<u64> = solo_only.as_array().map(|list| list.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+        let (min, max) = (
+            min.as_u64().unwrap_or(0) as usize,
+            max.as_u64().unwrap_or(0) as usize,
+        );
+        let solo: Vec<u64> = solo_only
+            .as_array()
+            .map(|list| list.iter().filter_map(Value::as_u64).collect())
+            .unwrap_or_default();
         let joinable = (0..total).filter(|&i| !solo.contains(&(i as u64))).count();
         let mut count = self.count(min, Some(max), total);
         if count >= 2 {
             count = count.min(joinable);
         }
-        let mut indices: Vec<usize> = (0..total).filter(|&i| count < 2 || !solo.contains(&(i as u64))).collect();
+        let mut indices: Vec<usize> = (0..total)
+            .filter(|&i| count < 2 || !solo.contains(&(i as u64)))
+            .collect();
         self.shuffle(&mut indices);
         let mut chosen: Vec<u64> = indices.into_iter().take(count).map(|i| i as u64).collect();
         chosen.sort_unstable();
@@ -502,7 +609,11 @@ impl Bot {
         let cards = decision["cards"].as_array().cloned().unwrap_or_default();
         let (mut top, mut rest) = (Vec::new(), Vec::new());
         for card in cards {
-            if self.rng.chance(1, 2) { top.push(card) } else { rest.push(card) }
+            if self.rng.chance(1, 2) {
+                top.push(card)
+            } else {
+                rest.push(card)
+            }
         }
         self.shuffle(&mut top);
         json!({ "kind": "partition", "top": top, "rest": rest })
@@ -547,13 +658,36 @@ impl Bot {
     }
 
     fn cast(&mut self, entry: &Value, x_value: Value) -> Option<Value> {
-        let alternative = if entry["normal"] == true { Value::Null } else { entry["alternative_costs"].get(0)?.clone() };
+        let alternative = if entry["normal"] == true {
+            Value::Null
+        } else {
+            entry["alternative_costs"].get(0)?.clone()
+        };
         let (modes, slots): (Vec<u64>, Vec<Value>) = match entry["modes"].as_object() {
-            None => (Vec::new(), entry["targets"]["slots"].as_array().cloned().unwrap_or_default()),
+            None => (
+                Vec::new(),
+                entry["targets"]["slots"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
             Some(range) => {
-                let modes = self.modes(&range["mode_count"], &range["min"], &range["max"], range.get("solo_only").unwrap_or(&Value::Null));
+                let modes = self.modes(
+                    &range["mode_count"],
+                    &range["min"],
+                    &range["max"],
+                    range.get("solo_only").unwrap_or(&Value::Null),
+                );
                 let per_mode = entry["targets"]["modes"].as_array()?;
-                let slots = modes.iter().flat_map(|m| per_mode[*m as usize].as_array().cloned().unwrap_or_default()).collect();
+                let slots = modes
+                    .iter()
+                    .flat_map(|m| {
+                        per_mode[*m as usize]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default()
+                    })
+                    .collect();
                 (modes, slots)
             }
         };
@@ -578,10 +712,16 @@ impl Bot {
             Some(choice) => {
                 let colors = choice["colors"].as_array()?.clone();
                 let count = choice["count"].as_u64().unwrap_or(0) as usize;
-                (0..count).map(|_| colors[self.rng.below(colors.len())].clone()).collect()
+                (0..count)
+                    .map(|_| colors[self.rng.below(colors.len())].clone())
+                    .collect()
             }
         };
-        let x_value = if entry["x"] == true { json!(self.rng.below(3)) } else { Value::Null };
+        let x_value = if entry["x"] == true {
+            json!(self.rng.below(3))
+        } else {
+            Value::Null
+        };
         Some(json!({
             "kind": "activate_ability",
             "source": entry["source"],
@@ -602,7 +742,10 @@ impl Bot {
             plan_payment(&cost, &pool, budget, None).is_some()
         };
         let entries = decision["entries"].as_array().cloned().unwrap_or_default();
-        let sources = entries.iter().filter(|e| e["kind"] == "activate" && e["mana_ability"] == true).count() as u32;
+        let sources = entries
+            .iter()
+            .filter(|e| e["kind"] == "activate" && e["mana_ability"] == true)
+            .count() as u32;
 
         // A mana ability's weight stays `None` until `wants_mana` is known.
         let mut options: Vec<(Option<usize>, Value, Option<Value>)> = Vec::new();
@@ -610,9 +753,16 @@ impl Bot {
         let mut wants_mana = false;
         for entry in &entries {
             match entry["kind"].as_str() {
-                Some("play_land") => options.push((Some(12), json!({ "kind": "play_land", "card": entry["card"] }), None)),
+                Some("play_land") => options.push((
+                    Some(12),
+                    json!({ "kind": "play_land", "card": entry["card"] }),
+                    None,
+                )),
                 Some("cast") => {
-                    let cost = entry["card"].as_str().and_then(|card| self.costs.get(card)).cloned();
+                    let cost = entry["card"]
+                        .as_str()
+                        .and_then(|card| self.costs.get(card))
+                        .cloned();
                     let weight = match &cost {
                         None => 2,
                         Some(cost) if can_pay(cost, 0) => {
@@ -620,12 +770,17 @@ impl Bot {
                             10
                         }
                         Some(cost) => {
-                            wants_mana |= mana_value(cost).is_some_and(|mv| mv <= pool.total() + sources);
+                            wants_mana |=
+                                mana_value(cost).is_some_and(|mv| mv <= pool.total() + sources);
                             0
                         }
                     };
                     if weight > 0 {
-                        let x_value = if entry["x"] == true { self.x_value(cost.as_deref(), &can_pay) } else { Value::Null };
+                        let x_value = if entry["x"] == true {
+                            self.x_value(cost.as_deref(), &can_pay)
+                        } else {
+                            Value::Null
+                        };
                         if let Some(action) = self.cast(entry, x_value) {
                             options.push((Some(weight), action, None));
                         }
@@ -633,7 +788,11 @@ impl Bot {
                 }
                 Some("activate") => {
                     if let Some(action) = self.activate(entry) {
-                        let weight = if entry["mana_ability"] == true { None } else { Some(2) };
+                        let weight = if entry["mana_ability"] == true {
+                            None
+                        } else {
+                            Some(2)
+                        };
                         options.push((weight, action, Some(entry["source"].clone())));
                     }
                 }
@@ -641,9 +800,17 @@ impl Bot {
             }
         }
         let mana_weight = if wants_mana { 10 } else { 2 };
-        let options: Vec<(usize, Value, Option<Value>)> =
-            options.into_iter().map(|(weight, action, source)| (weight.unwrap_or(mana_weight), action, source)).collect();
-        let pass_weight = if affordable { 1 } else if wants_mana { 2 } else { 6 };
+        let options: Vec<(usize, Value, Option<Value>)> = options
+            .into_iter()
+            .map(|(weight, action, source)| (weight.unwrap_or(mana_weight), action, source))
+            .collect();
+        let pass_weight = if affordable {
+            1
+        } else if wants_mana {
+            2
+        } else {
+            6
+        };
 
         let total: usize = options.iter().map(|(w, ..)| w).sum::<usize>() + pass_weight;
         let mut roll = self.rng.below(total);
@@ -659,7 +826,10 @@ impl Bot {
     }
 
     fn attackers(&mut self, decision: &Value) -> Value {
-        let entries = decision["attackers"].as_array().cloned().unwrap_or_default();
+        let entries = decision["attackers"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let mut attacks = Vec::new();
         for entry in entries {
             let defenders = entry["defenders"].as_array().cloned().unwrap_or_default();
@@ -687,9 +857,20 @@ impl Bot {
 
     fn payment(&mut self, seat: u32, decision: &Value) -> Reply {
         let pool = *self.pool(seat);
-        match plan_payment(&decision["cost"], &pool, self.life_budget(seat), self.last_source.as_ref()) {
-            Some((payments, spent)) => Reply { value: json!({ "kind": "payment", "plan": { "payments": payments } }), spent: Some(spent) },
-            None => Reply { value: json!({ "kind": "payment", "plan": null }), spent: None },
+        match plan_payment(
+            &decision["cost"],
+            &pool,
+            self.life_budget(seat),
+            self.last_source.as_ref(),
+        ) {
+            Some((payments, spent)) => Reply {
+                value: json!({ "kind": "payment", "plan": { "payments": payments } }),
+                spent: Some(spent),
+            },
+            None => Reply {
+                value: json!({ "kind": "payment", "plan": null }),
+                spent: None,
+            },
         }
     }
 }

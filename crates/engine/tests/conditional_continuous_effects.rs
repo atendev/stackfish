@@ -7,13 +7,15 @@ use std::collections::HashMap;
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(power: i32, toughness: i32, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Permanent".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types,
@@ -34,8 +36,19 @@ fn creature_definition(power: i32, toughness: i32, card_types: CardTypeSet) -> C
     }
 }
 
-fn permanent(id: ObjectId, owner: PlayerId, power: i32, toughness: i32, card_types: CardTypeSet) -> GameObject {
-    card_object(id, creature_definition(power, toughness, card_types), owner, ZoneKind::Battlefield)
+fn permanent(
+    id: ObjectId,
+    owner: PlayerId,
+    power: i32,
+    toughness: i32,
+    card_types: CardTypeSet,
+) -> GameObject {
+    card_object(
+        id,
+        creature_definition(power, toughness, card_types),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
 fn base_state() -> GameState {
@@ -50,7 +63,10 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -58,24 +74,34 @@ fn conditional_anthem(source: ObjectId, count: u32) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter { 
+        affected: AffectedFilter::Primitive(EffectFilter {
             controller: Some(FilterController::You),
             card_types: None,
-            self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
-        condition: Some(InterveningIfSpec::Primitive(InterveningIfPrimitive::ControllerControlsAtLeast {
-            filter: FilterSpec {
-                card_types: Some(CardTypeSet::ARTIFACT),
-                supertypes: None,
-                subtypes: None,
-                controller: Some(FilterController::You),
-                random: false,
-                extra: None,
+        condition: Some(InterveningIfSpec::Primitive(
+            InterveningIfPrimitive::ControllerControlsAtLeast {
+                filter: FilterSpec {
+                    card_types: Some(CardTypeSet::ARTIFACT),
+                    supertypes: None,
+                    subtypes: None,
+                    controller: Some(FilterController::You),
+                    random: false,
+                    extra: None,
+                },
+                count,
             },
-            count,
-        })),
+        )),
     }
 }
 
@@ -85,16 +111,32 @@ fn conditional_effect_applies_when_the_control_count_is_met() {
     let p0 = PlayerId(0);
     let anthem = ObjectId(0);
     let bear = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(anthem, p0, 0, 0, CardTypeSet::ENCHANTMENT));
+    put_on_battlefield(
+        &mut state,
+        permanent(anthem, p0, 0, 0, CardTypeSet::ENCHANTMENT),
+    );
     put_on_battlefield(&mut state, permanent(bear, p0, 2, 2, CardTypeSet::CREATURE));
-    put_on_battlefield(&mut state, permanent(ObjectId(2), p0, 0, 0, CardTypeSet::ARTIFACT));
-    put_on_battlefield(&mut state, permanent(ObjectId(3), p0, 0, 0, CardTypeSet::ARTIFACT));
-    put_on_battlefield(&mut state, permanent(ObjectId(4), p0, 0, 0, CardTypeSet::ARTIFACT));
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(2), p0, 0, 0, CardTypeSet::ARTIFACT),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(3), p0, 0, 0, CardTypeSet::ARTIFACT),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(4), p0, 0, 0, CardTypeSet::ARTIFACT),
+    );
     state.continuous_effects.push(conditional_anthem(anthem, 3));
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
 
-    assert_eq!(effective.power, Some(3), "3 artifacts meets the threshold - the anthem applies");
+    assert_eq!(
+        effective.power,
+        Some(3),
+        "3 artifacts meets the threshold - the anthem applies"
+    );
     assert_eq!(effective.toughness, Some(3));
 }
 
@@ -104,14 +146,24 @@ fn conditional_effect_does_not_apply_when_the_control_count_is_not_met() {
     let p0 = PlayerId(0);
     let anthem = ObjectId(0);
     let bear = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(anthem, p0, 0, 0, CardTypeSet::ENCHANTMENT));
+    put_on_battlefield(
+        &mut state,
+        permanent(anthem, p0, 0, 0, CardTypeSet::ENCHANTMENT),
+    );
     put_on_battlefield(&mut state, permanent(bear, p0, 2, 2, CardTypeSet::CREATURE));
-    put_on_battlefield(&mut state, permanent(ObjectId(2), p0, 0, 0, CardTypeSet::ARTIFACT));
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(2), p0, 0, 0, CardTypeSet::ARTIFACT),
+    );
     state.continuous_effects.push(conditional_anthem(anthem, 3));
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
 
-    assert_eq!(effective.power, Some(2), "only 1 artifact - below the threshold, no boost");
+    assert_eq!(
+        effective.power,
+        Some(2),
+        "only 1 artifact - below the threshold, no boost"
+    );
     assert_eq!(effective.toughness, Some(2));
 }
 
@@ -121,11 +173,23 @@ fn conditional_effect_stops_applying_the_instant_a_matching_permanent_leaves() {
     let p0 = PlayerId(0);
     let anthem = ObjectId(0);
     let bear = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(anthem, p0, 0, 0, CardTypeSet::ENCHANTMENT));
+    put_on_battlefield(
+        &mut state,
+        permanent(anthem, p0, 0, 0, CardTypeSet::ENCHANTMENT),
+    );
     put_on_battlefield(&mut state, permanent(bear, p0, 2, 2, CardTypeSet::CREATURE));
-    put_on_battlefield(&mut state, permanent(ObjectId(2), p0, 0, 0, CardTypeSet::ARTIFACT));
-    put_on_battlefield(&mut state, permanent(ObjectId(3), p0, 0, 0, CardTypeSet::ARTIFACT));
-    put_on_battlefield(&mut state, permanent(ObjectId(4), p0, 0, 0, CardTypeSet::ARTIFACT));
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(2), p0, 0, 0, CardTypeSet::ARTIFACT),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(3), p0, 0, 0, CardTypeSet::ARTIFACT),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(4), p0, 0, 0, CardTypeSet::ARTIFACT),
+    );
     state.continuous_effects.push(conditional_anthem(anthem, 3));
 
     assert_eq!(
@@ -135,7 +199,10 @@ fn conditional_effect_stops_applying_the_instant_a_matching_permanent_leaves() {
     );
 
     // A plain zone removal and re-query is the whole proof of continuous re-evaluation (CR 611.2c).
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().remove(ObjectId(4));
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .remove(ObjectId(4));
     state.objects.remove(&ObjectId(4));
 
     assert_eq!(
@@ -151,13 +218,27 @@ fn an_unconditional_effect_is_completely_unaffected() {
     let p0 = PlayerId(0);
     let anthem = ObjectId(0);
     let bear = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(anthem, p0, 0, 0, CardTypeSet::ENCHANTMENT));
+    put_on_battlefield(
+        &mut state,
+        permanent(anthem, p0, 0, 0, CardTypeSet::ENCHANTMENT),
+    );
     put_on_battlefield(&mut state, permanent(bear, p0, 2, 2, CardTypeSet::CREATURE));
     state.continuous_effects.push(ContinuousEffect {
         source: anthem,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -165,7 +246,11 @@ fn an_unconditional_effect_is_completely_unaffected() {
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
 
-    assert_eq!(effective.power, Some(3), "condition: None means unconditional, same as before this slice");
+    assert_eq!(
+        effective.power,
+        Some(3),
+        "condition: None means unconditional, same as before this slice"
+    );
     assert_eq!(effective.toughness, Some(3));
 }
 
@@ -173,12 +258,23 @@ fn an_unconditional_effect_is_completely_unaffected() {
 fn run_static_ability_script(source: ObjectId, script: &str) -> (GameState, ScriptRuntime) {
     let mut state = base_state();
     let p0 = PlayerId(0);
-    put_on_battlefield(&mut state, permanent(source, p0, 0, 0, CardTypeSet::ENCHANTMENT));
-    put_on_battlefield(&mut state, permanent(ObjectId(1), p0, 2, 2, CardTypeSet::CREATURE));
+    put_on_battlefield(
+        &mut state,
+        permanent(source, p0, 0, 0, CardTypeSet::ENCHANTMENT),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(1), p0, 2, 2, CardTypeSet::CREATURE),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    let definition = CardDefinition { script_ref: ScriptReference::Inline(script.to_string()), ..creature_definition(0, 0, CardTypeSet::ENCHANTMENT) };
-    runtime.run_card_script(&mut state, &definition, source).expect("card script registers a static ability");
+    let definition = CardDefinition {
+        script_ref: ScriptReference::Inline(script.to_string()),
+        ..creature_definition(0, 0, CardTypeSet::ENCHANTMENT)
+    };
+    runtime
+        .run_card_script(&mut state, &definition, source)
+        .expect("card script registers a static ability");
     (state, runtime)
 }
 
@@ -201,13 +297,28 @@ fn lua_controls_at_least_primitive_round_trips_through_set_condition() {
     let bear = ObjectId(1);
 
     // Below the threshold - no boost yet.
-    assert_eq!(effective_characteristics(&state, &runtime, bear).power, Some(2));
+    assert_eq!(
+        effective_characteristics(&state, &runtime, bear).power,
+        Some(2)
+    );
 
     // Add 3 artifacts and re-query: the condition is re-evaluated fresh, with no re-registration.
-    put_on_battlefield(&mut state, permanent(ObjectId(2), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT));
-    put_on_battlefield(&mut state, permanent(ObjectId(3), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT));
-    put_on_battlefield(&mut state, permanent(ObjectId(4), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT));
-    assert_eq!(effective_characteristics(&state, &runtime, bear).power, Some(3));
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(2), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(3), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(ObjectId(4), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT),
+    );
+    assert_eq!(
+        effective_characteristics(&state, &runtime, bear).power,
+        Some(3)
+    );
 }
 
 #[test]

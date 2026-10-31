@@ -4,13 +4,17 @@
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -35,7 +39,9 @@ fn bear_definition(id: u64, name: &str, script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -63,7 +69,15 @@ fn tokens_you_control_enter_tapped(source: ObjectId) -> ReplacementEffect {
             filter: EventFilter::WouldMoveZone {
                 from: None,
                 to: Some(ZoneKind::Battlefield),
-                affected: EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    controller: Some(FilterController::You),
+                    card_types: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::EntersTapped,
         },
@@ -78,9 +92,20 @@ fn tokens_you_control_enter_with_counters(source: ObjectId, amount: i32) -> Repl
             filter: EventFilter::WouldMoveZone {
                 from: None,
                 to: Some(ZoneKind::Battlefield),
-                affected: EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    controller: Some(FilterController::You),
+                    card_types: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
-            payload: ReplacementPayload::EntersWithCounters { kind: CounterKind::PlusOnePlusOne, amount },
+            payload: ReplacementPayload::EntersWithCounters {
+                kind: CounterKind::PlusOnePlusOne,
+                amount,
+            },
         },
         consumption: ConsumptionPolicy::Repeatable,
     }
@@ -104,7 +129,10 @@ fn two_player_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -112,22 +140,46 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -138,13 +190,38 @@ fn token_enters_tapped_via_an_externally_granted_controller_wide_effect() {
     let anthem = ObjectId(0);
     let card = ObjectId(1);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(anthem, bear_definition(1, "Anthem Source", ""), p0, ZoneKind::Battlefield));
-    state.replacement_effects.push(tokens_you_control_enter_tapped(anthem));
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            anthem,
+            bear_definition(1, "Anthem Source", ""),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .replacement_effects
+        .push(tokens_you_control_enter_tapped(anthem));
     state.objects.insert(
         card,
-        card_object(card, instant_definition(2, "Investigate", AbilityEffect::CreateToken { spec: TokenSpec::Named(NamedToken::Clue), count: 1 }), p0, ZoneKind::Hand),
+        card_object(
+            card,
+            instant_definition(
+                2,
+                "Investigate",
+                AbilityEffect::CreateToken {
+                    spec: TokenSpec::Named(NamedToken::Clue),
+                    count: 1,
+                },
+            ),
+            p0,
+            ZoneKind::Hand,
+        ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -152,8 +229,16 @@ fn token_enters_tapped_via_an_externally_granted_controller_wide_effect() {
     pass_both_and_drain(&mut engine, p0, p1);
 
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
-    let token_id = bf.contents.iter().copied().find(|&id| id != anthem).expect("the Clue token exists");
-    assert!(engine.state().object(token_id).unwrap().tapped, "the token entered tapped via the controller-wide effect");
+    let token_id = bf
+        .contents
+        .iter()
+        .copied()
+        .find(|&id| id != anthem)
+        .expect("the Clue token exists");
+    assert!(
+        engine.state().object(token_id).unwrap().tapped,
+        "the token entered tapped via the controller-wide effect"
+    );
 }
 
 #[test]
@@ -163,8 +248,18 @@ fn token_enters_with_counters_via_an_externally_granted_controller_wide_effect()
     let anthem = ObjectId(0);
     let card = ObjectId(1);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(anthem, bear_definition(1, "Anthem Source", ""), p0, ZoneKind::Battlefield));
-    state.replacement_effects.push(tokens_you_control_enter_with_counters(anthem, 2));
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            anthem,
+            bear_definition(1, "Anthem Source", ""),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .replacement_effects
+        .push(tokens_you_control_enter_with_counters(anthem, 2));
     let spec = TokenSpec::Creature(CreatureTokenSpec {
         subtypes: vec!["Saproling".to_string()],
         colors: ColorSet::empty(),
@@ -175,8 +270,23 @@ fn token_enters_with_counters_via_an_externally_granted_controller_wide_effect()
         additional_types: CardTypeSet::empty(),
         additional_supertypes: SupertypeSet::empty(),
     });
-    state.objects.insert(card, card_object(card, instant_definition(2, "Saproling Migration", AbilityEffect::CreateToken { spec, count: 1 }), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            instant_definition(
+                2,
+                "Saproling Migration",
+                AbilityEffect::CreateToken { spec, count: 1 },
+            ),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -184,8 +294,21 @@ fn token_enters_with_counters_via_an_externally_granted_controller_wide_effect()
     pass_both_and_drain(&mut engine, p0, p1);
 
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
-    let token_id = bf.contents.iter().copied().find(|&id| id != anthem).expect("the Saproling token exists");
-    assert_eq!(engine.state().object(token_id).unwrap().counters.count(&CounterKind::PlusOnePlusOne), 2);
+    let token_id = bf
+        .contents
+        .iter()
+        .copied()
+        .find(|&id| id != anthem)
+        .expect("the Saproling token exists");
+    assert_eq!(
+        engine
+            .state()
+            .object(token_id)
+            .unwrap()
+            .counters
+            .count(&CounterKind::PlusOnePlusOne),
+        2
+    );
 }
 
 #[test]
@@ -195,21 +318,56 @@ fn a_copyof_token_applies_its_freshly_reregistered_self_only_effect() {
     let source = ObjectId(0);
     let card = ObjectId(1);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(source, bear_definition(1, "Tapped Bear", SELF_REGISTER_ENTERS_TAPPED), p0, ZoneKind::Battlefield));
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            source,
+            bear_definition(1, "Tapped Bear", SELF_REGISTER_ENTERS_TAPPED),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
     // The source's self-registration ran on entry, as a struct-literal fixture seeds state.replacement_effects directly.
     state.replacement_effects.push(ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
-            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            filter: EventFilter::WouldMoveZone {
+                from: None,
+                to: Some(ZoneKind::Battlefield),
+                affected: EffectFilter {
+                    controller: None,
+                    card_types: None,
+                    self_only: true,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             payload: ReplacementPayload::EntersTapped,
         },
         consumption: ConsumptionPolicy::Repeatable,
     });
     state.objects.insert(
         card,
-        card_object(card, instant_definition(2, "Clone Legion", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(source, CopyExceptions::default()), count: 1 }), p0, ZoneKind::Hand),
+        card_object(
+            card,
+            instant_definition(
+                2,
+                "Clone Legion",
+                AbilityEffect::CreateToken {
+                    spec: TokenSpec::CopyOf(source, CopyExceptions::default()),
+                    count: 1,
+                },
+            ),
+            p0,
+            ZoneKind::Hand,
+        ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -217,9 +375,20 @@ fn a_copyof_token_applies_its_freshly_reregistered_self_only_effect() {
     pass_both_and_drain(&mut engine, p0, p1);
 
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
-    let token_id = bf.contents.iter().copied().find(|&id| id != source).expect("the copy token exists");
-    assert!(engine.state().object(token_id).unwrap().tapped, "run_card_script re-registered EntersTapped under the token's own id, and it was applied");
-    assert!(!engine.state().object(source).unwrap().tapped, "the original source itself is untouched");
+    let token_id = bf
+        .contents
+        .iter()
+        .copied()
+        .find(|&id| id != source)
+        .expect("the copy token exists");
+    assert!(
+        engine.state().object(token_id).unwrap().tapped,
+        "run_card_script re-registered EntersTapped under the token's own id, and it was applied"
+    );
+    assert!(
+        !engine.state().object(source).unwrap().tapped,
+        "the original source itself is untouched"
+    );
 }
 
 #[test]
@@ -230,9 +399,24 @@ fn a_plain_token_with_no_matching_effect_is_unaffected() {
     let mut state = two_player_state();
     state.objects.insert(
         card,
-        card_object(card, instant_definition(1, "Investigate", AbilityEffect::CreateToken { spec: TokenSpec::Named(NamedToken::Clue), count: 1 }), p0, ZoneKind::Hand),
+        card_object(
+            card,
+            instant_definition(
+                1,
+                "Investigate",
+                AbilityEffect::CreateToken {
+                    spec: TokenSpec::Named(NamedToken::Clue),
+                    count: 1,
+                },
+            ),
+            p0,
+            ZoneKind::Hand,
+        ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -242,6 +426,9 @@ fn a_plain_token_with_no_matching_effect_is_unaffected() {
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
     assert_eq!(bf.contents.len(), 1);
     let token = engine.state().object(bf.contents[0]).unwrap();
-    assert!(!token.tapped, "no registered effect matches - the token is unaffected");
+    assert!(
+        !token.tapped,
+        "no registered effect matches - the token is unaffected"
+    );
     assert_eq!(token.counters.count(&CounterKind::PlusOnePlusOne), 0);
 }

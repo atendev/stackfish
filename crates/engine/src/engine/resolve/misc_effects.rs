@@ -5,7 +5,7 @@ use std::ops::ControlFlow;
 
 use crate::commands;
 use crate::script::OperationOutcome;
-use crate::types::ability::{apply_text_box, AbilityEffect, CopyExceptions};
+use crate::types::ability::{AbilityEffect, CopyExceptions, apply_text_box};
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
@@ -26,7 +26,10 @@ impl Engine {
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         if let Some(Target::Object(target_id)) = legal_targets.first().copied() {
             commands::attach_permanent(&mut self.state, top.source, target_id);
-            events.push(GameEventKind::Attached { object: top.source, attached_to: target_id });
+            events.push(GameEventKind::Attached {
+                object: top.source,
+                attached_to: target_id,
+            });
         }
         ControlFlow::Continue(events)
     }
@@ -45,29 +48,45 @@ impl Engine {
             let source_id = top.source;
             // CR 707.9c: captured before anything mutates, for `retain_name` and `retain_color`.
             let original_definition = self.state.object(source_id).map(|o| o.definition.clone());
-            let snapshot = self
-                .state
-                .object(target_id)
-                .map(|obj| obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone()));
+            let snapshot = self.state.object(target_id).map(|obj| {
+                obj.copiable_override
+                    .clone()
+                    .unwrap_or_else(|| obj.definition.clone())
+            });
             if let Some(mut snapshot) = snapshot {
                 exceptions.apply(&mut snapshot, original_definition.as_ref());
-                let became_copy = self.state.objects.get_mut(&source_id).is_some_and(|source_obj| {
-                    if source_obj.zone == ZoneKind::Battlefield {
-                        source_obj.copiable_override = Some(snapshot.clone());
-                        // CR 707.9e
-                        source_obj.copy_generation += 1;
-                        true
-                    } else {
-                        false
-                    }
-                });
+                let became_copy =
+                    self.state
+                        .objects
+                        .get_mut(&source_id)
+                        .is_some_and(|source_obj| {
+                            if source_obj.zone == ZoneKind::Battlefield {
+                                source_obj.copiable_override = Some(snapshot.clone());
+                                // CR 707.9e
+                                source_obj.copy_generation += 1;
+                                true
+                            } else {
+                                false
+                            }
+                        });
                 if became_copy {
                     commands::purge_granted_abilities(&mut self.state, source_id);
-                    let result = self.script_runtime.run_card_script(&mut self.state, &snapshot, source_id);
+                    let result =
+                        self.script_runtime
+                            .run_card_script(&mut self.state, &snapshot, source_id);
                     self.record_script_error(source_id, &snapshot.script_ref, result);
                     // CR 707.9a: Vesuvan's linked upkeep ability.
-                    let generation = self.state.object(source_id).map(|o| o.copy_generation).unwrap_or(0);
-                    commands::grant_linked_copy_ability(&mut self.state, source_id, exceptions, generation);
+                    let generation = self
+                        .state
+                        .object(source_id)
+                        .map(|o| o.copy_generation)
+                        .unwrap_or(0);
+                    commands::grant_linked_copy_ability(
+                        &mut self.state,
+                        source_id,
+                        exceptions,
+                        generation,
+                    );
                     // CR 707.9e: Spark Double's extra counter. `x_value` is plumbed
                     // through for parity with `EntersAsCopy`.
                     // TODO: no real `BecomeCopy` producer uses `CounterAmount::X`
@@ -76,7 +95,10 @@ impl Engine {
                     {
                         events.push(counter_event);
                     }
-                    events.push(GameEventKind::BecameCopy { object: source_id, copied: target_id });
+                    events.push(GameEventKind::BecameCopy {
+                        object: source_id,
+                        copied: target_id,
+                    });
                 }
             }
         }
@@ -114,14 +136,16 @@ impl Engine {
                 && is_legal_now(&Target::Object(a_id), &reqs[0])
                 && is_legal_now(&Target::Object(b_id), &reqs[1])
             {
-                let a_snapshot = self
-                    .state
-                    .object(a_id)
-                    .map(|obj| obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone()));
-                let b_snapshot = self
-                    .state
-                    .object(b_id)
-                    .map(|obj| obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone()));
+                let a_snapshot = self.state.object(a_id).map(|obj| {
+                    obj.copiable_override
+                        .clone()
+                        .unwrap_or_else(|| obj.definition.clone())
+                });
+                let b_snapshot = self.state.object(b_id).map(|obj| {
+                    obj.copiable_override
+                        .clone()
+                        .unwrap_or_else(|| obj.definition.clone())
+                });
                 if let (Some(a_snapshot), Some(b_snapshot)) = (a_snapshot, b_snapshot) {
                     let mut a_new = a_snapshot.clone();
                     apply_text_box(&mut a_new, &b_snapshot);
@@ -136,9 +160,13 @@ impl Engine {
                     }
                     commands::purge_granted_abilities(&mut self.state, a_id);
                     commands::purge_granted_abilities(&mut self.state, b_id);
-                    let a_result = self.script_runtime.run_card_script(&mut self.state, &a_new, a_id);
+                    let a_result =
+                        self.script_runtime
+                            .run_card_script(&mut self.state, &a_new, a_id);
                     self.record_script_error(a_id, &a_new.script_ref, a_result);
-                    let b_result = self.script_runtime.run_card_script(&mut self.state, &b_new, b_id);
+                    let b_result =
+                        self.script_runtime
+                            .run_card_script(&mut self.state, &b_new, b_id);
                     self.record_script_error(b_id, &b_new.script_ref, b_result);
 
                     events.push(GameEventKind::TextBoxesExchanged { a: a_id, b: b_id });
@@ -169,13 +197,21 @@ impl Engine {
                 // Skipped for `ScriptHandle(0)`, the placeholder `cast.rs` leaves on
                 // vanilla spells, which would log a false failure every time.
                 // TODO: `cast.rs` collapses a `ForEachPlayer`-wrapped handle to `ScriptHandle(0)`, so a plain custom function that is the runtime's first handle reads as the placeholder
-                let outcome = self.script_runtime.invoke_operation(top.operation, &mut self.state, top.source, top.controller);
-                if let Err(ref e) = outcome {
-                    if top.operation != ScriptHandle(0) {
-                        self.log_events(vec![GameEventKind::ScriptError {
-                            message: format!("operation script error on source {:?}: {e:?}", top.source),
-                        }]);
-                    }
+                let outcome = self.script_runtime.invoke_operation(
+                    top.operation,
+                    &mut self.state,
+                    top.source,
+                    top.controller,
+                );
+                if let Err(ref e) = outcome
+                    && top.operation != ScriptHandle(0)
+                {
+                    self.log_events(vec![GameEventKind::ScriptError {
+                        message: format!(
+                            "operation script error on source {:?}: {e:?}",
+                            top.source
+                        ),
+                    }]);
                 }
                 match outcome {
                     Ok(OperationOutcome::Finished) | Err(_) => ControlFlow::Continue(events),
@@ -201,7 +237,8 @@ impl Engine {
                     }
                     // `DrawCards` with no `ForEachPlayer` context.
                     Ok(OperationOutcome::PendingDraw { amount }) => {
-                        self.process_state = self.continue_draw_cards(amount, top.controller, top.stack_id, events);
+                        self.process_state =
+                            self.continue_draw_cards(amount, top.controller, top.stack_id, events);
                         ControlFlow::Break(StepStatus::Progressed)
                     }
                     // A standalone script operation has no batching context, so each
@@ -209,15 +246,31 @@ impl Engine {
                     Ok(OperationOutcome::PendingZoneMoves(moves)) => {
                         self.process_state = self.chain_pending_zone_moves(
                             moves,
-                            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+                            ScriptedZoneMoveThen::StackResolution {
+                                stack_id: top.stack_id,
+                            },
                             events,
                         );
                         ControlFlow::Break(StepStatus::Progressed)
                     }
                     // `Game.Ops.CastSpell` with no `ForEachPlayer` context.
-                    Ok(OperationOutcome::PendingCast { card, modes, targets, x_value, free }) => {
-                        self.process_state =
-                            self.resolve_pending_cast(card, modes, targets, x_value, free, top.stack_id, top.controller, events);
+                    Ok(OperationOutcome::PendingCast {
+                        card,
+                        modes,
+                        targets,
+                        x_value,
+                        free,
+                    }) => {
+                        self.process_state = self.resolve_pending_cast(
+                            card,
+                            modes,
+                            targets,
+                            x_value,
+                            free,
+                            top.stack_id,
+                            top.controller,
+                            events,
+                        );
                         ControlFlow::Break(StepStatus::Progressed)
                     }
                 }
@@ -230,6 +283,7 @@ impl Engine {
     /// the cascade and madness casts, but inside an active pipeline run, so
     /// `pipeline_context` is left untouched. An illegal cast is logged as a
     /// `ScriptError`; the script is not told why.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn resolve_pending_cast(
         &mut self,
         card: ObjectId,
@@ -249,7 +303,14 @@ impl Engine {
         let command = EngineCommand {
             command_id,
             actor: controller,
-            action: PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost: None, pay_buyback: false },
+            action: PlayerActionKind::CastSpell {
+                card,
+                modes,
+                targets,
+                x_value,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         };
         match commands::execute_command(&mut self.state, &self.script_runtime, command) {
             Ok(outcome) => {
@@ -260,7 +321,10 @@ impl Engine {
                 if outcome.broke_pass_chain {
                     self.state.consecutive_passes = 0;
                 }
-                ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
+                ProcessState::ReplacementCheck {
+                    remaining: events_so_far.into(),
+                    checked: Vec::new(),
+                }
             }
             Err(err) => {
                 self.state.pending_timing_bypass = None;
@@ -270,11 +334,17 @@ impl Engine {
                     self.poison(internal.clone());
                 }
                 self.log_events(vec![GameEventKind::ScriptError {
-                    message: format!("script-requested cast failed on source {stack_id:?}: {err:?}"),
+                    message: format!(
+                        "script-requested cast failed on source {stack_id:?}: {err:?}"
+                    ),
                 }]);
-                let mut final_events: std::collections::VecDeque<GameEventKind> = events_so_far.into();
+                let mut final_events: std::collections::VecDeque<GameEventKind> =
+                    events_so_far.into();
                 final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
-                ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() }
+                ProcessState::ReplacementCheck {
+                    remaining: final_events,
+                    checked: Vec::new(),
+                }
             }
         }
     }

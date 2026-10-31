@@ -56,7 +56,10 @@ fn db_path() -> PathBuf {
 fn create(request: &[u8]) -> Session {
     let source = CardDbCardSource::open(db_path()).expect("the real card database opens");
     let (session, response) = Session::create(request, &source).unwrap_or_else(|e| {
-        panic!("the real-card setup is valid: {}", String::from_utf8_lossy(&e));
+        panic!(
+            "the real-card setup is valid: {}",
+            String::from_utf8_lossy(&e)
+        );
     });
     let response: Value = serde_json::from_slice(&response).expect("a response is JSON");
     assert_eq!(response["body"]["status"], "created");
@@ -65,13 +68,17 @@ fn create(request: &[u8]) -> Session {
 
 fn setup_request(players: usize, seed: u64) -> Vec<u8> {
     fn deck_json(deck: &Deck) -> Value {
-        let entries: Vec<Value> =
-            deck.cards.iter().map(|(card, count)| json!({ "card": card, "count": count })).collect();
+        let entries: Vec<Value> = deck
+            .cards
+            .iter()
+            .map(|(card, count)| json!({ "card": card, "count": count }))
+            .collect();
         json!({ "deck": entries })
     }
 
-    let decks: Vec<Value> =
-        (0..players).map(|i| deck_json(if i % 2 == 0 { &WHITE_BLUE } else { &BLACK_RED })).collect();
+    let decks: Vec<Value> = (0..players)
+        .map(|i| deck_json(if i % 2 == 0 { &WHITE_BLUE } else { &BLACK_RED }))
+        .collect();
     let body = json!({
         "players": decks,
         "format": "standard",
@@ -79,21 +86,33 @@ fn setup_request(players: usize, seed: u64) -> Vec<u8> {
         "overrides": { "shuffle_libraries": false, "skip_mulligan": true },
     });
     serde_json::to_vec(
-        &json!({ "v": stackfish_host::PROTOCOL_VERSION, "kind": "setup", "body": body })
+        &json!({ "v": stackfish_host::PROTOCOL_VERSION, "kind": "setup", "body": body }),
     )
     .expect("a setup request holds only strings, numbers and lists")
 }
 
 fn play(players: usize, seed: u64) -> Outcome {
     let mut session = create(&setup_request(players, seed));
-    Bot::new(seed).play(&mut session, ANSWER_LIMIT).unwrap_or_else(|e| panic!("seed {seed}: {e}"))
+    Bot::new(seed)
+        .play(&mut session, ANSWER_LIMIT)
+        .unwrap_or_else(|e| panic!("seed {seed}: {e}"))
 }
 
 fn assert_finished(outcome: &Outcome, players: usize, seed: u64) {
-    assert_eq!(outcome.rejected, 0, "seed {seed}: the Session rejected a bot Answer");
-    assert!(outcome.answers > 20, "seed {seed}: the game ended after {} answers", outcome.answers);
+    assert_eq!(
+        outcome.rejected, 0,
+        "seed {seed}: the Session rejected a bot Answer"
+    );
+    assert!(
+        outcome.answers > 20,
+        "seed {seed}: the game ended after {} answers",
+        outcome.answers
+    );
     if let Some(winner) = outcome.winner {
-        assert!((winner as usize) < players, "seed {seed}: winner {winner} is not a player");
+        assert!(
+            (winner as usize) < players,
+            "seed {seed}: winner {winner} is not a player"
+        );
     }
 }
 
@@ -118,7 +137,9 @@ fn real_card_bot_plays_two_player_games() {
 fn real_card_bot_games_are_byte_identical_for_the_same_seed() {
     let path = db_path();
     if !path.exists() {
-        eprintln!("skipping real_card_bot_games_are_byte_identical_for_the_same_seed: database not at {path:?}");
+        eprintln!(
+            "skipping real_card_bot_games_are_byte_identical_for_the_same_seed: database not at {path:?}"
+        );
         return;
     }
 
@@ -154,18 +175,28 @@ fn real_card_bot_plays_thirty_games() {
 fn real_card_bot_loads_every_script_without_errors() {
     let path = db_path();
     if !path.exists() {
-        eprintln!("skipping real_card_bot_loads_every_script_without_errors: database not at {path:?}");
+        eprintln!(
+            "skipping real_card_bot_loads_every_script_without_errors: database not at {path:?}"
+        );
         return;
     }
 
     let mut session = create(&setup_request(2, 0));
     let mut bot = Bot::new(0).recording(&[0, 1]);
-    let outcome = bot.play(&mut session, ANSWER_LIMIT).expect("the game finishes");
+    let outcome = bot
+        .play(&mut session, ANSWER_LIMIT)
+        .expect("the game finishes");
     assert_finished(&outcome, 2, 0);
 
     for seat in [0, 1] {
-        let errors: Vec<_> =
-            bot.events(seat).iter().filter(|e| e["kind"] == "script_error").collect();
-        assert!(errors.is_empty(), "seat {seat} saw script errors: {errors:?}");
+        let errors: Vec<_> = bot
+            .events(seat)
+            .iter()
+            .filter(|e| e["kind"] == "script_error")
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "seat {seat} saw script errors: {errors:?}"
+        );
     }
 }

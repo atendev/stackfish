@@ -45,6 +45,9 @@ impl FixtureCardSource {
 
 impl CardSource for FixtureCardSource {
     fn load(&self, key: &str) -> Result<CardDefinition, CardSourceError> {
-        self.cards.get(key).cloned().ok_or_else(|| CardSourceError("no such card".to_string()))
+        self.cards
+            .get(key)
+            .cloned()
+            .ok_or_else(|| CardSourceError("no such card".to_string()))
     }
 }

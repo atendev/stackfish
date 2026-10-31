@@ -5,13 +5,21 @@
 use toml::{Table, Value};
 
 // Anything else on a `[[setup]]` table is an inline `CardSpec` field and gets moved out.
-const SETUP_FIELDS: &[&str] =
-    &["player", "zone", "card", "controlled_since_turn", "damage_marked", "is_commander"];
+const SETUP_FIELDS: &[&str] = &[
+    "player",
+    "zone",
+    "card",
+    "controlled_since_turn",
+    "damage_marked",
+    "is_commander",
+];
 
 /// Expands inline card fields into synthesized `[[cards]]` entries in place. An entry with
 /// only `SETUP_FIELDS` is untouched.
 pub(crate) fn expand(root: &mut Table) {
-    let Some(Value::Array(setup_entries)) = root.get("setup") else { return };
+    let Some(Value::Array(setup_entries)) = root.get("setup") else {
+        return;
+    };
 
     let mut synthesized_cards: Vec<Value> = Vec::new();
     let mut existing_keys: std::collections::HashSet<String> = match root.get("cards") {
@@ -31,7 +39,10 @@ pub(crate) fn expand(root: &mut Table) {
     root.insert("setup".to_string(), Value::Array(expanded_setup));
 
     if !synthesized_cards.is_empty() {
-        let cards = match root.entry("cards".to_string()).or_insert_with(|| Value::Array(Vec::new())) {
+        let cards = match root
+            .entry("cards".to_string())
+            .or_insert_with(|| Value::Array(Vec::new()))
+        {
             Value::Array(cards) => cards,
             other => panic!("scenario file's top-level `cards` must be an array, found {other:?}"),
         };
@@ -44,10 +55,15 @@ fn expand_one(
     synthesized_cards: &mut Vec<Value>,
     existing_keys: &mut std::collections::HashSet<String>,
 ) -> Value {
-    let Value::Table(mut entry) = entry else { return entry };
+    let Value::Table(mut entry) = entry else {
+        return entry;
+    };
 
-    let inline_keys: Vec<String> =
-        entry.keys().filter(|k| !SETUP_FIELDS.contains(&k.as_str())).cloned().collect();
+    let inline_keys: Vec<String> = entry
+        .keys()
+        .filter(|k| !SETUP_FIELDS.contains(&k.as_str()))
+        .cloned()
+        .collect();
     if inline_keys.is_empty() {
         return Value::Table(entry);
     }
@@ -69,7 +85,9 @@ fn expand_one(
     let mut card_table = Table::new();
     card_table.insert("key".to_string(), Value::String(card_key));
     for key in inline_keys {
-        let value = entry.remove(&key).expect("key came from entry.keys() above");
+        let value = entry
+            .remove(&key)
+            .expect("key came from entry.keys() above");
         card_table.insert(key, value);
     }
     synthesized_cards.push(Value::Table(card_table));

@@ -12,7 +12,9 @@ fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types,
@@ -37,7 +39,9 @@ fn ward_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Ward".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -62,7 +66,10 @@ fn object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneK
     card_object(id, definition, owner, zone)
 }
 
-fn state_with_cost_and_ward(cost: CostSpec, ward_script: &str) -> (GameState, PlayerId, ObjectId, ObjectId, ObjectId) {
+fn state_with_cost_and_ward(
+    cost: CostSpec,
+    ward_script: &str,
+) -> (GameState, PlayerId, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
     let fodder = ObjectId(1);
@@ -70,17 +77,52 @@ fn state_with_cost_and_ward(cost: CostSpec, ward_script: &str) -> (GameState, Pl
     let ward = ObjectId(3);
 
     let mut objects = HashMap::new();
-    objects.insert(source, object(source, vanilla_definition("Source", CardTypeSet::ARTIFACT), p0, ZoneKind::Battlefield));
-    objects.insert(fodder, object(fodder, vanilla_definition("Fodder", CardTypeSet::CREATURE), p0, ZoneKind::Battlefield));
-    objects.insert(hand_card, object(hand_card, vanilla_definition("Hand Card", CardTypeSet::CREATURE), p0, ZoneKind::Hand));
+    objects.insert(
+        source,
+        object(
+            source,
+            vanilla_definition("Source", CardTypeSet::ARTIFACT),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    objects.insert(
+        fodder,
+        object(
+            fodder,
+            vanilla_definition("Fodder", CardTypeSet::CREATURE),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    objects.insert(
+        hand_card,
+        object(
+            hand_card,
+            vanilla_definition("Hand Card", CardTypeSet::CREATURE),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
     let ward_definition = ward_definition(ward_script);
-    objects.insert(ward, object(ward, ward_definition.clone(), p0, ZoneKind::Battlefield));
+    objects.insert(
+        ward,
+        object(ward, ward_definition.clone(), p0, ZoneKind::Battlefield),
+    );
 
     let mut state = GameState {
         objects,
         zones: vec![
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::from([source, fodder, ward]) },
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::from([hand_card]) },
+            Zone {
+                kind: ZoneKind::Battlefield,
+                owner: None,
+                contents: VecDeque::from([source, fodder, ward]),
+            },
+            Zone {
+                kind: ZoneKind::Hand,
+                owner: Some(p0),
+                contents: VecDeque::from([hand_card]),
+            },
             Zone::new(ZoneKind::Graveyard, Some(p0)),
             Zone::new(ZoneKind::Exile, None),
         ],
@@ -100,8 +142,14 @@ fn state_with_cost_and_ward(cost: CostSpec, ward_script: &str) -> (GameState, Pl
         ..single_player_state(p0, Vec::new())
     };
 
-    ScriptRuntime::new().run_card_script(&mut state, &ward_definition, ward).expect("ward script self-registers cleanly");
-    assert_eq!(state.replacement_effects.len(), 1, "the ward's own replacement effect must have registered");
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &ward_definition, ward)
+        .expect("ward script self-registers cleanly");
+    assert_eq!(
+        state.replacement_effects.len(),
+        1,
+        "the ward's own replacement effect must have registered"
+    );
 
     (state, p0, source, fodder, hand_card)
 }
@@ -110,18 +158,28 @@ fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: Obj
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the ability's cost, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the ability's cost, got {status:?}"
+    );
 }
 
 fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange { object, from, to, .. } = event.kind {
+        if let GameEventKind::ZoneChange {
+            object, from, to, ..
+        } = event.kind
+        {
             return (object, from, to);
         }
     }
@@ -157,20 +215,33 @@ fn a_sacrifice_cost_payment_is_replacement_checked_for_real() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     };
-    let (state, p0, source, fodder, _hand_card) = state_with_cost_and_ward(cost, SACRIFICED_CREATURE_GOES_TO_EXILE);
+    let (state, p0, source, fodder, _hand_card) =
+        state_with_cost_and_ward(cost, SACRIFICED_CREATURE_GOES_TO_EXILE);
     let mut engine = Engine::new(state);
 
     activate_and_await_payment(&mut engine, p0, source);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(fodder)],
+        })
         .expect("a legal Sacrifice(fodder) payment pays a Sacrifice{Creature} cost");
     drain(&mut engine);
 
-    assert!(engine.state().object(fodder).is_none(), "the original fodder id is retired");
+    assert!(
+        engine.state().object(fodder).is_none(),
+        "the original fodder id is retired"
+    );
     let (new_id, from, to) = last_zone_change(&engine);
     assert_eq!(
         (from, to),
@@ -178,9 +249,17 @@ fn a_sacrifice_cost_payment_is_replacement_checked_for_real() {
         "the ward's WouldMoveZone(Battlefield, Graveyard) + ReplaceZoneDestination(Exile) must have \
          redirected the sacrifice into exile instead of the graveyard"
     );
-    assert!(engine.state().object(new_id).is_some(), "fodder now exists in exile under a new id");
     assert!(
-        engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty(),
+        engine.state().object(new_id).is_some(),
+        "fodder now exists in exile under a new id"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .is_empty(),
         "the graveyard must be empty - the sacrifice never actually landed there"
     );
 }
@@ -190,20 +269,33 @@ fn a_discard_cost_payment_is_replacement_checked_for_real() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Discard {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     };
-    let (state, p0, source, _fodder, hand_card) = state_with_cost_and_ward(cost, DISCARDED_CARD_GOES_TO_EXILE);
+    let (state, p0, source, _fodder, hand_card) =
+        state_with_cost_and_ward(cost, DISCARDED_CARD_GOES_TO_EXILE);
     let mut engine = Engine::new(state);
 
     activate_and_await_payment(&mut engine, p0, source);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Discard(hand_card)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Discard(hand_card)],
+        })
         .expect("a legal Discard(hand_card) payment pays a Discard{Creature} cost");
     drain(&mut engine);
 
-    assert!(engine.state().object(hand_card).is_none(), "the original hand_card id is retired");
+    assert!(
+        engine.state().object(hand_card).is_none(),
+        "the original hand_card id is retired"
+    );
     let (new_id, from, to) = last_zone_change(&engine);
     assert_eq!(
         (from, to),
@@ -212,9 +304,17 @@ fn a_discard_cost_payment_is_replacement_checked_for_real() {
          redirected the discard into exile instead of the graveyard - a from-zone WouldDie itself \
          can't express"
     );
-    assert!(engine.state().object(new_id).is_some(), "the card now exists in exile under a new id");
     assert!(
-        engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty(),
+        engine.state().object(new_id).is_some(),
+        "the card now exists in exile under a new id"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .is_empty(),
         "the graveyard must be empty - the discard never actually landed there"
     );
 }
@@ -225,7 +325,14 @@ fn a_sacrifice_cost_payment_without_a_matching_replacement_lands_in_the_graveyar
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     };
@@ -244,11 +351,19 @@ return s
     let mut engine = Engine::new(state);
 
     activate_and_await_payment(&mut engine, PlayerId(0), source);
-    engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] }).expect("legal payment");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(fodder)],
+        })
+        .expect("legal payment");
     drain(&mut engine);
 
     let (_new_id, from, to) = last_zone_change(&engine);
-    assert_eq!((from, to), (ZoneKind::Battlefield, ZoneKind::Graveyard), "a non-matching ward must not redirect the sacrifice");
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Battlefield, ZoneKind::Graveyard),
+        "a non-matching ward must not redirect the sacrifice"
+    );
 }
 
 #[test]
@@ -256,17 +371,34 @@ fn two_matching_wards_pause_for_a_cr_616_1_ordering_choice() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     };
-    let (mut state, p0, source, fodder, _hand_card) = state_with_cost_and_ward(cost, SACRIFICED_CREATURE_GOES_TO_EXILE);
+    let (mut state, p0, source, fodder, _hand_card) =
+        state_with_cost_and_ward(cost, SACRIFICED_CREATURE_GOES_TO_EXILE);
     let ward_a_source = ObjectId(3);
-    assert_eq!(state.replacement_effects.len(), 1, "state_with_cost_and_ward's own single ward");
+    assert_eq!(
+        state.replacement_effects.len(),
+        1,
+        "state_with_cost_and_ward's own single ward"
+    );
     let ward_b_source = ObjectId(999);
     state.objects.insert(
         ward_b_source,
-        object(ward_b_source, vanilla_definition("Ward B", CardTypeSet::ENCHANTMENT), p0, ZoneKind::Battlefield),
+        object(
+            ward_b_source,
+            vanilla_definition("Ward B", CardTypeSet::ENCHANTMENT),
+            p0,
+            ZoneKind::Battlefield,
+        ),
     );
     state.replacement_effects.push(ReplacementEffect {
         source: ward_b_source,
@@ -274,7 +406,15 @@ fn two_matching_wards_pause_for_a_cr_616_1_ordering_choice() {
             filter: EventFilter::WouldMoveZone {
                 from: Some(ZoneKind::Battlefield),
                 to: Some(ZoneKind::Graveyard),
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: Some(CardTypeSet::CREATURE),
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         },
@@ -283,24 +423,42 @@ fn two_matching_wards_pause_for_a_cr_616_1_ordering_choice() {
 
     let mut engine = Engine::new(state);
     activate_and_await_payment(&mut engine, p0, source);
-    engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] }).expect("legal payment");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(fodder)],
+        })
+        .expect("legal payment");
     let status = drain(&mut engine);
 
     let StepStatus::AwaitingReplacementChoice { player, candidates } = status else {
-        panic!("two matching replacement effects on a Sacrifice cost payment must pause for a CR 616.1 choice, got {status:?}");
+        panic!(
+            "two matching replacement effects on a Sacrifice cost payment must pause for a CR 616.1 choice, got {status:?}"
+        );
     };
     assert_eq!(player, p0);
     assert_eq!(candidates.len(), 2);
     assert!(candidates.contains(&ReplacementCandidate::Registered(ward_a_source)));
     assert!(candidates.contains(&ReplacementCandidate::Registered(ward_b_source)));
     // Nothing committed yet - fodder is still on the battlefield.
-    assert_eq!(engine.state().object(fodder).unwrap().zone, ZoneKind::Battlefield);
+    assert_eq!(
+        engine.state().object(fodder).unwrap().zone,
+        ZoneKind::Battlefield
+    );
 
-    engine.submit_replacement_choice(ReplacementCandidate::Registered(ward_b_source)).expect("ward_b_source is a real candidate");
+    engine
+        .submit_replacement_choice(ReplacementCandidate::Registered(ward_b_source))
+        .expect("ward_b_source is a real candidate");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "payment should finish resolving after the choice, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "payment should finish resolving after the choice, got {status:?}"
+    );
 
     assert!(engine.state().object(fodder).is_none());
     let (_new_id, from, to) = last_zone_change(&engine);
-    assert_eq!((from, to), (ZoneKind::Battlefield, ZoneKind::Exile), "both wards redirect to Exile - either choice ends up there");
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Battlefield, ZoneKind::Exile),
+        "both wards redirect to Exile - either choice ends up there"
+    );
 }

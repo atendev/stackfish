@@ -5,7 +5,9 @@ use stackfish_engine::engine::Engine;
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones,
+};
 
 const CDA_ALL_COLORS: &str = r#"
 local s = {}
@@ -59,7 +61,15 @@ const CARD: ObjectId = ObjectId(0);
 fn scripted(script: &str) -> CardDefinition {
     CardDefinition {
         script_ref: ScriptReference::Inline(script.to_string()),
-        ..minimal_card_definition(1, "Scripted", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            1,
+            "Scripted",
+            "unused",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -70,18 +80,34 @@ fn engine_with(zone: ZoneKind, script: &str) -> Engine {
         ..base_two_player_state(zones(
             p0,
             PlayerId(1),
-            &[ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile],
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Library,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+                ZoneKind::Exile,
+            ],
         ))
     };
-    state.objects.insert(CARD, card_object(CARD, scripted(script), p0, zone));
-    state.zone_mut(zone, Some(p0)).expect("zone exists").push_bottom(CARD);
+    state
+        .objects
+        .insert(CARD, card_object(CARD, scripted(script), p0, zone));
+    state
+        .zone_mut(zone, Some(p0))
+        .expect("zone exists")
+        .push_bottom(CARD);
     Engine::new(state)
 }
 
 // One full round of priority passes, so trigger collection and the sweep run at least once.
 fn run_sweep(engine: &mut Engine) {
     for player in [PlayerId(0), PlayerId(1)] {
-        engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+        engine
+            .submit_action(PlayerAction {
+                player,
+                kind: PlayerActionKind::PassPriority,
+            })
+            .unwrap();
         drain(engine);
     }
 }
@@ -96,8 +122,16 @@ fn a_cda_in_hand_or_library_registers_once_and_applies() {
         let mut engine = engine_with(zone, CDA_ALL_COLORS);
         run_sweep(&mut engine);
         run_sweep(&mut engine);
-        assert_eq!(engine.state().continuous_effects.len(), 1, "exactly one CDA in {zone:?}");
-        assert_eq!(colors(&engine, CARD), ColorSet::all(), "CDA applies in {zone:?}");
+        assert_eq!(
+            engine.state().continuous_effects.len(),
+            1,
+            "exactly one CDA in {zone:?}"
+        );
+        assert_eq!(
+            colors(&engine, CARD),
+            ColorSet::all(),
+            "CDA applies in {zone:?}"
+        );
     }
 }
 
@@ -106,7 +140,10 @@ fn a_plain_static_does_not_register_in_hand_or_library() {
     for zone in [ZoneKind::Hand, ZoneKind::Library] {
         let mut engine = engine_with(zone, PLAIN_STATIC);
         run_sweep(&mut engine);
-        assert!(engine.state().continuous_effects.is_empty(), "plain static must not register in {zone:?}");
+        assert!(
+            engine.state().continuous_effects.is_empty(),
+            "plain static must not register in {zone:?}"
+        );
     }
 }
 
@@ -115,18 +152,32 @@ fn a_hand_only_ability_registers_once_for_a_fixture_placed_hand_card() {
     let mut engine = engine_with(ZoneKind::Hand, CYCLING);
     run_sweep(&mut engine);
     run_sweep(&mut engine);
-    let count = engine.state().abilities.iter().filter(|a| a.source == CARD).count();
-    assert_eq!(count, 1, "one Cycling ability, not duplicated across sweeps");
+    let count = engine
+        .state()
+        .abilities
+        .iter()
+        .filter(|a| a.source == CARD)
+        .count();
+    assert_eq!(
+        count, 1,
+        "one Cycling ability, not duplicated across sweeps"
+    );
 }
 
 #[test]
 fn nothing_script_registered_survives_in_the_library() {
     let mut engine = engine_with(ZoneKind::Library, CYCLING);
     run_sweep(&mut engine);
-    assert!(engine.state().abilities.iter().all(|a| a.source != CARD), "no ability functions from the library");
+    assert!(
+        engine.state().abilities.iter().all(|a| a.source != CARD),
+        "no ability functions from the library"
+    );
     let mut engine = engine_with(ZoneKind::Library, ETB_TRIGGER);
     run_sweep(&mut engine);
-    assert!(engine.state().abilities.iter().all(|a| a.source != CARD), "an ETB trigger doesn't go live in the library");
+    assert!(
+        engine.state().abilities.iter().all(|a| a.source != CARD),
+        "an ETB trigger doesn't go live in the library"
+    );
 }
 
 #[test]
@@ -141,7 +192,10 @@ fn repeated_sweeps_never_duplicate_a_hand_ability() {
         }
         counts
     };
-    assert!(by_source(&engine).values().all(|&n| n == 1), "no source holds a duplicate ability");
+    assert!(
+        by_source(&engine).values().all(|&n| n == 1),
+        "no source holds a duplicate ability"
+    );
 }
 
 #[test]
@@ -155,14 +209,24 @@ fn a_cda_card_moved_hand_to_library_registers_for_the_new_id() {
     let mut moved = old.clone();
     moved.object_id = new_id;
     moved.zone = ZoneKind::Library;
-    state.zone_mut(ZoneKind::Hand, Some(PlayerId(0))).unwrap().remove(CARD);
+    state
+        .zone_mut(ZoneKind::Hand, Some(PlayerId(0)))
+        .unwrap()
+        .remove(CARD);
     // What `retire_object` does for the departed id.
     state.objects.remove(&CARD);
     state.continuous_effects.retain(|e| e.source != CARD);
     state.off_battlefield_scripts_run.remove(&CARD);
-    state.zone_mut(ZoneKind::Library, Some(PlayerId(0))).unwrap().push_top(new_id);
+    state
+        .zone_mut(ZoneKind::Library, Some(PlayerId(0)))
+        .unwrap()
+        .push_top(new_id);
     state.objects.insert(new_id, moved);
     run_sweep(&mut engine);
-    assert_eq!(engine.state().continuous_effects.len(), 1, "old id's CDA purged, new id's registered");
+    assert_eq!(
+        engine.state().continuous_effects.len(),
+        1,
+        "old id's CDA purged, new id's registered"
+    );
     assert_eq!(colors(&engine, new_id), ColorSet::all());
 }

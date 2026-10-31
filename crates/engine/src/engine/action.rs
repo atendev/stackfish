@@ -1,7 +1,7 @@
 //! `submit_action` validation, `CommandId` allocation and the
 //! `ProcessState::PendingAction` pipeline stage. See `DESIGN.md`.
 
-use crate::commands::{self, find_ability, Internal, PendingPaymentRequest, PriorityHandoff};
+use crate::commands::{self, Internal, PendingPaymentRequest, PriorityHandoff, find_ability};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement;
 use crate::types::ability::AbilityEffect;
@@ -69,8 +69,13 @@ impl Engine {
         }
         // Checked in full before queueing so the answer doesn't depend on the
         // caller; a rejection leaves the pending payment untouched.
-        commands::validate_command(&self.state, &self.script_runtime, action.player, action.kind.clone())
-            .map_err(ActionError::Rejected)?;
+        commands::validate_command(
+            &self.state,
+            &self.script_runtime,
+            action.player,
+            action.kind.clone(),
+        )
+        .map_err(ActionError::Rejected)?;
         if suspend_payment {
             self.suspend_current_payment();
         }
@@ -82,26 +87,45 @@ impl Engine {
     /// A bad `source` or `ability_index` is false too, so it is rejected up
     /// front instead of suspending the outer payment first.
     fn is_mana_ability_activation(&self, kind: &PlayerActionKind) -> bool {
-        let PlayerActionKind::ActivateAbility { source, ability_index, .. } = kind else {
+        let PlayerActionKind::ActivateAbility {
+            source,
+            ability_index,
+            ..
+        } = kind
+        else {
             return false;
         };
         let Some(ability) = find_ability(&self.state, *source, *ability_index) else {
             return false;
         };
-        matches!(ability.effect, Some(AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. }))
+        matches!(
+            ability.effect,
+            Some(AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. })
+        )
     }
 
     /// Moves the current `AwaitingPayment` and the pipeline fields the nested
     /// action would overwrite onto `suspended_payments`. Takes the values
     /// rather than cloning since nothing reads the live fields before they are overwritten.
     fn suspend_current_payment(&mut self) {
-        let ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingPayment {
+            stack_id,
+            payer,
+            cost,
+            source,
+            on_paid,
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("caller only takes this branch when process_state is AwaitingPayment");
         };
         self.suspended_payments.push(SuspendedPayment {
-            request: PendingPaymentRequest { stack_id, payer, cost, source, on_paid },
+            request: PendingPaymentRequest {
+                stack_id,
+                payer,
+                cost,
+                source,
+                on_paid,
+            },
             pipeline_context: self.pipeline_context.take(),
             pipeline_exit: std::mem::replace(&mut self.pipeline_exit, PipelineExit::BackToPriority),
         });
@@ -115,26 +139,32 @@ impl Engine {
         // The id is consumed only once the command is accepted.
         let command_id = CommandId(self.next_command_id);
         let since_ledger = self.state.ledger.len();
-        let command = EngineCommand { command_id, actor: action.player, action: action.kind };
-
-        let mut outcome = match commands::execute_command(&mut self.state, &self.script_runtime, command) {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                // `submit_action` ran the same `validate_command`, so a rejection
-                // here means the state changed in between or the engine broke:
-                // fatal either way. The process state is reset and a nested mana
-                // ability's outer payment resumed so a host finds the engine consistent.
-                let internal = match err {
-                    commands::CommandError::Internal(internal) => internal,
-                    commands::CommandError::Rejected(rejected) => {
-                        Internal::new(format!("a queued action was rejected after it was accepted: {rejected:?}"))
-                    }
-                };
-                self.process_state = self.resume_suspended_payment_or(ProcessState::PriorityWindow);
-                self.poison(internal.clone());
-                return StepStatus::Error(internal);
-            }
+        let command = EngineCommand {
+            command_id,
+            actor: action.player,
+            action: action.kind,
         };
+
+        let mut outcome =
+            match commands::execute_command(&mut self.state, &self.script_runtime, command) {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    // `submit_action` ran the same `validate_command`, so a rejection
+                    // here means the state changed in between or the engine broke:
+                    // fatal either way. The process state is reset and a nested mana
+                    // ability's outer payment resumed so a host finds the engine consistent.
+                    let internal = match err {
+                        commands::CommandError::Internal(internal) => internal,
+                        commands::CommandError::Rejected(rejected) => Internal::new(format!(
+                            "a queued action was rejected after it was accepted: {rejected:?}"
+                        )),
+                    };
+                    self.process_state =
+                        self.resume_suspended_payment_or(ProcessState::PriorityWindow);
+                    self.poison(internal.clone());
+                    return StepStatus::Error(internal);
+                }
+            };
 
         // `execute_command` only reports new battlefield permanents; running their
         // scripts needs `&mut ScriptRuntime`, so it happens here. A script error is
@@ -145,7 +175,9 @@ impl Engine {
         // TODO: devour/amplify choice here if this loop ever handles non-land entries (CR 702.82a, 702.38a)
         for object_id in &outcome.battlefield_entries {
             if let Some(definition) = self.state.object(*object_id).map(|o| o.definition.clone()) {
-                let result = self.script_runtime.run_card_script(&mut self.state, &definition, *object_id);
+                let result =
+                    self.script_runtime
+                        .run_card_script(&mut self.state, &definition, *object_id);
                 self.record_script_error(*object_id, &definition.script_ref, result);
             }
             let counter_events = replacement::apply_enters_battlefield_modifiers(
@@ -194,8 +226,10 @@ impl Engine {
             };
         }
 
-        self.process_state =
-            ProcessState::ReplacementCheck { remaining: outcome.events.into(), checked: Vec::new() };
+        self.process_state = ProcessState::ReplacementCheck {
+            remaining: outcome.events.into(),
+            checked: Vec::new(),
+        };
         StepStatus::Progressed
     }
 }

@@ -36,7 +36,10 @@ pub fn two_player_state(zones: Vec<Zone>) -> GameState {
         land_play_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
+        rng: RngState {
+            seed: 1,
+            draws_consumed: 0,
+        },
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 1000,
@@ -79,7 +82,10 @@ pub fn single_player_state(player: PlayerId, zones: Vec<Zone>) -> GameState {
         land_play_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
+        rng: RngState {
+            seed: 1,
+            draws_consumed: 0,
+        },
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 1000,
@@ -98,7 +104,11 @@ pub fn single_player_state(player: PlayerId, zones: Vec<Zone>) -> GameState {
 
 /// Each player's hand plus a shared battlefield.
 pub fn hand_and_battlefield_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone> {
-    vec![Zone::new(ZoneKind::Hand, Some(p0)), Zone::new(ZoneKind::Hand, Some(p1)), Zone::new(ZoneKind::Battlefield, None)]
+    vec![
+        Zone::new(ZoneKind::Hand, Some(p0)),
+        Zone::new(ZoneKind::Hand, Some(p1)),
+        Zone::new(ZoneKind::Battlefield, None),
+    ]
 }
 
 /// `hand_and_battlefield_zones` plus each player's graveyard.
@@ -125,7 +135,9 @@ pub fn zones(p0: PlayerId, p1: PlayerId, kinds: &[ZoneKind]) -> Vec<Zone> {
     kinds
         .iter()
         .flat_map(|&kind| match kind {
-            ZoneKind::Battlefield | ZoneKind::Exile | ZoneKind::Stack => vec![Zone::new(kind, None)],
+            ZoneKind::Battlefield | ZoneKind::Exile | ZoneKind::Stack => {
+                vec![Zone::new(kind, None)]
+            }
             _ => vec![Zone::new(kind, Some(p0)), Zone::new(kind, Some(p1))],
         })
         .collect()

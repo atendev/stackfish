@@ -7,7 +7,9 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::ids::{AbilityId, EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
-use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, PlayerState};
+use crate::types::player::{
+    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, PlayerState,
+};
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
@@ -201,18 +203,26 @@ impl GameState {
     /// `zones` was built wrong.
     // TODO: enforce that at most one zone matches
     pub fn zone(&self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&Zone> {
-        self.zones.iter().find(|z| z.kind == kind && z.owner == owner)
+        self.zones
+            .iter()
+            .find(|z| z.kind == kind && z.owner == owner)
     }
 
     pub fn zone_mut(&mut self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&mut Zone> {
-        self.zones.iter_mut().find(|z| z.kind == kind && z.owner == owner)
+        self.zones
+            .iter_mut()
+            .find(|z| z.kind == kind && z.owner == owner)
     }
 
     /// CR 500.7, 500.8: returns whether `player`'s current `step` is skipped,
     /// consuming the entry. A skipped step runs no turn-based actions and
     /// opens no priority window.
     pub fn consume_step_skip(&mut self, player: PlayerId, step: Step) -> bool {
-        if let Some(pos) = self.pending_step_skips.iter().position(|(p, s)| *p == player && *s == step) {
+        if let Some(pos) = self
+            .pending_step_skips
+            .iter()
+            .position(|(p, s)| *p == player && *s == step)
+        {
             self.pending_step_skips.remove(pos);
             true
         } else {
@@ -245,8 +255,16 @@ mod tests {
             last_active_turn_number: HashMap::new(),
             objects: HashMap::new(),
             zones: vec![
-                Zone { kind: ZoneKind::Hand, owner: Some(hand), contents: VecDeque::new() },
-                Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
+                Zone {
+                    kind: ZoneKind::Hand,
+                    owner: Some(hand),
+                    contents: VecDeque::new(),
+                },
+                Zone {
+                    kind: ZoneKind::Battlefield,
+                    owner: None,
+                    contents: VecDeque::new(),
+                },
             ],
             stack: Vec::new(),
             continuous_effects: Vec::new(),
@@ -258,7 +276,10 @@ mod tests {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: RngState { seed: 1, draws_consumed: 0 },
+            rng: RngState {
+                seed: 1,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no: 0,
             next_object_id: 1,
@@ -275,15 +296,42 @@ mod tests {
         };
 
         let card = ObjectId(0);
-        state.zone_mut(ZoneKind::Hand, Some(hand)).unwrap().push_bottom(card);
-        assert!(state.zone(ZoneKind::Hand, Some(hand)).unwrap().contents.contains(&card));
+        state
+            .zone_mut(ZoneKind::Hand, Some(hand))
+            .unwrap()
+            .push_bottom(card);
+        assert!(
+            state
+                .zone(ZoneKind::Hand, Some(hand))
+                .unwrap()
+                .contents
+                .contains(&card)
+        );
 
-        let removed = state.zone_mut(ZoneKind::Hand, Some(hand)).unwrap().remove(card);
+        let removed = state
+            .zone_mut(ZoneKind::Hand, Some(hand))
+            .unwrap()
+            .remove(card);
         assert_eq!(removed, Some(card));
-        assert!(!state.zone(ZoneKind::Hand, Some(hand)).unwrap().contents.contains(&card));
+        assert!(
+            !state
+                .zone(ZoneKind::Hand, Some(hand))
+                .unwrap()
+                .contents
+                .contains(&card)
+        );
 
-        state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(card);
-        assert!(state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&card));
+        state
+            .zone_mut(ZoneKind::Battlefield, None)
+            .unwrap()
+            .push_bottom(card);
+        assert!(
+            state
+                .zone(ZoneKind::Battlefield, None)
+                .unwrap()
+                .contents
+                .contains(&card)
+        );
 
         // Nonexistent zone (no command zone registered here) -> None, not a panic.
         assert!(state.zone_mut(ZoneKind::Command, Some(hand)).is_none());

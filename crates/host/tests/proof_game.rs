@@ -19,21 +19,35 @@ fn create(request: &[u8]) -> Session {
 
 fn play(players: usize, seed: u64) -> Outcome {
     let mut session = create(&proof_setup_request(players, seed));
-    Bot::new(seed).play(&mut session, ANSWER_LIMIT).unwrap_or_else(|e| panic!("seed {seed}: {e}"))
+    Bot::new(seed)
+        .play(&mut session, ANSWER_LIMIT)
+        .unwrap_or_else(|e| panic!("seed {seed}: {e}"))
 }
 
 fn play_recorded(players: usize, seed: u64) -> (Outcome, Bot) {
     let mut session = create(&proof_setup_request(players, seed));
     let mut bot = Bot::new(seed).recording(&[]);
-    let outcome = bot.play(&mut session, ANSWER_LIMIT).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    let outcome = bot
+        .play(&mut session, ANSWER_LIMIT)
+        .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
     (outcome, bot)
 }
 
 fn assert_finished(outcome: &Outcome, players: usize, seed: u64) {
-    assert_eq!(outcome.rejected, 0, "seed {seed}: the Session rejected a bot Answer");
-    assert!(outcome.answers > 20, "seed {seed}: the game ended after {} answers", outcome.answers);
+    assert_eq!(
+        outcome.rejected, 0,
+        "seed {seed}: the Session rejected a bot Answer"
+    );
+    assert!(
+        outcome.answers > 20,
+        "seed {seed}: the game ended after {} answers",
+        outcome.answers
+    );
     if let Some(winner) = outcome.winner {
-        assert!((winner as usize) < players, "seed {seed}: winner {winner} is not a player");
+        assert!(
+            (winner as usize) < players,
+            "seed {seed}: winner {winner} is not a player"
+        );
     }
 }
 
@@ -45,11 +59,21 @@ fn a_bot_plays_thirty_two_player_games_to_the_end() {
         assert_finished(&outcome, 2, seed);
         winners.insert(outcome.winner);
         for seat in 0..2 {
-            let errors: Vec<_> = bot.events(seat).iter().filter(|e| e["kind"] == "script_error").collect();
-            assert!(errors.is_empty(), "seed {seed}: a proof card script failed to load: {errors:?}");
+            let errors: Vec<_> = bot
+                .events(seat)
+                .iter()
+                .filter(|e| e["kind"] == "script_error")
+                .collect();
+            assert!(
+                errors.is_empty(),
+                "seed {seed}: a proof card script failed to load: {errors:?}"
+            );
         }
     }
-    assert!(winners.contains(&Some(0)) && winners.contains(&Some(1)), "both players should win some games: {winners:?}");
+    assert!(
+        winners.contains(&Some(0)) && winners.contains(&Some(1)),
+        "both players should win some games: {winners:?}"
+    );
 }
 
 const SPELLS: [&str; 21] = [
@@ -90,23 +114,38 @@ fn the_games_cast_every_card_of_the_set_and_play_every_land() {
                     continue;
                 }
                 let name = event["identity"]["name"].as_str();
-                if let (Some(object), Some(name), "stack") = (event["object"].as_str(), name, event["to"].as_str().unwrap_or("")) {
+                if let (Some(object), Some(name), "stack") = (
+                    event["object"].as_str(),
+                    name,
+                    event["to"].as_str().unwrap_or(""),
+                ) {
                     on_stack.insert(object.to_string(), name.to_string());
                 }
-                if let (Some(name), "hand", "battlefield") = (name, event["from"].as_str().unwrap_or(""), event["to"].as_str().unwrap_or("")) {
+                if let (Some(name), "hand", "battlefield") = (
+                    name,
+                    event["from"].as_str().unwrap_or(""),
+                    event["to"].as_str().unwrap_or(""),
+                ) {
                     lands.insert(name.to_string());
                 }
             }
         }
         for seat in 0..2 {
-            for event in bot.events(seat).iter().filter(|e| e["kind"] == "spell_cast") {
+            for event in bot
+                .events(seat)
+                .iter()
+                .filter(|e| e["kind"] == "spell_cast")
+            {
                 if let Some(name) = event["object"].as_str().and_then(|o| on_stack.get(o)) {
                     cast.insert(name.clone());
                 }
             }
         }
     }
-    let missing: Vec<_> = SPELLS.iter().filter(|name| !cast.contains(**name)).collect();
+    let missing: Vec<_> = SPELLS
+        .iter()
+        .filter(|name| !cast.contains(**name))
+        .collect();
     assert!(missing.is_empty(), "no game cast {missing:?}");
     for land in ["Mountain", "Forest", "Island", "Swamp"] {
         assert!(lands.contains(land), "no game played {land}");
@@ -119,10 +158,17 @@ fn the_same_seeds_give_a_byte_identical_game() {
     for seed in 0..8 {
         let first = play(2, seed);
         let second = play(2, seed);
-        assert_eq!(first.transcript_hash, second.transcript_hash, "seed {seed} played two different games");
+        assert_eq!(
+            first.transcript_hash, second.transcript_hash,
+            "seed {seed} played two different games"
+        );
         assert_eq!(first.answers, second.answers);
     }
-    assert_ne!(play(2, 11).transcript_hash, play(2, 12).transcript_hash, "another seed plays another game");
+    assert_ne!(
+        play(2, 11).transcript_hash,
+        play(2, 12).transcript_hash,
+        "another seed plays another game"
+    );
 }
 
 #[test]
@@ -159,7 +205,11 @@ fn ids_in(events: &[Value]) -> HashSet<String> {
             "defense",
         ];
         match value {
-            Value::String(text) if !NOT_IDS.contains(&key) && !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) => {
+            Value::String(text)
+                if !NOT_IDS.contains(&key)
+                    && !text.is_empty()
+                    && text.bytes().all(|b| b.is_ascii_digit()) =>
+            {
                 found.insert(text.clone());
             }
             Value::Array(items) => items.iter().for_each(|v| walk(v, key, found)),
@@ -180,7 +230,9 @@ fn no_seat_receives_a_hidden_id_over_a_whole_proof_game() {
     setup["body"]["spectators"] = json!([{ "omniscient": true }]);
     let mut session = create(&serde_json::to_vec(&setup).unwrap());
     let mut bot = Bot::new(seed).recording(&[2]);
-    let outcome = bot.play(&mut session, ANSWER_LIMIT).expect("the game finishes");
+    let outcome = bot
+        .play(&mut session, ANSWER_LIMIT)
+        .expect("the game finishes");
     assert_eq!(outcome.rejected, 0);
 
     let mut library = HashSet::new();
@@ -188,7 +240,9 @@ fn no_seat_receives_a_hidden_id_over_a_whole_proof_game() {
     for event in bot.events(2).iter().filter(|e| e["kind"] == "zone_change") {
         // `previous` is the id in the zone left and `object` the id in the zone entered.
         for (id_field, zone_field) in [("previous", "from"), ("object", "to")] {
-            let Some(id) = event.get(id_field).and_then(Value::as_str) else { continue };
+            let Some(id) = event.get(id_field).and_then(Value::as_str) else {
+                continue;
+            };
             if event[zone_field] == "library" {
                 library.insert(id.to_string());
             }
@@ -201,8 +255,14 @@ fn no_seat_receives_a_hidden_id_over_a_whole_proof_game() {
 
     for seat in [0u32, 1] {
         let seen = ids_in(bot.events(seat));
-        assert!(seen.is_disjoint(&library), "seat {seat} received a library id");
+        assert!(
+            seen.is_disjoint(&library),
+            "seat {seat} received a library id"
+        );
         let other = 1 - seat as usize;
-        assert!(seen.is_disjoint(&hands[other]), "seat {seat} received an id from player {other}'s hand");
+        assert!(
+            seen.is_disjoint(&hands[other]),
+            "seat {seat} received an id from player {other}'s hand"
+        );
     }
 }

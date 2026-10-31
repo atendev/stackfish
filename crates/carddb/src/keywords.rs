@@ -49,7 +49,10 @@ mod tests {
 
     #[test]
     fn a_must_attack_clause_sets_its_bit() {
-        assert_eq!(parse(&["Attacks each combat if able".to_string()]), KeywordSet::ATTACKS_EACH_COMBAT);
+        assert_eq!(
+            parse(&["Attacks each combat if able".to_string()]),
+            KeywordSet::ATTACKS_EACH_COMBAT
+        );
     }
 
     #[test]

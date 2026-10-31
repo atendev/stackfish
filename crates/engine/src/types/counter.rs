@@ -23,18 +23,35 @@ pub struct CounterSet {
     counters: Vec<(CounterKind, i32, crate::types::ids::SequenceNo)>,
 }
 
+impl Default for CounterSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CounterSet {
     pub fn new() -> Self {
-        CounterSet { counters: Vec::new() }
+        CounterSet {
+            counters: Vec::new(),
+        }
     }
 
     pub fn count(&self, kind: &CounterKind) -> i32 {
-        self.counters.iter().filter(|(k, _, _)| k == kind).map(|(_, n, _)| n).sum()
+        self.counters
+            .iter()
+            .filter(|(k, _, _)| k == kind)
+            .map(|(_, n, _)| n)
+            .sum()
     }
 
     /// A negative `amount` removes counters. `timestamp` is this addition's
     /// CR 613.7 timestamp and must come from `GameState::allocate_sequence_no`.
-    pub fn add(&mut self, kind: CounterKind, amount: i32, timestamp: crate::types::ids::SequenceNo) {
+    pub fn add(
+        &mut self,
+        kind: CounterKind,
+        amount: i32,
+        timestamp: crate::types::ids::SequenceNo,
+    ) {
         self.counters.push((kind, amount, timestamp));
     }
 
@@ -54,9 +71,15 @@ impl CounterSet {
     /// CR 613.4c: `kind`'s entries with their timestamps, so the layer 7c
     /// fold in `layers::effective_characteristics` can interleave them with
     /// `ModifyPT` and `DoublePT` effects.
-    pub(crate) fn batches(&self, kind: &CounterKind) -> impl Iterator<Item = (i32, crate::types::ids::SequenceNo)> + '_ {
+    pub(crate) fn batches(
+        &self,
+        kind: &CounterKind,
+    ) -> impl Iterator<Item = (i32, crate::types::ids::SequenceNo)> + '_ {
         let kind = kind.clone();
-        self.counters.iter().filter(move |(k, _, _)| *k == kind).map(|(_, n, ts)| (*n, *ts))
+        self.counters
+            .iter()
+            .filter(move |(k, _, _)| *k == kind)
+            .map(|(_, n, ts)| (*n, *ts))
     }
 }
 
@@ -97,7 +120,10 @@ mod tests {
         set.add(CounterKind::Charge, 1, SequenceNo(1));
         set.add(CounterKind::Energy, 1, SequenceNo(2));
         let totals = set.totals();
-        assert_eq!(totals, vec![(CounterKind::Energy, 3), (CounterKind::Charge, 1)]);
+        assert_eq!(
+            totals,
+            vec![(CounterKind::Energy, 3), (CounterKind::Charge, 1)]
+        );
     }
 
     #[test]

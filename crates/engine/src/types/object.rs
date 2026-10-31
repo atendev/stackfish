@@ -147,7 +147,10 @@ impl GameObject {
             controlled_since_turn: state.turn_number,
             is_token: false,
             is_commander: false,
-            visibility: VisibilityPolicy { public, visible_to: if public { Vec::new() } else { vec![owner] } },
+            visibility: VisibilityPolicy {
+                public,
+                visible_to: if public { Vec::new() } else { vec![owner] },
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
@@ -169,7 +172,9 @@ mod tests {
         CardDefinition {
             definition_id: 1,
             name: "Test".to_string(),
-            mana_cost: ManaCost { symbols: Vec::new() },
+            mana_cost: ManaCost {
+                symbols: Vec::new(),
+            },
             color_indicator: None,
             supertypes: SupertypeSet::empty(),
             card_types: crate::types::card::CardTypeSet::CREATURE,
@@ -215,7 +220,10 @@ mod tests {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: crate::types::game::RngState { seed: 1, draws_consumed: 0 },
+            rng: crate::types::game::RngState {
+                seed: 1,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no: 0,
             next_object_id: 1,
@@ -234,14 +242,20 @@ mod tests {
 
     #[test]
     fn visibility_public_is_visible_to_everyone() {
-        let policy = VisibilityPolicy { public: true, visible_to: Vec::new() };
+        let policy = VisibilityPolicy {
+            public: true,
+            visible_to: Vec::new(),
+        };
         assert!(policy.is_visible_to(PlayerId(0)));
         assert!(policy.is_visible_to(PlayerId(1)));
     }
 
     #[test]
     fn visibility_private_is_visible_only_to_listed_players() {
-        let policy = VisibilityPolicy { public: false, visible_to: vec![PlayerId(0)] };
+        let policy = VisibilityPolicy {
+            public: false,
+            visible_to: vec![PlayerId(0)],
+        };
         assert!(policy.is_visible_to(PlayerId(0)));
         assert!(!policy.is_visible_to(PlayerId(1)));
     }
@@ -249,17 +263,38 @@ mod tests {
     #[test]
     fn new_object_starts_as_permanent_only_on_battlefield() {
         let state = dummy_state();
-        let battlefield = GameObject::new(ObjectId(0), dummy_definition(), PlayerId(0), ZoneKind::Battlefield, SequenceNo(0), &state);
+        let battlefield = GameObject::new(
+            ObjectId(0),
+            dummy_definition(),
+            PlayerId(0),
+            ZoneKind::Battlefield,
+            SequenceNo(0),
+            &state,
+        );
         assert!(battlefield.is_permanent());
 
-        let hand = GameObject::new(ObjectId(1), dummy_definition(), PlayerId(0), ZoneKind::Hand, SequenceNo(0), &state);
+        let hand = GameObject::new(
+            ObjectId(1),
+            dummy_definition(),
+            PlayerId(0),
+            ZoneKind::Hand,
+            SequenceNo(0),
+            &state,
+        );
         assert!(!hand.is_permanent());
     }
 
     #[test]
     fn new_object_visibility_is_public_on_battlefield() {
         let state = dummy_state();
-        let obj = GameObject::new(ObjectId(0), dummy_definition(), PlayerId(0), ZoneKind::Battlefield, SequenceNo(0), &state);
+        let obj = GameObject::new(
+            ObjectId(0),
+            dummy_definition(),
+            PlayerId(0),
+            ZoneKind::Battlefield,
+            SequenceNo(0),
+            &state,
+        );
         assert!(obj.visibility.public);
         assert!(obj.visibility.visible_to.is_empty());
     }
@@ -268,7 +303,14 @@ mod tests {
     fn new_object_visibility_is_owner_only_off_battlefield() {
         let state = dummy_state();
         let owner = PlayerId(0);
-        let obj = GameObject::new(ObjectId(0), dummy_definition(), owner, ZoneKind::Hand, SequenceNo(0), &state);
+        let obj = GameObject::new(
+            ObjectId(0),
+            dummy_definition(),
+            owner,
+            ZoneKind::Hand,
+            SequenceNo(0),
+            &state,
+        );
         assert!(!obj.visibility.public);
         assert_eq!(obj.visibility.visible_to, vec![owner]);
     }
@@ -297,7 +339,10 @@ mod tests {
             controlled_since_turn: 2,
             is_token: true,
             is_commander: true,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 3,
             entered_via_escape: true,
         };

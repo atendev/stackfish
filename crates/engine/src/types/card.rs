@@ -17,7 +17,10 @@ use crate::types::mana::{ColorSet, ManaCost};
 #[derive(Clone, Debug, PartialEq)]
 pub enum PTValue {
     Fixed(i32),
-    CharacteristicDefining { display: String, script: Option<ScriptReference> },
+    CharacteristicDefining {
+        display: String,
+        script: Option<ScriptReference>,
+    },
 }
 
 impl PTValue {
@@ -42,7 +45,8 @@ impl PTValue {
 /// CR 121.3: nets `+1/+1` and `-1/-1` counters against a resolved base, from
 /// a `Fixed` literal or a script-resolved CDA (CR 613.4a).
 pub(crate) fn net_counters(base: i32, counters: &CounterSet) -> i32 {
-    base + counters.count(&CounterKind::PlusOnePlusOne) - counters.count(&CounterKind::MinusOneMinusOne)
+    base + counters.count(&CounterKind::PlusOnePlusOne)
+        - counters.count(&CounterKind::MinusOneMinusOne)
 }
 
 bitflags! {
@@ -369,7 +373,9 @@ mod tests {
         CardDefinition {
             definition_id: 1,
             name: "Test".to_string(),
-            mana_cost: ManaCost { symbols: Vec::new() },
+            mana_cost: ManaCost {
+                symbols: Vec::new(),
+            },
             color_indicator: None,
             supertypes: SupertypeSet::empty(),
             card_types: CardTypeSet::CREATURE,
@@ -394,7 +400,11 @@ mod tests {
     fn pt_value_as_fixed_returns_some_for_fixed() {
         assert_eq!(PTValue::Fixed(3).as_fixed(), Some(3));
         assert_eq!(
-            PTValue::CharacteristicDefining { display: "*".to_string(), script: None }.as_fixed(),
+            PTValue::CharacteristicDefining {
+                display: "*".to_string(),
+                script: None
+            }
+            .as_fixed(),
             None
         );
     }
@@ -410,7 +420,10 @@ mod tests {
 
     #[test]
     fn pt_value_net_with_counters_returns_none_for_cda() {
-        let cda = PTValue::CharacteristicDefining { display: "*".to_string(), script: None };
+        let cda = PTValue::CharacteristicDefining {
+            display: "*".to_string(),
+            script: None,
+        };
         assert_eq!(cda.net_with_counters(&CounterSet::new()), None);
     }
 
@@ -441,7 +454,10 @@ mod tests {
         assert_eq!(ModeChoice::UpTo(3).bounds(), (1, 3, false));
         assert_eq!(ModeChoice::ExactlyRepeatable(2).bounds(), (2, 2, true));
         assert_eq!(ModeChoice::UpToRepeatable(3).bounds(), (1, 3, true));
-        assert_eq!(ModeChoice::ExactlyChosenByOpponent(1).bounds(), (1, 1, false));
+        assert_eq!(
+            ModeChoice::ExactlyChosenByOpponent(1).bounds(),
+            (1, 1, false)
+        );
         assert_eq!(ModeChoice::UpToChosenByOpponent(2).bounds(), (1, 2, false));
         // PawprintBudget uses max as a budget display hint.
         assert_eq!(ModeChoice::PawprintBudget(5).bounds(), (0, 5, false));

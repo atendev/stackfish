@@ -10,7 +10,15 @@ const P1: PlayerId = PlayerId(1);
 fn scripted(name: &str, script: &str) -> CardDefinition {
     CardDefinition {
         script_ref: ScriptReference::Inline(script.to_string()),
-        ..minimal_card_definition(1, name, name, ManaCost { symbols: Vec::new() }, CardTypeSet::INSTANT)
+        ..minimal_card_definition(
+            1,
+            name,
+            name,
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::INSTANT,
+        )
     }
 }
 
@@ -36,7 +44,12 @@ return s
 const VANILLA: &str = "local s = {} return s";
 
 fn game(cards: Vec<CardDefinition>) -> Engine {
-    let player = |id: PlayerId| PlayerConfig { player_id: id, library: cards.clone(), commanders: Vec::new(), life_override: None };
+    let player = |id: PlayerId| PlayerConfig {
+        player_id: id,
+        library: cards.clone(),
+        commanders: Vec::new(),
+        life_override: None,
+    };
     Engine::new_game(GameConfig {
         players: vec![player(P0), player(P1)],
         turn_order: vec![P0, P1],
@@ -46,15 +59,24 @@ fn game(cards: Vec<CardDefinition>) -> Engine {
 }
 
 fn definitions(engine: &Engine, name: &str) -> Vec<CardDefinition> {
-    let mut found: Vec<_> =
-        engine.state().objects.values().filter(|o| o.definition.name == name).map(|o| o.definition.clone()).collect();
+    let mut found: Vec<_> = engine
+        .state()
+        .objects
+        .values()
+        .filter(|o| o.definition.name == name)
+        .map(|o| o.definition.clone())
+        .collect();
     found.sort_by_key(|d| d.definition_id);
     found
 }
 
 #[test]
 fn a_spells_script_operation_and_target_requirement_are_loaded() {
-    let engine = game(vec![scripted("Shock", SHOCK), scripted("Peek", PEEK), scripted("Vanilla", VANILLA)]);
+    let engine = game(vec![
+        scripted("Shock", SHOCK),
+        scripted("Peek", PEEK),
+        scripted("Vanilla", VANILLA),
+    ]);
 
     let shock = definitions(&engine, "Shock");
     assert_eq!(shock.len(), 2, "one per player");
@@ -62,7 +84,11 @@ fn a_spells_script_operation_and_target_requirement_are_loaded() {
         assert_eq!(card.effect, Some(AbilityEffect::Damage(2)));
         assert!(matches!(
             card.target_requirement,
-            Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 1, .. }))
+            Some(TargetSpec::Primitive(TargetRequirement {
+                filter: TargetFilter::AnyTarget,
+                count: 1,
+                ..
+            }))
         ));
     }
     for card in definitions(&engine, "Peek") {
@@ -70,7 +96,10 @@ fn a_spells_script_operation_and_target_requirement_are_loaded() {
         assert!(card.target_requirement.is_none());
     }
     for card in definitions(&engine, "Vanilla") {
-        assert!(card.effect.is_none() && card.target_requirement.is_none(), "a script that declares neither adds neither");
+        assert!(
+            card.effect.is_none() && card.target_requirement.is_none(),
+            "a script that declares neither adds neither"
+        );
     }
 }
 
@@ -81,8 +110,15 @@ fn a_value_set_in_rust_wins_over_the_script() {
     card.target_requirement = None;
     let engine = game(vec![card]);
     for card in definitions(&engine, "Shock") {
-        assert_eq!(card.effect, Some(AbilityEffect::GainLife(5)), "an explicit effect is kept");
-        assert!(card.target_requirement.is_some(), "the unset target requirement is still filled in");
+        assert_eq!(
+            card.effect,
+            Some(AbilityEffect::GainLife(5)),
+            "an explicit effect is kept"
+        );
+        assert!(
+            card.target_requirement.is_some(),
+            "the unset target requirement is still filled in"
+        );
     }
 }
 
@@ -90,7 +126,11 @@ fn a_value_set_in_rust_wins_over_the_script() {
 fn a_broken_script_logs_a_script_error_and_the_game_still_builds() {
     let engine = game(vec![scripted("Broken", "this is not lua (")]);
     assert!(
-        engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::ScriptError { .. })),
+        engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::ScriptError { .. })),
         "a script that fails to load is logged"
     );
     for card in definitions(&engine, "Broken") {

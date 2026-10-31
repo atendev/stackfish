@@ -53,25 +53,41 @@ pub(crate) fn mana_cost_string(cost: &ManaCost) -> String {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WireManaUnit {
-    Colored { color: WireColor },
+    Colored {
+        color: WireColor,
+    },
     Colorless,
-    SnowColored { color: WireColor },
+    SnowColored {
+        color: WireColor,
+    },
     SnowColorless,
-    RestrictedColored { color: WireColor, types: Vec<WireCardType> },
-    RestrictedColorless { types: Vec<WireCardType> },
+    RestrictedColored {
+        color: WireColor,
+        types: Vec<WireCardType>,
+    },
+    RestrictedColorless {
+        types: Vec<WireCardType>,
+    },
 }
 
 impl From<ManaUnit> for WireManaUnit {
     fn from(unit: ManaUnit) -> Self {
         match unit {
-            ManaUnit::Colored(color) => WireManaUnit::Colored { color: color.into() },
+            ManaUnit::Colored(color) => WireManaUnit::Colored {
+                color: color.into(),
+            },
             ManaUnit::Colorless => WireManaUnit::Colorless,
-            ManaUnit::SnowColored(color) => WireManaUnit::SnowColored { color: color.into() },
+            ManaUnit::SnowColored(color) => WireManaUnit::SnowColored {
+                color: color.into(),
+            },
             ManaUnit::SnowColorless => WireManaUnit::SnowColorless,
-            ManaUnit::RestrictedColored(color, types) => {
-                WireManaUnit::RestrictedColored { color: color.into(), types: card_types(types) }
-            }
-            ManaUnit::RestrictedColorless(types) => WireManaUnit::RestrictedColorless { types: card_types(types) },
+            ManaUnit::RestrictedColored(color, types) => WireManaUnit::RestrictedColored {
+                color: color.into(),
+                types: card_types(types),
+            },
+            ManaUnit::RestrictedColorless(types) => WireManaUnit::RestrictedColorless {
+                types: card_types(types),
+            },
         }
     }
 }
@@ -86,7 +102,9 @@ impl From<WireManaUnit> for ManaUnit {
             WireManaUnit::RestrictedColored { color, types } => {
                 ManaUnit::RestrictedColored(color.into(), card_type_set(&types))
             }
-            WireManaUnit::RestrictedColorless { types } => ManaUnit::RestrictedColorless(card_type_set(&types)),
+            WireManaUnit::RestrictedColorless { types } => {
+                ManaUnit::RestrictedColorless(card_type_set(&types))
+            }
         }
     }
 }
@@ -97,7 +115,14 @@ mod tests {
 
     #[test]
     fn a_cost_prints_in_the_form_the_parser_reads() {
-        for text in ["{2}{R}{G/W}", "{2/W}{C}{S}", "{X}{X}{B}", "{1}{B/P}{B/P}", "{W/U/P}", "{U/P}"] {
+        for text in [
+            "{2}{R}{G/W}",
+            "{2/W}{C}{S}",
+            "{X}{X}{B}",
+            "{1}{B/P}{B/P}",
+            "{W/U/P}",
+            "{U/P}",
+        ] {
             let cost = ManaCost::parse(text).expect("valid cost");
             assert_eq!(mana_cost_string(&cost), text);
         }

@@ -3,8 +3,8 @@
 
 use std::collections::VecDeque;
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, minimal_card_definition, single_player_state};
@@ -12,7 +12,15 @@ use stackfish_testutil::{card_object, drain, minimal_card_definition, single_pla
 fn land_definition() -> CardDefinition {
     CardDefinition {
         oracle_text: "{T}: Add {G}.".to_string(),
-        ..minimal_card_definition(1, "Test Forest", "test_forest", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            1,
+            "Test Forest",
+            "test_forest",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     }
 }
 
@@ -23,7 +31,10 @@ fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -
 
 fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: ObjectId) -> GameState {
     let mut objects = std::collections::HashMap::new();
-    objects.insert(source, permanent_object(source, land_definition(), controller));
+    objects.insert(
+        source,
+        permanent_object(source, land_definition(), controller),
+    );
     GameState {
         objects,
         abilities: vec![RegisteredAbility {
@@ -36,10 +47,19 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
             cost: None,
             target: None,
             operation: ScriptHandle(0),
-            effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)])),
+            effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(
+                Color::Green,
+            )])),
             intervening_if: None,
         }],
-        ..single_player_state(controller, vec![Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::from([source]) }])
+        ..single_player_state(
+            controller,
+            vec![Zone {
+                kind: ZoneKind::Battlefield,
+                owner: None,
+                contents: VecDeque::from([source]),
+            }],
+        )
     }
 }
 
@@ -47,8 +67,12 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets,
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");
@@ -65,15 +89,22 @@ fn activate_and_drain(
     drain(engine)
 }
 
-fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+fn try_activate(
+    engine: &mut Engine,
+    player: PlayerId,
+    source: ObjectId,
+    targets: Vec<Target>,
+) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::ActivateAbility {
+            source,
+            ability_index: 0,
+            targets,
+            chosen_colors: Vec::new(),
             x_value: None,
-            },
-        })
-        
+        },
+    })
 }
 
 fn try_activate_and_drain(
@@ -97,10 +128,25 @@ fn mana_ability_taps_source_and_adds_mana_no_stack_object() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     assert!(engine.state().object(source).unwrap().tapped, "source taps");
-    assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 1, "mana lands in the pool");
-    assert!(engine.state().stack.is_empty(), "a mana ability never touches the stack");
-    assert_eq!(engine.state().consecutive_passes, 0, "activating breaks the pass chain (CR 117.4)");
-    assert_eq!(engine.state().priority_player, p0, "priority stays with the activator (CR 117.3c)");
+    assert_eq!(
+        engine.state().player(p0).unwrap().mana_pool.green,
+        1,
+        "mana lands in the pool"
+    );
+    assert!(
+        engine.state().stack.is_empty(),
+        "a mana ability never touches the stack"
+    );
+    assert_eq!(
+        engine.state().consecutive_passes,
+        0,
+        "activating breaks the pass chain (CR 117.4)"
+    );
+    assert_eq!(
+        engine.state().priority_player,
+        p0,
+        "priority stays with the activator (CR 117.3c)"
+    );
 
     let events: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
     assert!(matches!(events[0], GameEventKind::Tapped { object } if *object == source));
@@ -121,8 +167,14 @@ fn reject_when_actor_does_not_control_source() {
 
     let mut engine = Engine::new(state);
     let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert!(
+        !engine.state().object(source).unwrap().tapped,
+        "no partial mutation"
+    );
 }
 
 #[test]
@@ -134,8 +186,15 @@ fn reject_when_source_already_tapped() {
 
     let mut engine = Engine::new(state);
     let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0, "no mana added");
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert_eq!(
+        engine.state().player(p0).unwrap().mana_pool.green,
+        0,
+        "no mana added"
+    );
 }
 
 // CR 602.5a, CR 302.6
@@ -151,9 +210,19 @@ fn reject_when_source_has_summoning_sickness() {
 
     let mut engine = Engine::new(state);
     let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
-    assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0, "no mana added");
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert!(
+        !engine.state().object(source).unwrap().tapped,
+        "no partial mutation"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().mana_pool.green,
+        0,
+        "no mana added"
+    );
 }
 
 #[test]
@@ -214,7 +283,10 @@ fn reject_nonexistent_ability_index() {
             },
         })
         .unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -226,7 +298,10 @@ fn reject_ability_kind_not_activated() {
 
     let mut engine = Engine::new(state);
     let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -236,9 +311,16 @@ fn reject_target_supplied_for_mana_ability() {
     let state = state_with_source(source, p0, source);
 
     let mut engine = Engine::new(state);
-    let err = try_activate_and_drain(&mut engine, p0, source, vec![Target::Player(p0)]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
+    let err =
+        try_activate_and_drain(&mut engine, p0, source, vec![Target::Player(p0)]).unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert!(
+        !engine.state().object(source).unwrap().tapped,
+        "no partial mutation"
+    );
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0);
 }
 
@@ -248,8 +330,13 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
     let source_a = ObjectId(0);
     let source_b = ObjectId(1);
     let mut state = state_with_source(source_a, p0, source_a);
-    state.objects.insert(source_b, permanent_object(source_b, land_definition(), p0));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source_b);
+    state
+        .objects
+        .insert(source_b, permanent_object(source_b, land_definition(), p0));
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(source_b);
     // source_a gets a second ability (index 1) that adds colorless.
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
@@ -274,7 +361,9 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
         cost: None,
         target: None,
         operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)])),
+        effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(
+            Color::Green,
+        )])),
         intervening_if: None,
     });
 

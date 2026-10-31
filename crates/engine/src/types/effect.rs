@@ -1,12 +1,12 @@
-use crate::{
-    CardTypeSet, Subtype, SupertypeSet, ObjectId, PlayerId, SequenceNo, ColorSet, ManaCost,
-    GameObject, GameState, GameEventKind, ScriptHandle, Target, ZoneKind,
-};
+use crate::script::ScriptRuntime;
 use crate::types::ability::{CopyExceptions, InterveningIfSpec};
 use crate::types::card::{CardDefinition, KeywordSet, PTValue};
 use crate::types::cost::FilterController;
 use crate::types::counter::CounterKind;
-use crate::script::ScriptRuntime;
+use crate::{
+    CardTypeSet, ColorSet, GameEventKind, GameObject, GameState, ManaCost, ObjectId, PlayerId,
+    ScriptHandle, SequenceNo, Subtype, SupertypeSet, Target, ZoneKind,
+};
 
 /// CR 612.6 "full text" payload: only the fields `EffectiveCharacteristics`
 /// derives from a `CardDefinition` (name, mana cost, color, type line,
@@ -113,17 +113,17 @@ impl Eq for FullTextOverride {}
 /// TODO: a script that decides dynamically whether it depends on another effect; it needs partial layer state in `state_to_lua`
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Layer {
-    CopyEffects,            // 1
-    ControlChangingEffects, // 2
-    TextChanging,           // 3
-    TypeChanging,           // 4
-    ColorChanging,          // 5
-    AbilityAdding,          // 6
-    PowerToughnessCDA,      // 7a — characteristic-defining abilities
-    PowerToughnessSetting,  // 7b
-    PowerToughnessModifying,// 7c
-    PowerToughnessCounters, // 7d
-    PowerToughnessSwitching,// 7e
+    CopyEffects,             // 1
+    ControlChangingEffects,  // 2
+    TextChanging,            // 3
+    TypeChanging,            // 4
+    ColorChanging,           // 5
+    AbilityAdding,           // 6
+    PowerToughnessCDA,       // 7a — characteristic-defining abilities
+    PowerToughnessSetting,   // 7b
+    PowerToughnessModifying, // 7c
+    PowerToughnessCounters,  // 7d
+    PowerToughnessSwitching, // 7e
 }
 
 /// CR 702.14a: a landwalk grant's "[type]" beyond a bare land type. All
@@ -340,7 +340,7 @@ pub enum EffectPayload {
 /// the catch-all, like `FilterSpec`. It has no `random`, since continuous
 /// effects never pick one object, and no `extra` string.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct EffectFilter { 
+pub struct EffectFilter {
     /// `You`, `Opponent` or `Any`, resolved against the effect source's
     /// controller (CR 613), not a caller-supplied player.
     pub controller: Option<FilterController>,
@@ -363,7 +363,7 @@ pub struct EffectFilter {
     pub excluded_supertypes: Option<SupertypeSet>,
     /// Only the effect's own source object.
     pub self_only: bool,
- }
+}
 
 /// A `ContinuousEffect`'s affected-object predicate, with the same
 /// `Primitive` and `Script` split as `EffectPayload`.
@@ -447,30 +447,34 @@ pub(crate) fn matches_effect_filter(
             return false;
         }
     }
-    if let Some(types) = filter.card_types {
-        if !object.definition.card_types.intersects(types) {
-            return false;
-        }
+    if let Some(types) = filter.card_types
+        && !object.definition.card_types.intersects(types)
+    {
+        return false;
     }
-    if let Some(subtypes) = &filter.subtypes {
-        if !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
-            return false;
-        }
+    if let Some(subtypes) = &filter.subtypes
+        && !subtypes
+            .iter()
+            .any(|s| object.definition.subtypes.contains(s))
+    {
+        return false;
     }
-    if let Some(subtypes) = &filter.excluded_subtypes {
-        if subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
-            return false;
-        }
+    if let Some(subtypes) = &filter.excluded_subtypes
+        && subtypes
+            .iter()
+            .any(|s| object.definition.subtypes.contains(s))
+    {
+        return false;
     }
-    if let Some(types) = filter.supertypes {
-        if !object.definition.supertypes.intersects(types) {
-            return false;
-        }
+    if let Some(types) = filter.supertypes
+        && !object.definition.supertypes.intersects(types)
+    {
+        return false;
     }
-    if let Some(types) = filter.excluded_supertypes {
-        if object.definition.supertypes.intersects(types) {
-            return false;
-        }
+    if let Some(types) = filter.excluded_supertypes
+        && object.definition.supertypes.intersects(types)
+    {
+        return false;
     }
     true
 }
@@ -490,9 +494,9 @@ impl ContinuousEffect {
                 matches_effect_filter(filter, object, self.source, source.controller)
             }
             AffectedFilter::EnchantedOnly => source.attached_to == Some(object.object_id),
-            AffectedFilter::EnchantedPlayerControls => {
-                source.attached_to_player.is_some_and(|p| object.controller == p)
-            }
+            AffectedFilter::EnchantedPlayerControls => source
+                .attached_to_player
+                .is_some_and(|p| object.controller == p),
             AffectedFilter::Script(_) => false,
         }
     }
@@ -537,7 +541,11 @@ pub enum EventFilter {
     /// `Engine::continue_draw_cards`, and `(Hand, Graveyard)` via
     /// `Engine::submit_discard` (CR 514.1) and Sacrifice and Discard costs.
     /// Other pairs are correct but may be unreachable in gameplay.
-    WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind>, affected: EffectFilter },
+    WouldMoveZone {
+        from: Option<ZoneKind>,
+        to: Option<ZoneKind>,
+        affected: EffectFilter,
+    },
     /// CR 702.89a (Umbra armor): "if enchanted permanent would be destroyed".
     /// The `WouldDie` zone shape, but the affected object is always the
     /// source's `attached_to` target. Fieldless and a sibling variant, because
@@ -627,7 +635,10 @@ pub enum ReplacementPayload {
     /// because this runs once from `ResolveStackTop` and not inside the
     /// layer-2 recursion. `None` means any creature.
     // TODO: offer Devour for a Search-fetched creature; `PlayLand` and `Search` never check for it
-    EntersWithCountersDevour { per_creature: i32, quality: Option<Subtype> },
+    EntersWithCountersDevour {
+        per_creature: i32,
+        quality: Option<Subtype>,
+    },
     /// CR 702.38a (Amplify N): enters with N +1/+1 counters per hand card
     /// revealed that shares a creature type. Like Devour, it needs a mid-ETB
     /// player choice, so `ResolveStackTop` checks
@@ -677,7 +688,10 @@ pub enum ReplacementPayload {
 /// point.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReplacementSpec {
-    Primitive { filter: EventFilter, payload: ReplacementPayload },
+    Primitive {
+        filter: EventFilter,
+        payload: ReplacementPayload,
+    },
     Script(ScriptHandle),
 }
 
@@ -711,7 +725,9 @@ impl ReplacementEffect {
         state: &GameState,
         script_runtime: &ScriptRuntime,
     ) -> bool {
-        let ReplacementSpec::Primitive { filter, payload } = &self.spec else { return false };
+        let ReplacementSpec::Primitive { filter, payload } = &self.spec else {
+            return false;
+        };
         match (filter, event) {
             (EventFilter::DamageDealt { affected }, GameEventKind::DamageDealt { target, .. }) => {
                 if let ReplacementPayload::RedirectDamage(new_target) = payload {
@@ -724,7 +740,12 @@ impl ReplacementEffect {
             }
             (
                 EventFilter::WouldDie { affected },
-                GameEventKind::ZoneChange { object, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, .. },
+                GameEventKind::ZoneChange {
+                    object,
+                    from: ZoneKind::Battlefield,
+                    to: ZoneKind::Graveyard,
+                    ..
+                },
             ) => {
                 if matches!(payload, ReplacementPayload::Regenerate) {
                     if !is_destroy {
@@ -738,33 +759,63 @@ impl ReplacementEffect {
                         return false;
                     }
                 }
-                event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source)
+                event_target_matches(
+                    affected,
+                    Target::Object(*object),
+                    state,
+                    script_runtime,
+                    self.source,
+                )
             }
             (
                 EventFilter::WouldDieEnchanted,
-                GameEventKind::ZoneChange { object, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, .. },
+                GameEventKind::ZoneChange {
+                    object,
+                    from: ZoneKind::Battlefield,
+                    to: ZoneKind::Graveyard,
+                    ..
+                },
             ) => {
                 // CR 702.89a: only genuine destruction, the same `is_destroy` gate as the `Regenerate` arm.
                 is_destroy && state.object(self.source).and_then(|o| o.attached_to) == Some(*object)
             }
             (
                 EventFilter::WouldEnterEnchantedPlayerGraveyard,
-                GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. },
+                GameEventKind::ZoneChange {
+                    object,
+                    to: ZoneKind::Graveyard,
+                    ..
+                },
             ) => {
                 // CR 400.7: graveyards are owner-keyed, so check `object`'s owner, not its controller.
-                let Some(enchanted_player) = state.object(self.source).and_then(|o| o.attached_to_player) else {
+                let Some(enchanted_player) =
+                    state.object(self.source).and_then(|o| o.attached_to_player)
+                else {
                     return false;
                 };
-                state.object(*object).is_some_and(|o| o.owner == enchanted_player)
+                state
+                    .object(*object)
+                    .is_some_and(|o| o.owner == enchanted_player)
             }
             (
                 EventFilter::WouldMoveZone { from, to, affected },
-                GameEventKind::ZoneChange { object, from: event_from, to: event_to, .. },
+                GameEventKind::ZoneChange {
+                    object,
+                    from: event_from,
+                    to: event_to,
+                    ..
+                },
             ) => {
                 if from.is_some_and(|f| f != *event_from) || to.is_some_and(|t| t != *event_to) {
                     return false;
                 }
-                event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source)
+                event_target_matches(
+                    affected,
+                    Target::Object(*object),
+                    state,
+                    script_runtime,
+                    self.source,
+                )
             }
             _ => false,
         }
@@ -774,25 +825,60 @@ impl ReplacementEffect {
     /// applies. A mismatched pairing falls back to returning the event
     /// unchanged.
     pub fn apply(&self, event: GameEventKind) -> GameEventKind {
-        let ReplacementSpec::Primitive { payload, .. } = &self.spec else { return event };
+        let ReplacementSpec::Primitive { payload, .. } = &self.spec else {
+            return event;
+        };
         match (payload, event) {
             (
                 ReplacementPayload::PreventDamage,
-                GameEventKind::DamageDealt { source, target, is_combat_damage, .. },
-            ) => GameEventKind::DamageDealt { source, target, amount: 0, is_combat_damage },
+                GameEventKind::DamageDealt {
+                    source,
+                    target,
+                    is_combat_damage,
+                    ..
+                },
+            ) => GameEventKind::DamageDealt {
+                source,
+                target,
+                amount: 0,
+                is_combat_damage,
+            },
             (
                 ReplacementPayload::RedirectDamage(new_target),
-                GameEventKind::DamageDealt { source, amount, is_combat_damage, .. },
-            ) => GameEventKind::DamageDealt { source, target: *new_target, amount, is_combat_damage },
+                GameEventKind::DamageDealt {
+                    source,
+                    amount,
+                    is_combat_damage,
+                    ..
+                },
+            ) => GameEventKind::DamageDealt {
+                source,
+                target: *new_target,
+                amount,
+                is_combat_damage,
+            },
             (
                 ReplacementPayload::ReplaceZoneDestination(new_zone),
-                GameEventKind::ZoneChange { object, from, last_known_info, .. },
-            ) => GameEventKind::ZoneChange { object, from, to: *new_zone, last_known_info },
+                GameEventKind::ZoneChange {
+                    object,
+                    from,
+                    last_known_info,
+                    ..
+                },
+            ) => GameEventKind::ZoneChange {
+                object,
+                from,
+                to: *new_zone,
+                last_known_info,
+            },
             (ReplacementPayload::Regenerate, GameEventKind::ZoneChange { object, .. }) => {
                 GameEventKind::Regenerated { object }
             }
             (ReplacementPayload::UmbraArmor, GameEventKind::ZoneChange { object, .. }) => {
-                GameEventKind::UmbraArmorConsumed { enchanted: object, aura: self.source }
+                GameEventKind::UmbraArmorConsumed {
+                    enchanted: object,
+                    aura: self.source,
+                }
             }
             (_, other) => other,
         }
@@ -805,12 +891,18 @@ impl ReplacementEffect {
 /// (CR 115.4) without calling it, because that also checks protection, which
 /// doesn't matter when CR 614.9 fizzles only on a missing destination, and it
 /// lives a layer above `types`.
-fn redirect_target_still_valid(target: Target, state: &GameState, script_runtime: &ScriptRuntime) -> bool {
+fn redirect_target_still_valid(
+    target: Target,
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> bool {
     match target {
         // `state.player()` keeps eliminated players, so check the flag for CR 614.9's "left the game".
         Target::Player(pid) => state.player(pid).is_some_and(|p| !p.eliminated),
         Target::Object(id) => {
-            let Some(object) = state.object(id) else { return false };
+            let Some(object) = state.object(id) else {
+                return false;
+            };
             if object.zone != ZoneKind::Battlefield {
                 return false;
             }
@@ -839,7 +931,8 @@ fn event_target_matches(
     if state.object(effect_source).is_none() {
         return false;
     }
-    let source_controller = crate::layers::effective_controller(state, script_runtime, effect_source);
+    let source_controller =
+        crate::layers::effective_controller(state, script_runtime, effect_source);
     match target {
         Target::Player(pid) => {
             if filter.card_types.is_some()
@@ -858,12 +951,15 @@ fn event_target_matches(
             }
         }
         Target::Object(id) => {
-            let Some(object) = state.object(id) else { return false };
+            let Some(object) = state.object(id) else {
+                return false;
+            };
             if filter.self_only && id != effect_source {
                 return false;
             }
             if let Some(fc) = filter.controller {
-                let object_controller = crate::layers::effective_controller(state, script_runtime, id);
+                let object_controller =
+                    crate::layers::effective_controller(state, script_runtime, id);
                 let matches_controller = match fc {
                     FilterController::You => object_controller == source_controller,
                     FilterController::Opponent => object_controller != source_controller,
@@ -873,31 +969,35 @@ fn event_target_matches(
                     return false;
                 }
             }
-            if let Some(types) = filter.card_types {
-                if !object.definition.card_types.intersects(types) {
-                    return false;
-                }
+            if let Some(types) = filter.card_types
+                && !object.definition.card_types.intersects(types)
+            {
+                return false;
             }
             // CR 205.4b: raw field, not `effective_characteristics`, as in `matches_effect_filter`. This is a near-duplicate with a layers-aware controller and an event-shaped `Target`, so the check is repeated.
-            if let Some(subtypes) = &filter.subtypes {
-                if !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
-                    return false;
-                }
+            if let Some(subtypes) = &filter.subtypes
+                && !subtypes
+                    .iter()
+                    .any(|s| object.definition.subtypes.contains(s))
+            {
+                return false;
             }
-            if let Some(subtypes) = &filter.excluded_subtypes {
-                if subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
-                    return false;
-                }
+            if let Some(subtypes) = &filter.excluded_subtypes
+                && subtypes
+                    .iter()
+                    .any(|s| object.definition.subtypes.contains(s))
+            {
+                return false;
             }
-            if let Some(types) = filter.supertypes {
-                if !object.definition.supertypes.intersects(types) {
-                    return false;
-                }
+            if let Some(types) = filter.supertypes
+                && !object.definition.supertypes.intersects(types)
+            {
+                return false;
             }
-            if let Some(types) = filter.excluded_supertypes {
-                if object.definition.supertypes.intersects(types) {
-                    return false;
-                }
+            if let Some(types) = filter.excluded_supertypes
+                && object.definition.supertypes.intersects(types)
+            {
+                return false;
             }
             true
         }
@@ -997,7 +1097,9 @@ pub struct EffectiveCharacteristics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::card::{CardDefinition, ModeChoice, PTValue, ScriptReference, SupertypeSet as SupertypeSetT};
+    use crate::types::card::{
+        CardDefinition, ModeChoice, PTValue, ScriptReference, SupertypeSet as SupertypeSetT,
+    };
     use crate::types::counter::CounterSet;
     use crate::types::game::{GameState, RngState};
     use crate::types::ids::PlayerId;
@@ -1006,14 +1108,21 @@ mod tests {
     use crate::types::player::PlayerState;
     use std::collections::HashMap;
 
-    fn object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet, zone: ZoneKind) -> GameObject {
+    fn object(
+        id: ObjectId,
+        controller: PlayerId,
+        card_types: CardTypeSet,
+        zone: ZoneKind,
+    ) -> GameObject {
         GameObject {
             object_id: id,
             lineage: crate::types::ids::ObjectLineage { previous: None },
             definition: CardDefinition {
                 definition_id: 1,
                 name: "Test Object".to_string(),
-                mana_cost: ManaCost { symbols: Vec::new() },
+                mana_cost: ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator: None,
                 supertypes: SupertypeSetT::empty(),
                 card_types,
@@ -1044,12 +1153,16 @@ mod tests {
             deathtouched: false,
             counters: CounterSet::new(),
             attachments: Vec::new(),
-            attached_to: None, attached_to_player: None,
+            attached_to: None,
+            attached_to_player: None,
             timestamp: SequenceNo(0),
             controlled_since_turn: 0,
             is_commander: false,
             is_token: false,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
@@ -1109,7 +1222,10 @@ mod tests {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: RngState { seed: 1, draws_consumed: 0 },
+            rng: RngState {
+                seed: 1,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no: 0,
             next_object_id: 1000,
@@ -1126,7 +1242,11 @@ mod tests {
         }
     }
 
-    fn replacement(source: ObjectId, filter: EventFilter, payload: ReplacementPayload) -> ReplacementEffect {
+    fn replacement(
+        source: ObjectId,
+        filter: EventFilter,
+        payload: ReplacementPayload,
+    ) -> ReplacementEffect {
         ReplacementEffect {
             source,
             spec: ReplacementSpec::Primitive { filter, payload },
@@ -1140,26 +1260,50 @@ mod tests {
         let effect_source = ObjectId(0);
         let creature = ObjectId(1);
         let state = state_with(vec![
-            object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield),
+            object(
+                effect_source,
+                p0,
+                CardTypeSet::ARTIFACT,
+                ZoneKind::Battlefield,
+            ),
             object(creature, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield),
         ]);
         let effect = replacement(
             effect_source,
             EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: Some(CardTypeSet::CREATURE),
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             ReplacementPayload::PreventDamage,
         );
 
-        let matching =
-            GameEventKind::DamageDealt { source: creature, target: Target::Object(creature), amount: 3, is_combat_damage: false };
+        let matching = GameEventKind::DamageDealt {
+            source: creature,
+            target: Target::Object(creature),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(effect.matches(&matching, false, &state, &ScriptRuntime::new()));
 
         let land = ObjectId(2);
         let mut state2 = state;
-        state2.objects.insert(land, object(land, p0, CardTypeSet::LAND, ZoneKind::Battlefield));
-        let non_matching =
-            GameEventKind::DamageDealt { source: land, target: Target::Object(land), amount: 3, is_combat_damage: false };
+        state2.objects.insert(
+            land,
+            object(land, p0, CardTypeSet::LAND, ZoneKind::Battlefield),
+        );
+        let non_matching = GameEventKind::DamageDealt {
+            source: land,
+            target: Target::Object(land),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(!effect.matches(&non_matching, false, &state2, &ScriptRuntime::new()));
     }
 
@@ -1169,20 +1313,41 @@ mod tests {
         let p1 = PlayerId(1);
         let effect_source = ObjectId(0);
         // `You` is relative to the effect source's controller, p0.
-        let state = state_with(vec![object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield)]);
+        let state = state_with(vec![object(
+            effect_source,
+            p0,
+            CardTypeSet::ARTIFACT,
+            ZoneKind::Battlefield,
+        )]);
         let effect = replacement(
             effect_source,
             EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: None, controller: Some(FilterController::You), self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: Some(FilterController::You),
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             ReplacementPayload::PreventDamage,
         );
 
-        let to_p0 =
-            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        let to_p0 = GameEventKind::DamageDealt {
+            source: effect_source,
+            target: Target::Player(p0),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(effect.matches(&to_p0, false, &state, &ScriptRuntime::new()));
-        let to_p1 =
-            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p1), amount: 3, is_combat_damage: false };
+        let to_p1 = GameEventKind::DamageDealt {
+            source: effect_source,
+            target: Target::Player(p1),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(!effect.matches(&to_p1, false, &state, &ScriptRuntime::new()));
     }
 
@@ -1198,7 +1363,15 @@ mod tests {
         let effect = replacement(
             this,
             EventFilter::WouldDie {
-                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: true,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         );
@@ -1217,7 +1390,10 @@ mod tests {
             to: ZoneKind::Graveyard,
             last_known_info: None,
         };
-        assert!(!effect.matches(&other_death, true, &state, &ScriptRuntime::new()), "self_only must not match a different object's death");
+        assert!(
+            !effect.matches(&other_death, true, &state, &ScriptRuntime::new()),
+            "self_only must not match a different object's death"
+        );
 
         let non_death = GameEventKind::ZoneChange {
             object: this,
@@ -1225,74 +1401,163 @@ mod tests {
             to: ZoneKind::Battlefield,
             last_known_info: None,
         };
-        assert!(!effect.matches(&non_death, true, &state, &ScriptRuntime::new()), "only Battlefield -> Graveyard counts as \"would die\"");
+        assert!(
+            !effect.matches(&non_death, true, &state, &ScriptRuntime::new()),
+            "only Battlefield -> Graveyard counts as \"would die\""
+        );
     }
 
     #[test]
     fn would_move_zone_with_both_sides_wildcard_matches_any_zone_change() {
         let p0 = PlayerId(0);
         let this = ObjectId(0);
-        let state = state_with(vec![object(this, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        let state = state_with(vec![object(
+            this,
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        )]);
         let effect = replacement(
             this,
             EventFilter::WouldMoveZone {
                 from: None,
                 to: None,
-                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: true,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         );
 
-        let library_to_hand = GameEventKind::ZoneChange { object: this, from: ZoneKind::Library, to: ZoneKind::Hand, last_known_info: None };
-        assert!(effect.matches(&library_to_hand, false, &state, &ScriptRuntime::new()), "both-wildcard must match a draw-shaped move");
+        let library_to_hand = GameEventKind::ZoneChange {
+            object: this,
+            from: ZoneKind::Library,
+            to: ZoneKind::Hand,
+            last_known_info: None,
+        };
+        assert!(
+            effect.matches(&library_to_hand, false, &state, &ScriptRuntime::new()),
+            "both-wildcard must match a draw-shaped move"
+        );
 
-        let hand_to_graveyard = GameEventKind::ZoneChange { object: this, from: ZoneKind::Hand, to: ZoneKind::Graveyard, last_known_info: None };
-        assert!(effect.matches(&hand_to_graveyard, false, &state, &ScriptRuntime::new()), "both-wildcard must match a discard-shaped move too");
+        let hand_to_graveyard = GameEventKind::ZoneChange {
+            object: this,
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: None,
+        };
+        assert!(
+            effect.matches(&hand_to_graveyard, false, &state, &ScriptRuntime::new()),
+            "both-wildcard must match a discard-shaped move too"
+        );
     }
 
     #[test]
     fn would_move_zone_with_from_pinned_ignores_to() {
         let p0 = PlayerId(0);
         let this = ObjectId(0);
-        let state = state_with(vec![object(this, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        let state = state_with(vec![object(
+            this,
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        )]);
         let effect = replacement(
             this,
             EventFilter::WouldMoveZone {
                 from: Some(ZoneKind::Battlefield),
                 to: None,
-                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: true,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         );
 
-        let to_graveyard = GameEventKind::ZoneChange { object: this, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
+        let to_graveyard = GameEventKind::ZoneChange {
+            object: this,
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Graveyard,
+            last_known_info: None,
+        };
         assert!(effect.matches(&to_graveyard, false, &state, &ScriptRuntime::new()));
-        let to_hand = GameEventKind::ZoneChange { object: this, from: ZoneKind::Battlefield, to: ZoneKind::Hand, last_known_info: None };
-        assert!(effect.matches(&to_hand, false, &state, &ScriptRuntime::new()), "to left wildcard - any destination off the battlefield matches");
+        let to_hand = GameEventKind::ZoneChange {
+            object: this,
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Hand,
+            last_known_info: None,
+        };
+        assert!(
+            effect.matches(&to_hand, false, &state, &ScriptRuntime::new()),
+            "to left wildcard - any destination off the battlefield matches"
+        );
 
-        let from_hand = GameEventKind::ZoneChange { object: this, from: ZoneKind::Hand, to: ZoneKind::Graveyard, last_known_info: None };
-        assert!(!effect.matches(&from_hand, false, &state, &ScriptRuntime::new()), "from is pinned to Battlefield - a Hand-sourced move must not match");
+        let from_hand = GameEventKind::ZoneChange {
+            object: this,
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: None,
+        };
+        assert!(
+            !effect.matches(&from_hand, false, &state, &ScriptRuntime::new()),
+            "from is pinned to Battlefield - a Hand-sourced move must not match"
+        );
     }
 
     #[test]
     fn would_move_zone_with_both_sides_pinned_requires_an_exact_match() {
         let p0 = PlayerId(0);
         let this = ObjectId(0);
-        let state = state_with(vec![object(this, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        let state = state_with(vec![object(
+            this,
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        )]);
         let effect = replacement(
             this,
             EventFilter::WouldMoveZone {
                 from: Some(ZoneKind::Battlefield),
                 to: Some(ZoneKind::Exile),
-                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: true,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Graveyard),
         );
 
-        let exact = GameEventKind::ZoneChange { object: this, from: ZoneKind::Battlefield, to: ZoneKind::Exile, last_known_info: None };
+        let exact = GameEventKind::ZoneChange {
+            object: this,
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Exile,
+            last_known_info: None,
+        };
         assert!(effect.matches(&exact, false, &state, &ScriptRuntime::new()));
 
-        let wrong_to = GameEventKind::ZoneChange { object: this, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
+        let wrong_to = GameEventKind::ZoneChange {
+            object: this,
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Graveyard,
+            last_known_info: None,
+        };
         assert!(!effect.matches(&wrong_to, false, &state, &ScriptRuntime::new()));
     }
 
@@ -1300,13 +1565,27 @@ mod tests {
     fn apply_prevent_damage_zeroes_amount_and_keeps_source_and_target() {
         let effect = replacement(
             ObjectId(0),
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            EventFilter::DamageDealt {
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             ReplacementPayload::PreventDamage,
         );
         let source = ObjectId(1);
         let target = Target::Object(ObjectId(2));
-        let rewritten =
-            effect.apply(GameEventKind::DamageDealt { source, target, amount: 5, is_combat_damage: false });
+        let rewritten = effect.apply(GameEventKind::DamageDealt {
+            source,
+            target,
+            amount: 5,
+            is_combat_damage: false,
+        });
         assert!(matches!(
             rewritten,
             GameEventKind::DamageDealt { source: s, target: t, amount: 0, .. } if s == source && t == target
@@ -1318,7 +1597,17 @@ mod tests {
         let new_target = Target::Player(PlayerId(1));
         let effect = replacement(
             ObjectId(0),
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            EventFilter::DamageDealt {
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             ReplacementPayload::RedirectDamage(new_target),
         );
         let source = ObjectId(1);
@@ -1340,16 +1629,40 @@ mod tests {
         let effect_source = ObjectId(0);
         let redirect_dest = ObjectId(1);
         let state = state_with(vec![
-            object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield),
-            object(redirect_dest, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield),
+            object(
+                effect_source,
+                p0,
+                CardTypeSet::ARTIFACT,
+                ZoneKind::Battlefield,
+            ),
+            object(
+                redirect_dest,
+                p0,
+                CardTypeSet::CREATURE,
+                ZoneKind::Battlefield,
+            ),
         ]);
         let effect = replacement(
             effect_source,
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            EventFilter::DamageDealt {
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             ReplacementPayload::RedirectDamage(Target::Object(redirect_dest)),
         );
-        let event =
-            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        let event = GameEventKind::DamageDealt {
+            source: effect_source,
+            target: Target::Player(p0),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(effect.matches(&event, false, &state, &ScriptRuntime::new()));
     }
 
@@ -1358,14 +1671,33 @@ mod tests {
         let p0 = PlayerId(0);
         let effect_source = ObjectId(0);
         let gone = ObjectId(99); // never inserted into state.objects - CR 400.7 retired id
-        let state = state_with(vec![object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield)]);
+        let state = state_with(vec![object(
+            effect_source,
+            p0,
+            CardTypeSet::ARTIFACT,
+            ZoneKind::Battlefield,
+        )]);
         let effect = replacement(
             effect_source,
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            EventFilter::DamageDealt {
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             ReplacementPayload::RedirectDamage(Target::Object(gone)),
         );
-        let event =
-            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        let event = GameEventKind::DamageDealt {
+            source: effect_source,
+            target: Target::Player(p0),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(
             !effect.matches(&event, false, &state, &ScriptRuntime::new()),
             "CR 614.9: a redirection effect whose destination is no longer on the battlefield does nothing"
@@ -1378,16 +1710,35 @@ mod tests {
         let effect_source = ObjectId(0);
         let land = ObjectId(1);
         let state = state_with(vec![
-            object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield),
+            object(
+                effect_source,
+                p0,
+                CardTypeSet::ARTIFACT,
+                ZoneKind::Battlefield,
+            ),
             object(land, p0, CardTypeSet::LAND, ZoneKind::Battlefield),
         ]);
         let effect = replacement(
             effect_source,
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            EventFilter::DamageDealt {
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             ReplacementPayload::RedirectDamage(Target::Object(land)),
         );
-        let event =
-            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        let event = GameEventKind::DamageDealt {
+            source: effect_source,
+            target: Target::Player(p0),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(
             !effect.matches(&event, false, &state, &ScriptRuntime::new()),
             "CR 614.9: a land is never a valid redirection destination (not a creature/planeswalker/battle)"
@@ -1399,15 +1750,34 @@ mod tests {
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let effect_source = ObjectId(0);
-        let mut state = state_with(vec![object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield)]);
+        let mut state = state_with(vec![object(
+            effect_source,
+            p0,
+            CardTypeSet::ARTIFACT,
+            ZoneKind::Battlefield,
+        )]);
         state.player_mut(p1).unwrap().eliminated = true;
         let effect = replacement(
             effect_source,
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            EventFilter::DamageDealt {
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             ReplacementPayload::RedirectDamage(Target::Player(p1)),
         );
-        let event =
-            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        let event = GameEventKind::DamageDealt {
+            source: effect_source,
+            target: Target::Player(p0),
+            amount: 3,
+            is_combat_damage: false,
+        };
         assert!(
             !effect.matches(&event, false, &state, &ScriptRuntime::new()),
             "CR 614.9: redirecting to a player who has left the game does nothing"
@@ -1418,7 +1788,17 @@ mod tests {
     fn apply_replace_zone_destination_changes_to_only() {
         let effect = replacement(
             ObjectId(0),
-            EventFilter::WouldDie { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            EventFilter::WouldDie {
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         );
         let object_id = ObjectId(1);
@@ -1440,7 +1820,17 @@ mod tests {
         // PreventDamage on a ZoneChange: no real builder makes this pairing, but a struct literal can, and apply() must not panic.
         let effect = replacement(
             ObjectId(0),
-            EventFilter::WouldDie { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
+            EventFilter::WouldDie {
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
+            },
             ReplacementPayload::PreventDamage,
         );
         let object_id = ObjectId(1);
@@ -1461,9 +1851,19 @@ mod tests {
     fn matches_effect_filter_checks_subtypes_and_excluded_subtypes() {
         let p0 = PlayerId(0);
         let source = ObjectId(0);
-        let mut zombie = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        let mut zombie = object(
+            ObjectId(1),
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        );
         zombie.definition.subtypes = vec![Subtype("Zombie".to_string())];
-        let mut wall = object(ObjectId(2), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        let mut wall = object(
+            ObjectId(2),
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        );
         wall.definition.subtypes = vec![Subtype("Wall".to_string())];
 
         let subtypes_filter = EffectFilter {
@@ -1495,9 +1895,19 @@ mod tests {
     fn matches_effect_filter_checks_supertypes_and_excluded_supertypes() {
         let p0 = PlayerId(0);
         let source = ObjectId(0);
-        let mut legendary = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        let mut legendary = object(
+            ObjectId(1),
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        );
         legendary.definition.supertypes = SupertypeSetT::LEGENDARY;
-        let plain = object(ObjectId(2), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        let plain = object(
+            ObjectId(2),
+            p0,
+            CardTypeSet::CREATURE,
+            ZoneKind::Battlefield,
+        );
 
         let supertypes_filter = EffectFilter {
             controller: None,
@@ -1508,8 +1918,18 @@ mod tests {
             excluded_supertypes: None,
             self_only: false,
         };
-        assert!(matches_effect_filter(&supertypes_filter, &legendary, source, p0));
-        assert!(!matches_effect_filter(&supertypes_filter, &plain, source, p0));
+        assert!(matches_effect_filter(
+            &supertypes_filter,
+            &legendary,
+            source,
+            p0
+        ));
+        assert!(!matches_effect_filter(
+            &supertypes_filter,
+            &plain,
+            source,
+            p0
+        ));
 
         let excluded_filter = EffectFilter {
             controller: None,
@@ -1521,6 +1941,11 @@ mod tests {
             self_only: false,
         };
         assert!(matches_effect_filter(&excluded_filter, &plain, source, p0));
-        assert!(!matches_effect_filter(&excluded_filter, &legendary, source, p0));
+        assert!(!matches_effect_filter(
+            &excluded_filter,
+            &legendary,
+            source,
+            p0
+        ));
     }
 }

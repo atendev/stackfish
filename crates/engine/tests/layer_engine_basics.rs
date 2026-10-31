@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
@@ -29,7 +29,9 @@ fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> Card
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -51,7 +53,12 @@ fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> Card
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    card_object(id, creature_definition(power, toughness, KeywordSet::empty()), owner, ZoneKind::Battlefield)
+    card_object(
+        id,
+        creature_definition(power, toughness, KeywordSet::empty()),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
 fn base_state() -> GameState {
@@ -67,7 +74,10 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -90,7 +100,15 @@ fn continuous_effect(
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
+    EffectFilter {
+        controller: None,
+        card_types: None,
+        self_only: false,
+        subtypes: None,
+        excluded_subtypes: None,
+        supertypes: None,
+        excluded_supertypes: None,
+    }
 }
 
 #[test]
@@ -139,7 +157,10 @@ fn modify_pt_adds_on_top_of_base() {
     state.continuous_effects.push(continuous_effect(
         anthem,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 1, toughness: 1 },
+        EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        },
         no_filter(),
         0,
     ));
@@ -164,7 +185,10 @@ fn set_pt_overrides_base_before_modify_pt_applies() {
     state.continuous_effects.push(continuous_effect(
         setter,
         Layer::PowerToughnessSetting,
-        EffectPrimitive::SetPT { power: 0, toughness: 1 },
+        EffectPrimitive::SetPT {
+            power: 0,
+            toughness: 1,
+        },
         no_filter(),
         0,
     ));
@@ -172,7 +196,10 @@ fn set_pt_overrides_base_before_modify_pt_applies() {
     state.continuous_effects.push(continuous_effect(
         modifier,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 2, toughness: 2 },
+        EffectPrimitive::ModifyPT {
+            power: 2,
+            toughness: 2,
+        },
         no_filter(),
         0,
     ));
@@ -196,14 +223,20 @@ fn later_timestamp_set_pt_wins_within_the_same_layer() {
     state.continuous_effects.push(continuous_effect(
         first,
         Layer::PowerToughnessSetting,
-        EffectPrimitive::SetPT { power: 4, toughness: 4 },
+        EffectPrimitive::SetPT {
+            power: 4,
+            toughness: 4,
+        },
         no_filter(),
         5,
     ));
     state.continuous_effects.push(continuous_effect(
         second,
         Layer::PowerToughnessSetting,
-        EffectPrimitive::SetPT { power: 1, toughness: 1 },
+        EffectPrimitive::SetPT {
+            power: 1,
+            toughness: 1,
+        },
         no_filter(),
         10,
     ));
@@ -229,16 +262,35 @@ fn effect_filter_only_affects_matching_objects() {
     state.continuous_effects.push(continuous_effect(
         anthem,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 1, toughness: 1 },
-        EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+        EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        },
+        EffectFilter {
+            controller: Some(FilterController::You),
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        },
         0,
     ));
 
     let own = effective_characteristics(&state, &ScriptRuntime::new(), own_bear);
     let opposing = effective_characteristics(&state, &ScriptRuntime::new(), opposing_bear);
 
-    assert_eq!(own.power, Some(3), "creatures you control should be boosted");
-    assert_eq!(opposing.power, Some(2), "an opponent's creature should be untouched");
+    assert_eq!(
+        own.power,
+        Some(3),
+        "creatures you control should be boosted"
+    );
+    assert_eq!(
+        opposing.power,
+        Some(2),
+        "an opponent's creature should be untouched"
+    );
 }
 
 #[test]
@@ -255,8 +307,19 @@ fn self_only_filter_excludes_other_objects() {
     state.continuous_effects.push(continuous_effect(
         equipment,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 3, toughness: 0 },
-        EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+        EffectPrimitive::ModifyPT {
+            power: 3,
+            toughness: 0,
+        },
+        EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        },
         0,
     ));
 
@@ -273,10 +336,14 @@ fn cda_power_and_toughness_are_still_skipped_not_guessed() {
     let p0 = PlayerId(0);
     let star = ObjectId(0);
     let mut object = creature(star, p0, 0, 0);
-    object.definition.power =
-        Some(PTValue::CharacteristicDefining { display: "*".to_string(), script: None });
-    object.definition.toughness =
-        Some(PTValue::CharacteristicDefining { display: "*".to_string(), script: None });
+    object.definition.power = Some(PTValue::CharacteristicDefining {
+        display: "*".to_string(),
+        script: None,
+    });
+    object.definition.toughness = Some(PTValue::CharacteristicDefining {
+        display: "*".to_string(),
+        script: None,
+    });
     put_on_battlefield(&mut state, object);
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), star);
@@ -312,7 +379,10 @@ fn with_the_boost_registered_the_same_creature_survives_sba() {
     state.continuous_effects.push(continuous_effect(
         anthem,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 1, toughness: 1 },
+        EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        },
         no_filter(),
         0,
     ));
@@ -322,7 +392,10 @@ fn with_the_boost_registered_the_same_creature_survives_sba() {
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
-    assert!(events.is_empty(), "the +1/+1 anthem should make 2 damage sub-lethal on an effective 3 toughness");
+    assert!(
+        events.is_empty(),
+        "the +1/+1 anthem should make 2 damage sub-lethal on an effective 3 toughness"
+    );
     assert!(state.object(bear).is_some());
 }
 
@@ -346,7 +419,10 @@ fn a_granted_indestructible_survives_lethal_damage_via_sba() {
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
-    assert!(events.is_empty(), "granted Indestructible should ignore 704.5g lethal damage");
+    assert!(
+        events.is_empty(),
+        "granted Indestructible should ignore 704.5g lethal damage"
+    );
     assert!(state.object(bear).is_some());
 }
 

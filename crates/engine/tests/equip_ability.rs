@@ -4,13 +4,15 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 const STATIC_EQUIP: &str = r#"
 local s = {}
@@ -27,7 +29,9 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -52,7 +56,9 @@ fn equipment_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
         name: "Test Equipment".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: Some(ColorSet::GREEN),
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ARTIFACT,
@@ -83,15 +89,20 @@ fn equip_ability(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None,
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
-                supertypes: None, excluded_supertypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
                 controller: Some(FilterController::You),
                 zone: None,
             },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),
@@ -106,7 +117,10 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
 
 fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     let id = obj.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, obj);
 }
 
@@ -114,7 +128,15 @@ fn protection_from_green(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionColor(ColorSet::GREEN)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -136,44 +158,78 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets,
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");
 }
 
-fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+fn try_activate(
+    engine: &mut Engine,
+    player: PlayerId,
+    source: ObjectId,
+    targets: Vec<Target>,
+) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::ActivateAbility {
+            source,
+            ability_index: 0,
+            targets,
+            chosen_colors: Vec::new(),
             x_value: None,
-            },
-        })
-        
+        },
+    })
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the ability's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the ability's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
 fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     match outcome {
         SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => panic!("fixture didn't expect a replacement ordering-choice pause"),
-        SbaOutcome::NeedsLegendRuleChoice { .. } => panic!("fixture didn't expect a legend-rule choice pause"),
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
 }
 
@@ -187,7 +243,9 @@ fn game_ops_attach_self_registers_a_real_equip_ability() {
     put_on_battlefield(&mut state, permanent(equipment, definition.clone(), p0));
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, equipment).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, equipment)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.abilities.len(), 1);
     let ability = &state.abilities[0];
@@ -210,7 +268,10 @@ fn equipping_a_creature_you_control_attaches_it() {
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(bear, creature_definition(1, "Bear", 2, 2), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, creature_definition(1, "Bear", 2, 2), p0),
+    );
     put_on_battlefield(&mut state, permanent(equipment, equipment_definition(), p0));
     state.abilities.push(equip_ability(equipment));
 
@@ -222,7 +283,14 @@ fn equipping_a_creature_you_control_attaches_it() {
 
     let equipment_now = engine.state().object(equipment).unwrap();
     assert_eq!(equipment_now.attached_to, Some(bear));
-    assert!(engine.state().object(bear).unwrap().attachments.contains(&equipment));
+    assert!(
+        engine
+            .state()
+            .object(bear)
+            .unwrap()
+            .attachments
+            .contains(&equipment)
+    );
     assert!(
         engine
             .state()
@@ -239,15 +307,20 @@ fn equipping_a_creature_you_dont_control_is_rejected() {
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(bear, creature_definition(1, "Bear", 2, 2), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, creature_definition(1, "Bear", 2, 2), p1),
+    );
     put_on_battlefield(&mut state, permanent(equipment, equipment_definition(), p0));
     state.abilities.push(equip_ability(equipment));
 
     let mut engine = Engine::new(state);
     let err = try_activate(&mut engine, p0, equipment, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
-        "CR 702.6a requires a creature *you control* - got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "CR 702.6a requires a creature *you control* - got {err:?}"
+    );
 }
 
 #[test]
@@ -256,13 +329,23 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(bear, creature_definition(1, "Bear", 2, 2), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, creature_definition(1, "Bear", 2, 2), p0),
+    );
     put_on_battlefield(&mut state, permanent(equipment, equipment_definition(), p0));
     state.abilities.push(equip_ability(equipment));
 
     // A dummy stack object makes the stack non-empty, and CR 702.6a needs it empty.
     let already_on_stack = ObjectId(2);
-    state.objects.insert(already_on_stack, permanent(already_on_stack, creature_definition(2, "Bystander", 1, 1), p0));
+    state.objects.insert(
+        already_on_stack,
+        permanent(
+            already_on_stack,
+            creature_definition(2, "Bystander", 1, 1),
+            p0,
+        ),
+    );
     state.stack.push(StackObject {
         stack_id: already_on_stack,
         kind: StackEntryKind::Spell,
@@ -287,8 +370,10 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
     let mut engine = Engine::new(state);
     let err = try_activate(&mut engine, p0, equipment, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
-        "Equip can only be activated as a sorcery (empty stack), got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "Equip can only be activated as a sorcery (empty stack), got {err:?}"
+    );
 }
 
 #[test]
@@ -299,8 +384,14 @@ fn reequipping_to_a_different_creature_moves_the_attachment() {
     let bear1 = ObjectId(0);
     let bear2 = ObjectId(1);
     let equipment = ObjectId(2);
-    put_on_battlefield(&mut state, permanent(bear1, creature_definition(1, "Bear One", 2, 2), p0));
-    put_on_battlefield(&mut state, permanent(bear2, creature_definition(2, "Bear Two", 2, 2), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear1, creature_definition(1, "Bear One", 2, 2), p0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(bear2, creature_definition(2, "Bear Two", 2, 2), p0),
+    );
     let mut equipment_obj = permanent(equipment, equipment_definition(), p0);
     equipment_obj.attached_to = Some(bear1);
     put_on_battlefield(&mut state, equipment_obj);
@@ -314,12 +405,27 @@ fn reequipping_to_a_different_creature_moves_the_attachment() {
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    assert_eq!(engine.state().object(equipment).unwrap().attached_to, Some(bear2));
+    assert_eq!(
+        engine.state().object(equipment).unwrap().attached_to,
+        Some(bear2)
+    );
     assert!(
-        !engine.state().object(bear1).unwrap().attachments.contains(&equipment),
+        !engine
+            .state()
+            .object(bear1)
+            .unwrap()
+            .attachments
+            .contains(&equipment),
         "re-equipping should clean the old target's attachments list"
     );
-    assert!(engine.state().object(bear2).unwrap().attachments.contains(&equipment));
+    assert!(
+        engine
+            .state()
+            .object(bear2)
+            .unwrap()
+            .attachments
+            .contains(&equipment)
+    );
 }
 
 // CR 704.5n
@@ -340,15 +446,33 @@ fn an_equipped_creature_dying_makes_the_equipment_fall_off_but_stay_on_the_battl
     // Pass 1: the creature dies (CR 704.5g), one pass behind as with an Aura's CR 704.5m check.
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].kind, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }));
-    assert_eq!(state.object(equipment).unwrap().attached_to, Some(bear), "not yet noticed this same pass");
+    assert!(matches!(
+        events[0].kind,
+        GameEventKind::ZoneChange {
+            to: ZoneKind::Graveyard,
+            ..
+        }
+    ));
+    assert_eq!(
+        state.object(equipment).unwrap().attached_to,
+        Some(bear),
+        "not yet noticed this same pass"
+    );
 
     // Pass 2: the creature is gone, so CR 704.5n unattaches the Equipment, which stays on the battlefield with no ZoneChange.
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].kind, GameEventKind::Unattached { object, was_attached_to } if object == equipment && was_attached_to == bear));
-    let equipment_now = state.object(equipment).expect("the Equipment must still exist");
-    assert_eq!(equipment_now.zone, ZoneKind::Battlefield, "CR 704.5n: stays on the battlefield, unlike an Aura");
+    assert!(
+        matches!(events[0].kind, GameEventKind::Unattached { object, was_attached_to } if object == equipment && was_attached_to == bear)
+    );
+    let equipment_now = state
+        .object(equipment)
+        .expect("the Equipment must still exist");
+    assert_eq!(
+        equipment_now.zone,
+        ZoneKind::Battlefield,
+        "CR 704.5n: stays on the battlefield, unlike an Aura"
+    );
     assert_eq!(equipment_now.attached_to, None);
 }
 
@@ -369,7 +493,11 @@ fn an_equipped_creatures_controller_changing_does_not_unattach_the_equipment() {
     put_on_battlefield(&mut state, equipment_obj);
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert!(events.is_empty(), "a controller change alone must never knock an Equipment off, got {:?}", events.iter().map(|e| &e.kind).collect::<Vec<_>>());
+    assert!(
+        events.is_empty(),
+        "a controller change alone must never knock an Equipment off, got {:?}",
+        events.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
     assert_eq!(state.object(equipment).unwrap().attached_to, Some(bear));
 }
 
@@ -387,7 +515,11 @@ fn a_legally_equipped_creature_is_unaffected() {
     put_on_battlefield(&mut state, equipment_obj);
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert!(events.is_empty(), "a healthy, legally-attached Equipment should be left alone, got {:?}", events.iter().map(|e| &e.kind).collect::<Vec<_>>());
+    assert!(
+        events.is_empty(),
+        "a healthy, legally-attached Equipment should be left alone, got {:?}",
+        events.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -400,7 +532,11 @@ fn an_unattached_equipment_is_not_itself_a_violation() {
     // attached_to left at its default None.
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert!(events.is_empty(), "an unattached Equipment is legal on its own, got {:?}", events.iter().map(|e| &e.kind).collect::<Vec<_>>());
+    assert!(
+        events.is_empty(),
+        "an unattached Equipment is legal on its own, got {:?}",
+        events.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
 }
 
 // An equipped creature gaining protection from the Equipment's color makes it fall off (CR 702.16).
@@ -421,7 +557,9 @@ fn an_equipped_creature_gaining_protection_from_the_equipment_makes_it_fall_off(
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].kind, GameEventKind::Unattached { object, was_attached_to } if object == equipment && was_attached_to == bear));
+    assert!(
+        matches!(events[0].kind, GameEventKind::Unattached { object, was_attached_to } if object == equipment && was_attached_to == bear)
+    );
     let equipment_now = state.object(equipment).unwrap();
     assert_eq!(equipment_now.zone, ZoneKind::Battlefield);
     assert_eq!(equipment_now.attached_to, None);

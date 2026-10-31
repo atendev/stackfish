@@ -5,9 +5,9 @@
 
 use serde_json::{Value, json};
 use stackfish_engine::{
-    AbilityEffect, AtomicManaSymbol, CardDefinition, CardTypeSet, Color, KeywordSet, ManaCost, ManaSymbol,
-    ModeChoice, PTValue, ScriptReference, SpellMode, Subtype, SupertypeSet, TargetFilter, TargetRequirement,
-    TargetSpec,
+    AbilityEffect, AtomicManaSymbol, CardDefinition, CardTypeSet, Color, KeywordSet, ManaCost,
+    ManaSymbol, ModeChoice, PTValue, ScriptReference, SpellMode, Subtype, SupertypeSet,
+    TargetFilter, TargetRequirement, TargetSpec,
 };
 
 use crate::card_source::FixtureCardSource;
@@ -63,14 +63,22 @@ fn cost(text: &str) -> ManaCost {
                 "R" => AtomicManaSymbol::Colored(Color::Red),
                 "G" => AtomicManaSymbol::Colored(Color::Green),
                 "C" => AtomicManaSymbol::Colorless,
-                generic => AtomicManaSymbol::Generic(generic.parse().expect("a generic cost is a number")),
+                generic => {
+                    AtomicManaSymbol::Generic(generic.parse().expect("a generic cost is a number"))
+                }
             })
         })
         .collect();
     ManaCost { symbols }
 }
 
-fn base(id: u64, name: &str, mana_cost: &str, card_types: CardTypeSet, oracle_text: &str) -> CardDefinition {
+fn base(
+    id: u64,
+    name: &str,
+    mana_cost: &str,
+    card_types: CardTypeSet,
+    oracle_text: &str,
+) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
@@ -116,12 +124,25 @@ return s
     let card = CardDefinition {
         supertypes: SupertypeSet::BASIC,
         subtypes: vec![Subtype(subtype.to_string())],
-        ..base(id, name, "", CardTypeSet::LAND, &format!("{{T}}: Add {{{letter}}}."))
+        ..base(
+            id,
+            name,
+            "",
+            CardTypeSet::LAND,
+            &format!("{{T}}: Add {{{letter}}}."),
+        )
     };
     scripted(card, &lua)
 }
 
-fn creature(id: u64, name: &str, mana_cost: &str, power: i32, toughness: i32, text: &str) -> CardDefinition {
+fn creature(
+    id: u64,
+    name: &str,
+    mana_cost: &str,
+    power: i32,
+    toughness: i32,
+    text: &str,
+) -> CardDefinition {
     CardDefinition {
         power: Some(PTValue::Fixed(power)),
         toughness: Some(PTValue::Fixed(toughness)),
@@ -211,8 +232,14 @@ fn fork_in_the_road() -> CardDefinition {
 
 /// Every card in the proof set, keyed by a readable slug rather than an `oracle_id`.
 pub fn proof_cards() -> FixtureCardSource {
-    let flying = |card: CardDefinition| CardDefinition { keywords: KeywordSet::FLYING, ..card };
-    let first_strike = |card: CardDefinition| CardDefinition { keywords: KeywordSet::FIRST_STRIKE, ..card };
+    let flying = |card: CardDefinition| CardDefinition {
+        keywords: KeywordSet::FLYING,
+        ..card
+    };
+    let first_strike = |card: CardDefinition| CardDefinition {
+        keywords: KeywordSet::FIRST_STRIKE,
+        ..card
+    };
 
     let mountain = land(1, "Mountain", "Mountain", 'R');
     let forest = land(2, "Forest", "Forest", 'G');
@@ -222,24 +249,52 @@ pub fn proof_cards() -> FixtureCardSource {
     let grizzly_bear = creature(5, "Grizzly Bear", "{1}{G}", 2, 2, "");
     let stone_giant = creature(6, "Stone Giant", "{3}{G}", 4, 4, "");
     let wind_drake = flying(creature(7, "Wind Drake", "{2}{U}", 2, 2, "Flying"));
-    let cinder_duelist = first_strike(creature(8, "Cinder Duelist", "{1}{R}", 2, 1, "First strike"));
+    let cinder_duelist = first_strike(creature(
+        8,
+        "Cinder Duelist",
+        "{1}{R}",
+        2,
+        1,
+        "First strike",
+    ));
 
     let scholar_imp = with_ability(
-        creature(9, "Scholar Imp", "{2}{U}", 1, 1, "When Scholar Imp enters the battlefield, draw a card."),
+        creature(
+            9,
+            "Scholar Imp",
+            "{2}{U}",
+            1,
+            1,
+            "When Scholar Imp enters the battlefield, draw a card.",
+        ),
         r#"    local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Enters)
     e:SetOperation(Game.Ops.DrawCards(1))
     e:Register()"#,
     );
     let grave_rat = with_ability(
-        creature(10, "Grave Rat", "{1}{B}", 2, 1, "When Grave Rat dies, you gain 3 life."),
+        creature(
+            10,
+            "Grave Rat",
+            "{1}{B}",
+            2,
+            1,
+            "When Grave Rat dies, you gain 3 life.",
+        ),
         r#"    local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Dies)
     e:SetOperation(Game.Ops.GainLife(3))
     e:Register()"#,
     );
     let ember_pinger = with_ability(
-        creature(11, "Ember Pinger", "{2}{R}", 1, 1, "{T}: Ember Pinger deals 1 damage to target creature."),
+        creature(
+            11,
+            "Ember Pinger",
+            "{2}{R}",
+            1,
+            1,
+            "{T}: Ember Pinger deals 1 damage to target creature.",
+        ),
         r#"    local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.TapSelf)
     e:SetTarget({ type = "object", card_types = { "Creature" } })
@@ -247,7 +302,14 @@ pub fn proof_cards() -> FixtureCardSource {
     e:Register()"#,
     );
     let mirror_sage = with_ability(
-        creature(12, "Mirror Sage", "{2}{G}", 2, 2, "When Mirror Sage enters the battlefield, you may draw a card."),
+        creature(
+            12,
+            "Mirror Sage",
+            "{2}{G}",
+            2,
+            2,
+            "When Mirror Sage enters the battlefield, you may draw a card.",
+        ),
         r#"    local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Enters)
     e:SetOperation(function(source, controller)
@@ -262,39 +324,89 @@ pub fn proof_cards() -> FixtureCardSource {
     let instant = CardTypeSet::INSTANT;
     let sorcery = CardTypeSet::SORCERY;
     let shock = spell(
-        base(13, "Shock", "{R}", instant, "Shock deals 2 damage to any target."),
+        base(
+            13,
+            "Shock",
+            "{R}",
+            instant,
+            "Shock deals 2 damage to any target.",
+        ),
         Some(r#"{ type = "any", count = 1 }"#),
         "Game.Ops.Damage(2)",
     );
-    let divination = spell(base(14, "Divination", "{2}{U}", sorcery, "Draw two cards."), None, "Game.Ops.DrawCards(2)");
+    let divination = spell(
+        base(14, "Divination", "{2}{U}", sorcery, "Draw two cards."),
+        None,
+        "Game.Ops.DrawCards(2)",
+    );
     let counterspell = spell(
-        base(15, "Counterspell", "{U}{U}", instant, "Counter target spell."),
+        base(
+            15,
+            "Counterspell",
+            "{U}{U}",
+            instant,
+            "Counter target spell.",
+        ),
         Some(r#"{ zone = "Stack", count = 1 }"#),
         "Game.Ops.Counter",
     );
     let bounce = spell(
-        base(16, "Bounce", "{1}{U}", instant, "Return target creature to its owner's hand."),
+        base(
+            16,
+            "Bounce",
+            "{1}{U}",
+            instant,
+            "Return target creature to its owner's hand.",
+        ),
         Some(r#"{ type = "object", card_types = { "Creature" }, count = 1 }"#),
         "Game.Ops.ReturnToHand",
     );
     let rampant_growth = spell(
-        base(18, "Rampant Growth", "{1}{G}", sorcery, "Search your library for a basic land card, put it onto the battlefield tapped, then shuffle."),
+        base(
+            18,
+            "Rampant Growth",
+            "{1}{G}",
+            sorcery,
+            "Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.",
+        ),
         None,
         r#"Game.Ops.Search({ card_types = { "Land" } }, 1, { destination = "Battlefield", tapped = true })"#,
     );
     let raise_militia = spell(
-        base(19, "Raise Militia", "{2}{G}", sorcery, "Create a 2/2 green Soldier creature token."),
+        base(
+            19,
+            "Raise Militia",
+            "{2}{G}",
+            sorcery,
+            "Create a 2/2 green Soldier creature token.",
+        ),
         None,
         r#"Game.Ops.CreateToken(Game.Tokens.Creature("Soldier", "G", 2, 2))"#,
     );
-    let peek = spell(base(20, "Peek", "{U}", sorcery, "Scry 2."), None, "Game.Ops.Scry(2)");
+    let peek = spell(
+        base(20, "Peek", "{U}", sorcery, "Scry 2."),
+        None,
+        "Game.Ops.Scry(2)",
+    );
     let drain_touch = spell(
-        base(21, "Drain Touch", "{1}{B}", sorcery, "Target player loses 3 life."),
+        base(
+            21,
+            "Drain Touch",
+            "{1}{B}",
+            sorcery,
+            "Target player loses 3 life.",
+        ),
         Some(r#"{ type = "player", count = 1 }"#),
         "Game.Ops.LoseLife(3)",
     );
     let doom_blade = spell(
-        base(22, "Doom Blade", "{1}{B}", instant, "Destroy target creature."),
+        base(
+            22,
+            "Doom Blade",
+            "{1}{B}",
+            instant,
+            "Destroy target creature.",
+        ),
         Some(r#"{ type = "object", card_types = { "Creature" }, count = 1 }"#),
         "Game.Ops.Destroy",
     );
@@ -302,7 +414,13 @@ pub fn proof_cards() -> FixtureCardSource {
     let giant_growth_aura = scripted(
         CardDefinition {
             subtypes: vec![Subtype("Aura".to_string())],
-            ..base(23, "Giant Growth Aura", "{1}{G}", CardTypeSet::ENCHANTMENT, "Enchant creature. Enchanted creature gets +3/+3.")
+            ..base(
+                23,
+                "Giant Growth Aura",
+                "{1}{G}",
+                CardTypeSet::ENCHANTMENT,
+                "Enchant creature. Enchanted creature gets +3/+3.",
+            )
         },
         r#"
 local s = {}
@@ -320,7 +438,13 @@ return s
 "#,
     );
     let spark_stone = with_ability(
-        base(24, "Spark Stone", "{2}", CardTypeSet::ARTIFACT, "{T}: Add {C}."),
+        base(
+            24,
+            "Spark Stone",
+            "{2}",
+            CardTypeSet::ARTIFACT,
+            "{T}: Add {C}.",
+        ),
         r#"    local e = Game.CreateManaAbility(c)
     e:AddCost(Game.Costs.TapSelf)
     e:SetOperation(Game.Ops.AddMana("C"))
@@ -329,7 +453,13 @@ return s
     let iron_blade = with_ability(
         CardDefinition {
             subtypes: vec![Subtype("Equipment".to_string())],
-            ..base(25, "Iron Blade", "{1}", CardTypeSet::ARTIFACT, "Equipped creature gets +2/+0. Equip {1}")
+            ..base(
+                25,
+                "Iron Blade",
+                "{1}",
+                CardTypeSet::ARTIFACT,
+                "Equipped creature gets +2/+0. Equip {1}",
+            )
         },
         r#"    local bonus = Game.CreateStaticAbility(c)
     bonus:SetLayer(Game.Layers.PowerToughnessModifying)
@@ -373,15 +503,19 @@ return s
 }
 
 fn deck_json(deck: Deck) -> Value {
-    let entries: Vec<Value> = deck.iter().map(|(card, count)| json!({ "card": card, "count": count })).collect();
+    let entries: Vec<Value> = deck
+        .iter()
+        .map(|(card, count)| json!({ "card": card, "count": count }))
+        .collect();
     json!({ "deck": entries })
 }
 
 /// A `setup` request for `players` players on the standard preset, alternating the
 /// red-green and blue-black decks.
 pub fn proof_setup_request(players: usize, seed: u64) -> Vec<u8> {
-    let decks: Vec<Value> =
-        (0..players).map(|i| deck_json(if i % 2 == 0 { RED_GREEN } else { BLUE_BLACK })).collect();
+    let decks: Vec<Value> = (0..players)
+        .map(|i| deck_json(if i % 2 == 0 { RED_GREEN } else { BLUE_BLACK }))
+        .collect();
     let body = json!({ "players": decks, "format": "standard", "seed": seed.to_string() });
     serde_json::to_vec(&json!({ "v": crate::PROTOCOL_VERSION, "kind": "setup", "body": body }))
         .expect("a setup request holds only strings, numbers and lists")

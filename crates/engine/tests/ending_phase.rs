@@ -2,13 +2,15 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{DiscardError, Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
     let definition = CardDefinition {
         definition_id: id.0,
         name: "Test Card".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -27,7 +29,10 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     };
-    let obj = GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Hand) };
+    let obj = GameObject {
+        controlled_since_turn: 1,
+        ..card_object(id, definition, owner, ZoneKind::Hand)
+    };
     (id, obj)
 }
 
@@ -40,7 +45,18 @@ fn state_at_end_step() -> GameState {
         step: Step::End,
         last_active_turn_number: HashMap::from([(p0, 2), (p1, 1)]),
         next_object_id: 100,
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Command, ZoneKind::Battlefield, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Library,
+                ZoneKind::Hand,
+                ZoneKind::Graveyard,
+                ZoneKind::Command,
+                ZoneKind::Battlefield,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
@@ -74,7 +90,10 @@ fn step_until_pause(engine: &mut Engine) -> StepStatus {
 
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
         .expect("PassPriority should be accepted");
 }
 
@@ -166,7 +185,13 @@ fn submit_discard_wrong_count_rejected() {
     // Excess = 2, but submit only 1.
     let err = engine.submit_discard(vec![ids[0]]).unwrap_err();
     assert!(
-        matches!(err, DiscardError::WrongCount { expected: 2, got: 1 }),
+        matches!(
+            err,
+            DiscardError::WrongCount {
+                expected: 2,
+                got: 1
+            }
+        ),
         "expected WrongCount, got {err:?}"
     );
     // Engine still waiting.
@@ -184,7 +209,10 @@ fn submit_discard_duplicate_card_rejected() {
     pass_through_end_step(&mut engine);
 
     let err = engine.submit_discard(vec![ids[0], ids[0]]).unwrap_err();
-    assert!(matches!(err, DiscardError::DuplicateCard), "expected DuplicateCard, got {err:?}");
+    assert!(
+        matches!(err, DiscardError::DuplicateCard),
+        "expected DuplicateCard, got {err:?}"
+    );
 }
 
 #[test]
@@ -196,8 +224,13 @@ fn submit_discard_card_not_in_hand_rejected() {
 
     pass_through_end_step(&mut engine);
 
-    let err = engine.submit_discard(vec![ObjectId(999), ObjectId(998)]).unwrap_err();
-    assert!(matches!(err, DiscardError::CardNotInHand), "expected CardNotInHand, got {err:?}");
+    let err = engine
+        .submit_discard(vec![ObjectId(999), ObjectId(998)])
+        .unwrap_err();
+    assert!(
+        matches!(err, DiscardError::CardNotInHand),
+        "expected CardNotInHand, got {err:?}"
+    );
 }
 
 #[test]
@@ -211,7 +244,9 @@ fn submit_discard_valid_moves_cards_to_graveyard_and_advances_turn() {
     pass_through_end_step(&mut engine);
 
     // Discard 2 (excess = 9 - 7).
-    engine.submit_discard(vec![ids[0], ids[1]]).expect("valid discard");
+    engine
+        .submit_discard(vec![ids[0], ids[1]])
+        .expect("valid discard");
 
     let status = step_until_pause(&mut engine);
 
@@ -248,8 +283,19 @@ fn until_end_of_turn_continuous_effects_drained_at_cleanup() {
     state.continuous_effects.push(ContinuousEffect {
         source: ObjectId(1),
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: 0,
+        }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::UntilEndOfTurn,
         condition: None,
@@ -257,8 +303,19 @@ fn until_end_of_turn_continuous_effects_drained_at_cleanup() {
     state.continuous_effects.push(ContinuousEffect {
         source: ObjectId(2),
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: 0,
+        }),
         timestamp: SequenceNo(1),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -276,7 +333,10 @@ fn until_end_of_turn_continuous_effects_drained_at_cleanup() {
         "UntilEndOfTurn effect should be gone"
     );
     assert!(
-        matches!(engine.state().continuous_effects[0].duration, EffectDuration::Permanent),
+        matches!(
+            engine.state().continuous_effects[0].duration,
+            EffectDuration::Permanent
+        ),
         "surviving effect should be Permanent"
     );
 }
@@ -288,8 +348,19 @@ fn permanent_effects_survive_cleanup() {
     state.continuous_effects.push(ContinuousEffect {
         source: ObjectId(1),
         layer: Layer::ColorChanging,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: 0,
+        }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,

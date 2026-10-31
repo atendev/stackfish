@@ -99,34 +99,62 @@ pub struct Response {
 
 impl Response {
     fn empty(status: Status) -> Self {
-        Response { status, events: Vec::new(), decision: None, error: None, winner: None, seats: None }
+        Response {
+            status,
+            events: Vec::new(),
+            decision: None,
+            error: None,
+            winner: None,
+            seats: None,
+        }
     }
 
     pub fn created(seats: Vec<u32>) -> Self {
-        Response { seats: Some(seats), ..Response::empty(Status::Created) }
+        Response {
+            seats: Some(seats),
+            ..Response::empty(Status::Created)
+        }
     }
 
     pub fn decision_open(events: Vec<WireEvent>, decision: WireDecision) -> Self {
-        Response { events, decision: Some(decision), ..Response::empty(Status::DecisionOpen) }
+        Response {
+            events,
+            decision: Some(decision),
+            ..Response::empty(Status::DecisionOpen)
+        }
     }
 
     pub fn still_running(events: Vec<WireEvent>) -> Self {
-        Response { events, ..Response::empty(Status::StillRunning) }
+        Response {
+            events,
+            ..Response::empty(Status::StillRunning)
+        }
     }
 
     pub fn game_over(events: Vec<WireEvent>, winner: Option<u32>) -> Self {
-        Response { events, winner: Some(winner), ..Response::empty(Status::GameOver) }
+        Response {
+            events,
+            winner: Some(winner),
+            ..Response::empty(Status::GameOver)
+        }
     }
 
     pub fn error(code: ErrorCode, message: impl Into<String>) -> Self {
         Response {
-            error: Some(WireError { code, message: message.into() }),
+            error: Some(WireError {
+                code,
+                message: message.into(),
+            }),
             ..Response::empty(Status::Error)
         }
     }
 
     /// A refusal that leaves a Decision open reports `decision_open` for it.
-    pub fn refusal(code: ErrorCode, message: impl Into<String>, open: Option<WireDecision>) -> Self {
+    pub fn refusal(
+        code: ErrorCode,
+        message: impl Into<String>,
+        open: Option<WireDecision>,
+    ) -> Self {
         let mut response = Response::error(code, message);
         if let Some(decision) = open {
             response.status = Status::DecisionOpen;
@@ -137,7 +165,10 @@ impl Response {
 
     /// A fatal error carries the events produced before it.
     pub fn fatal(events: Vec<WireEvent>, message: impl Into<String>) -> Self {
-        Response { events, ..Response::error(ErrorCode::PipelineError, message) }
+        Response {
+            events,
+            ..Response::error(ErrorCode::PipelineError, message)
+        }
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -147,7 +178,11 @@ impl Response {
             kind: &'static str,
             body: &'a Response,
         }
-        serde_json::to_vec(&Envelope { v: PROTOCOL_VERSION, kind: "response", body: self })
-            .expect("a response holds only strings, numbers and lists, which always serialize")
+        serde_json::to_vec(&Envelope {
+            v: PROTOCOL_VERSION,
+            kind: "response",
+            body: self,
+        })
+        .expect("a response holds only strings, numbers and lists, which always serialize")
     }
 }

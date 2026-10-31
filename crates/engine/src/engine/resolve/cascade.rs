@@ -24,19 +24,24 @@ impl Engine {
         let cascade_mv = self
             .state
             .object(top.source)
-            .map(|o| o.definition.mana_cost.resolve_x(top.x_value.unwrap_or(0)).mana_value())
+            .map(|o| {
+                o.definition
+                    .mana_cost
+                    .resolve_x(top.x_value.unwrap_or(0))
+                    .mana_value()
+            })
             .unwrap_or(0);
 
         let mut exiled = Vec::new();
         let mut candidate = None;
-        loop {
-            let Some(card) =
-                self.state.zone(ZoneKind::Library, Some(controller)).and_then(|z| z.contents.front().copied())
-            else {
-                // CR 702.85a: the library ran out, so the walk stops.
-                break;
-            };
-            let Some(proposed) = commands::propose_zone_move(&self.state, card, ZoneKind::Library, ZoneKind::Exile)
+        // CR 702.85a: the walk stops when the library runs out.
+        while let Some(card) = self
+            .state
+            .zone(ZoneKind::Library, Some(controller))
+            .and_then(|z| z.contents.front().copied())
+        {
+            let Some(proposed) =
+                commands::propose_zone_move(&self.state, card, ZoneKind::Library, ZoneKind::Exile)
             else {
                 break;
             };
@@ -49,8 +54,14 @@ impl Engine {
             self.state.ledger.push(committed);
             exiled.push(new_id);
 
-            let card_object = self.state.object(new_id).expect("just inserted by commit_zone_move");
-            let is_land = card_object.definition.card_types.contains(CardTypeSet::LAND);
+            let card_object = self
+                .state
+                .object(new_id)
+                .expect("just inserted by commit_zone_move");
+            let is_land = card_object
+                .definition
+                .card_types
+                .contains(CardTypeSet::LAND);
             let mana_value = card_object.definition.mana_cost.mana_value();
             if !is_land && mana_value < cascade_mv {
                 candidate = Some(new_id);
@@ -65,6 +76,9 @@ impl Engine {
             stack_id: top.stack_id,
             events_so_far: events,
         };
-        ControlFlow::Break(StepStatus::AwaitingCascadeChoice { player: controller, candidate })
+        ControlFlow::Break(StepStatus::AwaitingCascadeChoice {
+            player: controller,
+            candidate,
+        })
     }
 }

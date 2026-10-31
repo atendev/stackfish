@@ -4,7 +4,10 @@
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, single_player_state, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, single_player_state,
+    two_player_state as base_two_player_state,
+};
 
 const NO_COST_ADD_MANA: &str = r#"
 local s = {}
@@ -82,7 +85,9 @@ fn artifact_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Mana Rock".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ARTIFACT,
@@ -107,7 +112,9 @@ fn land_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Mana Land".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::LAND,
@@ -130,47 +137,79 @@ fn land_definition(script: &str) -> CardDefinition {
 
 #[test]
 fn run_card_script_self_registers_a_mana_ability_with_no_cost() {
-    let mut state = base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let mut state =
+        base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
     let rock = ObjectId(0);
     let definition = artifact_definition(NO_COST_ADD_MANA);
-    state.objects.insert(rock, card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        rock,
+        card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, rock).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, rock)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.abilities.len(), 1);
     let ability = &state.abilities[0];
     assert_eq!(ability.source, rock);
     assert_eq!(ability.kind, AbilityKind::Activated);
     assert!(ability.target.is_none());
-    assert!(ability.cost.is_none(), "no AddCost() calls means cost: None, matching mana_ability TOML");
-    assert!(matches!(ability.effect, Some(AbilityEffect::AddMana(ref units)) if units == &vec![ManaUnit::Colorless]));
+    assert!(
+        ability.cost.is_none(),
+        "no AddCost() calls means cost: None, matching mana_ability TOML"
+    );
+    assert!(
+        matches!(ability.effect, Some(AbilityEffect::AddMana(ref units)) if units == &vec![ManaUnit::Colorless])
+    );
 }
 
 #[test]
 fn run_card_script_self_registers_a_mana_ability_with_a_real_cost() {
-    let mut state = base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let mut state =
+        base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
     let rock = ObjectId(0);
     let definition = artifact_definition(TAP_SELF_COST_ADD_MANA);
-    state.objects.insert(rock, card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        rock,
+        card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, rock).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, rock)
+        .expect("script self-registers cleanly");
 
-    let cost = state.abilities[0].cost.as_ref().expect("AddCost(TapSelf) was called - cost must be Some");
-    assert!(matches!(cost.additional.as_slice(), [AdditionalCost::TapSelf]));
-    assert!(matches!(state.abilities[0].effect, Some(AbilityEffect::AddMana(_))));
+    let cost = state.abilities[0]
+        .cost
+        .as_ref()
+        .expect("AddCost(TapSelf) was called - cost must be Some");
+    assert!(matches!(
+        cost.additional.as_slice(),
+        [AdditionalCost::TapSelf]
+    ));
+    assert!(matches!(
+        state.abilities[0].effect,
+        Some(AbilityEffect::AddMana(_))
+    ));
 }
 
 #[test]
 fn run_card_script_self_registers_a_mana_ability_with_add_mana_choice() {
-    let mut state = base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let mut state =
+        base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
     let rock = ObjectId(0);
     let definition = artifact_definition(ADD_MANA_CHOICE_NO_COST);
-    state.objects.insert(rock, card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        rock,
+        card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, rock).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, rock)
+        .expect("script self-registers cleanly");
 
     assert!(state.abilities[0].cost.is_none());
     match &state.abilities[0].effect {
@@ -186,48 +225,76 @@ fn run_card_script_self_registers_a_mana_ability_with_add_mana_choice() {
 
 #[test]
 fn run_card_script_mana_ability_register_without_set_operation_is_an_error() {
-    let mut state = base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let mut state =
+        base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
     let rock = ObjectId(0);
     let definition = artifact_definition(NO_SET_OPERATION);
-    state.objects.insert(rock, card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        rock,
+        card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, rock);
 
-    assert!(result.is_err(), "Register() with no SetOperation() must fail");
+    assert!(
+        result.is_err(),
+        "Register() with no SetOperation() must fail"
+    );
     assert!(state.abilities.is_empty());
 }
 
 #[test]
 fn run_card_script_mana_ability_rejects_a_non_mana_operation() {
-    let mut state = base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let mut state =
+        base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
     let rock = ObjectId(0);
     let definition = artifact_definition(NON_MANA_OPERATION);
-    state.objects.insert(rock, card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        rock,
+        card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, rock);
 
-    assert!(result.is_err(), "Game.Ops.GainLife(1) isn't AddMana/AddManaChoice - must be rejected");
-    assert!(state.abilities.is_empty(), "no partial ability should have been committed");
+    assert!(
+        result.is_err(),
+        "Game.Ops.GainLife(1) isn't AddMana/AddManaChoice - must be rejected"
+    );
+    assert!(
+        state.abilities.is_empty(),
+        "no partial ability should have been committed"
+    );
 }
 
 #[test]
 fn run_card_script_mana_ability_has_no_set_target_method() {
-    let mut state = base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let mut state =
+        base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
     let rock = ObjectId(0);
     let definition = artifact_definition(SET_TARGET_DOES_NOT_EXIST);
-    state.objects.insert(rock, card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        rock,
+        card_object(rock, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, rock);
 
-    assert!(result.is_err(), "ManaAbilityBuilder has no :SetTarget method at all - calling it is a Lua error");
+    assert!(
+        result.is_err(),
+        "ManaAbilityBuilder has no :SetTarget method at all - calling it is a Lua error"
+    );
     assert!(state.abilities.is_empty());
 }
 
 fn no_stack_object_pushed(engine: &Engine) -> bool {
-    !engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::StackObjectPushed { .. }))
+    !engine
+        .state()
+        .ledger
+        .iter()
+        .any(|e| matches!(e.kind, GameEventKind::StackObjectPushed { .. }))
 }
 
 #[test]
@@ -236,18 +303,37 @@ fn play_land_self_registered_mana_ability_with_no_cost_resolves_instantly() {
     let p1 = PlayerId(1);
     let land = ObjectId(0);
     let mut state = base_two_player_state(hand_battlefield_graveyard_zones(p0, p1));
-    state.objects.insert(land, card_object(land, land_definition(NO_COST_ADD_MANA), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+    state.objects.insert(
+        land,
+        card_object(land, land_definition(NO_COST_ADD_MANA), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(land);
 
     let mut engine = Engine::new(state);
     engine
-        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: land } })
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card: land },
+        })
         .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().abilities.len(), 1, "the land's mana ability self-registered");
+    assert_eq!(
+        engine.state().abilities.len(),
+        1,
+        "the land's mana ability self-registered"
+    );
 
-    let new_land_id = *engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.front().unwrap();
+    let new_land_id = *engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .front()
+        .unwrap();
 
     engine
         .submit_action(PlayerAction {
@@ -271,7 +357,10 @@ fn play_land_self_registered_mana_ability_with_no_cost_resolves_instantly() {
     assert!(engine.state().object(new_land_id).unwrap().tapped);
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.colorless, 1);
     assert!(engine.state().stack.is_empty());
-    assert!(no_stack_object_pushed(&engine), "a mana ability must never push a StackObject");
+    assert!(
+        no_stack_object_pushed(&engine),
+        "a mana ability must never push a StackObject"
+    );
 }
 
 #[test]
@@ -280,11 +369,24 @@ fn activated_mana_ability_with_explicit_tap_cost_pauses_for_payment() {
     let p1 = PlayerId(1);
     let rock = ObjectId(0);
     let mut state = base_two_player_state(hand_battlefield_graveyard_zones(p0, p1));
-    state.objects.insert(rock, card_object(rock, artifact_definition(TAP_SELF_COST_ADD_MANA), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(rock);
+    state.objects.insert(
+        rock,
+        card_object(
+            rock,
+            artifact_definition(TAP_SELF_COST_ADD_MANA),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(rock);
     let mut runtime = ScriptRuntime::new();
     let definition = artifact_definition(TAP_SELF_COST_ADD_MANA);
-    runtime.run_card_script(&mut state, &definition, rock).expect("self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, rock)
+        .expect("self-registers cleanly");
 
     let mut engine = Engine::new(state);
     engine
@@ -300,13 +402,24 @@ fn activated_mana_ability_with_explicit_tap_cost_pauses_for_payment() {
         })
         .expect("p0 controls the rock and holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "a real cost must pause for payment, got {status:?}");
-    assert!(!engine.state().object(rock).unwrap().tapped, "not tapped until payment commits");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "a real cost must pause for payment, got {status:?}"
+    );
+    assert!(
+        !engine.state().object(rock).unwrap().tapped,
+        "not tapped until payment commits"
+    );
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.colorless, 0);
-    assert!(engine.state().stack.is_empty(), "still never pushed onto the stack, even while paused");
+    assert!(
+        engine.state().stack.is_empty(),
+        "still never pushed onto the stack, even while paused"
+    );
 
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Tap(rock)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Tap(rock)],
+        })
         .expect("Tap(rock) pays the self-registered TapSelf cost");
     let status = drain(&mut engine);
     // CR 605.3a: still p0's priority, as in the no-cost case.
@@ -315,7 +428,10 @@ fn activated_mana_ability_with_explicit_tap_cost_pauses_for_payment() {
     assert!(engine.state().object(rock).unwrap().tapped);
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.colorless, 1);
     assert!(engine.state().stack.is_empty());
-    assert!(no_stack_object_pushed(&engine), "a cost-bearing mana ability must still never push a StackObject");
+    assert!(
+        no_stack_object_pushed(&engine),
+        "a cost-bearing mana ability must still never push a StackObject"
+    );
 }
 
 // Treasure shape: the Sacrifice cost machinery is reusable, and the mana is added only once the sacrifice has committed.
@@ -324,11 +440,24 @@ fn activated_mana_ability_with_sacrifice_cost_resolves_without_ever_using_the_st
     let p0 = PlayerId(0);
     let rock = ObjectId(0);
     let mut state = single_player_state(p0, hand_battlefield_graveyard_zones(p0, PlayerId(1)));
-    state.objects.insert(rock, card_object(rock, artifact_definition(SACRIFICE_COST_ADD_MANA_CHOICE), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(rock);
+    state.objects.insert(
+        rock,
+        card_object(
+            rock,
+            artifact_definition(SACRIFICE_COST_ADD_MANA_CHOICE),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(rock);
     let mut runtime = ScriptRuntime::new();
     let definition = artifact_definition(SACRIFICE_COST_ADD_MANA_CHOICE);
-    runtime.run_card_script(&mut state, &definition, rock).expect("self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, rock)
+        .expect("self-registers cleanly");
 
     let mut engine = Engine::new(state);
     engine
@@ -344,21 +473,48 @@ fn activated_mana_ability_with_sacrifice_cost_resolves_without_ever_using_the_st
         })
         .expect("p0 controls the rock and holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the Sacrifice cost, got {status:?}");
-    assert!(engine.state().object(rock).is_some(), "not sacrificed until payment commits");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the Sacrifice cost, got {status:?}"
+    );
+    assert!(
+        engine.state().object(rock).is_some(),
+        "not sacrificed until payment commits"
+    );
     assert!(engine.state().stack.is_empty());
 
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(rock)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(rock)],
+        })
         .expect("sacrificing the rock itself pays its own Sacrifice{Artifact} cost");
     drain(&mut engine);
 
-    assert!(engine.state().object(rock).is_none(), "the original id is retired");
     assert!(
-        engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len() == 1,
+        engine.state().object(rock).is_none(),
+        "the original id is retired"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .len()
+            == 1,
         "the sacrificed rock now exists in the graveyard under a new id"
     );
-    assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "the chosen blue mana was added");
-    assert!(engine.state().stack.is_empty(), "never touched the stack, even mid-sacrifice");
-    assert!(no_stack_object_pushed(&engine), "a mana ability must never push a StackObject");
+    assert_eq!(
+        engine.state().player(p0).unwrap().mana_pool.blue,
+        1,
+        "the chosen blue mana was added"
+    );
+    assert!(
+        engine.state().stack.is_empty(),
+        "never touched the stack, even mid-sacrifice"
+    );
+    assert!(
+        no_stack_object_pushed(&engine),
+        "a mana ability must never push a StackObject"
+    );
 }

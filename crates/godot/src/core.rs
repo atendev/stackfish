@@ -48,7 +48,12 @@ pub struct Core {
 impl Default for Core {
     /// The `Core` belongs to the calling thread.
     fn default() -> Core {
-        Core { owner: thread::current().id(), session: None, dead: false, last_failure: None }
+        Core {
+            owner: thread::current().id(),
+            session: None,
+            dead: false,
+            last_failure: None,
+        }
     }
 }
 
@@ -142,19 +147,26 @@ mod tests {
 
     fn created_core() -> Core {
         let mut core = Core::default();
-        core.create(&proof_setup_request(2, 1), &proof_cards()).expect("the setup is valid");
+        core.create(&proof_setup_request(2, 1), &proof_cards())
+            .expect("the setup is valid");
         core
     }
 
     fn status(response: &[u8]) -> String {
-        let value: serde_json::Value = serde_json::from_slice(response).expect("a response is JSON");
-        value["body"]["status"].as_str().expect("a response has a status").to_string()
+        let value: serde_json::Value =
+            serde_json::from_slice(response).expect("a response is JSON");
+        value["body"]["status"]
+            .as_str()
+            .expect("a response has a status")
+            .to_string()
     }
 
     #[test]
     fn create_then_advance_works_on_the_owner_thread() {
         let mut core = created_core();
-        let response = core.handle(br#"{"v":1,"kind":"advance","body":{}}"#).expect("the call works");
+        let response = core
+            .handle(br#"{"v":1,"kind":"advance","body":{}}"#)
+            .expect("the call works");
         assert_eq!(status(&response), "decision_open");
         assert_eq!(core.last_error(), "");
     }
@@ -162,11 +174,14 @@ mod tests {
     #[test]
     fn a_refused_setup_returns_the_error_response_and_allows_a_retry() {
         let mut core = Core::default();
-        let refused = core.create(b"not json", &proof_cards()).expect("a refusal is a response");
+        let refused = core
+            .create(b"not json", &proof_cards())
+            .expect("a refusal is a response");
         assert_eq!(status(&refused), "error");
         assert_eq!(core.last_error(), "");
         assert_eq!(core.handle(b"{}"), Err(Failure::NotCreated));
-        core.create(&proof_setup_request(2, 1), &proof_cards()).expect("the retry works");
+        core.create(&proof_setup_request(2, 1), &proof_cards())
+            .expect("the retry works");
     }
 
     #[test]
@@ -179,9 +194,15 @@ mod tests {
     #[test]
     fn a_second_create_fails_and_keeps_the_first_session() {
         let mut core = created_core();
-        assert_eq!(core.create(&proof_setup_request(2, 2), &proof_cards()), Err(Failure::AlreadyCreated));
+        assert_eq!(
+            core.create(&proof_setup_request(2, 2), &proof_cards()),
+            Err(Failure::AlreadyCreated)
+        );
         assert_eq!(core.last_error(), "already_created");
-        assert!(core.handle(br#"{"v":1,"kind":"advance","body":{}}"#).is_ok());
+        assert!(
+            core.handle(br#"{"v":1,"kind":"advance","body":{}}"#)
+                .is_ok()
+        );
         assert_eq!(core.last_error(), "");
     }
 
@@ -211,7 +232,10 @@ mod tests {
         assert_eq!(last_error, "wrong_thread");
         // The owner thread sees no trace of the refused calls, and its Session still runs.
         assert_eq!(core.last_error(), "");
-        assert!(core.handle(br#"{"v":1,"kind":"advance","body":{}}"#).is_ok());
+        assert!(
+            core.handle(br#"{"v":1,"kind":"advance","body":{}}"#)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -237,7 +261,13 @@ mod tests {
         let result = core.run(|_| panic!("the engine broke"));
         assert_eq!(result, Err(Failure::Panicked));
         assert_eq!(core.last_error(), "panicked");
-        assert_eq!(core.handle(br#"{"v":1,"kind":"advance","body":{}}"#), Err(Failure::Panicked));
-        assert_eq!(core.create(&proof_setup_request(2, 4), &proof_cards()), Err(Failure::Panicked));
+        assert_eq!(
+            core.handle(br#"{"v":1,"kind":"advance","body":{}}"#),
+            Err(Failure::Panicked)
+        );
+        assert_eq!(
+            core.create(&proof_setup_request(2, 4), &proof_cards()),
+            Err(Failure::Panicked)
+        );
     }
 }

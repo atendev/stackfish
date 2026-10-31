@@ -5,7 +5,8 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::triggers::collect_triggers;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
+    two_player_state as base_two_player_state,
 };
 
 const CONDITION_ENTERS_BATTLEFIELD: &str = r#"
@@ -29,7 +30,15 @@ fn bear_definition() -> CardDefinition {
         toughness: Some(PTValue::Fixed(2)),
         oracle_text: "When this creature enters the battlefield, you gain 1 life.".to_string(),
         script_ref: ScriptReference::Inline(String::new()),
-        ..minimal_card_definition(1, "Test Bear", "test_bear", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            1,
+            "Test Bear",
+            "test_bear",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -41,7 +50,12 @@ fn zone_change_event(object: ObjectId, from: ZoneKind, to: ZoneKind) -> GameEven
     GameEvent {
         event_id: EventId(0),
         sequence_no: SequenceNo(0),
-        kind: GameEventKind::ZoneChange { object, from, to, last_known_info: None },
+        kind: GameEventKind::ZoneChange {
+            object,
+            from,
+            to,
+            last_known_info: None,
+        },
         caused_by_command: None,
         parent_event: None,
     }
@@ -52,12 +66,23 @@ fn primitive_enters_condition_matches_the_bear_entering_the_battlefield() {
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let mut runtime = ScriptRuntime::new();
-    let condition = runtime.load_condition("return Game.Conditions.Enters").expect("primitive loads");
-    assert!(matches!(condition, ConditionSpec::Primitive(ConditionPrimitive::EntersBattlefield)));
+    let condition = runtime
+        .load_condition("return Game.Conditions.Enters")
+        .expect("primitive loads");
+    assert!(matches!(
+        condition,
+        ConditionSpec::Primitive(ConditionPrimitive::EntersBattlefield)
+    ));
 
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -85,11 +110,19 @@ fn primitive_enters_condition_false_on_a_different_object() {
     let bear = ObjectId(0);
     let someone_else = ObjectId(1);
     let mut runtime = ScriptRuntime::new();
-    let condition = runtime.load_condition("return Game.Conditions.Enters").expect("primitive loads");
+    let condition = runtime
+        .load_condition("return Game.Conditions.Enters")
+        .expect("primitive loads");
 
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -106,7 +139,10 @@ fn primitive_enters_condition_false_on_a_different_object() {
 
     let event = zone_change_event(someone_else, ZoneKind::Hand, ZoneKind::Battlefield);
     let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
-    assert!(pending.is_empty(), "the bear's ETB condition shouldn't fire for a different object");
+    assert!(
+        pending.is_empty(),
+        "the bear's ETB condition shouldn't fire for a different object"
+    );
 }
 
 #[test]
@@ -114,11 +150,19 @@ fn primitive_enters_condition_false_on_wrong_destination_zone() {
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let mut runtime = ScriptRuntime::new();
-    let condition = runtime.load_condition("return Game.Conditions.Enters").expect("primitive loads");
+    let condition = runtime
+        .load_condition("return Game.Conditions.Enters")
+        .expect("primitive loads");
 
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -141,8 +185,13 @@ fn primitive_enters_condition_false_on_wrong_destination_zone() {
 #[test]
 fn the_always_condition_tag_is_not_a_lua_value() {
     let mut runtime = ScriptRuntime::new();
-    let error = runtime.load_condition("return Game.Conditions.Always").expect_err("Always is removed");
-    assert!(format!("{error:?}").contains("omit :SetCondition"), "{error:?}");
+    let error = runtime
+        .load_condition("return Game.Conditions.Always")
+        .expect_err("Always is removed");
+    assert!(
+        format!("{error:?}").contains("omit :SetCondition"),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -153,8 +202,14 @@ fn primitive_always_condition_matches_an_unrelated_event() {
     let condition = ConditionSpec::Primitive(ConditionPrimitive::Always);
 
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -178,7 +233,11 @@ fn primitive_always_condition_matches_an_unrelated_event() {
         parent_event: None,
     };
     let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
-    assert_eq!(pending.len(), 1, "an Always condition means no filter - any event matches");
+    assert_eq!(
+        pending.len(),
+        1,
+        "an Always condition means no filter - any event matches"
+    );
 }
 
 #[test]
@@ -186,22 +245,34 @@ fn condition_script_returning_nil_is_a_load_error() {
     let mut runtime = ScriptRuntime::new();
     // Game.Conditions.Typo indexes nil and not a runtime error, so load_condition must reject it and not treat it as "always".
     let result = runtime.load_condition("return Game.Conditions.Typo");
-    assert!(result.is_err(), "a nil-producing condition chunk must fail to load, not become unconditional");
+    assert!(
+        result.is_err(),
+        "a nil-producing condition chunk must fail to load, not become unconditional"
+    );
 }
 
 #[test]
 fn condition_script_returning_a_table_is_a_load_error() {
     let mut runtime = ScriptRuntime::new();
     let result = runtime.load_condition("return { not_a = \"condition\" }");
-    assert!(result.is_err(), "an unrecognized return shape must fail to load");
+    assert!(
+        result.is_err(),
+        "an unrecognized return shape must fail to load"
+    );
 }
 
 #[test]
 fn operation_script_gain_life_decodes_to_the_ability_effect_primitive() {
     let mut runtime = ScriptRuntime::new();
-    let (effect, handle) = runtime.load_operation("return Game.Ops.GainLife(3)").expect("primitive loads");
+    let (effect, handle) = runtime
+        .load_operation("return Game.Ops.GainLife(3)")
+        .expect("primitive loads");
     assert!(matches!(effect, Some(AbilityEffect::GainLife(3))));
-    assert_eq!(handle, ScriptHandle(0), "the operation handle is an unused placeholder when effect is Some");
+    assert_eq!(
+        handle,
+        ScriptHandle(0),
+        "the operation handle is an unused placeholder when effect is Some"
+    );
 }
 
 #[test]
@@ -217,12 +288,21 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
         matches!(status, StepStatus::AwaitingPayment { .. }),
         "expected a pause for the cast's (free) cost, got {status:?}"
     );
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
 }
 
 #[test]
@@ -231,12 +311,19 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(bear);
 
     let mut engine = Engine::new(state);
-    let condition =
-        engine.load_condition("return Game.Conditions.Enters").expect("condition primitive loads");
+    let condition = engine
+        .load_condition("return Game.Conditions.Enters")
+        .expect("condition primitive loads");
     // A Lua function that errors if called, since operation is not an Option but ResolveStackTop must never reach it while effect is Some.
     let poison_pill_operation = engine
         .load_script("return function(source, controller) error('operation should never run when effect is Some') end")
@@ -259,7 +346,14 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card: bear,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
@@ -275,7 +369,10 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(engine.state().stack.is_empty(), "both the spell and its triggered ability have resolved");
+    assert!(
+        engine.state().stack.is_empty(),
+        "both the spell and its triggered ability have resolved"
+    );
     assert_eq!(
         engine.state().player(p0).unwrap().life,
         21,
@@ -291,16 +388,31 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
     let primitive_bear = ObjectId(0);
     let script_bear = ObjectId(1);
     let mut state = two_player_state();
-    state.objects.insert(primitive_bear, card_object(primitive_bear, bear_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(primitive_bear);
-    state.objects.insert(script_bear, card_object(script_bear, bear_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(script_bear);
+    state.objects.insert(
+        primitive_bear,
+        card_object(primitive_bear, bear_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(primitive_bear);
+    state.objects.insert(
+        script_bear,
+        card_object(script_bear, bear_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(script_bear);
 
     let mut engine = Engine::new(state);
 
-    let (effect, operation) =
-        engine.load_operation("return Game.Ops.GainLife(1)").expect("operation primitive loads");
-    let condition = engine.load_condition("return Game.Conditions.Enters").expect("condition primitive loads");
+    let (effect, operation) = engine
+        .load_operation("return Game.Ops.GainLife(1)")
+        .expect("operation primitive loads");
+    let condition = engine
+        .load_condition("return Game.Conditions.Enters")
+        .expect("condition primitive loads");
     engine.state_mut().abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -315,8 +427,12 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
         intervening_if: None,
     });
 
-    let script_condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
-    let script_operation = engine.load_script(OPERATION_GAIN_LIFE_1).expect("operation script loads");
+    let script_condition = engine
+        .load_script(CONDITION_ENTERS_BATTLEFIELD)
+        .expect("condition script loads");
+    let script_operation = engine
+        .load_script(OPERATION_GAIN_LIFE_1)
+        .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -340,7 +456,8 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("p0 holds priority");
@@ -353,7 +470,11 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
     drain(&mut engine);
     pass(&mut engine, p1);
     drain(&mut engine);
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "primitive-path ability applied its gain_life");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "primitive-path ability applied its gain_life"
+    );
 
     // Cast and resolve the script-path bear second.
     engine
@@ -364,7 +485,8 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("p0 holds priority");

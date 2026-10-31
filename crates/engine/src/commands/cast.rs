@@ -16,7 +16,10 @@ use crate::types::zone::ZoneKind;
 
 use super::attach::{non_eliminated_players, remap_abilities};
 use super::legality::{combine_chosen_modes, is_sorcery_speed, validate_targets};
-use super::{CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected, Validated};
+use super::{
+    CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
+    Validated,
+};
 
 /// What `apply_cast_spell` needs, all settled by `validate_cast_spell`.
 #[derive(Debug)]
@@ -38,6 +41,7 @@ pub(crate) struct CastPlan {
     pending_mode_choice: Option<PendingModeChoice>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn validate_cast_spell(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -65,7 +69,9 @@ pub(super) fn validate_cast_spell(
     let free_cast = state.pending_free_cast == Some(card);
     let free_cast_alternative = AlternativeCost::Replacement {
         description: "cast without paying its mana cost".to_string(),
-        cost: CostSpec::mana_only(ManaCost { symbols: Vec::new() }),
+        cost: CostSpec::mana_only(ManaCost {
+            symbols: Vec::new(),
+        }),
         from_zone: ZoneKind::Exile,
         exile_on_leaving_stack: false,
         escape: false,
@@ -92,15 +98,9 @@ pub(super) fn validate_cast_spell(
         Some(&free_cast_alternative)
     } else {
         match alternative_cost {
-            Some(idx) => Some(
-                object
-                    .definition
-                    .alternative_costs
-                    .get(idx)
-                    .ok_or(Rejected::IllegalAction(
-                        "no such alternative cost on this card".to_string(),
-                    ))?,
-            ),
+            Some(idx) => Some(object.definition.alternative_costs.get(idx).ok_or(
+                Rejected::IllegalAction("no such alternative cost on this card".to_string()),
+            )?),
             None => None,
         }
     };
@@ -119,9 +119,7 @@ pub(super) fn validate_cast_spell(
         Some(AlternativeCost::Replacement { from_zone, .. }) => *from_zone,
         None => ZoneKind::Hand,
     };
-    if !cast_from_command_zone
-        && (object.zone != required_zone || object.controller != actor)
-    {
+    if !cast_from_command_zone && (object.zone != required_zone || object.controller != actor) {
         return Err(Rejected::IllegalAction(
             "card is not in the zone required to cast it this way".to_string(),
         ));
@@ -165,142 +163,174 @@ pub(super) fn validate_cast_spell(
         Vec<AdditionalCost>,
         Option<PendingModeChoice>,
     ) = if object.definition.modes.is_empty() {
-            if !modes.is_empty() {
-                return Err(Rejected::IllegalAction(
-                    "this card isn't modal - no modes to choose".to_string(),
-                ));
-            }
-            (object.definition.target_requirement.clone(), None, Vec::new(), None)
-        } else if let ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) =
-            object.definition.mode_choice
-        {
-            // CR 700.2e
-            // The other player chooses, not the caster (see `ModeChoice`). The choice is
-            // deferred to a pause at resolution.
-            if !modes.is_empty() {
-                return Err(Rejected::IllegalAction(
-                    "this card's mode is chosen by another player, not the caster - submit \
+        if !modes.is_empty() {
+            return Err(Rejected::IllegalAction(
+                "this card isn't modal - no modes to choose".to_string(),
+            ));
+        }
+        (
+            object.definition.target_requirement.clone(),
+            None,
+            Vec::new(),
+            None,
+        )
+    } else if let ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) =
+        object.definition.mode_choice
+    {
+        // CR 700.2e
+        // The other player chooses, not the caster (see `ModeChoice`). The choice is
+        // deferred to a pause at resolution.
+        if !modes.is_empty() {
+            return Err(Rejected::IllegalAction(
+                "this card's mode is chosen by another player, not the caster - submit \
                      no modes when casting it"
-                        .to_string(),
-                ));
-            }
-            if !targets.is_empty() {
-                return Err(Rejected::IllegalAction(
-                    "this card's mode (and therefore its targets) isn't chosen yet"
-                        .to_string(),
-                ));
-            }
-            if object
-                .definition
-                .modes
-                .iter()
-                .any(|m| m.target_requirement.is_some() || m.additional_cost.is_some())
-            {
-                return Err(Rejected::IllegalAction(
-                    "a chosen-by-opponent modal card's modes must have no target \
+                    .to_string(),
+            ));
+        }
+        if !targets.is_empty() {
+            return Err(Rejected::IllegalAction(
+                "this card's mode (and therefore its targets) isn't chosen yet".to_string(),
+            ));
+        }
+        if object
+            .definition
+            .modes
+            .iter()
+            .any(|m| m.target_requirement.is_some() || m.additional_cost.is_some())
+        {
+            return Err(Rejected::IllegalAction(
+                "a chosen-by-opponent modal card's modes must have no target \
                      requirement and no additional cost"
-                        .to_string(),
-                ));
-            }
-            let others: Vec<PlayerId> =
-                non_eliminated_players(state).into_iter().filter(|&p| p != actor).collect();
-            let [chooser] = others.as_slice() else {
-                return Err(Rejected::IllegalAction(
-                    "a chosen-by-opponent modal card needs exactly one other player in the \
+                    .to_string(),
+            ));
+        }
+        let others: Vec<PlayerId> = non_eliminated_players(state)
+            .into_iter()
+            .filter(|&p| p != actor)
+            .collect();
+        let [chooser] = others.as_slice() else {
+            return Err(Rejected::IllegalAction(
+                "a chosen-by-opponent modal card needs exactly one other player in the \
                      game - CR 700.2e's 3+ player 'controller decides who chooses' \
                      sub-clause isn't supported yet"
-                        .to_string(),
+                    .to_string(),
+            ));
+        };
+        let (min, max) = match object.definition.mode_choice {
+            ModeChoice::ExactlyChosenByOpponent(n) => (n, n),
+            ModeChoice::UpToChosenByOpponent(n) => (1, n),
+            _ => unreachable!("matched above"),
+        };
+        (
+            None,
+            None,
+            Vec::new(),
+            Some(PendingModeChoice {
+                chooser: *chooser,
+                min,
+                max,
+            }),
+        )
+    } else if let ModeChoice::PawprintBudget(budget) = object.definition.mode_choice {
+        // CR 700.2i
+        // Limited by total pawprint weight and not mode count: zero modes is legal, and
+        // there are no repeats (no card combines a pawprint budget with the repeat
+        // exception of CR 700.2d).
+        let mut seen_modes = HashSet::new();
+        let mut total_weight: u32 = 0;
+        for &m in &modes {
+            if !seen_modes.insert(m) {
+                return Err(Rejected::IllegalAction(
+                    "the same mode can't be chosen more than once".to_string(),
                 ));
-            };
-            let (min, max) = match object.definition.mode_choice {
-                ModeChoice::ExactlyChosenByOpponent(n) => (n, n),
-                ModeChoice::UpToChosenByOpponent(n) => (1, n),
-                _ => unreachable!("matched above"),
-            };
-            (
-                None,
-                None,
-                Vec::new(),
-                Some(PendingModeChoice { chooser: *chooser, min, max }),
-            )
-        } else if let ModeChoice::PawprintBudget(budget) = object.definition.mode_choice {
-            // CR 700.2i
-            // Limited by total pawprint weight and not mode count: zero modes is legal, and
-            // there are no repeats (no card combines a pawprint budget with the repeat
-            // exception of CR 700.2d).
+            }
+            let mode =
+                object.definition.modes.get(m as usize).ok_or_else(|| {
+                    Rejected::IllegalAction("no such mode on this card".to_string())
+                })?;
+            total_weight += mode.pawprint_weight;
+        }
+        if total_weight > budget {
+            return Err(Rejected::IllegalAction(format!(
+                "this modal spell allows choosing modes worth up to {budget} pawprint(s), got {total_weight}"
+            )));
+        }
+        let mut chosen_indices = modes.clone();
+        chosen_indices.sort_unstable();
+        let mode_additional_costs: Vec<AdditionalCost> = chosen_indices
+            .iter()
+            .filter_map(|&idx| {
+                object
+                    .definition
+                    .modes
+                    .get(idx as usize)
+                    .and_then(|m| m.additional_cost.clone())
+            })
+            .collect();
+        let (target_requirement, modal_effect) =
+            combine_chosen_modes(&object.definition.modes, &chosen_indices)
+                .map_err(Rejected::IllegalAction)?;
+        (
+            target_requirement,
+            modal_effect,
+            mode_additional_costs,
+            None,
+        )
+    } else {
+        // CR 700.2a
+        // Never zero, even for an UpTo spell (ModeChoice::bounds already floors it).
+        let (min, max, repeatable) = object.definition.mode_choice.bounds();
+        let chosen_count = modes.len() as u32;
+        if chosen_count < min || chosen_count > max {
+            return Err(Rejected::IllegalAction(format!(
+                "this modal spell requires choosing between {min} and {max} mode(s), got {chosen_count}"
+            )));
+        }
+        if !repeatable {
             let mut seen_modes = HashSet::new();
-            let mut total_weight: u32 = 0;
             for &m in &modes {
                 if !seen_modes.insert(m) {
                     return Err(Rejected::IllegalAction(
                         "the same mode can't be chosen more than once".to_string(),
                     ));
                 }
-                let mode = object.definition.modes.get(m as usize).ok_or_else(|| {
+            }
+        }
+        // CR 700.2
+        // Chosen modes' effects happen in printed order, not the order the player
+        // listed them.
+        let mut chosen_indices = modes.clone();
+        chosen_indices.sort_unstable();
+        let mut chosen_modes = Vec::with_capacity(chosen_indices.len());
+        for &idx in &chosen_indices {
+            let mode =
+                object.definition.modes.get(idx as usize).ok_or_else(|| {
                     Rejected::IllegalAction("no such mode on this card".to_string())
                 })?;
-                total_weight += mode.pawprint_weight;
-            }
-            if total_weight > budget {
-                return Err(Rejected::IllegalAction(format!(
-                    "this modal spell allows choosing modes worth up to {budget} pawprint(s), got {total_weight}"
-                )));
-            }
-            let mut chosen_indices = modes.clone();
-            chosen_indices.sort_unstable();
-            let mode_additional_costs: Vec<AdditionalCost> = chosen_indices
-                .iter()
-                .filter_map(|&idx| object.definition.modes.get(idx as usize).and_then(|m| m.additional_cost.clone()))
-                .collect();
-            let (target_requirement, modal_effect) =
-                combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(Rejected::IllegalAction)?;
-            (target_requirement, modal_effect, mode_additional_costs, None)
-        } else {
-            // CR 700.2a
-            // Never zero, even for an UpTo spell (ModeChoice::bounds already floors it).
-            let (min, max, repeatable) = object.definition.mode_choice.bounds();
-            let chosen_count = modes.len() as u32;
-            if chosen_count < min || chosen_count > max {
-                return Err(Rejected::IllegalAction(format!(
-                    "this modal spell requires choosing between {min} and {max} mode(s), got {chosen_count}"
-                )));
-            }
-            if !repeatable {
-                let mut seen_modes = HashSet::new();
-                for &m in &modes {
-                    if !seen_modes.insert(m) {
-                        return Err(Rejected::IllegalAction(
-                            "the same mode can't be chosen more than once".to_string(),
-                        ));
-                    }
-                }
-            }
-            // CR 700.2
-            // Chosen modes' effects happen in printed order, not the order the player
-            // listed them.
-            let mut chosen_indices = modes.clone();
-            chosen_indices.sort_unstable();
-            let mut chosen_modes = Vec::with_capacity(chosen_indices.len());
-            for &idx in &chosen_indices {
-                let mode = object.definition.modes.get(idx as usize).ok_or_else(|| {
-                    Rejected::IllegalAction("no such mode on this card".to_string())
-                })?;
-                chosen_modes.push(mode);
-            }
-            // CR 700.2h
-            // Every chosen mode's additional cost, whether one or several modes were chosen.
-            let mode_additional_costs: Vec<AdditionalCost> =
-                chosen_modes.iter().filter_map(|m| m.additional_cost.clone()).collect();
-            // CR 700.2c/d
-            // A single mode passes through bare. Two or more combine into one
-            // TargetSpec::Multiple and AbilityEffect::Modal pair, which ResolveStackTop
-            // splits again with split_targets_by_requirement. A modal triggered ability
-            // shares this through commands::legality::combine_chosen_modes (CR 603.3c); see
-            // its doc comment for the combinations it cannot make.
-            let (target_requirement, modal_effect) =
-                combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(Rejected::IllegalAction)?;
-            (target_requirement, modal_effect, mode_additional_costs, None)
-        };
+            chosen_modes.push(mode);
+        }
+        // CR 700.2h
+        // Every chosen mode's additional cost, whether one or several modes were chosen.
+        let mode_additional_costs: Vec<AdditionalCost> = chosen_modes
+            .iter()
+            .filter_map(|m| m.additional_cost.clone())
+            .collect();
+        // CR 700.2c/d
+        // A single mode passes through bare. Two or more combine into one
+        // TargetSpec::Multiple and AbilityEffect::Modal pair, which ResolveStackTop
+        // splits again with split_targets_by_requirement. A modal triggered ability
+        // shares this through commands::legality::combine_chosen_modes (CR 603.3c); see
+        // its doc comment for the combinations it cannot make.
+        let (target_requirement, modal_effect) =
+            combine_chosen_modes(&object.definition.modes, &chosen_indices)
+                .map_err(Rejected::IllegalAction)?;
+        (
+            target_requirement,
+            modal_effect,
+            mode_additional_costs,
+            None,
+        )
+    };
 
     // CR 601.2c/601.2e
     // Validated below, so an illegal cast is rejected before anything mutates.
@@ -332,9 +362,12 @@ pub(super) fn validate_cast_spell(
     // `cost_has_x`).
     // TODO: X combined with an alternative cost (flashback on an X spell) is not handled, and x_value goes unchecked in that branch
     let (mut cost, exile_on_leaving_stack, escaped) = match alternative {
-        Some(AlternativeCost::Replacement { cost, exile_on_leaving_stack, escape, .. }) => {
-            (cost.clone(), *exile_on_leaving_stack, *escape)
-        }
+        Some(AlternativeCost::Replacement {
+            cost,
+            exile_on_leaving_stack,
+            escape,
+            ..
+        }) => (cost.clone(), *exile_on_leaving_stack, *escape),
         None => {
             let has_x = object.definition.mana_cost.has_x();
             let resolved_mana_cost = match (has_x, x_value) {
@@ -342,14 +375,12 @@ pub(super) fn validate_cast_spell(
                 (false, None) => object.definition.mana_cost.clone(),
                 (true, None) => {
                     return Err(Rejected::IllegalAction(
-                        "this spell's cost includes {X} - a value must be announced"
-                            .to_string(),
+                        "this spell's cost includes {X} - a value must be announced".to_string(),
                     ));
                 }
                 (false, Some(_)) => {
                     return Err(Rejected::IllegalAction(
-                        "an X value was announced but this spell's cost has no {X}"
-                            .to_string(),
+                        "an X value was announced but this spell's cost has no {X}".to_string(),
                     ));
                 }
             };
@@ -396,7 +427,9 @@ pub(super) fn validate_cast_spell(
         let buyback_cost = object.definition.buyback_cost.clone().ok_or_else(|| {
             Rejected::IllegalAction("this spell has no buyback cost to pay".to_string())
         })?;
-        let mut mana = cost.mana.unwrap_or(ManaCost { symbols: Vec::new() });
+        let mut mana = cost.mana.unwrap_or(ManaCost {
+            symbols: Vec::new(),
+        });
         mana.symbols.extend(buyback_cost.symbols);
         cost.mana = Some(mana);
     }
@@ -406,9 +439,15 @@ pub(super) fn validate_cast_spell(
     // owner derivation as `commands::commit_zone_move`. Looked up before any id is
     // allocated or the card is removed, so a missing zone rejects without a partial
     // move.
-    let from_owner = if from_zone == ZoneKind::Exile { None } else { Some(actor) };
+    let from_owner = if from_zone == ZoneKind::Exile {
+        None
+    } else {
+        Some(actor)
+    };
     if state.zone(from_zone, from_owner).is_none() {
-        return Err(Rejected::IllegalAction("actor has no such zone".to_string()));
+        return Err(Rejected::IllegalAction(
+            "actor has no such zone".to_string(),
+        ));
     }
 
     Ok(Validated::CastSpell(Box::new(CastPlan {
@@ -430,7 +469,10 @@ pub(super) fn validate_cast_spell(
     })))
 }
 
-pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<CommandOutcome, Internal> {
+pub(super) fn apply_cast_spell(
+    state: &mut GameState,
+    plan: CastPlan,
+) -> Result<CommandOutcome, Internal> {
     let CastPlan {
         actor,
         card,
@@ -451,7 +493,9 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
     // CR 601.3/702.85a: the one-shot grants are spent by this cast, or by none.
     state.pending_timing_bypass.take();
     state.pending_free_cast.take();
-    let object = state.object(card).ok_or_else(|| Internal::new("cast: the validated card is gone"))?;
+    let object = state
+        .object(card)
+        .ok_or_else(|| Internal::new("cast: the validated card is gone"))?;
     // CR 603.10
     // Snapshot before the move, for last_known_info.
     let last_known_info = object.clone();
@@ -462,7 +506,9 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
     let new_id = state.allocate_object_id();
     let mut new_object = last_known_info.clone();
     new_object.object_id = new_id;
-    new_object.lineage = ObjectLineage { previous: Some(card) };
+    new_object.lineage = ObjectLineage {
+        previous: Some(card),
+    };
     new_object.zone = ZoneKind::Stack;
     new_object.timestamp = state.allocate_sequence_no();
 
@@ -478,10 +524,10 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
     // This cast counts toward the next commander tax once the zone move above
     // commits.
     // TODO: a cast abandoned through Engine::unwind_payment (CR 601.6) keeps this increment, and unwind_payment returns any unwound spell to hand whatever its origin zone, so an unwound commander cast already loses its command-zone recastability
-    if cast_from_command_zone {
-        if let Some(p) = state.player_mut(actor) {
-            *p.commander_casts.entry(last_known_info.definition.name.clone()).or_insert(0) += 1;
-        }
+    if cast_from_command_zone && let Some(p) = state.player_mut(actor) {
+        *p.commander_casts
+            .entry(last_known_info.definition.name.clone())
+            .or_insert(0) += 1;
     }
 
     // CR 608.2m

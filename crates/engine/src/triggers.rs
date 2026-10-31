@@ -49,7 +49,12 @@ pub fn collect_triggers(
     runtime: &ScriptRuntime,
     departed: &[RegisteredAbility],
 ) -> (Vec<PendingTrigger>, Vec<String>) {
-    if !state.abilities.iter().any(|a| a.kind == AbilityKind::Triggered) && departed.is_empty() {
+    if !state
+        .abilities
+        .iter()
+        .any(|a| a.kind == AbilityKind::Triggered)
+        && departed.is_empty()
+    {
         // No triggered ability exists, so there is nothing to match.
         return (Vec::new(), Vec::new());
     }
@@ -68,28 +73,39 @@ pub fn collect_triggers(
         };
         // CR 707.9g: skip an ability granted by a copy effect that a later copy
         // effect on the same object has superseded.
-        if let Some(&granted_generation) = state.linked_ability_generation.get(&ability.id) {
-            if source_object.copy_generation != granted_generation {
-                continue;
-            }
+        if let Some(&granted_generation) = state.linked_ability_generation.get(&ability.id)
+            && source_object.copy_generation != granted_generation
+        {
+            continue;
         }
         // CR 113.6
         // Defensive: the ability is also deregistered when its source leaves the zone.
-        if state.ability_function_zones.get(&ability.id).is_some_and(|z| *z != source_object.zone) {
+        if state
+            .ability_function_zones
+            .get(&ability.id)
+            .is_some_and(|z| *z != source_object.zone)
+        {
             continue;
         }
         let controller = source_object.controller;
 
         let (matched, once_per_turn) = match &ability.condition {
             None => (true, false),
-            Some(ConditionSpec::Primitive(primitive)) => {
-                (primitive.matches(ability.source, controller, state.active_player, &event.kind), false)
-            }
+            Some(ConditionSpec::Primitive(primitive)) => (
+                primitive.matches(ability.source, controller, state.active_player, &event.kind),
+                false,
+            ),
             // CR 603.2h
             Some(ConditionSpec::PrimitiveOncePerTurn(primitive)) => {
                 let already = state.once_per_turn_triggered.contains(&ability.id);
                 (
-                    !already && primitive.matches(ability.source, controller, state.active_player, &event.kind),
+                    !already
+                        && primitive.matches(
+                            ability.source,
+                            controller,
+                            state.active_player,
+                            &event.kind,
+                        ),
                     true,
                 )
             }
@@ -117,7 +133,9 @@ pub fn collect_triggers(
         // CR 603.4: checked at trigger time, and again at resolution (CR 608.2a).
         let intervening_if_holds = match &ability.intervening_if {
             None => true,
-            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, controller, ability.source, None),
+            Some(InterveningIfSpec::Primitive(p)) => {
+                p.holds(state, controller, ability.source, None)
+            }
             Some(InterveningIfSpec::Script(handle)) => {
                 match runtime.invoke_intervening_if(*handle, state, ability.source, controller) {
                     Ok(v) => v,
@@ -167,9 +185,16 @@ pub fn collect_triggers(
         };
         // Each variant carries its last-known info in a different event shape.
         let lki = match &event.kind {
-            GameEventKind::ZoneChange { last_known_info: Some(lki), .. } => lki,
-            GameEventKind::Cycled { last_known_info, .. } => last_known_info,
-            GameEventKind::MadnessExiled { last_known_info, .. } => last_known_info,
+            GameEventKind::ZoneChange {
+                last_known_info: Some(lki),
+                ..
+            } => lki,
+            GameEventKind::Cycled {
+                last_known_info, ..
+            } => last_known_info,
+            GameEventKind::MadnessExiled {
+                last_known_info, ..
+            } => last_known_info,
             _ => continue,
         };
         if lki.object_id != ability.source {
@@ -181,9 +206,12 @@ pub fn collect_triggers(
         // CR 603.4
         let intervening_if_holds = match &ability.intervening_if {
             None => true,
-            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, lki.controller, ability.source, Some(lki)),
+            Some(InterveningIfSpec::Primitive(p)) => {
+                p.holds(state, lki.controller, ability.source, Some(lki))
+            }
             Some(InterveningIfSpec::Script(handle)) => {
-                match runtime.invoke_intervening_if(*handle, state, ability.source, lki.controller) {
+                match runtime.invoke_intervening_if(*handle, state, ability.source, lki.controller)
+                {
                     Ok(v) => v,
                     Err(e) => {
                         errors.push(format!(
@@ -195,7 +223,14 @@ pub fn collect_triggers(
                 }
             }
         };
-        if intervening_if_holds && primitive.matches(ability.source, lki.controller, state.active_player, &event.kind) {
+        if intervening_if_holds
+            && primitive.matches(
+                ability.source,
+                lki.controller,
+                state.active_player,
+                &event.kind,
+            )
+        {
             pending.push(PendingTrigger {
                 source: ability.source,
                 controller: lki.controller,
@@ -221,8 +256,11 @@ pub fn group_apnap(
     apnap_player_order(state)
         .into_iter()
         .filter_map(|pid| {
-            let group: Vec<PendingTrigger> =
-                triggers.iter().copied().filter(|t| t.controller == pid).collect();
+            let group: Vec<PendingTrigger> = triggers
+                .iter()
+                .copied()
+                .filter(|t| t.controller == pid)
+                .collect();
             if group.is_empty() {
                 None
             } else {
@@ -235,7 +273,11 @@ pub fn group_apnap(
 /// CR 101.4: `state.turn_order` rotated to start at the active player.
 pub fn apnap_player_order(state: &GameState) -> Vec<PlayerId> {
     let mut order: Vec<PlayerId> = Vec::new();
-    match state.turn_order.iter().position(|p| *p == state.active_player) {
+    match state
+        .turn_order
+        .iter()
+        .position(|p| *p == state.active_player)
+    {
         Some(start) => {
             order.extend(state.turn_order[start..].iter().copied());
             order.extend(state.turn_order[..start].iter().copied());
@@ -247,17 +289,25 @@ pub fn apnap_player_order(state: &GameState) -> Vec<PlayerId> {
 
 /// CR 603.10: re-derives a departed source's last-known info from the ledger
 /// at stack-push time. `PendingTrigger` is `Copy`, so it cannot carry the snapshot.
-pub fn find_departed_lki(state: &GameState, source: ObjectId) -> Option<crate::types::object::GameObject> {
-    state.ledger.iter().rev().find_map(|event| match &event.kind {
-        GameEventKind::ZoneChange { last_known_info: Some(lki), .. } if lki.object_id == source => {
-            Some(lki.clone())
-        }
-        GameEventKind::Cycled { last_known_info, .. } if last_known_info.object_id == source => {
-            Some(last_known_info.clone())
-        }
-        GameEventKind::MadnessExiled { last_known_info, .. } if last_known_info.object_id == source => {
-            Some(last_known_info.clone())
-        }
-        _ => None,
-    })
+pub fn find_departed_lki(
+    state: &GameState,
+    source: ObjectId,
+) -> Option<crate::types::object::GameObject> {
+    state
+        .ledger
+        .iter()
+        .rev()
+        .find_map(|event| match &event.kind {
+            GameEventKind::ZoneChange {
+                last_known_info: Some(lki),
+                ..
+            } if lki.object_id == source => Some(lki.clone()),
+            GameEventKind::Cycled {
+                last_known_info, ..
+            } if last_known_info.object_id == source => Some(last_known_info.clone()),
+            GameEventKind::MadnessExiled {
+                last_known_info, ..
+            } if last_known_info.object_id == source => Some(last_known_info.clone()),
+            _ => None,
+        })
 }

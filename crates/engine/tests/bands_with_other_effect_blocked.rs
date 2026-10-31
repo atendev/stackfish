@@ -6,13 +6,21 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
-fn creature_definition(id: u64, name: &str, power: i32, toughness: i32, keywords: KeywordSet) -> CardDefinition {
+fn creature_definition(
+    id: u64,
+    name: &str,
+    power: i32,
+    toughness: i32,
+    keywords: KeywordSet,
+) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -37,7 +45,9 @@ fn become_blocked_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 99,
         name: "Test Fog Effect".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -50,7 +60,8 @@ fn become_blocked_spell_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_become_blocked".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None,
+            filter: TargetFilter::Object {
+                mana_value: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 excluded_card_types: None,
                 subtypes: None,
@@ -79,7 +90,10 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -106,16 +120,26 @@ fn combat_damage_state(combat: CombatState) -> GameState {
     }
 }
 
-fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
+fn declare_attackers(
+    engine: &mut Engine,
+    player: PlayerId,
+    attackers: Vec<(ObjectId, Target)>,
+) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::DeclareAttackers { attackers },
+        })
         .expect("player holds priority");
     drain(engine)
 }
 
 fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>>) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBands { bands } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::DeclareBands { bands },
+        })
         .expect("player holds priority");
     drain(engine)
 }
@@ -124,30 +148,64 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
 // Reversed pass order: p1 cast the spell and holds priority back after casting (CR 601.2i).
 fn pass_p1_then_p0_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -157,13 +215,22 @@ fn assign_combat_damage(
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
 ) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::AssignCombatDamage { assignments },
+        })
         .expect("turn-based action, no priority required");
     drain(engine)
 }
 
 fn p1_life(engine: &Engine, p1: PlayerId) -> i32 {
-    engine.state().players.iter().find(|p| p.player_id == p1).unwrap().life
+    engine
+        .state()
+        .players
+        .iter()
+        .find(|p| p.player_id == p1)
+        .unwrap()
+        .life
 }
 
 #[test]
@@ -172,24 +239,52 @@ fn become_blocked_spell_marks_the_target_attacker_blocked() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Bear", 3, 3, KeywordSet::empty()), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition(1, "Bear", 3, 3, KeywordSet::empty()),
+            p0,
+        ),
+    );
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, become_blocked_spell_definition(), p1, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p1)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, become_blocked_spell_definition(), p1, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p1))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "got {status:?}"
+    );
     // p0 passes so p1 (the defending player, holding the fog spell) gets priority.
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
     cast_spell(&mut engine, p1, card, vec![Target::Object(attacker)]);
     pay_free_and_drain(&mut engine);
     pass_p1_then_p0_and_drain(&mut engine, p0, p1);
 
     let combat = engine.state().combat.as_ref().unwrap();
-    assert_eq!(combat.effect_blocked, vec![attacker], "CR 509.1h: the targeted attacker is now blocked, by no one");
-    assert!(combat.blocks.is_empty(), "no real blocker was ever declared");
+    assert_eq!(
+        combat.effect_blocked,
+        vec![attacker],
+        "CR 509.1h: the targeted attacker is now blocked, by no one"
+    );
+    assert!(
+        combat.blocks.is_empty(),
+        "no real blocker was ever declared"
+    );
 }
 
 #[test]
@@ -199,17 +294,49 @@ fn cr_702_22i_propagates_to_every_living_band_member() {
     let p1 = PlayerId(1);
     let a = ObjectId(0);
     let b = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(a, creature_definition(1, "Wing", 2, 2, KeywordSet::BANDING), p0));
-    put_on_battlefield(&mut state, permanent(b, creature_definition(2, "Tail", 2, 2, KeywordSet::empty()), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            a,
+            creature_definition(1, "Wing", 2, 2, KeywordSet::BANDING),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            b,
+            creature_definition(2, "Tail", 2, 2, KeywordSet::empty()),
+            p0,
+        ),
+    );
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, become_blocked_spell_definition(), p1, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p1)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, become_blocked_spell_definition(), p1, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p1))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(a, Target::Player(p1)), (b, Target::Player(p1))]);
+    declare_attackers(
+        &mut engine,
+        p0,
+        vec![(a, Target::Player(p1)), (b, Target::Player(p1))],
+    );
     let status = declare_bands(&mut engine, p0, vec![vec![a, b]]);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "band declaration failed: {status:?}");
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "band declaration failed: {status:?}"
+    );
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
     // Only `a` is targeted - `b` should still become blocked via CR 702.22i.
     cast_spell(&mut engine, p1, card, vec![Target::Object(a)]);
@@ -217,9 +344,17 @@ fn cr_702_22i_propagates_to_every_living_band_member() {
     pass_p1_then_p0_and_drain(&mut engine, p0, p1);
 
     let combat = engine.state().combat.as_ref().unwrap();
-    assert_eq!(combat.effect_blocked.len(), 2, "both band members should be blocked, got {:?}", combat.effect_blocked);
+    assert_eq!(
+        combat.effect_blocked.len(),
+        2,
+        "both band members should be blocked, got {:?}",
+        combat.effect_blocked
+    );
     assert!(combat.effect_blocked.contains(&a));
-    assert!(combat.effect_blocked.contains(&b), "CR 702.22i: the untargeted band member becomes blocked too");
+    assert!(
+        combat.effect_blocked.contains(&b),
+        "CR 702.22i: the untargeted band member becomes blocked too"
+    );
 }
 
 #[test]
@@ -229,26 +364,68 @@ fn a_band_member_already_removed_from_combat_is_not_propagated_to() {
     let p1 = PlayerId(1);
     let a = ObjectId(0);
     let b = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(a, creature_definition(1, "Wing", 2, 2, KeywordSet::BANDING), p0));
-    put_on_battlefield(&mut state, permanent(b, creature_definition(2, "Tail", 2, 2, KeywordSet::empty()), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            a,
+            creature_definition(1, "Wing", 2, 2, KeywordSet::BANDING),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            b,
+            creature_definition(2, "Tail", 2, 2, KeywordSet::empty()),
+            p0,
+        ),
+    );
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, become_blocked_spell_definition(), p1, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p1)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, become_blocked_spell_definition(), p1, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p1))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(a, Target::Player(p1)), (b, Target::Player(p1))]);
+    declare_attackers(
+        &mut engine,
+        p0,
+        vec![(a, Target::Player(p1)), (b, Target::Player(p1))],
+    );
     let status = declare_bands(&mut engine, p0, vec![vec![a, b]]);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "band declaration failed: {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "band declaration failed: {status:?}"
+    );
     // CR 702.22f: b is removed from combat before the effect resolves, so it leaves its band.
-    engine.state_mut().combat.as_mut().unwrap().attackers.retain(|(id, _)| *id != b);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .state_mut()
+        .combat
+        .as_mut()
+        .unwrap()
+        .attackers
+        .retain(|(id, _)| *id != b);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
     cast_spell(&mut engine, p1, card, vec![Target::Object(a)]);
     pay_free_and_drain(&mut engine);
     pass_p1_then_p0_and_drain(&mut engine, p0, p1);
 
     let combat = engine.state().combat.as_ref().unwrap();
-    assert_eq!(combat.effect_blocked, vec![a], "b already left combat - it must not be marked blocked");
+    assert_eq!(
+        combat.effect_blocked,
+        vec![a],
+        "b already left combat - it must not be marked blocked"
+    );
 }
 
 #[test]
@@ -258,23 +435,62 @@ fn an_attacker_already_blocked_is_left_untouched() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let blocker = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Bear", 3, 3, KeywordSet::empty()), p0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition(2, "Wall", 0, 4, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition(1, "Bear", 3, 3, KeywordSet::empty()),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            creature_definition(2, "Wall", 0, 4, KeywordSet::empty()),
+            p1,
+        ),
+    );
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, become_blocked_spell_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, become_blocked_spell_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    engine.state_mut().combat.as_mut().unwrap().blocks.push((blocker, attacker));
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::CastSpell {
-        card, modes: Vec::new(), targets: vec![Target::Object(attacker)], x_value: None, alternative_cost: None, pay_buyback: false,
-    } }).expect("player holds priority, spell is in hand");
+    engine
+        .state_mut()
+        .combat
+        .as_mut()
+        .unwrap()
+        .blocks
+        .push((blocker, attacker));
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets: vec![Target::Object(attacker)],
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
+        })
+        .expect("player holds priority, spell is in hand");
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
     let combat = engine.state().combat.as_ref().unwrap();
-    assert!(combat.effect_blocked.is_empty(), "already blocked via a real declared blocker - no redundant effect_blocked entry needed");
+    assert!(
+        combat.effect_blocked.is_empty(),
+        "already blocked via a real declared blocker - no redundant effect_blocked entry needed"
+    );
 }
 
 #[test]
@@ -283,18 +499,37 @@ fn targeting_a_non_attacking_creature_is_a_silent_no_op() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bystander = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(bystander, creature_definition(1, "Bystander", 2, 2, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            bystander,
+            creature_definition(1, "Bystander", 2, 2, KeywordSet::empty()),
+            p1,
+        ),
+    );
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, become_blocked_spell_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, become_blocked_spell_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(bystander)]);
     pay_free_and_drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "no crash from the no-op resolution, got {status:?}");
-    assert!(engine.state().combat.is_none(), "combat never started - nothing to mark blocked");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "no crash from the no-op resolution, got {status:?}"
+    );
+    assert!(
+        engine.state().combat.is_none(),
+        "combat never started - nothing to mark blocked"
+    );
 }
 
 #[test]
@@ -308,14 +543,29 @@ fn effect_blocked_attacker_with_no_trample_deals_no_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: vec![attacker],
-        damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Bear", 3, 3, KeywordSet::empty()), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition(1, "Bear", 3, 3, KeywordSet::empty()),
+            p0,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
-    assert_eq!(p1_life(&engine, p1), 20, "CR 509.1h/510.1c: effect-blocked with zero blockers deals no damage, no trample");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
+    assert_eq!(
+        p1_life(&engine, p1),
+        20,
+        "CR 509.1h/510.1c: effect-blocked with zero blockers deals no damage, no trample"
+    );
 }
 
 #[test]
@@ -329,12 +579,27 @@ fn effect_blocked_trampler_deals_full_power_per_702_19d() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: vec![attacker],
-        damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition(1, "Rampager", 5, 5, KeywordSet::TRAMPLE),
+            p0,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
-    assert_eq!(p1_life(&engine, p1), 15, "CR 702.19d: trample treats zero blockers as though they all got lethal - full power tramples over");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
+    assert_eq!(
+        p1_life(&engine, p1),
+        15,
+        "CR 702.19d: trample treats zero blockers as though they all got lethal - full power tramples over"
+    );
 }

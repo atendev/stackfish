@@ -11,8 +11,10 @@ fn fixture_db_path() -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir()
-        .join(format!("stackfish-carddb-test-{}-{n}.sqlite", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "stackfish-carddb-test-{}-{n}.sqlite",
+        std::process::id()
+    ));
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch(
         "
@@ -116,7 +118,10 @@ fn loads_card_by_script_id() {
     let def = db.load_by_script_id("lightning_bolt").unwrap();
     assert_eq!(def.name, "Lightning Bolt");
     let by_oracle_id = db.load_by_oracle_id("bolt-1").unwrap();
-    assert_eq!(def.definition_id, by_oracle_id.definition_id, "same card, same id regardless of lookup key");
+    assert_eq!(
+        def.definition_id, by_oracle_id.definition_id,
+        "same card, same id regardless of lookup key"
+    );
 }
 
 #[test]
@@ -144,7 +149,9 @@ fn unsupported_casual_format_type_is_rejected() {
 #[test]
 fn not_found_is_a_typed_error() {
     let db = open_fixture();
-    let err = db.load_by_name("Some Card That Does Not Exist").unwrap_err();
+    let err = db
+        .load_by_name("Some Card That Does Not Exist")
+        .unwrap_err();
     assert!(matches!(err, stackfish_carddb::CardLoadError::NotFound(_)));
 }
 

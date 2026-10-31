@@ -23,7 +23,11 @@ pub(crate) fn find_ability(
     source: ObjectId,
     ability_index: u32,
 ) -> Option<&RegisteredAbility> {
-    state.abilities.iter().filter(|a| a.source == source).nth(ability_index as usize)
+    state
+        .abilities
+        .iter()
+        .filter(|a| a.source == source)
+        .nth(ability_index as usize)
 }
 
 /// Looks up a `RegisteredAbility` by its stable `AbilityId`, the
@@ -56,19 +60,6 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
         true
     });
 }
-
-/// Removes `old_id` from `state.objects` and purges every `RegisteredAbility`,
-/// `ContinuousEffect` and `ReplacementEffect` still pointing at it. Call it at a
-/// zone-change site that does not call `remap_abilities` for `old_id` (discard,
-/// `draw_step`, SBA-driven death). Calling both deletes what remap carried
-/// forward; calling neither leaves dead entries behind.
-///
-/// Returns the departing object's `Triggered` abilities (CR 603.10), which would
-/// otherwise be deleted before `collect_triggers` sees them. `sba::commit_death`
-/// and `move_to_graveyard_for_cost` pass them to the engine's last-known-
-/// information stash. `submit_discard` and `draw_step` drop them, because `Dies`
-/// and `LeavesBattlefield` need `from == Battlefield`.
-/// TODO: stash departed abilities from hand and library once a condition can consume them
 
 /// CR 707.2a: removes every `RegisteredAbility`, `ContinuousEffect` and
 /// `ReplacementEffect` sourced from `id` without removing `id` from
@@ -123,7 +114,9 @@ pub(crate) fn grant_linked_copy_ability(
         id,
         source: object,
         kind: AbilityKind::Triggered,
-        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
+        condition: Some(ConditionSpec::Primitive(
+            ConditionPrimitive::BeginningOfYourUpkeep,
+        )),
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object {
@@ -174,7 +167,11 @@ pub(crate) fn apply_copy_additional_counters(
         crate::types::ability::CounterAmount::Fixed(amount) => amount,
         crate::types::ability::CounterAmount::X => x_value.unwrap_or(0),
     };
-    Some(crate::types::event::GameEventKind::CounterAdded { object, kind, amount: amount as i32 })
+    Some(crate::types::event::GameEventKind::CounterAdded {
+        object,
+        kind,
+        amount: amount as i32,
+    })
 }
 
 /// CR 303.4: `definition` is an enchantment with the "Aura" subtype. `Subtype`
@@ -223,14 +220,25 @@ pub(crate) fn legal_aura_entry_candidates(
     let mut object_ids: Vec<ObjectId> = state.objects.keys().copied().collect();
     object_ids.sort();
     let object_candidates = object_ids.into_iter().map(Target::Object);
-    let player_candidates = non_eliminated_players(state).into_iter().map(Target::Player);
+    let player_candidates = non_eliminated_players(state)
+        .into_iter()
+        .map(Target::Player);
     object_candidates
         .chain(player_candidates)
         // CR 202.3
         // An Aura's enchant restriction is a definition's base filter with no live X,
         // so `None` is correct.
         .filter(|&target| {
-            attachment_target_is_legal(state, script_runtime, target, &req.filter, controller, aura_source, req.exclude_source, None)
+            attachment_target_is_legal(
+                state,
+                script_runtime,
+                target,
+                &req.filter,
+                controller,
+                aura_source,
+                req.exclude_source,
+                None,
+            )
         })
         .collect()
 }
@@ -255,7 +263,13 @@ pub(crate) fn legal_entry_attach_candidates(
     source: ObjectId,
 ) -> Option<Vec<Target>> {
     if is_aura(definition) {
-        return Some(legal_aura_entry_candidates(state, script_runtime, definition, controller, source));
+        return Some(legal_aura_entry_candidates(
+            state,
+            script_runtime,
+            definition,
+            controller,
+            source,
+        ));
     }
     let wanted = if is_equipment(definition) {
         CardTypeSet::CREATURE
@@ -270,7 +284,13 @@ pub(crate) fn legal_entry_attach_candidates(
             .values()
             .filter(|obj| {
                 obj.zone == ZoneKind::Battlefield
-                    && crate::layers::effective_characteristics(state, script_runtime, obj.object_id).card_types.intersects(wanted)
+                    && crate::layers::effective_characteristics(
+                        state,
+                        script_runtime,
+                        obj.object_id,
+                    )
+                    .card_types
+                    .intersects(wanted)
             })
             .map(|obj| Target::Object(obj.object_id))
             .collect(),
@@ -287,21 +307,20 @@ pub(crate) fn legal_entry_attach_candidates(
 /// target's `attachments` first, leaving no stale entry.
 pub(crate) fn attach_permanent(state: &mut GameState, attaching_id: ObjectId, target_id: ObjectId) {
     let previous_target = state.object(attaching_id).and_then(|o| o.attached_to);
-    if let Some(old_target_id) = previous_target {
-        if old_target_id != target_id {
-            if let Some(old_target) = state.object_mut(old_target_id) {
-                old_target.attachments.retain(|&id| id != attaching_id);
-            }
-        }
+    if let Some(old_target_id) = previous_target
+        && old_target_id != target_id
+        && let Some(old_target) = state.object_mut(old_target_id)
+    {
+        old_target.attachments.retain(|&id| id != attaching_id);
     }
     if let Some(attaching) = state.object_mut(attaching_id) {
         attaching.attached_to = Some(target_id);
         attaching.attached_to_player = None;
     }
-    if let Some(target) = state.object_mut(target_id) {
-        if !target.attachments.contains(&attaching_id) {
-            target.attachments.push(attaching_id);
-        }
+    if let Some(target) = state.object_mut(target_id)
+        && !target.attachments.contains(&attaching_id)
+    {
+        target.attachments.push(attaching_id);
     }
 }
 
@@ -311,7 +330,11 @@ pub(crate) fn attach_permanent(state: &mut GameState, attaching_id: ObjectId, ta
 /// Auras call it: Equipment and Fortification never attach to a player
 /// (CR 301.5a/301.6), so there is no move-away-from-a-player case.
 /// TODO: "enchanted player" references for continuous and replacement effects, since continuous effects only affect objects (CR 303.4m)
-pub(crate) fn attach_permanent_to_player(state: &mut GameState, attaching_id: ObjectId, player: PlayerId) {
+pub(crate) fn attach_permanent_to_player(
+    state: &mut GameState,
+    attaching_id: ObjectId,
+    player: PlayerId,
+) {
     if let Some(attaching) = state.object_mut(attaching_id) {
         attaching.attached_to_player = Some(player);
         attaching.attached_to = None;
@@ -351,6 +374,18 @@ pub fn propose_attach(candidates: &[ObjectId]) -> AttachProposal {
     }
 }
 
+/// Removes `old_id` from `state.objects` and purges every `RegisteredAbility`,
+/// `ContinuousEffect` and `ReplacementEffect` still pointing at it. Call it at a
+/// zone-change site that does not call `remap_abilities` for `old_id` (discard,
+/// `draw_step`, SBA-driven death). Calling both deletes what remap carried
+/// forward; calling neither leaves dead entries behind.
+///
+/// Returns the departing object's `Triggered` abilities (CR 603.10), which would
+/// otherwise be deleted before `collect_triggers` sees them. `sba::commit_death`
+/// and `move_to_graveyard_for_cost` pass them to the engine's last-known-
+/// information stash. `submit_discard` and `draw_step` drop them, because `Dies`
+/// and `LeavesBattlefield` need `from == Battlefield`.
+/// TODO: stash departed abilities from hand and library once a condition can consume them
 pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<RegisteredAbility> {
     let removed = state.objects.remove(&old_id);
     // CR 303.4b/301.5a
@@ -358,10 +393,10 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     // drop it from that object's `attachments` too, best effort. An object attached
     // to old_id keeps a stale `attached_to`, which the SBA checks (CR 704.5m/704.5n)
     // notice on their next pass, as in a real game.
-    if let Some(target_id) = removed.and_then(|o| o.attached_to) {
-        if let Some(target) = state.object_mut(target_id) {
-            target.attachments.retain(|&id| id != old_id);
-        }
+    if let Some(target_id) = removed.and_then(|o| o.attached_to)
+        && let Some(target) = state.object_mut(target_id)
+    {
+        target.attachments.retain(|&id| id != old_id);
     }
     let mut departed_triggered = Vec::new();
     state.off_battlefield_scripts_run.remove(&old_id);
@@ -404,7 +439,11 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
 /// fewer than 2 non-eliminated players remain (`finish_sba_loop`,
 /// `finish_cleanup_sba_check`), so the walk finds one before wrapping to `after`.
 pub(crate) fn next_active_player(state: &GameState, after: PlayerId) -> PlayerId {
-    let start_idx = state.turn_order.iter().position(|p| *p == after).unwrap_or(0);
+    let start_idx = state
+        .turn_order
+        .iter()
+        .position(|p| *p == after)
+        .unwrap_or(0);
     for offset in 1..=state.turn_order.len() {
         let idx = (start_idx + offset) % state.turn_order.len();
         let candidate = state.turn_order[idx];

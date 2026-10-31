@@ -2,14 +2,17 @@
 //! which expands them.
 
 use rusqlite::Connection;
-use stackfish_scenario::{parse, run, AssertionOutcome, EntryOutcome};
+use stackfish_scenario::{AssertionOutcome, EntryOutcome, parse, run};
 use std::path::PathBuf;
 
 fn assert_no_hard_failures(report: &stackfish_scenario::ScenarioReport) {
     for entry in &report.entries {
         match &entry.outcome {
             EntryOutcome::Assertion(AssertionOutcome::Failed { expected, actual }) => {
-                panic!("assertion failed: {} (expected {expected}, got {actual})", entry.description)
+                panic!(
+                    "assertion failed: {} (expected {expected}, got {actual})",
+                    entry.description
+                )
             }
             EntryOutcome::Action(stackfish_scenario::StepOutcome::Errored(msg)) => {
                 panic!("action errored: {} ({msg})", entry.description)
@@ -143,7 +146,10 @@ fn unique_temp_path(name: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("stackfish-scenario-inline-setup-test-{}-{n}-{name}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "stackfish-scenario-inline-setup-test-{}-{n}-{name}",
+        std::process::id()
+    ))
 }
 
 fn fixture_db_path() -> PathBuf {

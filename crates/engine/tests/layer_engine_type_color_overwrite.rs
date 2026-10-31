@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
@@ -16,7 +16,9 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -38,14 +40,21 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    card_object(id, creature_definition(power, toughness), owner, ZoneKind::Battlefield)
+    card_object(
+        id,
+        creature_definition(power, toughness),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
 fn land_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Land".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::LAND,
@@ -83,11 +92,19 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
-fn continuous_effect(source: ObjectId, layer: Layer, effect: EffectPrimitive, timestamp: u64) -> ContinuousEffect {
+fn continuous_effect(
+    source: ObjectId,
+    layer: Layer,
+    effect: EffectPrimitive,
+    timestamp: u64,
+) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer,
@@ -100,7 +117,15 @@ fn continuous_effect(source: ObjectId, layer: Layer, effect: EffectPrimitive, ti
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter { controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None }
+    EffectFilter {
+        controller: None,
+        card_types: None,
+        self_only: false,
+        subtypes: None,
+        excluded_subtypes: None,
+        supertypes: None,
+        excluded_supertypes: None,
+    }
 }
 
 #[test]
@@ -118,7 +143,11 @@ fn set_card_types_overwrites_existing_types_entirely() {
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), target_land);
 
-    assert_eq!(effective.card_types, CardTypeSet::CREATURE, "Land should be gone entirely, not just gained Creature alongside it");
+    assert_eq!(
+        effective.card_types,
+        CardTypeSet::CREATURE,
+        "Land should be gone entirely, not just gained Creature alongside it"
+    );
 }
 
 #[test]
@@ -129,11 +158,20 @@ fn set_colors_overwrites_existing_colors_entirely() {
     let mut white_creature = creature(target, p0, 2, 2);
     white_creature.definition.color_indicator = Some(ColorSet::WHITE);
     put_on_battlefield(&mut state, white_creature);
-    state.continuous_effects.push(continuous_effect(target, Layer::ColorChanging, EffectPrimitive::SetColors(ColorSet::BLACK), 0));
+    state.continuous_effects.push(continuous_effect(
+        target,
+        Layer::ColorChanging,
+        EffectPrimitive::SetColors(ColorSet::BLACK),
+        0,
+    ));
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), target);
 
-    assert_eq!(effective.colors, ColorSet::BLACK, "White should be gone entirely, not just gained Black alongside it");
+    assert_eq!(
+        effective.colors,
+        ColorSet::BLACK,
+        "White should be gone entirely, not just gained Black alongside it"
+    );
 }
 
 #[test]
@@ -158,7 +196,11 @@ fn later_timestamp_set_card_types_wins_over_an_earlier_add_card_type() {
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), target_land);
 
-    assert_eq!(effective.card_types, CardTypeSet::ARTIFACT, "the later SetCardTypes replaces Land+Creature entirely, leaving only Artifact");
+    assert_eq!(
+        effective.card_types,
+        CardTypeSet::ARTIFACT,
+        "the later SetCardTypes replaces Land+Creature entirely, leaving only Artifact"
+    );
 }
 
 #[test]
@@ -183,7 +225,10 @@ fn an_earlier_set_card_types_is_still_built_on_by_a_later_add_card_type() {
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), target_land);
 
-    assert_eq!(effective.card_types, CardTypeSet::ARTIFACT | CardTypeSet::CREATURE);
+    assert_eq!(
+        effective.card_types,
+        CardTypeSet::ARTIFACT | CardTypeSet::CREATURE
+    );
 }
 
 #[test]
@@ -203,8 +248,14 @@ fn add_supertype_unions_a_supertype_in_without_removing_existing_ones() {
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), target);
 
-    assert!(effective.supertypes.contains(SupertypeSet::SNOW), "should keep Snow, not lose it");
-    assert!(effective.supertypes.contains(SupertypeSet::LEGENDARY), "should gain Legendary");
+    assert!(
+        effective.supertypes.contains(SupertypeSet::SNOW),
+        "should keep Snow, not lose it"
+    );
+    assert!(
+        effective.supertypes.contains(SupertypeSet::LEGENDARY),
+        "should gain Legendary"
+    );
 }
 
 #[test]
@@ -222,8 +273,16 @@ fn add_subtype_unions_a_subtype_in_without_removing_existing_ones() {
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), target);
 
-    assert!(effective.subtypes.contains(&Subtype("Bear".to_string())), "should keep Bear, not lose it");
-    assert!(effective.subtypes.contains(&Subtype("Elemental".to_string())), "should gain Elemental");
+    assert!(
+        effective.subtypes.contains(&Subtype("Bear".to_string())),
+        "should keep Bear, not lose it"
+    );
+    assert!(
+        effective
+            .subtypes
+            .contains(&Subtype("Elemental".to_string())),
+        "should gain Elemental"
+    );
     assert_eq!(effective.subtypes.len(), 2, "no duplicate entries");
 }
 
@@ -270,9 +329,15 @@ fn legend_rule_recognizes_a_continuous_effect_granted_legendary_supertype() {
 
     match outcome {
         SbaOutcome::NeedsLegendRuleChoice { candidates, .. } => {
-            assert_eq!(candidates.len(), 2, "both same-named legendaries (one printed, one granted) should be offered");
+            assert_eq!(
+                candidates.len(),
+                2,
+                "both same-named legendaries (one printed, one granted) should be offered"
+            );
         }
-        _ => panic!("expected a legend-rule choice pause now that both copies are effectively legendary"),
+        _ => panic!(
+            "expected a legend-rule choice pause now that both copies are effectively legendary"
+        ),
     }
 }
 
@@ -313,14 +378,25 @@ fn game_effects_set_card_types_and_friends_self_register_and_resolve_for_real() 
     let target_land = ObjectId(0);
     let mut definition = land_definition();
     definition.script_ref = ScriptReference::Inline(ANIMATE_LAND_SCRIPT.to_string());
-    state.objects.insert(target_land, card_object(target_land, definition.clone(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target_land);
+    state.objects.insert(
+        target_land,
+        card_object(target_land, definition.clone(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(target_land);
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, target_land).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, target_land)
+        .expect("script self-registers cleanly");
 
     let effective = effective_characteristics(&state, &runtime, target_land);
-    assert_eq!(effective.card_types, CardTypeSet::ARTIFACT | CardTypeSet::CREATURE);
+    assert_eq!(
+        effective.card_types,
+        CardTypeSet::ARTIFACT | CardTypeSet::CREATURE
+    );
     assert!(effective.supertypes.contains(SupertypeSet::LEGENDARY));
     assert!(effective.subtypes.contains(&Subtype("Golem".to_string())));
     assert_eq!(effective.colors, ColorSet::BLUE);

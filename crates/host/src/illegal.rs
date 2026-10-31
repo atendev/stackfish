@@ -22,33 +22,49 @@ pub(crate) fn illegal_replies(decision: &Value, legal: &Value) -> Vec<Value> {
     match legal["kind"].as_str().unwrap_or_default() {
         "pick" => {
             let mut reply = legal.clone();
-            reply["picks"].as_array_mut().expect("a pick reply has picks").push(bogus_object());
+            reply["picks"]
+                .as_array_mut()
+                .expect("a pick reply has picks")
+                .push(bogus_object());
             extend(reply);
         }
         "order" => {
             let count = decision["items"].as_array().map_or(0, Vec::len);
             let mut reply = legal.clone();
-            reply["order"].as_array_mut().expect("an order reply has an order").push(json!(count));
+            reply["order"]
+                .as_array_mut()
+                .expect("an order reply has an order")
+                .push(json!(count));
             extend(reply);
         }
         "modes" => {
             let mode_count = decision["mode_count"].as_u64().unwrap_or(0);
             let mut reply = legal.clone();
-            reply["modes"].as_array_mut().expect("a modes reply has modes").push(json!(mode_count));
+            reply["modes"]
+                .as_array_mut()
+                .expect("a modes reply has modes")
+                .push(json!(mode_count));
             extend(reply);
         }
         "partition" => {
             let mut reply = legal.clone();
-            reply["top"].as_array_mut().expect("a partition reply has a top").push(json!(BOGUS));
+            reply["top"]
+                .as_array_mut()
+                .expect("a partition reply has a top")
+                .push(json!(BOGUS));
             extend(reply);
         }
         "payment" => {
             let units: Vec<Value> = (0..50).map(|_| json!({ "kind": "colorless" })).collect();
-            extend(json!({ "kind": "payment", "plan": { "payments": [{ "kind": "mana", "units": units }] } }));
+            extend(
+                json!({ "kind": "payment", "plan": { "payments": [{ "kind": "mana", "units": units }] } }),
+            );
         }
         "targets" => {
             let mut reply = legal.clone();
-            let lists = reply["targets"].as_array_mut().expect("a targets reply has lists");
+            let lists = reply["targets"]
+                .as_array_mut()
+                .expect("a targets reply has lists");
             match lists.first_mut().and_then(Value::as_array_mut) {
                 Some(first) => first.push(bogus_object()),
                 None => lists.push(Value::Array(vec![bogus_object()])),
@@ -56,7 +72,9 @@ pub(crate) fn illegal_replies(decision: &Value, legal: &Value) -> Vec<Value> {
             extend(reply);
         }
         "may_cast" => {
-            extend(json!({ "kind": "may_cast", "cast": { "modes": [99], "targets": [], "x_value": null } }));
+            extend(
+                json!({ "kind": "may_cast", "cast": { "modes": [99], "targets": [], "x_value": null } }),
+            );
         }
         "action" => {
             extend(json!({ "kind": "action", "action": { "kind": "play_land", "card": BOGUS } }));
@@ -94,7 +112,10 @@ pub(crate) fn illegal_replies(decision: &Value, legal: &Value) -> Vec<Value> {
             extend(reply);
             // The right creatures, one point too many.
             let mut over = legal.clone();
-            if let Some(amount) = over["assignments"].get_mut(0).and_then(|a| a["splits"].get_mut(0)) {
+            if let Some(amount) = over["assignments"]
+                .get_mut(0)
+                .and_then(|a| a["splits"].get_mut(0))
+            {
                 let given = amount["amount"].as_u64().unwrap_or(0);
                 amount["amount"] = json!(given + 1);
                 extend(over);

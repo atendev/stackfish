@@ -28,7 +28,13 @@ impl Engine {
                 checked.push(event);
                 self.process_state = ProcessState::ReplacementCheck { remaining, checked };
             }
-            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+            ReplacementOutcome::NeedsOrderingChoice {
+                affected_player,
+                event,
+                candidates,
+                excluded,
+                ..
+            } => {
                 self.process_state = ProcessState::AwaitingReplacementChoice {
                     affected_player,
                     pending_event: event,
@@ -43,7 +49,10 @@ impl Engine {
 
     /// Appends the checked events to the ledger, applying the deferred damage and
     /// counter effects, then pauses on `AwaitingPayment` or continues to `SbaLoop`.
-    pub(super) fn resolve_commit_events_state(&mut self, checked: Vec<GameEventKind>) -> StepStatus {
+    pub(super) fn resolve_commit_events_state(
+        &mut self,
+        checked: Vec<GameEventKind>,
+    ) -> StepStatus {
         let (caused_by_command, parent_event) = self
             .pipeline_context
             .as_ref()
@@ -66,7 +75,13 @@ impl Engine {
             }
             // CR 510.2: damage is applied only now that replacements have settled
             // its final amount and target.
-            if let GameEventKind::DamageDealt { source, target, amount, is_combat_damage } = &kind {
+            if let GameEventKind::DamageDealt {
+                source,
+                target,
+                amount,
+                is_combat_damage,
+            } = &kind
+            {
                 commands::apply_damage_event(
                     &mut self.state,
                     &self.script_runtime,
@@ -79,7 +94,12 @@ impl Engine {
             // CR 122.1a: applied here like damage, after replacements.
             // CR 613.7: the counter timestamp is allocated apart from the ledger
             // sequence number so the ledger numbering never gaps.
-            if let GameEventKind::CounterAdded { object, kind, amount } = &kind {
+            if let GameEventKind::CounterAdded {
+                object,
+                kind,
+                amount,
+            } = &kind
+            {
                 let timestamp = self.state.allocate_sequence_no();
                 if let Some(obj) = self.state.object_mut(*object) {
                     obj.counters.add(kind.clone(), *amount, timestamp);
@@ -95,16 +115,24 @@ impl Engine {
                 parent_event,
             });
         }
-        if modal_resume {
-            if let Some(continuation) = self.modal_continuation.take() {
-                return self.resume_modal_resolution(continuation);
-            }
+        if modal_resume && let Some(continuation) = self.modal_continuation.take() {
+            return self.resume_modal_resolution(continuation);
         }
         // CR 601.2f: pause for payment after the cast's events are committed.
         self.process_state = match self.pending_payment.take() {
-            Some(PendingPaymentRequest { stack_id, payer, cost, source, on_paid }) => {
-                ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid }
-            }
+            Some(PendingPaymentRequest {
+                stack_id,
+                payer,
+                cost,
+                source,
+                on_paid,
+            }) => ProcessState::AwaitingPayment {
+                stack_id,
+                payer,
+                cost,
+                source,
+                on_paid,
+            },
             None => ProcessState::SbaLoop,
         };
         StepStatus::Progressed

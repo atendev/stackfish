@@ -369,8 +369,13 @@ pub struct DamageSplitSpec {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActionSpec {
-    PassPriority { player: u32 },
-    PlayLand { player: u32, card: String },
+    PassPriority {
+        player: u32,
+    },
+    PlayLand {
+        player: u32,
+        card: String,
+    },
     CastSpell {
         player: u32,
         card: String,
@@ -400,11 +405,18 @@ pub enum ActionSpec {
         auto_pay: bool,
     },
     /// Shortcut for activating ability index 0 with no targets: tapping a land for its mana.
-    TapForMana { player: u32, source: String },
+    TapForMana {
+        player: u32,
+        source: String,
+    },
     /// Passes priority for whoever holds it until `state.phase` matches `phase`.
-    AdvanceToPhase { phase: String },
+    AdvanceToPhase {
+        phase: String,
+    },
     /// Same as `AdvanceToPhase`, for `state.step`.
-    AdvanceToStep { step: String },
+    AdvanceToStep {
+        step: String,
+    },
     DeclareAttackers {
         player: u32,
         #[serde(default)]
@@ -441,7 +453,9 @@ pub enum ActionSpec {
         mana: ManaPaymentSpec,
     },
     /// Abandons a pending payment through `Engine::unwind_payment`. CR 601.6
-    UnwindPayment { player: u32 },
+    UnwindPayment {
+        player: u32,
+    },
     /// Answers a pending discard with the card keys to discard. CR 514.1
     SubmitDiscard {
         player: u32,
@@ -449,15 +463,26 @@ pub enum ActionSpec {
         cards: Vec<String>,
     },
     /// Keeps the player's hand during pregame. CR 103.5
-    KeepHand { player: u32 },
+    KeepHand {
+        player: u32,
+    },
     /// Returns the hand and draws a fresh one. CR 103.5
-    TakeMulligan { player: u32 },
+    TakeMulligan {
+        player: u32,
+    },
     /// Bottoms `first_n` cards of the hand in zone order; 0 is valid only when none are owed.
     /// CR 103.5
-    BottomCards { player: u32, #[serde(default)] first_n: usize },
+    BottomCards {
+        player: u32,
+        #[serde(default)]
+        first_n: usize,
+    },
     /// Answers a script's mid-resolution target request from `Game.SelectTargets` or
     /// `Game.ChooseN`. `player` is not validated against the request.
-    SubmitScriptChoice { player: u32, target: TargetSpec },
+    SubmitScriptChoice {
+        player: u32,
+        target: TargetSpec,
+    },
 }
 
 fn describe_target(target: &TargetSpec) -> String {
@@ -475,14 +500,37 @@ impl ActionSpec {
             ActionSpec::PlayLand { player, card } => {
                 format!("play_land(player={player}, card={card:?})")
             }
-            ActionSpec::CastSpell { player, card, targets, modes, x_value, auto_pay } => {
-                let targets = targets.iter().map(describe_target).collect::<Vec<_>>().join(", ");
+            ActionSpec::CastSpell {
+                player,
+                card,
+                targets,
+                modes,
+                x_value,
+                auto_pay,
+            } => {
+                let targets = targets
+                    .iter()
+                    .map(describe_target)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!(
                     "cast_spell(player={player}, card={card:?}, targets=[{targets}], modes={modes:?}, x_value={x_value:?}, auto_pay={auto_pay})"
                 )
             }
-            ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors, x_value, auto_pay } => {
-                let targets = targets.iter().map(describe_target).collect::<Vec<_>>().join(", ");
+            ActionSpec::ActivateAbility {
+                player,
+                source,
+                ability_index,
+                targets,
+                chosen_colors,
+                x_value,
+                auto_pay,
+            } => {
+                let targets = targets
+                    .iter()
+                    .map(describe_target)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!(
                     "activate_ability(player={player}, source={source:?}, ability_index={ability_index}, targets=[{targets}], chosen_colors={chosen_colors:?}, x_value={x_value:?}, auto_pay={auto_pay})"
                 )
@@ -503,7 +551,15 @@ impl ActionSpec {
             ActionSpec::DeclareBands { player, bands } => {
                 let bands = bands
                     .iter()
-                    .map(|band| format!("[{}]", band.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ")))
+                    .map(|band| {
+                        format!(
+                            "[{}]",
+                            band.iter()
+                                .map(|c| format!("{c:?}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("declare_bands(player={player}, bands=[{bands}])")
@@ -516,7 +572,10 @@ impl ActionSpec {
                     .join(", ");
                 format!("declare_blockers(player={player}, blocks=[{blocks}])")
             }
-            ActionSpec::AssignCombatDamage { player, assignments } => {
+            ActionSpec::AssignCombatDamage {
+                player,
+                assignments,
+            } => {
                 let assignments = assignments
                     .iter()
                     .map(|a| {
@@ -532,8 +591,16 @@ impl ActionSpec {
                     .join(", ");
                 format!("assign_combat_damage(player={player}, assignments=[{assignments}])")
             }
-            ActionSpec::MakeChoice { player, description, selection } => {
-                let selection = selection.iter().map(describe_target).collect::<Vec<_>>().join(", ");
+            ActionSpec::MakeChoice {
+                player,
+                description,
+                selection,
+            } => {
+                let selection = selection
+                    .iter()
+                    .map(describe_target)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!(
                     "make_choice(player={player}, description={description:?}, selection=[{selection}])"
                 )
@@ -546,7 +613,10 @@ impl ActionSpec {
                 format!("submit_discard(player={player}, cards={cards:?})")
             }
             ActionSpec::SubmitScriptChoice { player, target } => {
-                format!("submit_script_choice(player={player}, target={})", describe_target(target))
+                format!(
+                    "submit_script_choice(player={player}, target={})",
+                    describe_target(target)
+                )
             }
             ActionSpec::KeepHand { player } => format!("keep_hand(player={player})"),
             ActionSpec::TakeMulligan { player } => format!("take_mulligan(player={player})"),
@@ -569,26 +639,70 @@ pub struct ManaPaymentSpec {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AssertionSpec {
-    Life { player: u32, equals: i32 },
-    LedgerLen { equals: usize },
-    ObjectZone { card: String, equals: String },
+    Life {
+        player: u32,
+        equals: i32,
+    },
+    LedgerLen {
+        equals: usize,
+    },
+    ObjectZone {
+        card: String,
+        equals: String,
+    },
     /// One pool field by name: `white`, `blue`, `black`, `red`, `green` or `colorless`.
-    ManaPool { player: u32, color: String, equals: u32 },
-    Tapped { card: String, equals: bool },
-    Eliminated { player: u32, equals: bool },
-    Phase { equals: String },
-    Step { equals: String },
-    ActivePlayer { equals: u32 },
-    PriorityPlayer { equals: u32 },
-    HandSize { player: u32, equals: usize },
+    ManaPool {
+        player: u32,
+        color: String,
+        equals: u32,
+    },
+    Tapped {
+        card: String,
+        equals: bool,
+    },
+    Eliminated {
+        player: u32,
+        equals: bool,
+    },
+    Phase {
+        equals: String,
+    },
+    Step {
+        equals: String,
+    },
+    ActivePlayer {
+        equals: u32,
+    },
+    PriorityPlayer {
+        equals: u32,
+    },
+    HandSize {
+        player: u32,
+        equals: usize,
+    },
     /// A counter count by kind; see `parse_counter_kind` for the names.
-    ObjectCounters { card: String, kind: String, equals: i32 },
-    PlayerCounters { player: u32, kind: String, equals: i32 },
+    ObjectCounters {
+        card: String,
+        kind: String,
+        equals: i32,
+    },
+    PlayerCounters {
+        player: u32,
+        kind: String,
+        equals: i32,
+    },
     /// Combat damage a player took from one commander. CR 903.10a
-    CommanderDamage { player: u32, source_card: String, equals: u32 },
+    CommanderDamage {
+        player: u32,
+        source_card: String,
+        equals: u32,
+    },
     /// The full membership of `card`'s band by key, order-independent and including `card`.
     /// `[]` asserts `card` is in no band. CR 702.22c
-    BandMembers { card: String, equals: Vec<String> },
+    BandMembers {
+        card: String,
+        equals: Vec<String>,
+    },
 }
 
 /// `AssertionSpec` with `assert_`-prefixed type names, for `[[steps]]` where actions and
@@ -603,7 +717,11 @@ pub enum AssertionStepSpec {
     #[serde(rename = "assert_object_zone")]
     ObjectZone { card: String, equals: String },
     #[serde(rename = "assert_mana_pool")]
-    ManaPool { player: u32, color: String, equals: u32 },
+    ManaPool {
+        player: u32,
+        color: String,
+        equals: u32,
+    },
     #[serde(rename = "assert_tapped")]
     Tapped { card: String, equals: bool },
     #[serde(rename = "assert_eliminated")]
@@ -619,11 +737,23 @@ pub enum AssertionStepSpec {
     #[serde(rename = "assert_hand_size")]
     HandSize { player: u32, equals: usize },
     #[serde(rename = "assert_object_counters")]
-    ObjectCounters { card: String, kind: String, equals: i32 },
+    ObjectCounters {
+        card: String,
+        kind: String,
+        equals: i32,
+    },
     #[serde(rename = "assert_player_counters")]
-    PlayerCounters { player: u32, kind: String, equals: i32 },
+    PlayerCounters {
+        player: u32,
+        kind: String,
+        equals: i32,
+    },
     #[serde(rename = "assert_commander_damage")]
-    CommanderDamage { player: u32, source_card: String, equals: u32 },
+    CommanderDamage {
+        player: u32,
+        source_card: String,
+        equals: u32,
+    },
     #[serde(rename = "assert_band_members")]
     BandMembers { card: String, equals: Vec<String> },
 }
@@ -631,29 +761,71 @@ pub enum AssertionStepSpec {
 impl AssertionStepSpec {
     pub(crate) fn to_assertion_spec(&self) -> AssertionSpec {
         match self {
-            Self::Life { player, equals } => AssertionSpec::Life { player: *player, equals: *equals },
+            Self::Life { player, equals } => AssertionSpec::Life {
+                player: *player,
+                equals: *equals,
+            },
             Self::LedgerLen { equals } => AssertionSpec::LedgerLen { equals: *equals },
-            Self::ObjectZone { card, equals } => AssertionSpec::ObjectZone { card: card.clone(), equals: equals.clone() },
-            Self::ManaPool { player, color, equals } => AssertionSpec::ManaPool { player: *player, color: color.clone(), equals: *equals },
-            Self::Tapped { card, equals } => AssertionSpec::Tapped { card: card.clone(), equals: *equals },
-            Self::Eliminated { player, equals } => AssertionSpec::Eliminated { player: *player, equals: *equals },
-            Self::Phase { equals } => AssertionSpec::Phase { equals: equals.clone() },
-            Self::Step { equals } => AssertionSpec::Step { equals: equals.clone() },
+            Self::ObjectZone { card, equals } => AssertionSpec::ObjectZone {
+                card: card.clone(),
+                equals: equals.clone(),
+            },
+            Self::ManaPool {
+                player,
+                color,
+                equals,
+            } => AssertionSpec::ManaPool {
+                player: *player,
+                color: color.clone(),
+                equals: *equals,
+            },
+            Self::Tapped { card, equals } => AssertionSpec::Tapped {
+                card: card.clone(),
+                equals: *equals,
+            },
+            Self::Eliminated { player, equals } => AssertionSpec::Eliminated {
+                player: *player,
+                equals: *equals,
+            },
+            Self::Phase { equals } => AssertionSpec::Phase {
+                equals: equals.clone(),
+            },
+            Self::Step { equals } => AssertionSpec::Step {
+                equals: equals.clone(),
+            },
             Self::ActivePlayer { equals } => AssertionSpec::ActivePlayer { equals: *equals },
             Self::PriorityPlayer { equals } => AssertionSpec::PriorityPlayer { equals: *equals },
-            Self::HandSize { player, equals } => AssertionSpec::HandSize { player: *player, equals: *equals },
-            Self::ObjectCounters { card, kind, equals } => {
-                AssertionSpec::ObjectCounters { card: card.clone(), kind: kind.clone(), equals: *equals }
-            }
-            Self::PlayerCounters { player, kind, equals } => {
-                AssertionSpec::PlayerCounters { player: *player, kind: kind.clone(), equals: *equals }
-            }
-            Self::CommanderDamage { player, source_card, equals } => {
-                AssertionSpec::CommanderDamage { player: *player, source_card: source_card.clone(), equals: *equals }
-            }
-            Self::BandMembers { card, equals } => {
-                AssertionSpec::BandMembers { card: card.clone(), equals: equals.clone() }
-            }
+            Self::HandSize { player, equals } => AssertionSpec::HandSize {
+                player: *player,
+                equals: *equals,
+            },
+            Self::ObjectCounters { card, kind, equals } => AssertionSpec::ObjectCounters {
+                card: card.clone(),
+                kind: kind.clone(),
+                equals: *equals,
+            },
+            Self::PlayerCounters {
+                player,
+                kind,
+                equals,
+            } => AssertionSpec::PlayerCounters {
+                player: *player,
+                kind: kind.clone(),
+                equals: *equals,
+            },
+            Self::CommanderDamage {
+                player,
+                source_card,
+                equals,
+            } => AssertionSpec::CommanderDamage {
+                player: *player,
+                source_card: source_card.clone(),
+                equals: *equals,
+            },
+            Self::BandMembers { card, equals } => AssertionSpec::BandMembers {
+                card: card.clone(),
+                equals: equals.clone(),
+            },
         }
     }
 }
@@ -692,8 +864,10 @@ impl<'de> serde::Deserialize<'de> for ScenarioStep {
         } else {
             let spec = ActionSpec::deserialize(value.clone())
                 .map_err(|e| D::Error::custom(format!("step `{step_type}`: {e}")))?;
-            let expect_error =
-                value.get("expect_error").and_then(toml::Value::as_bool).unwrap_or(false);
+            let expect_error = value
+                .get("expect_error")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(false);
             Ok(ScenarioStep::Action { spec, expect_error })
         }
     }
@@ -708,7 +882,11 @@ impl AssertionSpec {
             AssertionSpec::ObjectZone { card, equals } => {
                 format!("object_zone(card={card:?}) == {equals:?}")
             }
-            AssertionSpec::ManaPool { player, color, equals } => {
+            AssertionSpec::ManaPool {
+                player,
+                color,
+                equals,
+            } => {
                 format!("mana_pool(player={player}, color={color}) == {equals}")
             }
             AssertionSpec::Tapped { card, equals } => format!("tapped(card={card:?}) == {equals}"),
@@ -725,11 +903,21 @@ impl AssertionSpec {
             AssertionSpec::ObjectCounters { card, kind, equals } => {
                 format!("object_counters(card={card:?}, kind={kind:?}) == {equals}")
             }
-            AssertionSpec::PlayerCounters { player, kind, equals } => {
+            AssertionSpec::PlayerCounters {
+                player,
+                kind,
+                equals,
+            } => {
                 format!("player_counters(player={player}, kind={kind:?}) == {equals}")
             }
-            AssertionSpec::CommanderDamage { player, source_card, equals } => {
-                format!("commander_damage(player={player}, source_card={source_card:?}) == {equals}")
+            AssertionSpec::CommanderDamage {
+                player,
+                source_card,
+                equals,
+            } => {
+                format!(
+                    "commander_damage(player={player}, source_card={source_card:?}) == {equals}"
+                )
             }
             AssertionSpec::BandMembers { card, equals } => {
                 format!("band_members(card={card:?}) == {equals:?}")

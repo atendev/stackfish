@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 const UNTIL_END_OF_TURN: &str = r#"
 local s = {}
@@ -75,7 +77,9 @@ fn bear_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Bear".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -104,10 +108,15 @@ fn registered_duration(script: &str) -> EffectDuration {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(script);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.continuous_effects.len(), 1);
     state.continuous_effects[0].duration.clone()
@@ -115,27 +124,42 @@ fn registered_duration(script: &str) -> EffectDuration {
 
 #[test]
 fn set_duration_until_end_of_turn_is_decoded() {
-    assert!(matches!(registered_duration(UNTIL_END_OF_TURN), EffectDuration::UntilEndOfTurn));
+    assert!(matches!(
+        registered_duration(UNTIL_END_OF_TURN),
+        EffectDuration::UntilEndOfTurn
+    ));
 }
 
 #[test]
 fn set_duration_until_your_next_turn_is_decoded() {
-    assert!(matches!(registered_duration(UNTIL_YOUR_NEXT_TURN), EffectDuration::UntilYourNextTurn));
+    assert!(matches!(
+        registered_duration(UNTIL_YOUR_NEXT_TURN),
+        EffectDuration::UntilYourNextTurn
+    ));
 }
 
 #[test]
 fn set_duration_until_end_of_combat_is_decoded() {
-    assert!(matches!(registered_duration(UNTIL_END_OF_COMBAT), EffectDuration::UntilEndOfCombat));
+    assert!(matches!(
+        registered_duration(UNTIL_END_OF_COMBAT),
+        EffectDuration::UntilEndOfCombat
+    ));
 }
 
 #[test]
 fn set_duration_explicit_permanent_is_decoded() {
-    assert!(matches!(registered_duration(EXPLICIT_PERMANENT), EffectDuration::Permanent));
+    assert!(matches!(
+        registered_duration(EXPLICIT_PERMANENT),
+        EffectDuration::Permanent
+    ));
 }
 
 #[test]
 fn omitting_set_duration_still_defaults_to_permanent() {
-    assert!(matches!(registered_duration(NO_SET_DURATION), EffectDuration::Permanent));
+    assert!(matches!(
+        registered_duration(NO_SET_DURATION),
+        EffectDuration::Permanent
+    ));
 }
 
 fn step_until_pause(engine: &mut Engine) -> StepStatus {
@@ -149,7 +173,10 @@ fn step_until_pause(engine: &mut Engine) -> StepStatus {
 
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
         .expect("PassPriority should be accepted");
 }
 
@@ -178,12 +205,23 @@ fn lua_registered_until_end_of_turn_static_ability_drains_at_cleanup() {
     state.turn_number = 2;
     state.last_active_turn_number = HashMap::from([(p0, 1), (p1, 1)]);
     let definition = bear_definition(UNTIL_END_OF_TURN);
-    state.objects.insert(bear, card_object(bear, definition.clone(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
     assert_eq!(state.continuous_effects.len(), 1);
-    assert!(matches!(state.continuous_effects[0].duration, EffectDuration::UntilEndOfTurn));
+    assert!(matches!(
+        state.continuous_effects[0].duration,
+        EffectDuration::UntilEndOfTurn
+    ));
 
     let mut engine = Engine::new(state);
     pass_both_players(&mut engine, p0, p1);

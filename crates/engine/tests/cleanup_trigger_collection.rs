@@ -5,13 +5,15 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -36,7 +38,12 @@ fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -
     GameObject {
         damage_marked,
         controlled_since_turn: 1,
-        ..card_object(id, creature_definition(toughness), owner, ZoneKind::Battlefield)
+        ..card_object(
+            id,
+            creature_definition(toughness),
+            owner,
+            ZoneKind::Battlefield,
+        )
     }
 }
 
@@ -64,7 +71,17 @@ fn state_at_end_step() -> GameState {
         phase: Phase::Ending,
         step: Step::End,
         last_active_turn_number: HashMap::from([(p0, 2), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Battlefield, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Library,
+                ZoneKind::Hand,
+                ZoneKind::Graveyard,
+                ZoneKind::Battlefield,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
@@ -79,37 +96,61 @@ fn step_until_pause(engine: &mut Engine) -> StepStatus {
 
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
         .expect("PassPriority should be accepted");
 }
 
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     let s = step_until_pause(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p0), "expected p0 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p0),
+        "expected p0 end-step priority, got {s:?}"
+    );
     pass(engine, p0);
 
     let s = step_until_pause(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p1), "expected p1 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p1),
+        "expected p1 end-step priority, got {s:?}"
+    );
     pass(engine, p1);
 
     step_until_pause(engine)
 }
 
 #[test]
-fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies_trigger_at_cleanup() {
+fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies_trigger_at_cleanup()
+ {
     let mut state = state_at_end_step();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let source = ObjectId(1);
     // A permanent -5/-5 plus a +0/+5 pump leaves toughness 1 all turn, with no marked damage since CR 514.2 clears it in the same step.
     state.objects.insert(source, creature(source, p0, 1, 0));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(source);
     state.abilities.push(dies_ability(source));
     state.continuous_effects.push(ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: -5 }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: -5,
+        }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -117,8 +158,19 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
     state.continuous_effects.push(ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 5 }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: 5,
+        }),
         timestamp: SequenceNo(1),
         duration: EffectDuration::UntilEndOfTurn,
         condition: None,
@@ -132,15 +184,33 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 priority reopened by the Dies trigger, got {status:?}"
     );
-    assert_eq!(engine.state().phase, Phase::Ending, "still in cleanup, turn did not silently advance");
+    assert_eq!(
+        engine.state().phase,
+        Phase::Ending,
+        "still in cleanup, turn did not silently advance"
+    );
     assert_eq!(engine.state().step, Step::Cleanup);
-    assert_eq!(engine.state().stack.len(), 1, "the Dies trigger was pushed onto the stack");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the Dies trigger was pushed onto the stack"
+    );
     assert!(
-        engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty(),
+        engine
+            .state()
+            .zone(ZoneKind::Battlefield, None)
+            .unwrap()
+            .contents
+            .is_empty(),
         "the creature actually died"
     );
     assert_eq!(
-        engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(),
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .len(),
         1,
         "the dead creature landed in its owner's graveyard"
     );
@@ -151,7 +221,11 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
     pass(&mut engine, p1);
     let status = step_until_pause(&mut engine);
 
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied from the Dies trigger");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "GainLife(1) applied from the Dies trigger"
+    );
     assert!(engine.state().stack.is_empty());
     // CR 117.5: priority reopens for p0 once more in the same Cleanup step, so one more pass round is needed.
     assert!(
@@ -179,7 +253,10 @@ fn cleanup_with_no_sba_and_no_trigger_still_advances_silently() {
     // A healthy creature fires no Dies trigger, as the cleanup_no_discard_needed tests in ending_phase.rs also show.
     let source = ObjectId(1);
     state.objects.insert(source, creature(source, p0, 3, 0));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(source);
     state.abilities.push(dies_ability(source));
 
     let mut engine = Engine::new(state);

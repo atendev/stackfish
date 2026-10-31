@@ -6,7 +6,8 @@
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
+    two_player_state as base_two_player_state,
 };
 
 fn script_error_events(engine: &Engine) -> Vec<String> {
@@ -37,14 +38,30 @@ fn erroring_land_definition() -> CardDefinition {
     CardDefinition {
         supertypes: SupertypeSet::BASIC,
         script_ref: ScriptReference::Inline(ALWAYS_ERRORS_CARD_SCRIPT.to_string()),
-        ..minimal_card_definition(1, "Test Erroring Land", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            1,
+            "Test Erroring Land",
+            "unused",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     }
 }
 
 fn vanilla_land_definition() -> CardDefinition {
     CardDefinition {
         supertypes: SupertypeSet::BASIC,
-        ..minimal_card_definition(2, "Forest", "forest", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            2,
+            "Forest",
+            "forest",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     }
 }
 
@@ -53,20 +70,44 @@ fn play_land_with_a_real_erroring_script_logs_a_script_error() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let card = ObjectId(0);
-    state.objects.insert(card, card_object(card, erroring_land_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, erroring_land_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } }).expect("p0 holds priority, land is in hand");
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card },
+        })
+        .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
     assert!(
-        engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.len() == 1,
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "got {status:?}"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Battlefield, None)
+            .unwrap()
+            .contents
+            .len()
+            == 1,
         "the land still entered the battlefield - the fallback behavior is unchanged"
     );
     let errors = script_error_events(&engine);
-    assert_eq!(errors.len(), 1, "the real script error is now logged, not silently dropped");
+    assert_eq!(
+        errors.len(),
+        1,
+        "the real script error is now logged, not silently dropped"
+    );
     assert!(errors[0].contains("boom"), "error message: {}", errors[0]);
 }
 
@@ -75,14 +116,28 @@ fn play_land_with_a_bykey_placeholder_script_logs_no_script_error() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let card = ObjectId(0);
-    state.objects.insert(card, card_object(card, vanilla_land_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, vanilla_land_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } }).expect("p0 holds priority, land is in hand");
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card },
+        })
+        .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "got {status:?}"
+    );
     assert!(
         script_error_events(&engine).is_empty(),
         "ByKey is the ordinary 'no real script' shape testutil's own minimal_card_definition defaults to - \
@@ -94,7 +149,15 @@ fn vanilla_creature_definition() -> CardDefinition {
     CardDefinition {
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
-        ..minimal_card_definition(3, "Grizzly Bears", "grizzly_bears", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            3,
+            "Grizzly Bears",
+            "grizzly_bears",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -102,15 +165,29 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None, pay_buyback: false },
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
@@ -120,18 +197,43 @@ fn casting_a_vanilla_creature_with_a_bykey_script_logs_no_script_error() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(0);
-    state.objects.insert(card, card_object(card, vanilla_creature_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, vanilla_creature_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
-    assert_eq!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.len(), 1, "the creature resolved onto the battlefield");
+    assert_eq!(
+        engine
+            .state()
+            .zone(ZoneKind::Battlefield, None)
+            .unwrap()
+            .contents
+            .len(),
+        1,
+        "the creature resolved onto the battlefield"
+    );
     assert!(
         script_error_events(&engine).is_empty(),
         "a vanilla ByKey creature is this engine's own overwhelmingly common test-fixture shape - \
@@ -159,7 +261,15 @@ fn erroring_operation_creature_definition() -> CardDefinition {
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
         script_ref: ScriptReference::Inline(String::new()),
-        ..minimal_card_definition(4, "Test Erroring ETB Creature", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            4,
+            "Test Erroring ETB Creature",
+            "unused",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -169,12 +279,27 @@ fn a_triggered_abilitys_erroring_operation_logs_a_script_error_and_still_resolve
     let p1 = PlayerId(1);
     let caster = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(caster, card_object(caster, erroring_operation_creature_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(caster);
+    state.objects.insert(
+        caster,
+        card_object(
+            caster,
+            erroring_operation_creature_definition(),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(caster);
 
     let mut engine = Engine::new(state);
-    let condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
-    let operation = engine.load_script(OPERATION_ALWAYS_ERRORS).expect("operation script loads");
+    let condition = engine
+        .load_script(CONDITION_ENTERS_BATTLEFIELD)
+        .expect("condition script loads");
+    let operation = engine
+        .load_script(OPERATION_ALWAYS_ERRORS)
+        .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -191,28 +316,73 @@ fn a_triggered_abilitys_erroring_operation_logs_a_script_error_and_still_resolve
 
     cast_spell(&mut engine, p0, caster);
     pay_free_and_drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
-    assert_eq!(engine.state().stack.len(), 1, "the ETB ability itself is now on the stack");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "got {status:?}"
+    );
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the ETB ability itself is now on the stack"
+    );
 
     // The erroring operation resolves with no effect (the fallback) and the error is logged.
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
-    assert!(engine.state().stack.is_empty(), "the ability resolved with no effect - nothing left on the stack");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
+    assert!(
+        engine.state().stack.is_empty(),
+        "the ability resolved with no effect - nothing left on the stack"
+    );
 
     let errors = script_error_events(&engine);
-    assert_eq!(errors.len(), 1, "the real operation script error is now logged, not silently dropped");
+    assert_eq!(
+        errors.len(),
+        1,
+        "the real operation script error is now logged, not silently dropped"
+    );
     assert!(errors[0].contains("boom"), "error message: {}", errors[0]);
 }
 
 fn vanilla_instant_definition() -> CardDefinition {
-    minimal_card_definition(5, "Test Vanilla Instant", "vanilla_instant", ManaCost { symbols: Vec::new() }, CardTypeSet::INSTANT)
+    minimal_card_definition(
+        5,
+        "Test Vanilla Instant",
+        "vanilla_instant",
+        ManaCost {
+            symbols: Vec::new(),
+        },
+        CardTypeSet::INSTANT,
+    )
 }
 
 #[test]
@@ -221,19 +391,41 @@ fn a_vanilla_instant_with_no_operation_logs_no_script_error() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(0);
-    state.objects.insert(card, card_object(card, vanilla_instant_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, vanilla_instant_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(&mut engine);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
-    assert!(engine.state().stack.is_empty(), "the vanilla spell resolved with no effect, same as before this slice");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "got {status:?}"
+    );
+    assert!(
+        engine.state().stack.is_empty(),
+        "the vanilla spell resolved with no effect, same as before this slice"
+    );
     assert!(
         script_error_events(&engine).is_empty(),
         "ScriptHandle(0) is the reserved 'nothing bound' placeholder every vanilla spell/ability carries - \
@@ -246,7 +438,15 @@ fn pending_cast_caster_definition() -> CardDefinition {
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
         script_ref: ScriptReference::Inline(String::new()),
-        ..minimal_card_definition(6, "Test Pending-Cast Caster", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            6,
+            "Test Pending-Cast Caster",
+            "unused",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -262,12 +462,22 @@ fn a_script_requested_cast_that_targets_a_nonexistent_object_logs_a_script_error
     let p1 = PlayerId(1);
     let caster = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(caster, card_object(caster, pending_cast_caster_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(caster);
+    state.objects.insert(
+        caster,
+        card_object(caster, pending_cast_caster_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(caster);
 
     let mut engine = Engine::new(state);
-    let condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
-    let operation = engine.load_script(OPERATION_CASTS_A_NONEXISTENT_OBJECT).expect("operation script loads");
+    let condition = engine
+        .load_script(CONDITION_ENTERS_BATTLEFIELD)
+        .expect("condition script loads");
+    let operation = engine
+        .load_script(OPERATION_CASTS_A_NONEXISTENT_OBJECT)
+        .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -284,22 +494,63 @@ fn a_script_requested_cast_that_targets_a_nonexistent_object_logs_a_script_error
 
     cast_spell(&mut engine, p0, caster);
     pay_free_and_drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
-    assert_eq!(engine.state().stack.len(), 1, "the ETB ability itself is now on the stack");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "got {status:?}"
+    );
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the ETB ability itself is now on the stack"
+    );
 
     // The operation requests an illegal cast: no panic, no stuck pipeline, no payment pause, and the failure is logged.
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
-    assert!(engine.state().stack.is_empty(), "the ability resolved with no effect - nothing left on the stack");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
+    assert!(
+        engine.state().stack.is_empty(),
+        "the ability resolved with no effect - nothing left on the stack"
+    );
 
     let errors = script_error_events(&engine);
-    assert_eq!(errors.len(), 1, "the illegal script-requested cast is now logged, not silently dropped");
-    assert!(errors[0].contains("script-requested cast failed"), "error message: {}", errors[0]);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the illegal script-requested cast is now logged, not silently dropped"
+    );
+    assert!(
+        errors[0].contains("script-requested cast failed"),
+        "error message: {}",
+        errors[0]
+    );
 }

@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 const ENCHANTED_PLAYER_HAND_REVEALED: &str = r#"
 local s = {}
@@ -22,7 +24,9 @@ fn aura_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Enchant Player Hand Reveal Aura".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -54,7 +58,10 @@ fn two_player_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -63,16 +70,28 @@ fn run_card_script_self_registers_an_enchanted_player_hand_reveal_modifier() {
     let mut state = two_player_state();
     let aura = ObjectId(0);
     let definition = aura_definition(ENCHANTED_PLAYER_HAND_REVEALED);
-    state.objects.insert(aura, card_object(aura, definition.clone(), PlayerId(1), ZoneKind::Battlefield));
+    state.objects.insert(
+        aura,
+        card_object(aura, definition.clone(), PlayerId(1), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, aura).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, aura)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.hand_reveal_modifiers.len(), 1);
     let modifier = &state.hand_reveal_modifiers[0];
     assert_eq!(modifier.source, aura);
-    assert_eq!(modifier.controller, PlayerId(1), "controller resolved from the Aura's own live controller at drain time");
-    assert!(matches!(modifier.affected, HandRevealAffected::EnchantedPlayer));
+    assert_eq!(
+        modifier.controller,
+        PlayerId(1),
+        "controller resolved from the Aura's own live controller at drain time"
+    );
+    assert!(matches!(
+        modifier.affected,
+        HandRevealAffected::EnchantedPlayer
+    ));
 }
 
 #[test]
@@ -91,8 +110,14 @@ fn enchanted_players_hand_is_revealed() {
         timestamp: SequenceNo(0),
     });
 
-    assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "the enchanted player's hand should be revealed");
-    assert!(!is_hand_revealed(&state, &state.hand_reveal_modifiers, p1), "p1 isn't enchanted - unaffected");
+    assert!(
+        is_hand_revealed(&state, &state.hand_reveal_modifiers, p0),
+        "the enchanted player's hand should be revealed"
+    );
+    assert!(
+        !is_hand_revealed(&state, &state.hand_reveal_modifiers, p1),
+        "p1 isn't enchanted - unaffected"
+    );
 }
 
 #[test]
@@ -111,7 +136,10 @@ fn the_reveal_stops_once_the_aura_is_no_longer_attached_to_that_player() {
         timestamp: SequenceNo(0),
     });
 
-    assert!(!is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "the Aura isn't attached to anyone - not revealed");
+    assert!(
+        !is_hand_revealed(&state, &state.hand_reveal_modifiers, p0),
+        "the Aura isn't attached to anyone - not revealed"
+    );
 }
 
 #[test]
@@ -120,7 +148,10 @@ fn filter_controller_forms_resolve_independent_of_enchantment() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let source = ObjectId(1);
-    put_on_battlefield(&mut state, card_object(source, aura_definition(""), p0, ZoneKind::Battlefield));
+    put_on_battlefield(
+        &mut state,
+        card_object(source, aura_definition(""), p0, ZoneKind::Battlefield),
+    );
     state.hand_reveal_modifiers.push(HandRevealModifier {
         source,
         controller: p0,
@@ -128,8 +159,14 @@ fn filter_controller_forms_resolve_independent_of_enchantment() {
         timestamp: SequenceNo(0),
     });
 
-    assert!(!is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "the modifier's own controller isn't their own opponent");
-    assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p1), "p1 is p0's opponent - revealed");
+    assert!(
+        !is_hand_revealed(&state, &state.hand_reveal_modifiers, p0),
+        "the modifier's own controller isn't their own opponent"
+    );
+    assert!(
+        is_hand_revealed(&state, &state.hand_reveal_modifiers, p1),
+        "p1 is p0's opponent - revealed"
+    );
 }
 
 #[test]
@@ -142,7 +179,15 @@ fn two_independent_reveal_sources_never_conflict() {
     let mut aura_obj = card_object(aura, aura_definition(""), p1, ZoneKind::Battlefield);
     aura_obj.attached_to_player = Some(p0);
     put_on_battlefield(&mut state, aura_obj);
-    put_on_battlefield(&mut state, card_object(telepathy_like, aura_definition(""), p1, ZoneKind::Battlefield));
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            telepathy_like,
+            aura_definition(""),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
     // Two independent sources both reveal p0's hand, and CR 701.20c lets a revealed card be revealed again, so they never conflict.
     state.hand_reveal_modifiers.push(HandRevealModifier {
         source: aura,
@@ -157,11 +202,17 @@ fn two_independent_reveal_sources_never_conflict() {
         timestamp: SequenceNo(1),
     });
 
-    assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "revealed via either source");
+    assert!(
+        is_hand_revealed(&state, &state.hand_reveal_modifiers, p0),
+        "revealed via either source"
+    );
 
     // Removing the earlier source leaves the later Filter-based source holding.
     state.hand_reveal_modifiers.retain(|m| m.source != aura);
-    assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "still revealed via the remaining Filter-based source");
+    assert!(
+        is_hand_revealed(&state, &state.hand_reveal_modifiers, p0),
+        "still revealed via the remaining Filter-based source"
+    );
 }
 
 // Forces a real retire_object call on the modifier's source.
@@ -169,7 +220,9 @@ fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
         name: "Test Destroy Permanent".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -182,9 +235,20 @@ fn destroy_permanent_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_destroy_permanent".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: None, subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: None,
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
@@ -215,28 +279,67 @@ fn a_hand_reveal_modifier_is_purged_once_its_source_leaves_the_battlefield() {
         timestamp: SequenceNo(0),
     });
     let removal = ObjectId(1);
-    state.objects.insert(removal, card_object(removal, destroy_permanent_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(removal);
+    state.objects.insert(
+        removal,
+        card_object(removal, destroy_permanent_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(removal);
 
-    assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "the modifier is live before its source is destroyed");
+    assert!(
+        is_hand_revealed(&state, &state.hand_reveal_modifiers, p0),
+        "the modifier is live before its source is destroyed"
+    );
 
     let mut engine = Engine::new(state);
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: removal, modes: Vec::new(), targets: vec![Target::Object(aura)], x_value: None, alternative_cost: None, pay_buyback: false },
+            kind: PlayerActionKind::CastSpell {
+                card: removal,
+                modes: Vec::new(),
+                targets: vec![Target::Object(aura)],
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("p0 holds priority, spell is in hand");
     let status = stackfish_testutil::drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }));
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     stackfish_testutil::drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     stackfish_testutil::drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     stackfish_testutil::drain(&mut engine);
 
-    assert!(engine.state().object(aura).is_none(), "the source Aura was destroyed");
-    assert!(engine.state().hand_reveal_modifiers.is_empty(), "the modifier must be purged along with its source");
-    assert!(!is_hand_revealed(engine.state(), &engine.state().hand_reveal_modifiers, p0), "no longer revealed once the source is gone");
+    assert!(
+        engine.state().object(aura).is_none(),
+        "the source Aura was destroyed"
+    );
+    assert!(
+        engine.state().hand_reveal_modifiers.is_empty(),
+        "the modifier must be purged along with its source"
+    );
+    assert!(
+        !is_hand_revealed(engine.state(), &engine.state().hand_reveal_modifiers, p0),
+        "no longer revealed once the source is gone"
+    );
 }

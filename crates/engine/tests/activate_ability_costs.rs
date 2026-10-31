@@ -11,7 +11,9 @@ fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types,
@@ -36,7 +38,9 @@ fn object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneK
     card_object(id, definition, owner, zone)
 }
 
-fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, ObjectId, ObjectId, ObjectId, ObjectId) {
+fn state_with_cost(
+    cost: CostSpec,
+) -> (GameState, PlayerId, ObjectId, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
     let fodder = ObjectId(1);
@@ -47,23 +51,48 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, ObjectId, ObjectId, 
     let mut objects = HashMap::new();
     objects.insert(
         source,
-        object(source, vanilla_definition("Source", CardTypeSet::ARTIFACT), p0, ZoneKind::Battlefield),
+        object(
+            source,
+            vanilla_definition("Source", CardTypeSet::ARTIFACT),
+            p0,
+            ZoneKind::Battlefield,
+        ),
     );
     objects.insert(
         fodder,
-        object(fodder, vanilla_definition("Fodder", CardTypeSet::CREATURE), p0, ZoneKind::Battlefield),
+        object(
+            fodder,
+            vanilla_definition("Fodder", CardTypeSet::CREATURE),
+            p0,
+            ZoneKind::Battlefield,
+        ),
     );
     objects.insert(
         hand_card,
-        object(hand_card, vanilla_definition("Hand Card", CardTypeSet::CREATURE), p0, ZoneKind::Hand),
+        object(
+            hand_card,
+            vanilla_definition("Hand Card", CardTypeSet::CREATURE),
+            p0,
+            ZoneKind::Hand,
+        ),
     );
     objects.insert(
         tappable_a,
-        object(tappable_a, vanilla_definition("Tappable A", CardTypeSet::ARTIFACT), p0, ZoneKind::Battlefield),
+        object(
+            tappable_a,
+            vanilla_definition("Tappable A", CardTypeSet::ARTIFACT),
+            p0,
+            ZoneKind::Battlefield,
+        ),
     );
     objects.insert(
         tappable_b,
-        object(tappable_b, vanilla_definition("Tappable B", CardTypeSet::ARTIFACT), p0, ZoneKind::Battlefield),
+        object(
+            tappable_b,
+            vanilla_definition("Tappable B", CardTypeSet::ARTIFACT),
+            p0,
+            ZoneKind::Battlefield,
+        ),
     );
 
     let state = GameState {
@@ -74,7 +103,11 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, ObjectId, ObjectId, 
                 owner: None,
                 contents: VecDeque::from([source, fodder, tappable_a, tappable_b]),
             },
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::from([hand_card]) },
+            Zone {
+                kind: ZoneKind::Hand,
+                owner: Some(p0),
+                contents: VecDeque::from([hand_card]),
+            },
             Zone::new(ZoneKind::Graveyard, Some(p0)),
         ],
         abilities: vec![RegisteredAbility {
@@ -94,7 +127,6 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, ObjectId, ObjectId, 
     };
     (state, p0, source, fodder, hand_card, tappable_a)
 }
-
 
 fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: ObjectId) {
     engine
@@ -118,7 +150,10 @@ fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: Obj
 
 fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange { object, from, to, .. } = event.kind {
+        if let GameEventKind::ZoneChange {
+            object, from, to, ..
+        } = event.kind
+        {
             return (object, from, to);
         }
     }
@@ -130,7 +165,14 @@ fn sacrifice_cost_accepts_legal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     };
@@ -139,14 +181,22 @@ fn sacrifice_cost_accepts_legal_payment() {
 
     activate_and_await_payment(&mut engine, p0, source);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(fodder)],
+        })
         .expect("a legal Sacrifice(fodder) payment pays a Sacrifice{Creature} cost");
     drain(&mut engine);
 
-    assert!(engine.state().object(fodder).is_none(), "the original fodder id is retired");
+    assert!(
+        engine.state().object(fodder).is_none(),
+        "the original fodder id is retired"
+    );
     let (new_id, from, to) = last_zone_change(&engine);
     assert_eq!((from, to), (ZoneKind::Battlefield, ZoneKind::Graveyard));
-    assert!(engine.state().object(new_id).is_some(), "fodder now exists in the graveyard under a new id");
+    assert!(
+        engine.state().object(new_id).is_some(),
+        "fodder now exists in the graveyard under a new id"
+    );
 }
 
 #[test]
@@ -154,7 +204,14 @@ fn sacrifice_cost_rejects_illegal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     };
@@ -165,11 +222,19 @@ fn sacrifice_cost_rejects_illegal_payment() {
 
     // tappable_a is an Artifact, not a Creature, so it fails the filter.
     let err = engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(tappable_a)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(tappable_a)],
+        })
         .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
-    assert!(engine.state().object(tappable_a).is_some(), "no partial mutation - nothing sacrificed");
-    assert!(engine.state().object(fodder).is_some(), "no partial mutation - fodder untouched");
+    assert!(
+        engine.state().object(tappable_a).is_some(),
+        "no partial mutation - nothing sacrificed"
+    );
+    assert!(
+        engine.state().object(fodder).is_some(),
+        "no partial mutation - fodder untouched"
+    );
 }
 
 #[test]
@@ -177,7 +242,14 @@ fn discard_cost_accepts_legal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Discard {
-            filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: None,
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     };
@@ -186,14 +258,22 @@ fn discard_cost_accepts_legal_payment() {
 
     activate_and_await_payment(&mut engine, p0, source);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Discard(hand_card)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Discard(hand_card)],
+        })
         .expect("a legal Discard(hand_card) payment pays a Discard cost");
     drain(&mut engine);
 
-    assert!(engine.state().object(hand_card).is_none(), "the original hand_card id is retired");
+    assert!(
+        engine.state().object(hand_card).is_none(),
+        "the original hand_card id is retired"
+    );
     let (new_id, from, to) = last_zone_change(&engine);
     assert_eq!((from, to), (ZoneKind::Hand, ZoneKind::Graveyard));
-    assert!(engine.state().object(new_id).is_some(), "the card now exists in the graveyard under a new id");
+    assert!(
+        engine.state().object(new_id).is_some(),
+        "the card now exists in the graveyard under a new id"
+    );
 }
 
 #[test]
@@ -201,7 +281,14 @@ fn discard_cost_rejects_illegal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Discard {
-            filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: None,
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     };
@@ -212,10 +299,15 @@ fn discard_cost_rejects_illegal_payment() {
 
     // fodder is on the battlefield, not in hand.
     let err = engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Discard(fodder)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Discard(fodder)],
+        })
         .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
-    assert!(engine.state().object(hand_card).is_some(), "no partial mutation - hand_card untouched");
+    assert!(
+        engine.state().object(hand_card).is_some(),
+        "no partial mutation - hand_card untouched"
+    );
 }
 
 #[test]
@@ -223,7 +315,14 @@ fn tap_permanents_cost_accepts_legal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::TapPermanents {
-            filter: FilterSpec { card_types: Some(CardTypeSet::ARTIFACT), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::ARTIFACT),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
             count: 2,
         }],
         alternative: Vec::new(),
@@ -249,7 +348,14 @@ fn tap_permanents_cost_rejects_duplicate_id() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::TapPermanents {
-            filter: FilterSpec { card_types: Some(CardTypeSet::ARTIFACT), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::ARTIFACT),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
             count: 2,
         }],
         alternative: Vec::new(),
@@ -266,7 +372,10 @@ fn tap_permanents_cost_rejects_duplicate_id() {
         })
         .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
-    assert!(!engine.state().object(tappable_a).unwrap().tapped, "no partial mutation");
+    assert!(
+        !engine.state().object(tappable_a).unwrap().tapped,
+        "no partial mutation"
+    );
 }
 
 #[test]
@@ -281,15 +390,30 @@ fn life_payment_cost_accepts_legal_payment() {
 
     activate_and_await_payment(&mut engine, p0, source);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Life(3)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Life(3)],
+        })
         .expect("paying exactly the required amount pays a LifePayment{3} cost");
     drain(&mut engine);
-    assert_eq!(engine.state().player(p0).unwrap().life, 17, "20 - 3 paid, ability not resolved yet");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        17,
+        "20 - 3 paid, ability not resolved yet"
+    );
 
     // Passing priority with a non-empty stack resolves the ability.
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    assert_eq!(engine.state().player(p0).unwrap().life, 18, "17 + 1 gained from the resolved ability");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        18,
+        "17 + 1 gained from the resolved ability"
+    );
 }
 
 #[test]
@@ -306,10 +430,16 @@ fn life_payment_cost_rejects_insufficient_life() {
 
     // Only 20 life is available, so paying 25 fails (CR 119.4).
     let err = engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Life(25)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Life(25)],
+        })
         .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "no partial mutation");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "no partial mutation"
+    );
 }
 
 #[test]
@@ -319,7 +449,14 @@ fn combined_tap_self_and_sacrifice_requires_both() {
         additional: vec![
             AdditionalCost::TapSelf,
             AdditionalCost::Sacrifice {
-                filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+                filter: FilterSpec {
+                    card_types: Some(CardTypeSet::CREATURE),
+                    supertypes: None,
+                    subtypes: None,
+                    controller: None,
+                    random: false,
+                    extra: None,
+                },
             },
         ],
         alternative: Vec::new(),
@@ -331,7 +468,9 @@ fn combined_tap_self_and_sacrifice_requires_both() {
 
     // Only the Sacrifice half, so the TapSelf entry is missing.
     let err = engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(fodder)],
+        })
         .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
 

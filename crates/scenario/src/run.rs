@@ -1,8 +1,7 @@
 use std::panic::{self, AssertUnwindSafe};
 
-use stackfish_engine::*;
 use stackfish_engine::engine::{Engine, StepStatus};
-
+use stackfish_engine::*;
 
 pub enum StepOutcome {
     Ran,
@@ -86,16 +85,21 @@ const MAX_ADVANCE_PASSES: u32 = 2000;
 /// Passes priority for whoever holds it until `reached` is true. It does not reuse `drain()`,
 /// which treats every pause as `Ran`; any pause other than a priority window stops the loop
 /// and is reported, not answered.
-pub(crate) fn run_advance(engine: &mut Engine, reached: impl Fn(&GameState) -> bool, label: &str) -> StepOutcome {
+pub(crate) fn run_advance(
+    engine: &mut Engine,
+    reached: impl Fn(&GameState) -> bool,
+    label: &str,
+) -> StepOutcome {
     let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
         for _ in 0..MAX_ADVANCE_PASSES {
             if reached(engine.state()) {
                 return StepOutcome::Ran;
             }
             let player = engine.state().priority_player;
-            if let Err(err) =
-                engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
-            {
+            if let Err(err) = engine.submit_action(PlayerAction {
+                player,
+                kind: PlayerActionKind::PassPriority,
+            }) {
                 return StepOutcome::Errored(format!("{err:?}"));
             }
             loop {
@@ -112,7 +116,9 @@ pub(crate) fn run_advance(engine: &mut Engine, reached: impl Fn(&GameState) -> b
                 }
             }
         }
-        StepOutcome::Errored(format!("advance did not reach {label} after {MAX_ADVANCE_PASSES} passes"))
+        StepOutcome::Errored(format!(
+            "advance did not reach {label} after {MAX_ADVANCE_PASSES} passes"
+        ))
     }));
     match result {
         Ok(outcome) => outcome,
@@ -187,12 +193,18 @@ pub(crate) fn run_mulligan(engine: &mut Engine, action: PlayerAction) -> StepOut
 
 // Bottoms the first `first_n` cards of the hand by position, since `new_game` library cards
 // have no TOML keys to name.
-pub(crate) fn run_bottom_cards(engine: &mut Engine, player: PlayerId, first_n: usize) -> StepOutcome {
+pub(crate) fn run_bottom_cards(
+    engine: &mut Engine,
+    player: PlayerId,
+    first_n: usize,
+) -> StepOutcome {
     let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
         let cards: Vec<ObjectId> = engine
             .state()
             .zone(ZoneKind::Hand, Some(player))
-            .map_or(Vec::new(), |z| z.contents.iter().copied().take(first_n).collect());
+            .map_or(Vec::new(), |z| {
+                z.contents.iter().copied().take(first_n).collect()
+            });
         let action = PlayerAction {
             player,
             kind: PlayerActionKind::BottomCards { cards },
@@ -207,4 +219,3 @@ pub(crate) fn run_bottom_cards(engine: &mut Engine, player: PlayerId, first_n: u
         Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
     }
 }
-

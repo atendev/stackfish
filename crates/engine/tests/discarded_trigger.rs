@@ -5,13 +5,15 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -33,13 +35,21 @@ fn creature_definition(name: &str) -> CardDefinition {
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
+    GameObject {
+        controlled_since_turn: 1,
+        ..card_object(id, definition, owner, ZoneKind::Battlefield)
+    }
 }
 
 fn hand_card_with_discarded_trigger(id: ObjectId, owner: PlayerId) -> GameObject {
     GameObject {
         controlled_since_turn: 1,
-        ..card_object(id, creature_definition("Self-Discard Watcher"), owner, ZoneKind::Hand)
+        ..card_object(
+            id,
+            creature_definition("Self-Discard Watcher"),
+            owner,
+            ZoneKind::Hand,
+        )
     }
 }
 
@@ -48,7 +58,9 @@ fn vanilla_hand_card(id: ObjectId, owner: PlayerId) -> GameObject {
     obj.definition = CardDefinition {
         definition_id: id.0,
         name: "Vanilla".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -94,28 +106,59 @@ fn two_player_state() -> GameState {
         phase: Phase::Ending,
         step: Step::End,
         last_active_turn_number: HashMap::from([(p0, 2), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Battlefield, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Library,
+                ZoneKind::Hand,
+                ZoneKind::Graveyard,
+                ZoneKind::Battlefield,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).expect("PassPriority should be accepted");
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .expect("PassPriority should be accepted");
 }
 
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     let s = drain(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p0), "expected p0 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p0),
+        "expected p0 end-step priority, got {s:?}"
+    );
     pass(engine, p0);
     let s = drain(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p1), "expected p1 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p1),
+        "expected p1 end-step priority, got {s:?}"
+    );
     pass(engine, p1);
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -127,8 +170,14 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
     let source = ObjectId(0);
     let watching_card = ObjectId(1);
 
-    state.objects.insert(source, permanent(source, creature_definition("Sac Outlet"), p0));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
+    state.objects.insert(
+        source,
+        permanent(source, creature_definition("Sac Outlet"), p0),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(source);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -139,7 +188,14 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
         cost: Some(CostSpec {
             mana: None,
             additional: vec![AdditionalCost::Discard {
-                filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+                filter: FilterSpec {
+                    card_types: None,
+                    supertypes: None,
+                    subtypes: None,
+                    controller: None,
+                    random: false,
+                    extra: None,
+                },
             }],
             alternative: Vec::new(),
         }),
@@ -148,33 +204,61 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
         effect: None,
         intervening_if: None,
     });
-    state.objects.insert(watching_card, hand_card_with_discarded_trigger(watching_card, p0));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(watching_card);
+    state.objects.insert(
+        watching_card,
+        hand_card_with_discarded_trigger(watching_card, p0),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(watching_card);
     state.abilities.push(discarded_trigger(watching_card));
 
     let mut engine = Engine::new(state);
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the Discard cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Discard(watching_card)] }).expect("legal Discard payment");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the Discard cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Discard(watching_card)],
+        })
+        .expect("legal Discard payment");
     let status = drain(&mut engine);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected priority reopened by the Discarded trigger, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "expected priority reopened by the Discarded trigger, got {status:?}"
+    );
     // 2: the activated ability (pushed on activation, CR 602.2b, before its cost was paid) plus the Discarded trigger collected off that payment.
-    assert_eq!(engine.state().stack.len(), 2, "the activated ability plus the Discarded trigger it paid for");
+    assert_eq!(
+        engine.state().stack.len(),
+        2,
+        "the activated ability plus the Discarded trigger it paid for"
+    );
 
     // Resolve both stack entries.
     pass_both_and_drain(&mut engine, p0, p1);
     pass_both_and_drain(&mut engine, p0, p1);
     assert!(engine.state().stack.is_empty());
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied from the Discarded trigger");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "GainLife(1) applied from the Discarded trigger"
+    );
 }
 
 #[test]
@@ -184,27 +268,51 @@ fn discarded_trigger_fires_off_the_cleanup_hand_size_discard() {
     let p1 = PlayerId(1);
     let watching_card = ObjectId(0);
 
-    state.objects.insert(watching_card, hand_card_with_discarded_trigger(watching_card, p0));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(watching_card);
+    state.objects.insert(
+        watching_card,
+        hand_card_with_discarded_trigger(watching_card, p0),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(watching_card);
     state.abilities.push(discarded_trigger(watching_card));
     // 7 more vanilla cards - hand_size 8, one over the limit.
     for i in 0..7 {
         let id = ObjectId(100 + i);
         state.objects.insert(id, vanilla_hand_card(id, p0));
-        state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(id);
+        state
+            .zone_mut(ZoneKind::Hand, Some(p0))
+            .unwrap()
+            .push_bottom(id);
     }
 
     let mut engine = Engine::new(state);
     let status = pass_through_end_step(&mut engine, p0, p1);
-    assert!(matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0));
+    assert!(
+        matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0)
+    );
 
-    engine.submit_discard(vec![watching_card]).expect("valid discard");
+    engine
+        .submit_discard(vec![watching_card])
+        .expect("valid discard");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected priority reopened by the Discarded trigger, got {status:?}");
-    assert_eq!(engine.state().stack.len(), 1, "the Discarded trigger was collected and pushed");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "expected priority reopened by the Discarded trigger, got {status:?}"
+    );
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the Discarded trigger was collected and pushed"
+    );
 
     pass_both_and_drain(&mut engine, p0, p1);
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied from the Discarded trigger");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "GainLife(1) applied from the Discarded trigger"
+    );
 }
 
 #[test]
@@ -215,29 +323,54 @@ fn discarded_trigger_does_not_fire_when_a_different_card_is_discarded() {
     let watching_card = ObjectId(0);
     let other_card = ObjectId(1);
 
-    state.objects.insert(watching_card, hand_card_with_discarded_trigger(watching_card, p0));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(watching_card);
+    state.objects.insert(
+        watching_card,
+        hand_card_with_discarded_trigger(watching_card, p0),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(watching_card);
     state.abilities.push(discarded_trigger(watching_card));
-    state.objects.insert(other_card, vanilla_hand_card(other_card, p0));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(other_card);
+    state
+        .objects
+        .insert(other_card, vanilla_hand_card(other_card, p0));
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(other_card);
     for i in 0..6 {
         let id = ObjectId(100 + i);
         state.objects.insert(id, vanilla_hand_card(id, p0));
-        state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(id);
+        state
+            .zone_mut(ZoneKind::Hand, Some(p0))
+            .unwrap()
+            .push_bottom(id);
     }
 
     let mut engine = Engine::new(state);
     let status = pass_through_end_step(&mut engine, p0, p1);
-    assert!(matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0));
+    assert!(
+        matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0)
+    );
 
     // Discard other_card, not the card carrying the Discarded trigger.
-    engine.submit_discard(vec![other_card]).expect("valid discard");
+    engine
+        .submit_discard(vec![other_card])
+        .expect("valid discard");
     let status = drain(&mut engine);
 
-    assert!(engine.state().stack.is_empty(), "the Discarded trigger must not fire for a different card");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the Discarded trigger must not fire for a different card"
+    );
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p1),
         "no trigger pending - the turn should advance straight to p1's Upkeep, got {status:?}"
     );
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "no GainLife - the trigger never fired");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "no GainLife - the trigger never fired"
+    );
 }

@@ -119,10 +119,17 @@ struct Format {
 fn format_preset(name: &str) -> Option<Format> {
     match name {
         // CR 103.4
-        "standard" => Some(Format { settings: GameSettings::default(), commander_slots: false }),
+        "standard" => Some(Format {
+            settings: GameSettings::default(),
+            commander_slots: false,
+        }),
         // CR 903.7, CR 103.5c
         "commander" => Some(Format {
-            settings: GameSettings { starting_life: 40, free_mulligans: 1, ..GameSettings::default() },
+            settings: GameSettings {
+                starting_life: 40,
+                free_mulligans: 1,
+                ..GameSettings::default()
+            },
             commander_slots: true,
         }),
         _ => None,
@@ -155,10 +162,16 @@ impl Resolver<'_> {
 
 pub fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, SetupError> {
     if body.players.len() < 2 {
-        return Err(SetupError(format!("a game needs at least 2 players, got {}", body.players.len())));
+        return Err(SetupError(format!(
+            "a game needs at least 2 players, got {}",
+            body.players.len()
+        )));
     }
     let Some(format) = format_preset(&body.format) else {
-        return Err(SetupError(format!("format {:?} is unknown, expected \"standard\" or \"commander\"", body.format)));
+        return Err(SetupError(format!(
+            "format {:?} is unknown, expected \"standard\" or \"commander\"",
+            body.format
+        )));
     };
     if !format.commander_slots
         && let Some(index) = body.players.iter().position(|p| !p.commanders.is_empty())
@@ -176,7 +189,10 @@ pub fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, SetupEr
     let mut settings = format.settings;
     body.overrides.apply(&mut settings);
 
-    let mut resolver = Resolver { source, loaded: HashMap::new() };
+    let mut resolver = Resolver {
+        source,
+        loaded: HashMap::new(),
+    };
     let mut players = Vec::with_capacity(body.players.len());
     for (index, player) in body.players.iter().enumerate() {
         // Library order is decklist order; the engine shuffles if the settings say so.
@@ -185,12 +201,29 @@ pub fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, SetupEr
             let card = resolver.resolve(&entry.card)?;
             library.extend(std::iter::repeat_n(card, entry.count as usize));
         }
-        let commanders = player.commanders.iter().map(|key| resolver.resolve(key)).collect::<Result<Vec<_>, _>>()?;
-        players.push(PlayerConfig { player_id: PlayerId(index as u32), library, commanders, life_override: None });
+        let commanders = player
+            .commanders
+            .iter()
+            .map(|key| resolver.resolve(key))
+            .collect::<Result<Vec<_>, _>>()?;
+        players.push(PlayerConfig {
+            player_id: PlayerId(index as u32),
+            library,
+            commanders,
+            life_override: None,
+        });
     }
 
     let turn_order = players.iter().map(|p| p.player_id).collect();
-    Ok(Built { config: GameConfig { players, turn_order, settings, rng_seed: body.seed.0 }, step_cap })
+    Ok(Built {
+        config: GameConfig {
+            players,
+            turn_order,
+            settings,
+            rng_seed: body.seed.0,
+        },
+        step_cap,
+    })
 }
 
 #[cfg(test)]
@@ -203,9 +236,20 @@ mod tests {
 
     fn source() -> FixtureCardSource {
         let card = |id: u64, name: &str| {
-            minimal_card_definition(id, name, name, ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+            minimal_card_definition(
+                id,
+                name,
+                name,
+                ManaCost {
+                    symbols: Vec::new(),
+                },
+                CardTypeSet::CREATURE,
+            )
         };
-        FixtureCardSource::new().with("a", card(1, "A")).with("b", card(2, "B")).with("boss", card(3, "Boss"))
+        FixtureCardSource::new()
+            .with("a", card(1, "A"))
+            .with("b", card(2, "B"))
+            .with("boss", card(3, "Boss"))
     }
 
     fn body(value: serde_json::Value) -> SetupBody {
@@ -223,7 +267,14 @@ mod tests {
         }));
         let built = build(&setup, &source()).unwrap();
         let settings = &built.config.settings;
-        assert_eq!((settings.starting_life, settings.free_mulligans, settings.starting_hand_size), (20, 0, 7));
+        assert_eq!(
+            (
+                settings.starting_life,
+                settings.free_mulligans,
+                settings.starting_hand_size
+            ),
+            (20, 0, 7)
+        );
         assert!(settings.shuffle_libraries && !settings.skip_mulligan);
         assert_eq!(built.config.rng_seed, 7);
         assert_eq!(built.step_cap, DEFAULT_STEP_CAP);
@@ -236,9 +287,19 @@ mod tests {
             "format": "commander", "seed": "1",
         }));
         let built = build(&setup, &source()).unwrap();
-        assert_eq!((built.config.settings.starting_life, built.config.settings.free_mulligans), (40, 1));
+        assert_eq!(
+            (
+                built.config.settings.starting_life,
+                built.config.settings.free_mulligans
+            ),
+            (40, 1)
+        );
         assert_eq!(names(&built.config.players[0].commanders), ["Boss"]);
-        assert_eq!(names(&built.config.players[0].library), ["A"], "a commander is not in the library");
+        assert_eq!(
+            names(&built.config.players[0].library),
+            ["A"],
+            "a commander is not in the library"
+        );
     }
 
     #[test]
@@ -249,7 +310,11 @@ mod tests {
         }));
         let built = build(&setup, &source()).unwrap();
         let settings = &built.config.settings;
-        assert_eq!((settings.starting_life, settings.free_mulligans), (25, 1), "untouched fields keep the preset");
+        assert_eq!(
+            (settings.starting_life, settings.free_mulligans),
+            (25, 1),
+            "untouched fields keep the preset"
+        );
         assert!(settings.skip_mulligan);
         assert_eq!(settings.max_mulligans, Some(2));
         assert_eq!(built.step_cap, 50);
@@ -267,8 +332,22 @@ mod tests {
             "players": [{ "deck": [] }, { "deck": [] }], "format": "standard", "seed": "1",
             "overrides": { "max_mulligans": 0 },
         }));
-        assert_eq!(build(&limited, &source()).unwrap().config.settings.max_mulligans, Some(0));
-        assert_eq!(build(&setup, &source()).unwrap().config.settings.max_mulligans, None);
+        assert_eq!(
+            build(&limited, &source())
+                .unwrap()
+                .config
+                .settings
+                .max_mulligans,
+            Some(0)
+        );
+        assert_eq!(
+            build(&setup, &source())
+                .unwrap()
+                .config
+                .settings
+                .max_mulligans,
+            None
+        );
     }
 
     #[test]
@@ -281,11 +360,22 @@ mod tests {
             "format": "standard", "seed": "1",
         }));
         let built = build(&setup, &source()).unwrap();
-        assert_eq!(names(&built.config.players[0].library), ["B", "B", "A", "B"]);
+        assert_eq!(
+            names(&built.config.players[0].library),
+            ["B", "B", "A", "B"]
+        );
         assert!(built.config.players[1].library.is_empty());
         let ids: Vec<u32> = built.config.players.iter().map(|p| p.player_id.0).collect();
         assert_eq!(ids, [0, 1]);
-        assert_eq!(built.config.turn_order, built.config.players.iter().map(|p| p.player_id).collect::<Vec<_>>());
+        assert_eq!(
+            built.config.turn_order,
+            built
+                .config
+                .players
+                .iter()
+                .map(|p| p.player_id)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -293,7 +383,10 @@ mod tests {
         use std::cell::Cell;
         struct Counting(FixtureCardSource, Cell<u32>);
         impl CardSource for Counting {
-            fn load(&self, key: &str) -> Result<CardDefinition, crate::card_source::CardSourceError> {
+            fn load(
+                &self,
+                key: &str,
+            ) -> Result<CardDefinition, crate::card_source::CardSourceError> {
                 self.1.set(self.1.get() + 1);
                 self.0.load(key)
             }

@@ -1,7 +1,9 @@
 //! CR 903.4, 903.5c/d, 702.124c: Commander color identity as pure query functions in `crates/engine/src/color_identity.rs`.
 //! Nothing is wired into `Engine::new_game` or any command, since the engine trusts the setup (CR 903.3a).
 
-use stackfish_engine::color_identity::{color_identity, commander_color_identity, illegal_cards_for_color_identity};
+use stackfish_engine::color_identity::{
+    color_identity, commander_color_identity, illegal_cards_for_color_identity,
+};
 use stackfish_engine::*;
 
 fn card(name: &str, mana_cost: &str, oracle_text: &str) -> CardDefinition {
@@ -87,8 +89,11 @@ fn bosh_iron_golem_color_identity_is_red_per_the_cr_example() {
 #[test]
 fn reminder_text_is_excluded_from_color_identity() {
     // The only {W} symbol is inside parentheses, so the identity is colorless (CR 903.4c).
-    let vanilla =
-        card("Silent Wisp", "{1}", "Flying (Reminder: as if it had {W} in its cost, which it doesn't.)");
+    let vanilla = card(
+        "Silent Wisp",
+        "{1}",
+        "Flying (Reminder: as if it had {W} in its cost, which it doesn't.)",
+    );
     assert_eq!(color_identity(&vanilla), ColorSet::empty());
 }
 
@@ -108,7 +113,10 @@ fn single_commander_color_identity_is_just_its_own() {
 fn partner_commanders_color_identity_is_the_union() {
     let red_partner = card("Red Partner", "{1}{R}", "Partner");
     let blue_partner = card("Blue Partner", "{1}{U}", "Partner");
-    assert_eq!(commander_color_identity(&[red_partner, blue_partner]), ColorSet::RED | ColorSet::BLUE);
+    assert_eq!(
+        commander_color_identity(&[red_partner, blue_partner]),
+        ColorSet::RED | ColorSet::BLUE
+    );
 }
 
 #[test]
@@ -134,9 +142,17 @@ fn basic_land_legality_falls_out_of_the_general_rule() {
     let mountain = card("Mountain", "{0}", "{T}: Add {R}.");
 
     let green_commander = commander_color_identity(&[card("Green General", "{2}{G}", "")]);
-    assert!(illegal_cards_for_color_identity(green_commander, &[forest.clone()]).is_empty());
-    assert_eq!(illegal_cards_for_color_identity(green_commander, &[mountain]).len(), 1);
+    assert!(
+        illegal_cards_for_color_identity(green_commander, std::slice::from_ref(&forest)).is_empty()
+    );
+    assert_eq!(
+        illegal_cards_for_color_identity(green_commander, &[mountain]).len(),
+        1
+    );
 
     let blue_commander = commander_color_identity(&[card("Blue General", "{2}{U}", "")]);
-    assert_eq!(illegal_cards_for_color_identity(blue_commander, &[forest]).len(), 1);
+    assert_eq!(
+        illegal_cards_for_color_identity(blue_commander, &[forest]).len(),
+        1
+    );
 }

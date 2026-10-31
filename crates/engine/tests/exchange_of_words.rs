@@ -6,7 +6,9 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 const SELF_REGISTER_GAIN_LIFE: &str = r#"
 local s = {}
@@ -22,7 +24,9 @@ fn flying_creature(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -47,7 +51,9 @@ fn trample_creature(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -70,7 +76,8 @@ fn trample_creature(id: u64, name: &str) -> CardDefinition {
 
 fn creature_word() -> TargetRequirement {
     TargetRequirement {
-        filter: TargetFilter::Object { mana_value: None,
+        filter: TargetFilter::Object {
+            mana_value: None,
             card_types: Some(CardTypeSet::CREATURE),
             excluded_card_types: None,
             subtypes: None,
@@ -91,7 +98,9 @@ fn exchange_of_words_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
         name: "Test Exchange of Words".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::SORCERY,
@@ -118,7 +127,10 @@ fn two_player_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -126,22 +138,46 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -153,13 +189,35 @@ fn exchanging_swaps_keywords_oracle_text_and_registered_abilities_not_name_or_pt
     let trampler = ObjectId(1);
     let card = ObjectId(2);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(flyer, flying_creature(1, "Bird"), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(trampler, trample_creature(2, "Rhino"), p1, ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, exchange_of_words_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(flyer, flying_creature(1, "Bird"), p0, ZoneKind::Battlefield),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            trampler,
+            trample_creature(2, "Rhino"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, exchange_of_words_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(flyer), Target::Object(trampler)]);
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![Target::Object(flyer), Target::Object(trampler)],
+    );
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
@@ -173,10 +231,36 @@ fn exchanging_swaps_keywords_oracle_text_and_registered_abilities_not_name_or_pt
     let rhino_now = effective_characteristics(engine.state(), &runtime, trampler);
 
     // Text box crossed over.
-    assert!(bird_now.keywords.contains(KeywordSet::TRAMPLE) && !bird_now.keywords.contains(KeywordSet::FLYING));
-    assert!(rhino_now.keywords.contains(KeywordSet::FLYING) && !rhino_now.keywords.contains(KeywordSet::TRAMPLE));
-    assert_eq!(engine.state().object(flyer).unwrap().copiable_override.as_ref().unwrap().oracle_text, "Trample");
-    assert_eq!(engine.state().object(trampler).unwrap().copiable_override.as_ref().unwrap().oracle_text, "Flying");
+    assert!(
+        bird_now.keywords.contains(KeywordSet::TRAMPLE)
+            && !bird_now.keywords.contains(KeywordSet::FLYING)
+    );
+    assert!(
+        rhino_now.keywords.contains(KeywordSet::FLYING)
+            && !rhino_now.keywords.contains(KeywordSet::TRAMPLE)
+    );
+    assert_eq!(
+        engine
+            .state()
+            .object(flyer)
+            .unwrap()
+            .copiable_override
+            .as_ref()
+            .unwrap()
+            .oracle_text,
+        "Trample"
+    );
+    assert_eq!(
+        engine
+            .state()
+            .object(trampler)
+            .unwrap()
+            .copiable_override
+            .as_ref()
+            .unwrap()
+            .oracle_text,
+        "Flying"
+    );
 
     // Name/P&T stayed each permanent's own - not a CR 707 copy.
     assert_eq!(bird_now.name, "Bird");
@@ -185,8 +269,24 @@ fn exchanging_swaps_keywords_oracle_text_and_registered_abilities_not_name_or_pt
     assert_eq!((rhino_now.power, rhino_now.toughness), (Some(5), Some(5)));
 
     // Registered abilities crossed over too: the flyer's triggered ability is now on the trampler's id, and the flyer has none.
-    assert_eq!(engine.state().abilities.iter().filter(|a| a.source == flyer).count(), 0);
-    assert_eq!(engine.state().abilities.iter().filter(|a| a.source == trampler).count(), 1);
+    assert_eq!(
+        engine
+            .state()
+            .abilities
+            .iter()
+            .filter(|a| a.source == flyer)
+            .count(),
+        0
+    );
+    assert_eq!(
+        engine
+            .state()
+            .abilities
+            .iter()
+            .filter(|a| a.source == trampler)
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -197,32 +297,82 @@ fn one_target_leaving_before_resolution_no_ops_the_whole_effect() {
     let trampler = ObjectId(1);
     let card = ObjectId(2);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(flyer, flying_creature(1, "Bird"), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(trampler, trample_creature(2, "Rhino"), p1, ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, exchange_of_words_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(flyer, flying_creature(1, "Bird"), p0, ZoneKind::Battlefield),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            trampler,
+            trample_creature(2, "Rhino"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, exchange_of_words_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(flyer), Target::Object(trampler)]);
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![Target::Object(flyer), Target::Object(trampler)],
+    );
     pay_free_and_drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
     // The trampler leaves the battlefield before resolution, so only one target remains legal.
-    engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(trampler);
+    engine
+        .state_mut()
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .remove(trampler);
     engine.state_mut().objects.remove(&trampler);
 
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
     assert!(
-        !engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::TextBoxesExchanged { .. })),
+        !engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::TextBoxesExchanged { .. })),
         "no partner to exchange with - the effect is a no-op, not a one-sided change"
     );
     let runtime = ScriptRuntime::new();
     let bird_now = effective_characteristics(engine.state(), &runtime, flyer);
-    assert!(bird_now.keywords.contains(KeywordSet::FLYING), "the surviving target's own text box is untouched");
-    assert!(engine.state().object(flyer).unwrap().copiable_override.is_none());
+    assert!(
+        bird_now.keywords.contains(KeywordSet::FLYING),
+        "the surviving target's own text box is untouched"
+    );
+    assert!(
+        engine
+            .state()
+            .object(flyer)
+            .unwrap()
+            .copiable_override
+            .is_none()
+    );
 }
 
 #[test]
@@ -233,27 +383,67 @@ fn both_targets_leaving_before_resolution_fizzles_the_whole_spell() {
     let trampler = ObjectId(1);
     let card = ObjectId(2);
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, card_object(flyer, flying_creature(1, "Bird"), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(trampler, trample_creature(2, "Rhino"), p1, ZoneKind::Battlefield));
-    state.objects.insert(card, card_object(card, exchange_of_words_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(flyer, flying_creature(1, "Bird"), p0, ZoneKind::Battlefield),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            trampler,
+            trample_creature(2, "Rhino"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(card, exchange_of_words_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(flyer), Target::Object(trampler)]);
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![Target::Object(flyer), Target::Object(trampler)],
+    );
     pay_free_and_drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
     for id in [flyer, trampler] {
-        engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(id);
+        engine
+            .state_mut()
+            .zone_mut(ZoneKind::Battlefield, None)
+            .unwrap()
+            .remove(id);
         engine.state_mut().objects.remove(&id);
     }
 
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
     assert!(
-        engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
+        engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
         "CR 608.2b: every target across every word is illegal - the whole spell fizzles"
     );
 }
@@ -261,6 +451,11 @@ fn both_targets_leaving_before_resolution_fizzles_the_whole_spell() {
 #[test]
 fn game_ops_exchange_text_boxes_decodes() {
     let mut runtime = ScriptRuntime::new();
-    let (effect, _handle) = runtime.load_operation("return Game.Ops.ExchangeTextBoxes").expect("primitive loads");
-    assert!(matches!(effect, Some(AbilityEffect::ExchangeTextBoxes)), "expected Some(AbilityEffect::ExchangeTextBoxes), got {effect:?}");
+    let (effect, _handle) = runtime
+        .load_operation("return Game.Ops.ExchangeTextBoxes")
+        .expect("primitive loads");
+    assert!(
+        matches!(effect, Some(AbilityEffect::ExchangeTextBoxes)),
+        "expected Some(AbilityEffect::ExchangeTextBoxes), got {effect:?}"
+    );
 }

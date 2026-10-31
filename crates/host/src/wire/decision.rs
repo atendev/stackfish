@@ -1,7 +1,7 @@
 use serde::Serialize;
 use stackfish_engine::decision::{
-    ActivateEntry, AttackerEntry, BlockerEntry, Candidate, CastEntry, Decision, DamageSplitEntry, Entry, EntryTargets,
-    ModeRange, PartitionRest, ReplyShape, TargetSlot,
+    ActivateEntry, AttackerEntry, BlockerEntry, Candidate, CastEntry, DamageSplitEntry, Decision,
+    Entry, EntryTargets, ModeRange, PartitionRest, ReplyShape, TargetSlot,
 };
 use stackfish_engine::triggers::PendingTrigger;
 use stackfish_engine::{AdditionalCost, CostSpec, ObjectId, Target, TargetRequirement, TargetSpec};
@@ -70,12 +70,18 @@ impl From<&AdditionalCost> for WireAdditionalCost {
             AdditionalCost::SacrificeSelf => WireAdditionalCost::SacrificeSelf,
             AdditionalCost::Discard { .. } => WireAdditionalCost::Discard,
             AdditionalCost::DiscardSelf => WireAdditionalCost::DiscardSelf,
-            AdditionalCost::TapPermanents { count, .. } => WireAdditionalCost::TapPermanents { count: *count },
+            AdditionalCost::TapPermanents { count, .. } => {
+                WireAdditionalCost::TapPermanents { count: *count }
+            }
             AdditionalCost::ExileFromGraveyard { count, .. } => {
                 WireAdditionalCost::ExileFromGraveyard { count: *count }
             }
-            AdditionalCost::LifePayment { amount } => WireAdditionalCost::LifePayment { amount: *amount },
-            AdditionalCost::Other { description } => WireAdditionalCost::Other { description: description.clone() },
+            AdditionalCost::LifePayment { amount } => {
+                WireAdditionalCost::LifePayment { amount: *amount }
+            }
+            AdditionalCost::Other { description } => WireAdditionalCost::Other {
+                description: description.clone(),
+            },
         }
     }
 }
@@ -92,7 +98,11 @@ impl From<&CostSpec> for WireCost {
     fn from(cost: &CostSpec) -> Self {
         WireCost {
             mana: cost.mana.as_ref().map(mana_cost_string).unwrap_or_default(),
-            additional: cost.additional.iter().map(WireAdditionalCost::from).collect(),
+            additional: cost
+                .additional
+                .iter()
+                .map(WireAdditionalCost::from)
+                .collect(),
         }
     }
 }
@@ -117,7 +127,10 @@ fn word_bounds(requirement: &TargetRequirement) -> (u32, Option<u32>) {
     }
 }
 
-fn target_words(spec: &TargetSpec, candidates: &[Vec<stackfish_engine::Target>]) -> Vec<WireTargetWord> {
+fn target_words(
+    spec: &TargetSpec,
+    candidates: &[Vec<stackfish_engine::Target>],
+) -> Vec<WireTargetWord> {
     let requirements: Vec<&TargetRequirement> = match spec {
         TargetSpec::Primitive(requirement) => vec![requirement],
         TargetSpec::Multiple(requirements) => requirements.iter().collect(),
@@ -127,7 +140,11 @@ fn target_words(spec: &TargetSpec, candidates: &[Vec<stackfish_engine::Target>])
         .enumerate()
         .map(|(i, word)| {
             let (min, max) = requirements.get(i).map_or((0, None), |r| word_bounds(r));
-            WireTargetWord { min, max, candidates: word.iter().map(|t| (*t).into()).collect() }
+            WireTargetWord {
+                min,
+                max,
+                candidates: word.iter().map(|t| (*t).into()).collect(),
+            }
         })
         .collect()
 }
@@ -146,7 +163,12 @@ pub struct WireSlot {
 
 impl From<&TargetSlot> for WireSlot {
     fn from(slot: &TargetSlot) -> Self {
-        WireSlot { candidates: slot.candidates.iter().map(|t| (*t).into()).collect(), min: slot.min, max: slot.max, x_dependent: slot.x_dependent }
+        WireSlot {
+            candidates: slot.candidates.iter().map(|t| (*t).into()).collect(),
+            min: slot.min,
+            max: slot.max,
+            x_dependent: slot.x_dependent,
+        }
     }
 }
 
@@ -165,7 +187,9 @@ impl From<&EntryTargets> for WireEntryTargets {
     fn from(targets: &EntryTargets) -> Self {
         match targets {
             EntryTargets::Fixed(list) => WireEntryTargets::Fixed { slots: slots(list) },
-            EntryTargets::PerMode(modes) => WireEntryTargets::PerMode { modes: modes.iter().map(|m| slots(m)).collect() },
+            EntryTargets::PerMode(modes) => WireEntryTargets::PerMode {
+                modes: modes.iter().map(|m| slots(m)).collect(),
+            },
         }
     }
 }
@@ -236,8 +260,18 @@ pub enum WireEntry {
 impl From<&Entry> for WireEntry {
     fn from(entry: &Entry) -> Self {
         match entry {
-            Entry::PlayLand { card } => WireEntry::PlayLand { card: (*card).into() },
-            Entry::Cast(CastEntry { card, modes, targets, x, normal, alternative_costs, buyback }) => WireEntry::Cast {
+            Entry::PlayLand { card } => WireEntry::PlayLand {
+                card: (*card).into(),
+            },
+            Entry::Cast(CastEntry {
+                card,
+                modes,
+                targets,
+                x,
+                normal,
+                alternative_costs,
+                buyback,
+            }) => WireEntry::Cast {
                 card: (*card).into(),
                 modes: modes.as_ref().map(WireModeRange::from),
                 targets: targets.into(),
@@ -246,19 +280,24 @@ impl From<&Entry> for WireEntry {
                 alternative_costs: alternative_costs.clone(),
                 buyback: *buyback,
             },
-            Entry::Activate(ActivateEntry { source, ability_index, targets, x, mana_ability, color_choice }) => {
-                WireEntry::Activate {
-                    source: (*source).into(),
-                    ability_index: *ability_index,
-                    targets: slots(targets),
-                    x: *x,
-                    mana_ability: *mana_ability,
-                    color_choice: color_choice.as_ref().map(|choice| WireColorChoice {
-                        count: choice.count,
-                        colors: choice.colors.iter().map(|c| (*c).into()).collect(),
-                    }),
-                }
-            }
+            Entry::Activate(ActivateEntry {
+                source,
+                ability_index,
+                targets,
+                x,
+                mana_ability,
+                color_choice,
+            }) => WireEntry::Activate {
+                source: (*source).into(),
+                ability_index: *ability_index,
+                targets: slots(targets),
+                x: *x,
+                mana_ability: *mana_ability,
+                color_choice: color_choice.as_ref().map(|choice| WireColorChoice {
+                    count: choice.count,
+                    colors: choice.colors.iter().map(|c| (*c).into()).collect(),
+                }),
+            },
             Entry::Pass => WireEntry::Pass,
         }
     }
@@ -289,7 +328,10 @@ pub struct WireBlocker {
 
 impl From<&BlockerEntry> for WireBlocker {
     fn from(entry: &BlockerEntry) -> Self {
-        WireBlocker { blocker: entry.blocker.into(), attackers: entry.attackers.iter().map(|a| (*a).into()).collect() }
+        WireBlocker {
+            blocker: entry.blocker.into(),
+            attackers: entry.attackers.iter().map(|a| (*a).into()).collect(),
+        }
     }
 }
 
@@ -318,9 +360,15 @@ impl From<&DamageSplitEntry> for WireDamageSplit {
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "shape", rename_all = "snake_case")]
 pub enum WireShape {
-    Pick { candidates: Vec<WireCandidate>, min: usize, max: usize },
+    Pick {
+        candidates: Vec<WireCandidate>,
+        min: usize,
+        max: usize,
+    },
     YesNo,
-    Order { items: Vec<WireTrigger> },
+    Order {
+        items: Vec<WireTrigger>,
+    },
     Modes {
         mode_count: usize,
         min: u32,
@@ -329,17 +377,32 @@ pub enum WireShape {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         solo_only: Vec<u32>,
     },
-    Partition { cards: Vec<U64>, rest: WireRest },
-    Payment { cost: WireCost },
-    Targets { words: Vec<WireTargetWord> },
+    Partition {
+        cards: Vec<U64>,
+        rest: WireRest,
+    },
+    Payment {
+        cost: WireCost,
+    },
+    Targets {
+        words: Vec<WireTargetWord>,
+    },
     MayCast {
         #[serde(skip_serializing_if = "Option::is_none")]
         card: Option<U64>,
     },
-    Action { entries: Vec<WireEntry> },
-    DeclareAttackers { attackers: Vec<WireAttacker> },
-    DeclareBlockers { blockers: Vec<WireBlocker> },
-    AssignDamage { splits: Vec<WireDamageSplit> },
+    Action {
+        entries: Vec<WireEntry>,
+    },
+    DeclareAttackers {
+        attackers: Vec<WireAttacker>,
+    },
+    DeclareBlockers {
+        blockers: Vec<WireBlocker>,
+    },
+    AssignDamage {
+        splits: Vec<WireDamageSplit>,
+    },
     /// What a Seat that is not choosing sees: the reply kind and the option count.
     /// `candidates` lists only the options in public zones.
     Opaque {
@@ -353,39 +416,55 @@ pub enum WireShape {
 impl From<&ReplyShape> for WireShape {
     fn from(shape: &ReplyShape) -> Self {
         match shape {
-            ReplyShape::Pick { candidates, min, max } => WireShape::Pick {
+            ReplyShape::Pick {
+                candidates,
+                min,
+                max,
+            } => WireShape::Pick {
                 candidates: candidates.iter().map(|c| (*c).into()).collect(),
                 min: *min,
                 max: *max,
             },
             ReplyShape::YesNo => WireShape::YesNo,
-            ReplyShape::Order { items } => WireShape::Order { items: items.iter().map(WireTrigger::from).collect() },
-            ReplyShape::Modes { mode_count, min, max, repeatable, solo_only } => {
-                WireShape::Modes {
-                    mode_count: *mode_count,
-                    min: *min,
-                    max: *max,
-                    repeatable: *repeatable,
-                    solo_only: solo_only.clone(),
-                }
-            }
+            ReplyShape::Order { items } => WireShape::Order {
+                items: items.iter().map(WireTrigger::from).collect(),
+            },
+            ReplyShape::Modes {
+                mode_count,
+                min,
+                max,
+                repeatable,
+                solo_only,
+            } => WireShape::Modes {
+                mode_count: *mode_count,
+                min: *min,
+                max: *max,
+                repeatable: *repeatable,
+                solo_only: solo_only.clone(),
+            },
             ReplyShape::Partition { cards, rest } => WireShape::Partition {
                 cards: cards.iter().map(|c| (*c).into()).collect(),
                 rest: (*rest).into(),
             },
             ReplyShape::Payment { cost } => WireShape::Payment { cost: cost.into() },
-            ReplyShape::Targets { spec, candidates } => WireShape::Targets { words: target_words(spec, candidates) },
-            ReplyShape::MayCast { card } => WireShape::MayCast { card: card.map(U64::from) },
-            ReplyShape::Action { entries } => WireShape::Action { entries: entries.iter().map(WireEntry::from).collect() },
-            ReplyShape::DeclareAttackers { attackers } => {
-                WireShape::DeclareAttackers { attackers: attackers.iter().map(WireAttacker::from).collect() }
-            }
-            ReplyShape::DeclareBlockers { blockers } => {
-                WireShape::DeclareBlockers { blockers: blockers.iter().map(WireBlocker::from).collect() }
-            }
-            ReplyShape::AssignDamage { splits } => {
-                WireShape::AssignDamage { splits: splits.iter().map(WireDamageSplit::from).collect() }
-            }
+            ReplyShape::Targets { spec, candidates } => WireShape::Targets {
+                words: target_words(spec, candidates),
+            },
+            ReplyShape::MayCast { card } => WireShape::MayCast {
+                card: card.map(U64::from),
+            },
+            ReplyShape::Action { entries } => WireShape::Action {
+                entries: entries.iter().map(WireEntry::from).collect(),
+            },
+            ReplyShape::DeclareAttackers { attackers } => WireShape::DeclareAttackers {
+                attackers: attackers.iter().map(WireAttacker::from).collect(),
+            },
+            ReplyShape::DeclareBlockers { blockers } => WireShape::DeclareBlockers {
+                blockers: blockers.iter().map(WireBlocker::from).collect(),
+            },
+            ReplyShape::AssignDamage { splits } => WireShape::AssignDamage {
+                splits: splits.iter().map(WireDamageSplit::from).collect(),
+            },
         }
     }
 }
@@ -428,7 +507,11 @@ impl WireDecision {
     /// The Decision as any other Seat sees it. `public` says which of the
     /// Decision's object candidates lie in public zones.
     pub fn opaque(decision: &Decision, public: impl Fn(&Candidate) -> bool) -> Self {
-        let candidates = pick_candidates(&decision.shape).into_iter().filter(|c| public(c)).map(WireCandidate::from).collect();
+        let candidates = pick_candidates(&decision.shape)
+            .into_iter()
+            .filter(|c| public(c))
+            .map(WireCandidate::from)
+            .collect();
         WireDecision {
             id: U64(decision.id.0),
             player: decision.player.0,
@@ -472,7 +555,10 @@ fn option_count(shape: &ReplyShape) -> usize {
         ReplyShape::DeclareAttackers { attackers } => attackers.len(),
         ReplyShape::DeclareBlockers { blockers } => blockers.len(),
         ReplyShape::AssignDamage { splits } => splits.len(),
-        ReplyShape::YesNo | ReplyShape::Modes { .. } | ReplyShape::Payment { .. } | ReplyShape::MayCast { .. } => 0,
+        ReplyShape::YesNo
+        | ReplyShape::Modes { .. }
+        | ReplyShape::Payment { .. }
+        | ReplyShape::MayCast { .. } => 0,
     }
 }
 
@@ -481,9 +567,11 @@ fn option_count(shape: &ReplyShape) -> usize {
 fn pick_candidates(shape: &ReplyShape) -> Vec<Candidate> {
     match shape {
         ReplyShape::Pick { candidates, .. } => candidates.clone(),
-        ReplyShape::Targets { candidates, .. } => {
-            candidates.iter().flatten().map(|t| Candidate::Target(*t)).collect()
-        }
+        ReplyShape::Targets { candidates, .. } => candidates
+            .iter()
+            .flatten()
+            .map(|t| Candidate::Target(*t))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -513,7 +601,11 @@ mod tests {
 
     #[test]
     fn an_attacker_entry_carries_its_required_flag() {
-        let entry = AttackerEntry { attacker: ObjectId(7), defenders: vec![Target::Player(PlayerId(1))], required: true };
+        let entry = AttackerEntry {
+            attacker: ObjectId(7),
+            defenders: vec![Target::Player(PlayerId(1))],
+            required: true,
+        };
         let json = serde_json::to_value(WireAttacker::from(&entry)).unwrap();
         assert_eq!(json["required"], true);
         assert_eq!(json["attacker"], "7");
@@ -538,7 +630,13 @@ mod tests {
 
     #[test]
     fn a_modes_shape_carries_its_solo_only_modes() {
-        let shape = ReplyShape::Modes { mode_count: 3, min: 2, max: 2, repeatable: false, solo_only: vec![1] };
+        let shape = ReplyShape::Modes {
+            mode_count: 3,
+            min: 2,
+            max: 2,
+            repeatable: false,
+            solo_only: vec![1],
+        };
         let json = serde_json::to_value(WireShape::from(&shape)).unwrap();
         assert_eq!(json["shape"], "modes");
         assert_eq!(json["solo_only"], serde_json::json!([1]));

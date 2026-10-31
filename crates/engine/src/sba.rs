@@ -13,6 +13,7 @@ use crate::types::stack::StackEntryKind;
 use crate::types::zone::ZoneKind;
 
 /// What one `check_state_based_actions` pass produced.
+#[allow(clippy::large_enum_variant)]
 pub enum SbaOutcome {
     /// Events from this pass, for the caller to append to the ledger; empty means
     /// CR 704.3's fixed point. The second element holds the dying objects'
@@ -37,11 +38,19 @@ pub enum SbaOutcome {
     /// name (`candidates`, sorted) and must keep one. Only the first group pauses;
     /// the caller reruns the pass after the answer to find the next.
     /// `resolved_so_far` is committed immediately.
-    NeedsLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId>, resolved_so_far: Vec<GameEvent> },
+    NeedsLegendRuleChoice {
+        player: PlayerId,
+        candidates: Vec<ObjectId>,
+        resolved_so_far: Vec<GameEvent>,
+    },
     /// CR 903.9a: `commander` (owned by `player`) sits in a graveyard or exile and
     /// has not yet been offered the command-zone choice (`commander_return_offered`).
     /// Only the first by `ObjectId` pauses per pass. `resolved_so_far` is committed immediately.
-    NeedsCommanderReturnChoice { player: PlayerId, commander: ObjectId, resolved_so_far: Vec<GameEvent> },
+    NeedsCommanderReturnChoice {
+        player: PlayerId,
+        commander: ObjectId,
+        resolved_so_far: Vec<GameEvent>,
+    },
 }
 
 /// One pass of CR 704 state-based actions: finds every applicable one, applies
@@ -55,18 +64,29 @@ pub enum SbaOutcome {
 ///
 /// The engine loops this until it returns empty (CR 704.3), so a caller can
 /// observe each pass.
-pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptRuntime) -> SbaOutcome {
+pub fn check_state_based_actions(
+    state: &mut GameState,
+    script_runtime: &ScriptRuntime,
+) -> SbaOutcome {
     let mut events = Vec::new();
     apply_player_loss(state, &mut events);
 
     // CR 704.5j: a player choice pauses this pass outright; the next pass finds the next group.
     if let Some((player, candidates)) = find_legend_rule_group(state, script_runtime) {
-        return SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far: events };
+        return SbaOutcome::NeedsLegendRuleChoice {
+            player,
+            candidates,
+            resolved_so_far: events,
+        };
     }
 
     // CR 903.9a: pauses like the legend rule above.
     if let Some((player, commander)) = find_commander_return_candidate(state) {
-        return SbaOutcome::NeedsCommanderReturnChoice { player, commander, resolved_so_far: events };
+        return SbaOutcome::NeedsCommanderReturnChoice {
+            player,
+            commander,
+            resolved_so_far: events,
+        };
     }
 
     // CR 704.5d: scanned first, against zones as they stand at the top of the pass,
@@ -96,7 +116,10 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     dying.extend(collect_illegally_attached_auras(state, script_runtime));
     // CR 303.4d: self-enchanting Auras, and the Aura-creatures unattached above.
     dying.extend(collect_self_enchanted_auras(state));
-    dying.extend(creature_auras.into_iter().map(|id| DyingCandidate { id, is_destroy: false }));
+    dying.extend(creature_auras.into_iter().map(|id| DyingCandidate {
+        id,
+        is_destroy: false,
+    }));
 
     match resolve_deaths(state, script_runtime, dying.into()) {
         DeathResolution::Done(death_events, mut death_departed) => {
@@ -144,7 +167,9 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
                 && (p.life <= 0
                     || p.drew_from_empty_library
                     || p.counters.count(&CounterKind::Poison) >= 10
-                    || p.commander_damage_taken.iter().any(|&(_, damage)| damage >= 21))
+                    || p.commander_damage_taken
+                        .iter()
+                        .any(|&(_, damage)| damage >= 21))
         })
         .map(|p| p.player_id)
         .collect();
@@ -206,7 +231,10 @@ fn remove_players_objects(state: &mut GameState, player: PlayerId) {
     let stack_ids: Vec<ObjectId> = state
         .stack
         .iter()
-        .filter(|so| so.owner == player || (so.controller == player && !matches!(so.kind, StackEntryKind::Spell)))
+        .filter(|so| {
+            so.owner == player
+                || (so.controller == player && !matches!(so.kind, StackEntryKind::Spell))
+        })
         .map(|so| so.stack_id)
         .collect();
     state.stack.retain(|so| !stack_ids.contains(&so.stack_id));
@@ -227,12 +255,19 @@ pub struct DyingCandidate {
 /// CR 704.5f, 704.5g: battlefield creatures with non-positive toughness or lethal
 /// marked damage. Characteristics come through `layers::effective_characteristics`.
 /// `is_destroy` is false for 704.5f and true for 704.5g.
-fn collect_dying_creatures(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
+fn collect_dying_creatures(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> Vec<DyingCandidate> {
     // `state.objects` is a `HashMap`, so the order is fixed by id. Creatures
     // that die together move to the graveyard in this order and take their new
     // ids in it, so an unordered walk would give a replay different ids.
-    let mut candidates: Vec<ObjectId> =
-        state.objects.values().filter(|o| o.zone == ZoneKind::Battlefield).map(|o| o.object_id).collect();
+    let mut candidates: Vec<ObjectId> = state
+        .objects
+        .values()
+        .filter(|o| o.zone == ZoneKind::Battlefield)
+        .map(|o| o.object_id)
+        .collect();
     candidates.sort();
 
     candidates
@@ -245,17 +280,26 @@ fn collect_dying_creatures(state: &GameState, script_runtime: &ScriptRuntime) ->
             }
             // An unresolved toughness is skipped rather than guessed.
             let toughness = effective.toughness?;
-            let object = state.object(id).expect("candidate id came from state.objects itself");
+            let object = state
+                .object(id)
+                .expect("candidate id came from state.objects itself");
             // CR 704.5f: applies even to an indestructible creature (CR 702.12b) and is not destruction.
             if toughness <= 0 {
-                return Some(DyingCandidate { id, is_destroy: false });
+                return Some(DyingCandidate {
+                    id,
+                    is_destroy: false,
+                });
             }
             if effective.keywords.contains(KeywordSet::INDESTRUCTIBLE) {
                 return None;
             }
             // CR 704.5g, 702.2b: lethal damage, or any damage from a deathtouch source; this is destruction.
-            let lethal = object.damage_marked >= toughness as u32 || (object.deathtouched && object.damage_marked > 0);
-            lethal.then_some(DyingCandidate { id, is_destroy: true })
+            let lethal = object.damage_marked >= toughness as u32
+                || (object.deathtouched && object.damage_marked > 0);
+            lethal.then_some(DyingCandidate {
+                id,
+                is_destroy: true,
+            })
         })
         .collect()
 }
@@ -264,16 +308,29 @@ fn collect_dying_creatures(state: &GameState, script_runtime: &ScriptRuntime) ->
 /// controller and effective name, for `Engine::submit_legend_rule_choice`. Applies
 /// to any permanent type. Candidates and groups are sorted by id because
 /// `state.objects` is a `HashMap`.
-fn find_legend_rule_group(state: &GameState, script_runtime: &ScriptRuntime) -> Option<(PlayerId, Vec<ObjectId>)> {
-    let mut groups: std::collections::BTreeMap<(PlayerId, String), Vec<ObjectId>> = std::collections::BTreeMap::new();
-    for object in state.objects.values().filter(|o| o.zone == ZoneKind::Battlefield) {
-        let effective = crate::layers::effective_characteristics(state, script_runtime, object.object_id);
+fn find_legend_rule_group(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> Option<(PlayerId, Vec<ObjectId>)> {
+    let mut groups: std::collections::BTreeMap<(PlayerId, String), Vec<ObjectId>> =
+        std::collections::BTreeMap::new();
+    for object in state
+        .objects
+        .values()
+        .filter(|o| o.zone == ZoneKind::Battlefield)
+    {
+        let effective =
+            crate::layers::effective_characteristics(state, script_runtime, object.object_id);
         if !effective.supertypes.contains(SupertypeSet::LEGENDARY) {
             continue;
         }
         // CR 704.5j: groups by current controller.
-        let controller = crate::layers::effective_controller(state, script_runtime, object.object_id);
-        groups.entry((controller, effective.name)).or_default().push(object.object_id);
+        let controller =
+            crate::layers::effective_controller(state, script_runtime, object.object_id);
+        groups
+            .entry((controller, effective.name))
+            .or_default()
+            .push(object.object_id);
     }
     let mut violating: Vec<(PlayerId, Vec<ObjectId>)> = groups
         .into_iter()
@@ -308,14 +365,21 @@ fn find_commander_return_candidate(state: &GameState) -> Option<(PlayerId, Objec
 /// CR 704.5k: the World permanents that die: all but the one with the highest
 /// timestamp, or all of them on a tie. Any permanent type. Deterministic, so the
 /// losers join the dying list.
-fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
+fn collect_world_rule_losers(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> Vec<DyingCandidate> {
     let mut world_objects: Vec<(ObjectId, crate::types::ids::SequenceNo)> = state
         .objects
         .values()
         .filter(|o| o.zone == ZoneKind::Battlefield)
         .filter_map(|o| {
-            let effective = crate::layers::effective_characteristics(state, script_runtime, o.object_id);
-            effective.supertypes.contains(SupertypeSet::WORLD).then_some((o.object_id, o.timestamp))
+            let effective =
+                crate::layers::effective_characteristics(state, script_runtime, o.object_id);
+            effective
+                .supertypes
+                .contains(SupertypeSet::WORLD)
+                .then_some((o.object_id, o.timestamp))
         })
         .collect();
     if world_objects.len() < 2 {
@@ -323,18 +387,34 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
     }
     // `state.objects` is a `HashMap`, so sort for a replay-stable death order.
     world_objects.sort_by_key(|(id, _)| *id);
-    let max_timestamp = world_objects.iter().map(|(_, ts)| *ts).max().expect("checked len >= 2 above");
-    let survivor_count = world_objects.iter().filter(|(_, ts)| *ts == max_timestamp).count();
+    let max_timestamp = world_objects
+        .iter()
+        .map(|(_, ts)| *ts)
+        .max()
+        .expect("checked len >= 2 above");
+    let survivor_count = world_objects
+        .iter()
+        .filter(|(_, ts)| *ts == max_timestamp)
+        .count();
     // CR 704.5k: "put into" a graveyard, not destroy.
     if survivor_count == 1 {
         world_objects
             .into_iter()
             .filter(|(_, ts)| *ts != max_timestamp)
-            .map(|(id, _)| DyingCandidate { id, is_destroy: false })
+            .map(|(id, _)| DyingCandidate {
+                id,
+                is_destroy: false,
+            })
             .collect()
     } else {
         // CR 704.5k: a tie leaves no survivor.
-        world_objects.into_iter().map(|(id, _)| DyingCandidate { id, is_destroy: false }).collect()
+        world_objects
+            .into_iter()
+            .map(|(id, _)| DyingCandidate {
+                id,
+                is_destroy: false,
+            })
+            .collect()
     }
 }
 
@@ -347,7 +427,10 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
 ///
 /// Runs before `resolve_deaths`, so a target that dies this pass still counts as
 /// legal and the Aura falls off one pass later (CR 304.3).
-fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
+fn collect_illegally_attached_auras(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> Vec<DyingCandidate> {
     let mut found: Vec<DyingCandidate> = state
         .objects
         .values()
@@ -356,40 +439,47 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
             let illegal = match (o.attached_to, o.attached_to_player) {
                 (None, None) => true,
                 (Some(target_id), None) => match &o.definition.target_requirement {
-                    Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::attachment_target_is_legal(
-                        state,
-                        script_runtime,
-                        crate::types::ids::Target::Object(target_id),
-                        &req.filter,
-                        o.controller,
-                        o.object_id,
-                        req.exclude_source,
-                        // No X context outside a cast or resolution.
-                        None,
-                    ),
+                    Some(crate::types::target::TargetSpec::Primitive(req)) => {
+                        !commands::attachment_target_is_legal(
+                            state,
+                            script_runtime,
+                            crate::types::ids::Target::Object(target_id),
+                            &req.filter,
+                            o.controller,
+                            o.object_id,
+                            req.exclude_source,
+                            // No X context outside a cast or resolution.
+                            None,
+                        )
+                    }
                     _ => state.object(target_id).is_none(),
                 },
                 (None, Some(player)) => {
                     let eliminated = state.player(player).map(|p| p.eliminated).unwrap_or(true);
                     eliminated
                         || match &o.definition.target_requirement {
-                            Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::attachment_target_is_legal(
-                                state,
-                                script_runtime,
-                                crate::types::ids::Target::Player(player),
-                                &req.filter,
-                                o.controller,
-                                o.object_id,
-                                req.exclude_source,
-                                None,
-                            ),
+                            Some(crate::types::target::TargetSpec::Primitive(req)) => {
+                                !commands::attachment_target_is_legal(
+                                    state,
+                                    script_runtime,
+                                    crate::types::ids::Target::Player(player),
+                                    &req.filter,
+                                    o.controller,
+                                    o.object_id,
+                                    req.exclude_source,
+                                    None,
+                                )
+                            }
                             _ => false,
                         }
                 }
                 // Defensive: `attach_permanent` and its player variant each clear the other.
                 (Some(_), Some(_)) => true,
             };
-            illegal.then_some(DyingCandidate { id: o.object_id, is_destroy: false })
+            illegal.then_some(DyingCandidate {
+                id: o.object_id,
+                is_destroy: false,
+            })
         })
         .collect();
     found.sort_by_key(|candidate| candidate.id);
@@ -403,8 +493,15 @@ fn collect_self_enchanted_auras(state: &GameState) -> Vec<DyingCandidate> {
     let mut found: Vec<DyingCandidate> = state
         .objects
         .values()
-        .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_aura(&o.definition) && o.attached_to == Some(o.object_id))
-        .map(|o| DyingCandidate { id: o.object_id, is_destroy: false })
+        .filter(|o| {
+            o.zone == ZoneKind::Battlefield
+                && commands::is_aura(&o.definition)
+                && o.attached_to == Some(o.object_id)
+        })
+        .map(|o| DyingCandidate {
+            id: o.object_id,
+            is_destroy: false,
+        })
         .collect();
     found.sort_by_key(|candidate| candidate.id);
     found
@@ -436,7 +533,10 @@ fn collect_creature_auras(state: &GameState, script_runtime: &ScriptRuntime) -> 
 /// Equipment. The equip ability's own filter is not reused (CR 702.6c), so a control
 /// change of the equipped creature does not unattach it. Unattached Equipment is
 /// legal (CR 301.5b).
-fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
+fn collect_illegally_attached_equipment(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> Vec<ObjectId> {
     let creature_filter = crate::types::target::TargetFilter::Object {
         card_types: Some(CardTypeSet::CREATURE),
         excluded_card_types: None,
@@ -476,10 +576,10 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
 /// entry. No zone change or new `ObjectId`, since `id` stays on the battlefield.
 fn commit_unattach(state: &mut GameState, id: ObjectId) -> GameEvent {
     let was_attached_to = state.object_mut(id).and_then(|o| o.attached_to.take());
-    if let Some(target_id) = was_attached_to {
-        if let Some(target) = state.object_mut(target_id) {
-            target.attachments.retain(|&a| a != id);
-        }
+    if let Some(target_id) = was_attached_to
+        && let Some(target) = state.object_mut(target_id)
+    {
+        target.attachments.retain(|&a| a != id);
     }
     let event_id = state.allocate_event_id();
     let sequence_no = state.allocate_sequence_no();
@@ -512,7 +612,10 @@ fn collect_ceasing_tokens(state: &GameState) -> Vec<ObjectId> {
 /// Removes `id` from its zone and purges it. No new `ObjectId`: a ceasing token
 /// has nowhere to move (CR 400.7). Returns its `Triggered` abilities as
 /// `commit_death` does.
-fn commit_token_cessation(state: &mut GameState, id: ObjectId) -> (GameEvent, Vec<RegisteredAbility>) {
+fn commit_token_cessation(
+    state: &mut GameState,
+    id: ObjectId,
+) -> (GameEvent, Vec<RegisteredAbility>) {
     for zone in &mut state.zones {
         zone.remove(id);
     }
@@ -530,6 +633,7 @@ fn commit_token_cessation(state: &mut GameState, id: ObjectId) -> (GameEvent, Ve
 }
 
 /// What one `resolve_deaths` call produced.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum DeathResolution {
     /// Every pending death is moved or gone. Holds the committed events and the dead
     /// objects' `Triggered` abilities (see `SbaOutcome::Progressed`).
@@ -562,7 +666,11 @@ pub(crate) fn resolve_deaths(
 ) -> DeathResolution {
     let mut resolved = Vec::new();
     let mut departed_triggered = Vec::new();
-    while let Some(DyingCandidate { id: object_id, is_destroy }) = pending_deaths.pop_front() {
+    while let Some(DyingCandidate {
+        id: object_id,
+        is_destroy,
+    }) = pending_deaths.pop_front()
+    {
         let Some(object) = state.object(object_id) else {
             // Already moved earlier in the pass; nothing to do.
             continue;
@@ -581,7 +689,13 @@ pub(crate) fn resolve_deaths(
                     departed_triggered.append(&mut abilities);
                 }
             }
-            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+            ReplacementOutcome::NeedsOrderingChoice {
+                affected_player,
+                event,
+                candidates,
+                excluded,
+                ..
+            } => {
                 // TODO: thread earlier iterations' events and departed abilities into this pause; they are dropped when a later death needs an ordering choice
                 return DeathResolution::NeedsOrderingChoice {
                     affected_player,
@@ -604,8 +718,17 @@ pub(crate) fn resolve_deaths(
 ///
 /// Returns the object's `Triggered` abilities (CR 603.10), because `retire_object`
 /// purges them before `collect_triggers` runs.
-pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (GameEvent, Vec<RegisteredAbility>) {
-    let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = event else {
+pub(crate) fn commit_death(
+    state: &mut GameState,
+    event: GameEventKind,
+) -> (GameEvent, Vec<RegisteredAbility>) {
+    let GameEventKind::ZoneChange {
+        object: old_id,
+        to,
+        last_known_info,
+        ..
+    } = event
+    else {
         // Every caller goes through `commit_death_or_regeneration`, which forwards only a `ZoneChange` here.
         unreachable!("commit_death is only ever called with a ZoneChange event");
     };
@@ -615,7 +738,9 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (Game
     let new_id = state.allocate_object_id();
     let mut new_object = last_known_info.clone();
     new_object.object_id = new_id;
-    new_object.lineage = ObjectLineage { previous: Some(old_id) };
+    new_object.lineage = ObjectLineage {
+        previous: Some(old_id),
+    };
     new_object.zone = to;
     new_object.timestamp = state.allocate_sequence_no();
     new_object.reset_for_new_object();
@@ -656,7 +781,10 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (Game
 /// CR 614.8: commits a `Regenerated` event: removes marked damage and the
 /// deathtouch taint, taps the permanent and removes it from combat (CR 506.4).
 /// The `ObjectId` is unchanged and nothing is retired, so the second element is empty.
-pub(crate) fn commit_regeneration(state: &mut GameState, object: ObjectId) -> (GameEvent, Vec<RegisteredAbility>) {
+pub(crate) fn commit_regeneration(
+    state: &mut GameState,
+    object: ObjectId,
+) -> (GameEvent, Vec<RegisteredAbility>) {
     if let Some(obj) = state.object_mut(object) {
         obj.damage_marked = 0;
         obj.deathtouched = false;
@@ -664,7 +792,9 @@ pub(crate) fn commit_regeneration(state: &mut GameState, object: ObjectId) -> (G
     }
     if let Some(combat) = state.combat.as_mut() {
         combat.attackers.retain(|(id, _)| *id != object);
-        combat.blocks.retain(|(blocker, attacker)| *blocker != object && *attacker != object);
+        combat
+            .blocks
+            .retain(|(blocker, attacker)| *blocker != object && *attacker != object);
         combat.effect_blocked.retain(|id| *id != object);
     }
     let event_id = state.allocate_event_id();
@@ -683,7 +813,11 @@ pub(crate) fn commit_regeneration(state: &mut GameState, object: ObjectId) -> (G
 /// through `commit_death`, a real zone move. Returns two committed events, which
 /// is why `commit_death_or_regeneration` returns a `Vec`.
 // TODO: run the Aura's departure through replacement checking (CR 616)
-fn commit_umbra_armor(state: &mut GameState, enchanted: ObjectId, aura: ObjectId) -> Vec<(GameEvent, Vec<RegisteredAbility>)> {
+fn commit_umbra_armor(
+    state: &mut GameState,
+    enchanted: ObjectId,
+    aura: ObjectId,
+) -> Vec<(GameEvent, Vec<RegisteredAbility>)> {
     if let Some(obj) = state.object_mut(enchanted) {
         obj.damage_marked = 0;
     }
@@ -719,7 +853,9 @@ pub(crate) fn commit_death_or_regeneration(
 ) -> Vec<(GameEvent, Vec<RegisteredAbility>)> {
     match event {
         GameEventKind::Regenerated { object } => vec![commit_regeneration(state, object)],
-        GameEventKind::UmbraArmorConsumed { enchanted, aura } => commit_umbra_armor(state, enchanted, aura),
+        GameEventKind::UmbraArmorConsumed { enchanted, aura } => {
+            commit_umbra_armor(state, enchanted, aura)
+        }
         other => vec![commit_death(state, other)],
     }
 }
@@ -728,7 +864,10 @@ pub(crate) fn commit_death_or_regeneration(
 /// exile to the command zone, with a new `ObjectId` (CR 400.7) and `is_commander`
 /// and `owner` preserved. `None` if `old_id` no longer resolves.
 // TODO: run this move through replacement checking, for CR 903.9b's redirect to the command zone
-pub(crate) fn move_commander_to_command_zone(state: &mut GameState, old_id: ObjectId) -> Option<GameEvent> {
+pub(crate) fn move_commander_to_command_zone(
+    state: &mut GameState,
+    old_id: ObjectId,
+) -> Option<GameEvent> {
     let object = state.object(old_id)?;
     let from = object.zone;
     let owner = object.owner;
@@ -737,12 +876,18 @@ pub(crate) fn move_commander_to_command_zone(state: &mut GameState, old_id: Obje
     let new_id = state.allocate_object_id();
     let mut new_object = last_known_info.clone();
     new_object.object_id = new_id;
-    new_object.lineage = ObjectLineage { previous: Some(old_id) };
+    new_object.lineage = ObjectLineage {
+        previous: Some(old_id),
+    };
     new_object.zone = ZoneKind::Command;
     new_object.timestamp = state.allocate_sequence_no();
 
     // Graveyard is per-owner and exile is shared.
-    let from_zone_owner = if from == ZoneKind::Exile { None } else { Some(owner) };
+    let from_zone_owner = if from == ZoneKind::Exile {
+        None
+    } else {
+        Some(owner)
+    };
     if let Some(zone) = state.zone_mut(from, from_zone_owner) {
         zone.remove(old_id);
     }

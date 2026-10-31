@@ -7,31 +7,37 @@ use std::rc::Rc;
 
 use mlua::{Lua, UserData, UserDataMethods, Value};
 
-use crate::types::ability::{AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, RegisteredAbility};
+use crate::types::ability::{
+    AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, RegisteredAbility,
+};
 use crate::types::card::ModeChoice;
-use crate::types::cost::{CostModifier, CostModifierTarget, CostSpec, FilterController, FilterSpec};
+use crate::types::cost::{
+    CostModifier, CostModifierTarget, CostSpec, FilterController, FilterSpec,
+};
 use crate::types::effect::{
-    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
-    EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
+    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter,
+    EffectPayload, EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload,
+    ReplacementSpec,
 };
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::player::{
-    DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected, HandSizeModifier,
-    LandPlayAffected, LandPlayModifier,
+    DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
+    HandSizeModifier, LandPlayAffected, LandPlayModifier,
 };
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::decode::{
-    decode_affected_value, decode_condition_value, decode_cost_component_value,
+    check_chain_words, decode_affected_value, decode_condition_value, decode_cost_component_value,
     decode_effect_value, decode_layer_value, decode_operation_value, decode_replacement_affected,
-    check_chain_words, decode_target_spec_value, parse_single_color_letter,
+    decode_target_spec_value, parse_single_color_letter,
 };
 use super::tags::{
-    AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind, EventFilterKindTag,
-    FilterTag, HandSizeEffectTag, InterveningIfTag, OncePerTurnTag, RedirectDamageToSourceTag, ReplacementPayloadTag,
+    AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind,
+    EventFilterKindTag, FilterTag, HandSizeEffectTag, InterveningIfTag, OncePerTurnTag,
+    RedirectDamageToSourceTag, ReplacementPayloadTag,
 };
-use super::types::{to_lua_err, ScriptError, ScriptRegistry};
+use super::types::{ScriptError, ScriptRegistry, to_lua_err};
 
 /// CR 613.1: a static ability's `:SetLayer` and `:SetEffect` must agree, or
 /// `:Register()` would build a `ContinuousEffect` that
@@ -44,7 +50,9 @@ use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 /// there is silently skipped at query time (`layers::resolve_primitive`'s
 /// caller), a narrower safety net.
 fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result<(), ScriptError> {
-    let EffectPayload::Primitive(effect) = effect else { return Ok(()) };
+    let EffectPayload::Primitive(effect) = effect else {
+        return Ok(());
+    };
     let paired = matches!(
         (layer, effect),
         (Layer::TextChanging, EffectPrimitive::SetName(_))
@@ -59,16 +67,34 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::AbilityAdding, EffectPrimitive::IgnoreKeyword(_))
             | (Layer::AbilityAdding, EffectPrimitive::RemoveAllAbilities)
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionColor(_))
-            | (Layer::AbilityAdding, EffectPrimitive::AddProtectionCardType(_))
-            | (Layer::AbilityAdding, EffectPrimitive::AddProtectionSubtype(_))
+            | (
+                Layer::AbilityAdding,
+                EffectPrimitive::AddProtectionCardType(_)
+            )
+            | (
+                Layer::AbilityAdding,
+                EffectPrimitive::AddProtectionSubtype(_)
+            )
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionName(_))
-            | (Layer::AbilityAdding, EffectPrimitive::AddProtectionEverything)
-            | (Layer::AbilityAdding, EffectPrimitive::AddProtectionPlayer(_))
+            | (
+                Layer::AbilityAdding,
+                EffectPrimitive::AddProtectionEverything
+            )
+            | (
+                Layer::AbilityAdding,
+                EffectPrimitive::AddProtectionPlayer(_)
+            )
             | (Layer::AbilityAdding, EffectPrimitive::AddLandwalkSubtype(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddBandsWithOther(_))
-            | (Layer::AbilityAdding, EffectPrimitive::AddBandsWithOtherSupertype(_))
+            | (
+                Layer::AbilityAdding,
+                EffectPrimitive::AddBandsWithOtherSupertype(_)
+            )
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
-            | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
+            | (
+                Layer::PowerToughnessModifying,
+                EffectPrimitive::ModifyPT { .. }
+            )
             | (Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)
     );
     if paired {
@@ -95,24 +121,40 @@ fn validate_characteristic_defining(
     function_zone: Option<ZoneKind>,
     duration: &EffectDuration,
 ) -> Result<(), ScriptError> {
-    let err = |why: &str| ScriptError::LoadError(format!("SetCharacteristicDefining: {why} (CR 604.3a)"));
+    let err =
+        |why: &str| ScriptError::LoadError(format!("SetCharacteristicDefining: {why} (CR 604.3a)"));
     let defines_color_or_subtype = matches!(
         (layer, effect),
-        (Layer::TypeChanging, EffectPayload::Primitive(EffectPrimitive::AddSubtype(_)))
-            | (Layer::ColorChanging, EffectPayload::Primitive(EffectPrimitive::AddColor(_)))
-            | (Layer::ColorChanging, EffectPayload::Primitive(EffectPrimitive::SetColors(_)))
+        (
+            Layer::TypeChanging,
+            EffectPayload::Primitive(EffectPrimitive::AddSubtype(_))
+        ) | (
+            Layer::ColorChanging,
+            EffectPayload::Primitive(EffectPrimitive::AddColor(_))
+        ) | (
+            Layer::ColorChanging,
+            EffectPayload::Primitive(EffectPrimitive::SetColors(_))
+        )
     );
     if !defines_color_or_subtype {
-        return Err(err("only AddSubtype (layer 4) and AddColor/SetColors (layer 5) can define a characteristic"));
+        return Err(err(
+            "only AddSubtype (layer 4) and AddColor/SetColors (layer 5) can define a characteristic",
+        ));
     }
     if !matches!(affected, AffectedFilter::Primitive(filter) if filter.self_only) {
-        return Err(err("it must affect only its own source - use SetAffected(Game.Affected.Self)"));
+        return Err(err(
+            "it must affect only its own source - use SetAffected(Game.Affected.Self)",
+        ));
     }
     if has_condition {
-        return Err(err("it can't set a characteristic only if a condition is met"));
+        return Err(err(
+            "it can't set a characteristic only if a condition is met",
+        ));
     }
     if function_zone.is_some() {
-        return Err(err("it already functions in every zone - don't combine with SetFunctionsFrom"));
+        return Err(err(
+            "it already functions in every zone - don't combine with SetFunctionsFrom",
+        ));
     }
     if !matches!(duration, EffectDuration::Permanent) {
         return Err(err("it can't have a limited duration"));
@@ -133,17 +175,35 @@ fn validate_replacement_filter_payload_pairing(
 ) -> Result<(), ScriptError> {
     let paired = matches!(
         (kind, payload),
-        (EventFilterKind::DamageDealt, ReplacementPayload::PreventDamage)
-            | (EventFilterKind::DamageDealt, ReplacementPayload::RedirectDamage(_))
-            | (EventFilterKind::WouldDie, ReplacementPayload::ReplaceZoneDestination(_))
-            | (EventFilterKind::WouldDie, ReplacementPayload::Regenerate)
-            | (EventFilterKind::WouldMoveZone { .. }, ReplacementPayload::ReplaceZoneDestination(_))
-            | (EventFilterKind::WouldDieEnchanted, ReplacementPayload::UmbraArmor)
-            | (EventFilterKind::WouldEnterEnchantedPlayerGraveyard, ReplacementPayload::ReplaceZoneDestination(_))
+        (
+            EventFilterKind::DamageDealt,
+            ReplacementPayload::PreventDamage
+        ) | (
+            EventFilterKind::DamageDealt,
+            ReplacementPayload::RedirectDamage(_)
+        ) | (
+            EventFilterKind::WouldDie,
+            ReplacementPayload::ReplaceZoneDestination(_)
+        ) | (EventFilterKind::WouldDie, ReplacementPayload::Regenerate)
+            | (
+                EventFilterKind::WouldMoveZone { .. },
+                ReplacementPayload::ReplaceZoneDestination(_)
+            )
+            | (
+                EventFilterKind::WouldDieEnchanted,
+                ReplacementPayload::UmbraArmor
+            )
+            | (
+                EventFilterKind::WouldEnterEnchantedPlayerGraveyard,
+                ReplacementPayload::ReplaceZoneDestination(_)
+            )
     ) || matches!(
         (kind, payload),
         (
-            EventFilterKind::WouldMoveZone { to: Some(ZoneKind::Battlefield), .. },
+            EventFilterKind::WouldMoveZone {
+                to: Some(ZoneKind::Battlefield),
+                ..
+            },
             ReplacementPayload::EntersTapped
                 | ReplacementPayload::EntersWithCounters { .. }
                 | ReplacementPayload::EntersWithCountersBloodthirst { .. }
@@ -239,7 +299,8 @@ impl UserData for TriggeredAbilityBuilder {
         });
         methods.add_method_mut("SetTarget", |lua, this, value: Value| {
             let mut registry = this.registry.borrow_mut();
-            let decoded = decode_target_spec_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            let decoded =
+                decode_target_spec_value(lua, &mut registry, value).map_err(to_lua_err)?;
             drop(registry);
             this.target = Some(decoded);
             Ok(())
@@ -343,7 +404,8 @@ impl UserData for ActivatedAbilityBuilder {
         });
         methods.add_method_mut("SetTarget", |lua, this, value: Value| {
             let mut registry = this.registry.borrow_mut();
-            let decoded = decode_target_spec_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            let decoded =
+                decode_target_spec_value(lua, &mut registry, value).map_err(to_lua_err)?;
             drop(registry);
             this.target = Some(decoded);
             Ok(())
@@ -450,7 +512,10 @@ impl UserData for ManaAbilityBuilder {
                         .to_string(),
                 )
             })?;
-            if !matches!(effect, Some(AbilityEffect::AddMana(_)) | Some(AbilityEffect::AddManaChoice { .. })) {
+            if !matches!(
+                effect,
+                Some(AbilityEffect::AddMana(_)) | Some(AbilityEffect::AddManaChoice { .. })
+            ) {
                 return Err(mlua::Error::RuntimeError(
                     "Game.CreateManaAbility only supports Game.Ops.AddMana/AddManaChoice \
                      operations - use Game.CreateActivatedAbility for anything else"
@@ -493,9 +558,9 @@ fn decode_state_condition(
     method: &str,
 ) -> mlua::Result<InterveningIfSpec> {
     match value {
-        Value::UserData(ud) if ud.is::<InterveningIfTag>() => {
-            Ok(InterveningIfSpec::Primitive(ud.borrow::<InterveningIfTag>()?.0.clone()))
-        }
+        Value::UserData(ud) if ud.is::<InterveningIfTag>() => Ok(InterveningIfSpec::Primitive(
+            ud.borrow::<InterveningIfTag>()?.0.clone(),
+        )),
         Value::UserData(ud) if ud.is::<ConditionTag>() || ud.is::<OncePerTurnTag>() => {
             Err(mlua::Error::RuntimeError(format!(
                 "{method} takes a state condition (AtOrBelowLife, ControlsAtLeast, Escaped, HadNoCounters); \
@@ -659,7 +724,11 @@ impl UserData for StaticAbilityBuilder {
                 duration: this.duration.clone(),
                 condition: this.condition.clone(),
             };
-            this.registry.borrow_mut().pending_static.push((continuous_effect, this.function_zone, this.characteristic_defining));
+            this.registry.borrow_mut().pending_static.push((
+                continuous_effect,
+                this.function_zone,
+                this.characteristic_defining,
+            ));
             Ok(())
         });
     }
@@ -728,21 +797,36 @@ impl UserData for ReplacementEffectBuilder {
         });
         methods.add_method_mut("Register", |_, this, ()| {
             let filter = match this.event_kind {
-                EventFilterKind::DamageDealt => EventFilter::DamageDealt { affected: this.affected.clone() },
-                EventFilterKind::WouldDie => EventFilter::WouldDie { affected: this.affected.clone() },
-                EventFilterKind::WouldMoveZone { from, to } => {
-                    EventFilter::WouldMoveZone { from, to, affected: this.affected.clone() }
-                }
+                EventFilterKind::DamageDealt => EventFilter::DamageDealt {
+                    affected: this.affected.clone(),
+                },
+                EventFilterKind::WouldDie => EventFilter::WouldDie {
+                    affected: this.affected.clone(),
+                },
+                EventFilterKind::WouldMoveZone { from, to } => EventFilter::WouldMoveZone {
+                    from,
+                    to,
+                    affected: this.affected.clone(),
+                },
                 EventFilterKind::WouldDieEnchanted => EventFilter::WouldDieEnchanted,
-                EventFilterKind::WouldEnterEnchantedPlayerGraveyard => EventFilter::WouldEnterEnchantedPlayerGraveyard,
+                EventFilterKind::WouldEnterEnchantedPlayerGraveyard => {
+                    EventFilter::WouldEnterEnchantedPlayerGraveyard
+                }
             };
-            validate_replacement_filter_payload_pairing(this.event_kind, &this.payload).map_err(to_lua_err)?;
+            validate_replacement_filter_payload_pairing(this.event_kind, &this.payload)
+                .map_err(to_lua_err)?;
             let replacement_effect = ReplacementEffect {
                 source: this.source,
-                spec: ReplacementSpec::Primitive { filter, payload: this.payload.clone() },
+                spec: ReplacementSpec::Primitive {
+                    filter,
+                    payload: this.payload.clone(),
+                },
                 consumption: this.consumption,
             };
-            this.registry.borrow_mut().pending_replacement.push((replacement_effect, this.function_zone));
+            this.registry
+                .borrow_mut()
+                .pending_replacement
+                .push((replacement_effect, this.function_zone));
             Ok(())
         });
     }
@@ -783,27 +867,30 @@ impl UserData for CostModifierBuilder {
             this.function_zone = Some(function_zone_name(&name)?);
             Ok(())
         });
-        methods.add_method_mut("SetFilter", |_, this, value: Value| {
-            match value {
-                Value::UserData(ud) if ud.is::<FilterTag>() => {
-                    this.filter = Some(ud.borrow::<FilterTag>()?.0.clone().into_filter_spec());
-                    Ok(())
-                }
-                other => Err(mlua::Error::RuntimeError(format!(
-                    "a cost modifier's SetFilter expects Game.Filter({{...}}), got {}",
-                    other.type_name()
-                ))),
+        methods.add_method_mut("SetFilter", |_, this, value: Value| match value {
+            Value::UserData(ud) if ud.is::<FilterTag>() => {
+                this.filter = Some(ud.borrow::<FilterTag>()?.0.clone().into_filter_spec());
+                Ok(())
             }
+            other => Err(mlua::Error::RuntimeError(format!(
+                "a cost modifier's SetFilter expects Game.Filter({{...}}), got {}",
+                other.type_name()
+            ))),
         });
-        methods.add_method_mut("SetAmount", |_, this, (amount, color): (i32, Option<String>)| {
-            this.amount = Some(amount);
-            this.target = match color.as_deref() {
-                None => CostModifierTarget::Generic,
-                Some("C") => CostModifierTarget::Colorless,
-                Some(letter) => CostModifierTarget::Colored(parse_single_color_letter(letter).map_err(to_lua_err)?),
-            };
-            Ok(())
-        });
+        methods.add_method_mut(
+            "SetAmount",
+            |_, this, (amount, color): (i32, Option<String>)| {
+                this.amount = Some(amount);
+                this.target = match color.as_deref() {
+                    None => CostModifierTarget::Generic,
+                    Some("C") => CostModifierTarget::Colorless,
+                    Some(letter) => CostModifierTarget::Colored(
+                        parse_single_color_letter(letter).map_err(to_lua_err)?,
+                    ),
+                };
+                Ok(())
+            },
+        );
         methods.add_method_mut("Register", |_, this, ()| {
             let filter = this.filter.clone().ok_or_else(|| {
                 mlua::Error::RuntimeError(
@@ -817,14 +904,17 @@ impl UserData for CostModifierBuilder {
                         .to_string(),
                 )
             })?;
-            this.registry.borrow_mut().pending_cost_modifiers.push((CostModifier {
-                source: this.source,
-                // Placeholder, stamped by `run_card_script`'s drain step.
-                controller: PlayerId(0),
-                filter,
-                target: this.target,
-                amount,
-            }, this.function_zone));
+            this.registry.borrow_mut().pending_cost_modifiers.push((
+                CostModifier {
+                    source: this.source,
+                    // Placeholder, stamped by `run_card_script`'s drain step.
+                    controller: PlayerId(0),
+                    filter,
+                    target: this.target,
+                    amount,
+                },
+                this.function_zone,
+            ));
             Ok(())
         });
     }
@@ -852,10 +942,15 @@ impl UserData for HandSizeModifierBuilder {
             Ok(())
         });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
-            this.affected = Some(match decode_player_affected(value, "a hand size modifier")? {
-                AffectedTag::EnchantedPlayer => HandSizeAffected::EnchantedPlayer,
-                tag => HandSizeAffected::Filter(reject_enchanted_player(tag, "a hand size modifier")?),
-            });
+            this.affected = Some(
+                match decode_player_affected(value, "a hand size modifier")? {
+                    AffectedTag::EnchantedPlayer => HandSizeAffected::EnchantedPlayer,
+                    tag => HandSizeAffected::Filter(reject_enchanted_player(
+                        tag,
+                        "a hand size modifier",
+                    )?),
+                },
+            );
             Ok(())
         });
         methods.add_method_mut("SetEffect", |_, this, value: mlua::AnyUserData| {
@@ -876,15 +971,21 @@ impl UserData for HandSizeModifierBuilder {
                         .to_string(),
                 )
             })?;
-            this.registry.borrow_mut().pending_hand_size_modifiers.push((HandSizeModifier {
-                source: this.source,
-                // Placeholder, stamped by `run_card_script`'s drain step.
-                controller: PlayerId(0),
-                affected,
-                effect,
-                // Placeholder, stamped by `run_card_script`'s drain step.
-                timestamp: SequenceNo(0),
-            }, this.function_zone));
+            this.registry
+                .borrow_mut()
+                .pending_hand_size_modifiers
+                .push((
+                    HandSizeModifier {
+                        source: this.source,
+                        // Placeholder, stamped by `run_card_script`'s drain step.
+                        controller: PlayerId(0),
+                        affected,
+                        effect,
+                        // Placeholder, stamped by `run_card_script`'s drain step.
+                        timestamp: SequenceNo(0),
+                    },
+                    this.function_zone,
+                ));
             Ok(())
         });
     }
@@ -909,10 +1010,15 @@ impl UserData for HandRevealModifierBuilder {
             Ok(())
         });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
-            this.affected = Some(match decode_player_affected(value, "a hand reveal modifier")? {
-                AffectedTag::EnchantedPlayer => HandRevealAffected::EnchantedPlayer,
-                tag => HandRevealAffected::Filter(reject_enchanted_player(tag, "a hand reveal modifier")?),
-            });
+            this.affected = Some(
+                match decode_player_affected(value, "a hand reveal modifier")? {
+                    AffectedTag::EnchantedPlayer => HandRevealAffected::EnchantedPlayer,
+                    tag => HandRevealAffected::Filter(reject_enchanted_player(
+                        tag,
+                        "a hand reveal modifier",
+                    )?),
+                },
+            );
             Ok(())
         });
         methods.add_method_mut("Register", |_, this, ()| {
@@ -957,7 +1063,10 @@ impl UserData for DrawLimitModifierBuilder {
         });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
             let tag = decode_player_affected(value, "a draw limit modifier")?;
-            this.affected = Some(DrawLimitAffected::Filter(reject_enchanted_player(tag, "a draw limit modifier")?));
+            this.affected = Some(DrawLimitAffected::Filter(reject_enchanted_player(
+                tag,
+                "a draw limit modifier",
+            )?));
             Ok(())
         });
         methods.add_method_mut("SetLimit", |_, this, limit: u32| {
@@ -978,15 +1087,21 @@ impl UserData for DrawLimitModifierBuilder {
                         .to_string(),
                 )
             })?;
-            this.registry.borrow_mut().pending_draw_limit_modifiers.push((DrawLimitModifier {
-                source: this.source,
-                // Placeholder, stamped by `run_card_script`'s drain step.
-                controller: PlayerId(0),
-                affected,
-                limit,
-                // Placeholder, stamped by `run_card_script`'s drain step.
-                timestamp: SequenceNo(0),
-            }, this.function_zone));
+            this.registry
+                .borrow_mut()
+                .pending_draw_limit_modifiers
+                .push((
+                    DrawLimitModifier {
+                        source: this.source,
+                        // Placeholder, stamped by `run_card_script`'s drain step.
+                        controller: PlayerId(0),
+                        affected,
+                        limit,
+                        // Placeholder, stamped by `run_card_script`'s drain step.
+                        timestamp: SequenceNo(0),
+                    },
+                    this.function_zone,
+                ));
             Ok(())
         });
     }
@@ -1014,7 +1129,10 @@ impl UserData for LandPlayModifierBuilder {
         });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
             let tag = decode_player_affected(value, "a land play modifier")?;
-            this.affected = Some(LandPlayAffected::Filter(reject_enchanted_player(tag, "a land play modifier")?));
+            this.affected = Some(LandPlayAffected::Filter(reject_enchanted_player(
+                tag,
+                "a land play modifier",
+            )?));
             Ok(())
         });
         methods.add_method_mut("SetAdditional", |_, this, additional: u32| {

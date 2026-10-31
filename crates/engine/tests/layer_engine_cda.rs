@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
@@ -33,11 +33,16 @@ fn cda_value(script: Option<&str>) -> PTValue {
     }
 }
 
-fn cda_creature_definition(power_script: Option<&str>, toughness_script: Option<&str>) -> CardDefinition {
+fn cda_creature_definition(
+    power_script: Option<&str>,
+    toughness_script: Option<&str>,
+) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test CDA Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -58,15 +63,27 @@ fn cda_creature_definition(power_script: Option<&str>, toughness_script: Option<
     }
 }
 
-fn cda_creature(id: ObjectId, owner: PlayerId, power_script: Option<&str>, toughness_script: Option<&str>) -> GameObject {
-    card_object(id, cda_creature_definition(power_script, toughness_script), owner, ZoneKind::Battlefield)
+fn cda_creature(
+    id: ObjectId,
+    owner: PlayerId,
+    power_script: Option<&str>,
+    toughness_script: Option<&str>,
+) -> GameObject {
+    card_object(
+        id,
+        cda_creature_definition(power_script, toughness_script),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
 fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -88,7 +105,12 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    card_object(id, creature_definition(power, toughness), owner, ZoneKind::Battlefield)
+    card_object(
+        id,
+        creature_definition(power, toughness),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
 fn base_state() -> GameState {
@@ -104,7 +126,10 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -127,7 +152,15 @@ fn continuous_effect(
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
+    EffectFilter {
+        controller: None,
+        card_types: None,
+        self_only: false,
+        subtypes: None,
+        excluded_subtypes: None,
+        supertypes: None,
+        excluded_supertypes: None,
+    }
 }
 
 const RETURNS_THREE: &str = "return function(source, controller) return 3 end";
@@ -143,7 +176,10 @@ fn no_script_still_resolves_to_none() {
     let script_runtime = ScriptRuntime::new();
     let effective = effective_characteristics(&state, &script_runtime, star);
 
-    assert_eq!(effective.power, None, "no script - can't resolve, skip rather than guess");
+    assert_eq!(
+        effective.power, None,
+        "no script - can't resolve, skip rather than guess"
+    );
     assert_eq!(effective.toughness, None);
 }
 
@@ -152,7 +188,10 @@ fn a_constant_returning_script_resolves_to_a_real_number() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let star = ObjectId(0);
-    put_on_battlefield(&mut state, cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE)));
+    put_on_battlefield(
+        &mut state,
+        cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE)),
+    );
 
     let script_runtime = ScriptRuntime::new();
     let effective = effective_characteristics(&state, &script_runtime, star);
@@ -167,13 +206,19 @@ fn cda_base_is_overridden_by_a_later_set_pt() {
     let p0 = PlayerId(0);
     let star = ObjectId(0);
     let setter = ObjectId(1);
-    put_on_battlefield(&mut state, cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE)));
+    put_on_battlefield(
+        &mut state,
+        cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE)),
+    );
     put_on_battlefield(&mut state, creature(setter, p0, 0, 0));
     // CR 613.4a, b: layer 7a resolves the CDA base (3/3) first, then 7b's SetPT overrides it entirely.
     state.continuous_effects.push(continuous_effect(
         setter,
         Layer::PowerToughnessSetting,
-        EffectPrimitive::SetPT { power: 5, toughness: 5 },
+        EffectPrimitive::SetPT {
+            power: 5,
+            toughness: 5,
+        },
         no_filter(),
         0,
     ));
@@ -181,7 +226,11 @@ fn cda_base_is_overridden_by_a_later_set_pt() {
     let script_runtime = ScriptRuntime::new();
     let effective = effective_characteristics(&state, &script_runtime, star);
 
-    assert_eq!(effective.power, Some(5), "SetPT should override the CDA base, not stack with it");
+    assert_eq!(
+        effective.power,
+        Some(5),
+        "SetPT should override the CDA base, not stack with it"
+    );
     assert_eq!(effective.toughness, Some(5));
 }
 
@@ -191,13 +240,19 @@ fn cda_base_has_modify_pt_stacked_on_top() {
     let p0 = PlayerId(0);
     let star = ObjectId(0);
     let anthem = ObjectId(1);
-    put_on_battlefield(&mut state, cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE)));
+    put_on_battlefield(
+        &mut state,
+        cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE)),
+    );
     put_on_battlefield(&mut state, creature(anthem, p0, 0, 0));
     // CR 613.4a, c: layer 7c adds on top of the 7a/7b result, so the CDA 3/3 base plus a +2/+2 anthem is 5/5.
     state.continuous_effects.push(continuous_effect(
         anthem,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 2, toughness: 2 },
+        EffectPrimitive::ModifyPT {
+            power: 2,
+            toughness: 2,
+        },
         no_filter(),
         0,
     ));
@@ -215,13 +270,19 @@ fn cda_base_nets_against_plus_one_counters() {
     let p0 = PlayerId(0);
     let star = ObjectId(0);
     let mut object = cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE));
-    object.counters.add(CounterKind::PlusOnePlusOne, 2, SequenceNo(0));
+    object
+        .counters
+        .add(CounterKind::PlusOnePlusOne, 2, SequenceNo(0));
     put_on_battlefield(&mut state, object);
 
     let script_runtime = ScriptRuntime::new();
     let effective = effective_characteristics(&state, &script_runtime, star);
 
-    assert_eq!(effective.power, Some(5), "CR 121.3: +1/+1 counters net against a CDA base too, not just Fixed");
+    assert_eq!(
+        effective.power,
+        Some(5),
+        "CR 121.3: +1/+1 counters net against a CDA base too, not just Fixed"
+    );
     assert_eq!(effective.toughness, Some(5));
 }
 
@@ -230,12 +291,18 @@ fn an_erroring_script_resolves_to_none_not_a_panic() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let star = ObjectId(0);
-    put_on_battlefield(&mut state, cda_creature(star, p0, Some(RETURNS_WRONG_TYPE), Some(RETURNS_WRONG_TYPE)));
+    put_on_battlefield(
+        &mut state,
+        cda_creature(star, p0, Some(RETURNS_WRONG_TYPE), Some(RETURNS_WRONG_TYPE)),
+    );
 
     let script_runtime = ScriptRuntime::new();
     let effective = effective_characteristics(&state, &script_runtime, star);
 
-    assert_eq!(effective.power, None, "a script that errors should skip, not panic or guess");
+    assert_eq!(
+        effective.power, None,
+        "a script that errors should skip, not panic or guess"
+    );
     assert_eq!(effective.toughness, None);
 }
 
@@ -251,7 +318,10 @@ fn a_script_less_cda_creature_never_dies_to_the_lethal_damage_sba() {
     let script_runtime = ScriptRuntime::new();
     let events = progressed(check_state_based_actions(&mut state, &script_runtime));
 
-    assert!(events.is_empty(), "toughness is unresolved (None) - 704.5g can't apply without a number");
+    assert!(
+        events.is_empty(),
+        "toughness is unresolved (None) - 704.5g can't apply without a number"
+    );
     assert!(state.object(star).is_some());
 }
 
@@ -268,6 +338,10 @@ fn a_scripted_cda_creature_dies_to_lethal_damage_via_sba() {
     let script_runtime = ScriptRuntime::new();
     let events = progressed(check_state_based_actions(&mut state, &script_runtime));
 
-    assert_eq!(events.len(), 1, "a real resolved toughness should make 704.5g apply");
+    assert_eq!(
+        events.len(),
+        1,
+        "a real resolved toughness should make 704.5g apply"
+    );
     assert!(state.object(star).is_none());
 }

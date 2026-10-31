@@ -14,7 +14,9 @@ use crate::types::player::effective_max_hand_size;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
-use super::{DiscardError, Engine, PendingZoneMove, ProcessState, ReplacementResumeTarget, StepStatus};
+use super::{
+    DiscardError, Engine, PendingZoneMove, ProcessState, ReplacementResumeTarget, StepStatus,
+};
 
 impl Engine {
     /// Answers the cleanup discard-to-hand-size pause (CR 514.1). `cards` must be
@@ -26,7 +28,10 @@ impl Engine {
         };
 
         if cards.len() != excess {
-            return Err(DiscardError::WrongCount { expected: excess, got: cards.len() });
+            return Err(DiscardError::WrongCount {
+                expected: excess,
+                got: cards.len(),
+            });
         }
 
         let mut seen: Vec<ObjectId> = Vec::with_capacity(cards.len());
@@ -47,7 +52,11 @@ impl Engine {
         let since_ledger = self.state.ledger.len();
         let pending: VecDeque<PendingZoneMove> = cards
             .into_iter()
-            .map(|id| PendingZoneMove { id, from: ZoneKind::Hand, to: ZoneKind::Graveyard })
+            .map(|id| PendingZoneMove {
+                id,
+                from: ZoneKind::Hand,
+                to: ZoneKind::Graveyard,
+            })
             .collect();
         self.process_state = self.continue_discard_moves(pending, since_ledger);
         Ok(())
@@ -61,11 +70,18 @@ impl Engine {
         since_ledger: usize,
     ) -> ProcessState {
         while let Some(pending) = remaining.pop_front() {
-            let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from, pending.to) else {
+            let Some(proposed) =
+                commands::propose_zone_move(&self.state, pending.id, pending.from, pending.to)
+            else {
                 continue;
             };
             // CR 614.8: a cleanup discard is never destruction.
-            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+            match replacement::apply_replacements(
+                &mut self.state,
+                &self.script_runtime,
+                proposed,
+                false,
+            ) {
                 ReplacementOutcome::Resolved(event) => {
                     // CR 702.35a: derived before commit purges the object's replacement effects.
                     let madness = replacement::madness_marker_event(&self.state, &event);
@@ -76,13 +92,22 @@ impl Engine {
                     }
                     self.state.ledger.push(committed);
                 }
-                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                ReplacementOutcome::NeedsOrderingChoice {
+                    affected_player,
+                    event,
+                    candidates,
+                    excluded,
+                    ..
+                } => {
                     return ProcessState::AwaitingReplacementChoice {
                         affected_player,
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger },
+                        resume: ReplacementResumeTarget::CleanupDiscard {
+                            remaining,
+                            since_ledger,
+                        },
                     };
                 }
             }
@@ -90,7 +115,9 @@ impl Engine {
         // The discard's zone changes need real trigger collection. `CleanupSbaCheck`
         // reaches the SBA check whether or not anything triggered.
         self.pipeline_exit = PipelineExit::CleanupSbaCheck;
-        ProcessState::CollectTriggers { since: since_ledger }
+        ProcessState::CollectTriggers {
+            since: since_ledger,
+        }
     }
 
     /// The tail every step reaches before opening priority: replacement check,
@@ -102,9 +129,16 @@ impl Engine {
         since_ledger: usize,
     ) -> ProcessState {
         self.state.priority_player = self.state.active_player;
-        self.pipeline_context = Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
+        self.pipeline_context = Some(PipelineContext {
+            since_ledger,
+            caused_by_command: None,
+            parent_event: None,
+        });
         self.pipeline_exit = PipelineExit::BackToPriority;
-        ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() }
+        ProcessState::ReplacementCheck {
+            remaining: events.into(),
+            checked: Vec::new(),
+        }
     }
 
     /// CR 502.3: untaps what the active player controls.
@@ -119,8 +153,11 @@ impl Engine {
             .filter(|(_, o)| {
                 o.zone == ZoneKind::Battlefield
                     && o.tapped
-                    && crate::layers::effective_controller(&self.state, &self.script_runtime, o.object_id)
-                        == active
+                    && crate::layers::effective_controller(
+                        &self.state,
+                        &self.script_runtime,
+                        o.object_id,
+                    ) == active
             })
             .map(|(id, _)| *id)
             .collect();
@@ -129,7 +166,10 @@ impl Engine {
 
         let mut events = Vec::with_capacity(ids.len());
         for id in ids {
-            self.state.object_mut(id).expect("id just collected from state.objects").tapped = false;
+            self.state
+                .object_mut(id)
+                .expect("id just collected from state.objects")
+                .tapped = false;
             events.push(GameEventKind::Untapped { object: id });
         }
         events
@@ -152,7 +192,9 @@ impl Engine {
             .map(|z| z.contents.len())
             .unwrap_or(0);
         // CR 402.2: no maximum hand size means no discard.
-        let Some(max_hand_size) = effective_max_hand_size(&self.state, &self.state.hand_size_modifiers, active, 7) else {
+        let Some(max_hand_size) =
+            effective_max_hand_size(&self.state, &self.state.hand_size_modifiers, active, 7)
+        else {
             self.process_state = ProcessState::CleanupSbaCheck;
             return StepStatus::Progressed;
         };
@@ -160,8 +202,15 @@ impl Engine {
 
         if hand_size > max_hand_size {
             let excess = hand_size - max_hand_size;
-            self.process_state = ProcessState::AwaitingDiscard { player: active, excess };
-            return StepStatus::AwaitingDiscard { player: active, hand_size, max_hand_size };
+            self.process_state = ProcessState::AwaitingDiscard {
+                player: active,
+                excess,
+            };
+            return StepStatus::AwaitingDiscard {
+                player: active,
+                hand_size,
+                max_hand_size,
+            };
         }
 
         self.process_state = ProcessState::CleanupSbaCheck;
@@ -215,14 +264,20 @@ impl Engine {
                 false
             }
             (Phase::Combat, Step::DeclareAttackers) => {
-              // CR 506.1
-              if self.state.combat.as_ref().map(|c| c.attackers.is_empty()).unwrap_or(true) {
-                  self.state.phase = Phase::Combat;
-                  self.state.step = Step::EndOfCombat;
-              } else {
-                self.state.step = Step::DeclareBlockers;
-              }
-              false
+                // CR 506.1
+                if self
+                    .state
+                    .combat
+                    .as_ref()
+                    .map(|c| c.attackers.is_empty())
+                    .unwrap_or(true)
+                {
+                    self.state.phase = Phase::Combat;
+                    self.state.step = Step::EndOfCombat;
+                } else {
+                    self.state.step = Step::DeclareBlockers;
+                }
+                false
             }
             (Phase::Combat, Step::DeclareBlockers) => {
                 // CR 510.1a: read through effective keywords so granted keywords count.
@@ -238,7 +293,9 @@ impl Engine {
                             .chain(combat.blocks.iter().map(|(blocker, _)| *blocker))
                             .any(|id| {
                                 commands::effective_keywords(&self.state, &self.script_runtime, id)
-                                    .intersects(KeywordSet::FIRST_STRIKE | KeywordSet::DOUBLE_STRIKE)
+                                    .intersects(
+                                        KeywordSet::FIRST_STRIKE | KeywordSet::DOUBLE_STRIKE,
+                                    )
                             })
                     })
                     .unwrap_or(false);
@@ -336,9 +393,13 @@ impl Engine {
         // Untap to upkeep stays within the beginning phase and must not re-log `PhaseStarted`.
         let mut events = Vec::new();
         if self.state.phase != phase_before {
-            events.push(GameEventKind::PhaseStarted { phase: self.state.phase });
+            events.push(GameEventKind::PhaseStarted {
+                phase: self.state.phase,
+            });
         }
-        events.push(GameEventKind::StepStarted { step: self.state.step });
+        events.push(GameEventKind::StepStarted {
+            step: self.state.step,
+        });
         if starting_new_turn {
             events.push(GameEventKind::TurnStarted {
                 player: self.state.active_player,
@@ -360,11 +421,16 @@ impl Engine {
             let untap_events = self.untap_step();
             events.extend(untap_events);
             let since_ledger = self.state.ledger.len();
-            self.pipeline_context =
-                Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
+            self.pipeline_context = Some(PipelineContext {
+                since_ledger,
+                caused_by_command: None,
+                parent_event: None,
+            });
             self.pipeline_exit = PipelineExit::AdvanceTurnStep;
-            self.process_state =
-                ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
+            self.process_state = ProcessState::ReplacementCheck {
+                remaining: events.into(),
+                checked: Vec::new(),
+            };
             return StepStatus::Progressed;
         }
         if self.state.step == Step::Draw {
@@ -381,9 +447,15 @@ impl Engine {
             // before it so trigger collection also covers the step markers.
             let since_ledger = self.state.ledger.len();
             if let Some(proposed) = commands::propose_draw(&mut self.state, active) {
-                match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+                match replacement::apply_replacements(
+                    &mut self.state,
+                    &self.script_runtime,
+                    proposed,
+                    false,
+                ) {
                     ReplacementOutcome::Resolved(event) => {
-                        let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                        let (committed, departed) =
+                            commands::commit_zone_move(&mut self.state, event);
                         self.departed_triggered_abilities.extend(departed);
                         // CR 702.29b: a hand-only ability registers when the card reaches hand.
                         if let GameEventKind::ZoneChange { object, .. } = committed.kind {
@@ -391,13 +463,22 @@ impl Engine {
                         }
                         self.state.ledger.push(committed);
                     }
-                    ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ReplacementOutcome::NeedsOrderingChoice {
+                        affected_player,
+                        event,
+                        candidates,
+                        excluded,
+                        ..
+                    } => {
                         self.process_state = ProcessState::AwaitingReplacementChoice {
                             affected_player,
                             pending_event: event,
                             candidates,
                             excluded,
-                            resume: ReplacementResumeTarget::Draw { tail_events: events, since_ledger },
+                            resume: ReplacementResumeTarget::Draw {
+                                tail_events: events,
+                                since_ledger,
+                            },
                         };
                         return StepStatus::Progressed;
                     }
@@ -417,11 +498,17 @@ impl Engine {
         // `execute_assign_combat_damage` says a split is required. Otherwise the one
         // legal assignment is made here before priority. Reusing that command keeps
         // this from drifting from its own validation.
-        if matches!(self.state.step, Step::CombatDamage | Step::FirstStrikeDamage) {
+        if matches!(
+            self.state.step,
+            Step::CombatDamage | Step::FirstStrikeDamage
+        ) {
             let active = self.state.active_player;
-            if let Ok(outcome) =
-                commands::execute_assign_combat_damage(&mut self.state, &self.script_runtime, active, Vec::new())
-            {
+            if let Ok(outcome) = commands::execute_assign_combat_damage(
+                &mut self.state,
+                &self.script_runtime,
+                active,
+                Vec::new(),
+            ) {
                 events.extend(outcome.events);
             }
         }
@@ -434,15 +521,24 @@ impl Engine {
 
     /// Redisplays the hand-size pair; `excess`, fixed when the pause began, is
     /// what `submit_discard` validates against.
-    pub(super) fn resolve_awaiting_discard_state(&mut self, player: PlayerId, excess: usize) -> StepStatus {
+    pub(super) fn resolve_awaiting_discard_state(
+        &mut self,
+        player: PlayerId,
+        excess: usize,
+    ) -> StepStatus {
         let hand_size = self
             .state
             .zone(ZoneKind::Hand, Some(player))
             .map(|z| z.contents.len())
             .unwrap_or(0);
-        let max_hand_size = effective_max_hand_size(&self.state, &self.state.hand_size_modifiers, player, 7)
-            .unwrap_or(u32::MAX) as usize;
-        let status = StepStatus::AwaitingDiscard { player, hand_size, max_hand_size };
+        let max_hand_size =
+            effective_max_hand_size(&self.state, &self.state.hand_size_modifiers, player, 7)
+                .unwrap_or(u32::MAX) as usize;
+        let status = StepStatus::AwaitingDiscard {
+            player,
+            hand_size,
+            max_hand_size,
+        };
         self.process_state = ProcessState::AwaitingDiscard { player, excess };
         status
     }

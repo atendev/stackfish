@@ -27,7 +27,11 @@ pub struct Zone {
 
 impl Zone {
     pub fn new(kind: ZoneKind, owner: Option<PlayerId>) -> Self {
-        Zone { kind, owner, contents: VecDeque::new() }
+        Zone {
+            kind,
+            owner,
+            contents: VecDeque::new(),
+        }
     }
 
     pub fn push_top(&mut self, object: ObjectId) {
@@ -49,6 +53,10 @@ impl Zone {
 
     pub fn len(&self) -> usize {
         self.contents.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.contents.is_empty()
     }
 
     pub fn top(&self) -> Option<ObjectId> {

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use stackfish_carddb::CardDb;
-use stackfish_engine::*;
 use stackfish_engine::engine::Engine;
+use stackfish_engine::*;
 
 use crate::schema::*;
 
@@ -58,8 +58,12 @@ fn build_pt(value: Option<i32>, script: &Option<String>) -> Option<PTValue> {
 pub(crate) fn open_card_db(file: &ScenarioFile) -> Option<CardDb> {
     file.card_db.as_ref().map(|path| {
         let resolved = resolve_card_db_path(file, path);
-        CardDb::open(&resolved)
-            .unwrap_or_else(|e| panic!("failed to open card_db {} (from {path:?}): {e}", resolved.display()))
+        CardDb::open(&resolved).unwrap_or_else(|e| {
+            panic!(
+                "failed to open card_db {} (from {path:?}): {e}",
+                resolved.display()
+            )
+        })
     })
 }
 
@@ -79,7 +83,11 @@ pub(crate) fn resolve_card_db_path(file: &ScenarioFile, path: &str) -> std::path
 /// Builds a `[[cards]]` entry's `CardDefinition`, from the database when `db_script_id` is
 /// set and from the spec's own fields otherwise. `placeholder_definition_id` is used only on
 /// the second path; the two callers pass different values (the real `ObjectId.0` and `0`).
-pub(crate) fn card_definition_from_spec(card_db: Option<&CardDb>, placeholder_definition_id: u64, spec: &CardSpec) -> CardDefinition {
+pub(crate) fn card_definition_from_spec(
+    card_db: Option<&CardDb>,
+    placeholder_definition_id: u64,
+    spec: &CardSpec,
+) -> CardDefinition {
     if let Some(script_id) = &spec.db_script_id {
         let db = card_db.unwrap_or_else(|| {
             panic!(
@@ -89,7 +97,10 @@ pub(crate) fn card_definition_from_spec(card_db: Option<&CardDb>, placeholder_de
             )
         });
         return db.load_by_script_id(script_id).unwrap_or_else(|e| {
-            panic!("card '{}': db_script_id {script_id:?} failed to load: {e}", spec.key)
+            panic!(
+                "card '{}': db_script_id {script_id:?} failed to load: {e}",
+                spec.key
+            )
         });
     }
 
@@ -109,7 +120,10 @@ pub(crate) fn card_definition_from_spec(card_db: Option<&CardDb>, placeholder_de
         defense: None,
         script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
         keywords: parse_keywords(&spec.keywords),
-        target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
+        target_requirement: spec
+            .target_requirement
+            .as_ref()
+            .map(build_target_requirement),
         // TODO: a TOML field for alternative costs; flashback and escape cards can only be built in Rust tests
         alternative_costs: Vec::new(),
         buyback_cost: None,
@@ -157,7 +171,9 @@ fn mana_symbols(generic_cost: u32, colors: &[String], has_x: bool) -> Vec<ManaSy
         symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Generic(generic_cost)));
     }
     for color_letter in colors {
-        symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Colored(parse_color(color_letter))));
+        symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Colored(parse_color(
+            color_letter,
+        ))));
     }
     symbols
 }
@@ -212,7 +228,10 @@ fn parse_filter_controller(name: &str) -> FilterController {
     }
 }
 
-pub(crate) fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> ContinuousEffect {
+pub(crate) fn build_continuous_effect(
+    source: ObjectId,
+    spec: &ContinuousEffectSpec,
+) -> ContinuousEffect {
     let layer = match spec.layer.as_str() {
         "type_changing" => Layer::TypeChanging,
         "color_changing" => Layer::ColorChanging,
@@ -229,22 +248,34 @@ pub(crate) fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectS
         Layer::TypeChanging => EffectPrimitive::AddCardType(parse_card_types(&spec.types)),
         Layer::ColorChanging => EffectPrimitive::AddColor(parse_colors(&spec.colors)),
         Layer::AbilityAdding => EffectPrimitive::AddKeyword(parse_keywords(&spec.keywords)),
-        Layer::PowerToughnessSetting => {
-            EffectPrimitive::SetPT { power: spec.power, toughness: spec.toughness }
-        }
-        Layer::PowerToughnessModifying => {
-            EffectPrimitive::ModifyPT { power: spec.power, toughness: spec.toughness }
-        }
+        Layer::PowerToughnessSetting => EffectPrimitive::SetPT {
+            power: spec.power,
+            toughness: spec.toughness,
+        },
+        Layer::PowerToughnessModifying => EffectPrimitive::ModifyPT {
+            power: spec.power,
+            toughness: spec.toughness,
+        },
         _ => unreachable!("layer already matched to one of the five arms above"),
     };
     let filter = EffectFilter {
-        controller: spec.filter_controller.as_deref().map(parse_filter_controller),
-        card_types: (!spec.filter_card_types.is_empty()).then(|| parse_card_types(&spec.filter_card_types)),
+        controller: spec
+            .filter_controller
+            .as_deref()
+            .map(parse_filter_controller),
+        card_types: (!spec.filter_card_types.is_empty())
+            .then(|| parse_card_types(&spec.filter_card_types)),
         subtypes: (!spec.filter_subtypes.is_empty())
             .then(|| spec.filter_subtypes.iter().cloned().map(Subtype).collect()),
-        excluded_subtypes: (!spec.filter_excluded_subtypes.is_empty())
-            .then(|| spec.filter_excluded_subtypes.iter().cloned().map(Subtype).collect()),
-        supertypes: (!spec.filter_supertypes.is_empty()).then(|| parse_supertypes(&spec.filter_supertypes)),
+        excluded_subtypes: (!spec.filter_excluded_subtypes.is_empty()).then(|| {
+            spec.filter_excluded_subtypes
+                .iter()
+                .cloned()
+                .map(Subtype)
+                .collect()
+        }),
+        supertypes: (!spec.filter_supertypes.is_empty())
+            .then(|| parse_supertypes(&spec.filter_supertypes)),
         excluded_supertypes: (!spec.filter_excluded_supertypes.is_empty())
             .then(|| parse_supertypes(&spec.filter_excluded_supertypes)),
         self_only: spec.filter_self_only,
@@ -284,8 +315,13 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
                 .then(|| parse_card_types(&spec.excluded_card_types)),
             subtypes: (!spec.subtypes.is_empty())
                 .then(|| spec.subtypes.iter().cloned().map(Subtype).collect()),
-            excluded_subtypes: (!spec.excluded_subtypes.is_empty())
-                .then(|| spec.excluded_subtypes.iter().cloned().map(Subtype).collect()),
+            excluded_subtypes: (!spec.excluded_subtypes.is_empty()).then(|| {
+                spec.excluded_subtypes
+                    .iter()
+                    .cloned()
+                    .map(Subtype)
+                    .collect()
+            }),
             supertypes: (!spec.supertypes.is_empty()).then(|| parse_supertypes(&spec.supertypes)),
             excluded_supertypes: (!spec.excluded_supertypes.is_empty())
                 .then(|| parse_supertypes(&spec.excluded_supertypes)),
@@ -294,7 +330,9 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
             // TODO: a `mana_value` field on TargetRequirementSpec; only a card script can express it
             mana_value: None,
         },
-        "player" => TargetFilter::Player { controller: spec.controller.as_deref().map(parse_filter_controller) },
+        "player" => TargetFilter::Player {
+            controller: spec.controller.as_deref().map(parse_filter_controller),
+        },
         "any" => TargetFilter::AnyTarget,
         // CR 113.9, CR 701.6a
         "ability" => TargetFilter::Ability,
@@ -406,18 +444,19 @@ fn zone_owner_for(kind: ZoneKind, player: PlayerId) -> Option<PlayerId> {
     }
 }
 
-/// Builds a `GameState` from struct literals. Returns it with a card-key to `ObjectId` map
-/// and the scripts that `run()` must load once an engine exists.
-pub fn build_initial_state(
-    file: &ScenarioFile,
-) -> (
+/// The built state, the card-key to `ObjectId` map and the scripts `run()` loads once an engine exists.
+pub type InitialState = (
     GameState,
     HashMap<String, ObjectId>,
     Vec<PendingTriggerScript>,
     Vec<PendingTargetScript>,
     Vec<PendingScriptTargetRequirement>,
     Vec<PendingScriptOperation>,
-) {
+);
+
+/// Builds a `GameState` from struct literals. Returns it with a card-key to `ObjectId` map
+/// and the scripts that `run()` must load once an engine exists.
+pub fn build_initial_state(file: &ScenarioFile) -> InitialState {
     let card_db = open_card_db(file);
     let mut next_object_id: u64 = 0;
     // `AbilityId` shares the sequence counter that `allocate_sequence_no` uses, so a fixed
@@ -461,12 +500,29 @@ pub fn build_initial_state(
     let mut zones: Vec<Zone> = Vec::new();
     for p in &file.players {
         let pid = PlayerId(p.id);
-        for kind in [ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Command] {
-            zones.push(Zone { kind, owner: Some(pid), contents: VecDeque::new() });
+        for kind in [
+            ZoneKind::Library,
+            ZoneKind::Hand,
+            ZoneKind::Graveyard,
+            ZoneKind::Command,
+        ] {
+            zones.push(Zone {
+                kind,
+                owner: Some(pid),
+                contents: VecDeque::new(),
+            });
         }
     }
-    zones.push(Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() });
-    zones.push(Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() });
+    zones.push(Zone {
+        kind: ZoneKind::Battlefield,
+        owner: None,
+        contents: VecDeque::new(),
+    });
+    zones.push(Zone {
+        kind: ZoneKind::Exile,
+        owner: None,
+        contents: VecDeque::new(),
+    });
 
     let card_specs: HashMap<&str, &CardSpec> =
         file.cards.iter().map(|c| (c.key.as_str(), c)).collect();
@@ -512,12 +568,16 @@ pub fn build_initial_state(
             deathtouched: false,
             counters: CounterSet::new(),
             attachments: Vec::new(),
-            attached_to: None, attached_to_player: None,
+            attached_to: None,
+            attached_to_player: None,
             timestamp: SequenceNo(0),
             controlled_since_turn: entry.controlled_since_turn,
             is_token: false,
             is_commander: entry.is_commander,
-            visibility: VisibilityPolicy { public, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         };
@@ -530,7 +590,11 @@ pub fn build_initial_state(
         zone.contents.push_back(object_id);
 
         if !spec.mana_ability.is_empty() {
-            let units = spec.mana_ability.iter().map(|s| parse_mana_unit(s)).collect();
+            let units = spec
+                .mana_ability
+                .iter()
+                .map(|s| parse_mana_unit(s))
+                .collect();
             abilities.push(RegisteredAbility {
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
@@ -553,18 +617,30 @@ pub fn build_initial_state(
                 operation: operation.clone(),
             });
         }
-        if let Some(script) = spec.target_requirement.as_ref().and_then(|r| r.script.as_ref()) {
-            target_scripts.push(PendingTargetScript { object: object_id, script: script.clone() });
+        if let Some(script) = spec
+            .target_requirement
+            .as_ref()
+            .and_then(|r| r.script.as_ref())
+        {
+            target_scripts.push(PendingTargetScript {
+                object: object_id,
+                script: script.clone(),
+            });
         }
         // An explicit TOML `target_requirement` wins; the script's own fills the gap.
-        if spec.target_requirement.is_none() {
-            if let Some(source) = &resolved_script {
-                script_target_requirements
-                    .push(PendingScriptTargetRequirement { object: object_id, source: source.clone() });
-            }
+        if spec.target_requirement.is_none()
+            && let Some(source) = &resolved_script
+        {
+            script_target_requirements.push(PendingScriptTargetRequirement {
+                object: object_id,
+                source: source.clone(),
+            });
         }
         if let Some(source) = &resolved_script {
-            script_operations.push(PendingScriptOperation { object: object_id, source: source.clone() });
+            script_operations.push(PendingScriptOperation {
+                object: object_id,
+                source: source.clone(),
+            });
         }
         if let Some(effect_spec) = &spec.continuous_effect {
             continuous_effects.push(build_continuous_effect(object_id, effect_spec));
@@ -603,7 +679,12 @@ pub fn build_initial_state(
         land_play_modifiers: Vec::new(),
         abilities,
         ledger: Vec::new(),
-        rng: RngState { seed: file.seed.expect("`seed` is required when `[game]` is not set"), draws_consumed: 0 },
+        rng: RngState {
+            seed: file
+                .seed
+                .expect("`seed` is required when `[game]` is not set"),
+            draws_consumed: 0,
+        },
         next_event_id: 0,
         next_sequence_no: next_ability_id,
         next_object_id,
@@ -619,7 +700,14 @@ pub fn build_initial_state(
         pending_free_cast: None,
     };
 
-    (state, card_ids, trigger_scripts, target_scripts, script_target_requirements, script_operations)
+    (
+        state,
+        card_ids,
+        trigger_scripts,
+        target_scripts,
+        script_target_requirements,
+        script_operations,
+    )
 }
 
 /// Loads the condition and operation sources into the engine and registers the triggered
@@ -679,7 +767,11 @@ pub(crate) fn register_target_script(engine: &mut Engine, object: ObjectId, sour
 
 /// Sets `object`'s `target_requirement` from the script's optional `s.target_requirement()`,
 /// or `None` if it has none. It overwrites the field, so call it only when TOML left it unset.
-pub(crate) fn register_script_target_requirement(engine: &mut Engine, object: ObjectId, source: &str) {
+pub(crate) fn register_script_target_requirement(
+    engine: &mut Engine,
+    object: ObjectId,
+    source: &str,
+) {
     let requirement = engine
         .build_target_requirement(source)
         .unwrap_or_else(|e| panic!("script target_requirement() failed to load: {e:?}"));
@@ -687,7 +779,9 @@ pub(crate) fn register_script_target_requirement(engine: &mut Engine, object: Ob
         .state_mut()
         .objects
         .get_mut(&object)
-        .unwrap_or_else(|| panic!("script target_requirement registration: object {object:?} not found"))
+        .unwrap_or_else(|| {
+            panic!("script target_requirement registration: object {object:?} not found")
+        })
         .definition
         .target_requirement = requirement;
 }
@@ -711,4 +805,3 @@ pub(crate) fn register_script_operation(engine: &mut Engine, object: ObjectId, s
         .definition
         .effect = effect;
 }
-

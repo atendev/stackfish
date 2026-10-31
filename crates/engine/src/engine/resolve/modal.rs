@@ -74,13 +74,20 @@ fn word_range(words: &[usize], index: usize) -> Range<usize> {
 /// that mode's own target requirement (none for the CR 700.2c placeholder,
 /// a `Multiple` when it owns several words) and its own legal targets, so
 /// `affected_player`, `Fight` and friends read the right shape.
-fn mode_view(top: &StackObject, effect: &AbilityEffect, range: Range<usize>, legal: &[Target]) -> StackObject {
+fn mode_view(
+    top: &StackObject,
+    effect: &AbilityEffect,
+    range: Range<usize>,
+    legal: &[Target],
+) -> StackObject {
     let mut view = top.clone();
     view.effect = Some(effect.clone());
     view.target_requirement = match &top.target_requirement {
         // A lone word, owned by the entry whose range covers it (a chain
         // with per-entry words over a single-target ability).
-        Some(TargetSpec::Primitive(req)) => (range == (0..1)).then(|| TargetSpec::Primitive(req.clone())),
+        Some(TargetSpec::Primitive(req)) => {
+            (range == (0..1)).then(|| TargetSpec::Primitive(req.clone()))
+        }
         Some(TargetSpec::Multiple(reqs)) => match reqs.get(range) {
             Some([one]) if commands::is_modal_placeholder_requirement(one) => None,
             Some([one]) => Some(TargetSpec::Primitive(one.clone())),
@@ -122,7 +129,15 @@ impl Engine {
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let effects: Vec<Option<AbilityEffect>> = entries.iter().cloned().map(Some).collect();
         match words {
-            None => self.resolve_modal_from(top, &effects, &[], modal_chunk_legals, Some(legal_targets), 0, events),
+            None => self.resolve_modal_from(
+                top,
+                &effects,
+                &[],
+                modal_chunk_legals,
+                Some(legal_targets),
+                0,
+                events,
+            ),
             Some(words) => {
                 // A lone `Primitive` word has no per-word chunks (they are
                 // only derived for a `Multiple`), so its one chunk is the
@@ -140,6 +155,7 @@ impl Engine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn resolve_modal_from(
         &mut self,
         top: &StackObject,
@@ -151,16 +167,19 @@ impl Engine {
         mut events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         for index in start..effects.len() {
-            let Some(effect) = &effects[index] else { continue };
-            let (range, mode_chunks, legal): (Range<usize>, &[Vec<Target>], Vec<Target>) = match shared_legal {
-                Some(legal) => (0..0, chunks, legal.to_vec()),
-                None => {
-                    let range = word_range(words, index);
-                    let mode_chunks = chunks.get(range.clone()).unwrap_or(&[]);
-                    let legal = mode_chunks.iter().flatten().copied().collect();
-                    (range, mode_chunks, legal)
-                }
+            let Some(effect) = &effects[index] else {
+                continue;
             };
+            let (range, mode_chunks, legal): (Range<usize>, &[Vec<Target>], Vec<Target>) =
+                match shared_legal {
+                    Some(legal) => (0..0, chunks, legal.to_vec()),
+                    None => {
+                        let range = word_range(words, index);
+                        let mode_chunks = chunks.get(range.clone()).unwrap_or(&[]);
+                        let legal = mode_chunks.iter().flatten().copied().collect();
+                        (range, mode_chunks, legal)
+                    }
+                };
             let continuation = |next: usize| ModalContinuation {
                 top: top.clone(),
                 effects: effects.to_vec(),
@@ -174,14 +193,20 @@ impl Engine {
             // before a mode that moves cards or pauses runs, so commit them
             // through the pipeline first and pick this mode up afterwards.
             if !is_synchronous(effect) && !events.is_empty() {
-                events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
+                events.push(GameEventKind::StackObjectResolved {
+                    stack_id: top.stack_id,
+                });
                 self.modal_continuation = Some(continuation(index));
-                self.process_state = ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
+                self.process_state = ProcessState::ReplacementCheck {
+                    remaining: events.into(),
+                    checked: Vec::new(),
+                };
                 return ControlFlow::Break(StepStatus::Progressed);
             }
 
             let has_later_mode = effects[index + 1..].iter().any(Option::is_some);
-            self.modal_continuation = (!is_synchronous(effect) && has_later_mode).then(|| continuation(index + 1));
+            self.modal_continuation =
+                (!is_synchronous(effect) && has_later_mode).then(|| continuation(index + 1));
             let view = match shared_legal {
                 Some(_) => {
                     let mut view = top.clone();
@@ -204,13 +229,36 @@ impl Engine {
     /// Picks the remaining modes up after the mode before them settled. Called
     /// from `resolve_commit_events_state` once it has committed the previous
     /// mode's events.
-    pub(in crate::engine) fn resume_modal_resolution(&mut self, continuation: ModalContinuation) -> StepStatus {
-        let ModalContinuation { top, effects, words, chunks, shared_legal, next } = continuation;
-        match self.resolve_modal_from(&top, &effects, &words, &chunks, shared_legal.as_deref(), next, Vec::new()) {
+    pub(in crate::engine) fn resume_modal_resolution(
+        &mut self,
+        continuation: ModalContinuation,
+    ) -> StepStatus {
+        let ModalContinuation {
+            top,
+            effects,
+            words,
+            chunks,
+            shared_legal,
+            next,
+        } = continuation;
+        match self.resolve_modal_from(
+            &top,
+            &effects,
+            &words,
+            &chunks,
+            shared_legal.as_deref(),
+            next,
+            Vec::new(),
+        ) {
             ControlFlow::Break(status) => status,
             ControlFlow::Continue(mut events) => {
-                events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
-                self.process_state = ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
+                events.push(GameEventKind::StackObjectResolved {
+                    stack_id: top.stack_id,
+                });
+                self.process_state = ProcessState::ReplacementCheck {
+                    remaining: events.into(),
+                    checked: Vec::new(),
+                };
                 StepStatus::Progressed
             }
         }

@@ -8,9 +8,13 @@ use super::*;
 use crate::commands::PaymentResolution;
 use crate::replacement::ReplacementCandidate;
 use crate::script::ScriptChoiceRequest;
-use crate::types::ability::{AbilityEffect, CopyExceptions, CreatureTokenSpec, SearchDestination, TokenSpec, UnlessPaidConsequence};
+use crate::types::ability::{
+    AbilityEffect, CopyExceptions, CreatureTokenSpec, SearchDestination, TokenSpec,
+    UnlessPaidConsequence,
+};
 use crate::types::card::{
-    CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SpellMode, SupertypeSet,
+    CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SpellMode,
+    SupertypeSet,
 };
 use crate::types::command::{PlayerAction, PlayerActionKind};
 use crate::types::cost::{CostSpec, PaymentPlan};
@@ -37,7 +41,11 @@ struct Case {
 
 macro_rules! case {
     ($name:expr, $pause:expr, |$e:ident| $call:expr) => {
-        Case { name: $name, pause: Box::new(move || $pause), answer: Box::new(move |$e: &mut Engine| $call.err().map(|error| format!("{error:?}"))) }
+        Case {
+            name: $name,
+            pause: Box::new(move || $pause),
+            answer: Box::new(move |$e: &mut Engine| $call.err().map(|error| format!("{error:?}"))),
+        }
     };
 }
 
@@ -49,7 +57,9 @@ fn definition(modes: Vec<SpellMode>, mode_choice: ModeChoice) -> CardDefinition 
     CardDefinition {
         definition_id: 1,
         name: "Charm".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -93,7 +103,10 @@ fn object(id: ObjectId, definition: CardDefinition) -> GameObject {
         controlled_since_turn: 0,
         is_token: false,
         is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+        visibility: VisibilityPolicy {
+            public: true,
+            visible_to: Vec::new(),
+        },
         copy_generation: 0,
         entered_via_escape: false,
     }
@@ -102,17 +115,31 @@ fn object(id: ObjectId, definition: CardDefinition) -> GameObject {
 /// Mode 0 resolves anywhere. Mode 1 (Cascade) cannot be combined with another mode.
 fn two_modes() -> Vec<SpellMode> {
     vec![
-        SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(1)), additional_cost: None, pawprint_weight: 0 },
-        SpellMode { target_requirement: None, effect: Some(AbilityEffect::Cascade), additional_cost: None, pawprint_weight: 0 },
+        SpellMode {
+            target_requirement: None,
+            effect: Some(AbilityEffect::GainLife(1)),
+            additional_cost: None,
+            pawprint_weight: 0,
+        },
+        SpellMode {
+            target_requirement: None,
+            effect: Some(AbilityEffect::Cascade),
+            additional_cost: None,
+            pawprint_weight: 0,
+        },
     ]
 }
 
 fn free() -> CostSpec {
-    CostSpec::mana_only(ManaCost { symbols: Vec::new() })
+    CostSpec::mana_only(ManaCost {
+        symbols: Vec::new(),
+    })
 }
 
 fn one_generic() -> CostSpec {
-    CostSpec::mana_only(ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(1))] })
+    CostSpec::mana_only(ManaCost {
+        symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(1))],
+    })
 }
 
 fn action(player: PlayerId, kind: PlayerActionKind) -> PlayerAction {
@@ -182,7 +209,11 @@ fn cases() -> Vec<Case> {
         }),
         copy_snapshot: None,
     };
-    let attach = || ProcessState::AwaitingAttachChoice { aura: ObjectId(4), controller: P0, candidates: ids(&[5]) };
+    let attach = || ProcessState::AwaitingAttachChoice {
+        aura: ObjectId(4),
+        controller: P0,
+        candidates: ids(&[5]),
+    };
     let devour = || ProcessState::AwaitingDevourChoice {
         object: ObjectId(1),
         controller: P0,
@@ -243,10 +274,15 @@ fn cases() -> Vec<Case> {
     };
     let replacement = || ProcessState::AwaitingReplacementChoice {
         affected_player: P0,
-        pending_event: GameEventKind::ScriptError { message: String::new() },
+        pending_event: GameEventKind::ScriptError {
+            message: String::new(),
+        },
         candidates: vec![ReplacementCandidate::Registered(ObjectId(3))],
         excluded: Vec::new(),
-        resume: ReplacementResumeTarget::ReplacementCheck { remaining: VecDeque::new(), checked: Vec::new() },
+        resume: ReplacementResumeTarget::ReplacementCheck {
+            remaining: VecDeque::new(),
+            checked: Vec::new(),
+        },
     };
     let legend = || ProcessState::AwaitingLegendRuleChoice {
         player: P0,
@@ -287,104 +323,271 @@ fn cases() -> Vec<Case> {
         carry_forward_if_declined: None,
         x_value: None,
     };
-    let spell_mode = || ProcessState::AwaitingModeChoice { stack_id: ObjectId(50), chooser: P0, min: 1, max: 2 };
+    let spell_mode = || ProcessState::AwaitingModeChoice {
+        stack_id: ObjectId(50),
+        chooser: P0,
+        min: 1,
+        max: 2,
+    };
     let mulligan = || ProcessState::AwaitingMulliganDecision { player: P0 };
-    let bottom = || ProcessState::AwaitingBottomCardChoice { player: P0, count: 2, remaining: VecDeque::new() };
-    let select_target = || ScriptChoiceRequest::SelectTarget { filter: TargetFilter::AnyTarget, exclude_ids: ids(&[5]) };
+    let bottom = || ProcessState::AwaitingBottomCardChoice {
+        player: P0,
+        count: 2,
+        remaining: VecDeque::new(),
+    };
+    let select_target = || ScriptChoiceRequest::SelectTarget {
+        filter: TargetFilter::AnyTarget,
+        exclude_ids: ids(&[5]),
+    };
 
     vec![
         // Scry and surveil: every offered card goes to exactly one pile.
-        case!("scry: a card left out", scry(), |e| e.submit_scry_choice(ids(&[1]), Vec::new())),
-        case!("scry: a card in both piles", scry(), |e| e.submit_scry_choice(ids(&[1, 2]), ids(&[2]))),
-        case!("scry: a card that was not offered", scry(), |e| e.submit_scry_choice(ids(&[1, 2]), ids(&[3]))),
-        case!("surveil: a card left out", surveil(), |e| e.submit_surveil_choice(Vec::new(), ids(&[2]))),
-        case!("surveil: a card twice", surveil(), |e| e.submit_surveil_choice(ids(&[1, 1]), ids(&[2]))),
-        case!("surveil: a card that was not offered", surveil(), |e| e.submit_surveil_choice(ids(&[1]), ids(&[2, 7]))),
+        case!("scry: a card left out", scry(), |e| e
+            .submit_scry_choice(ids(&[1]), Vec::new())),
+        case!("scry: a card in both piles", scry(), |e| e
+            .submit_scry_choice(ids(&[1, 2]), ids(&[2]))),
+        case!("scry: a card that was not offered", scry(), |e| e
+            .submit_scry_choice(ids(&[1, 2]), ids(&[3]))),
+        case!("surveil: a card left out", surveil(), |e| e
+            .submit_surveil_choice(Vec::new(), ids(&[2]))),
+        case!("surveil: a card twice", surveil(), |e| e
+            .submit_surveil_choice(ids(&[1, 1]), ids(&[2]))),
+        case!("surveil: a card that was not offered", surveil(), |e| e
+            .submit_surveil_choice(ids(&[1]), ids(&[2, 7]))),
         // Search.
-        case!("search: more than the count", search(), |e| e.submit_search_choice(ids(&[8, 9]))),
-        case!("search: not a candidate", search(), |e| e.submit_search_choice(ids(&[7]))),
-        case!("search: a candidate twice", ProcessState::AwaitingSearchChoice {
-            stack_id: ObjectId(50),
-            controller: P0,
-            events_so_far: Vec::new(),
-            candidates: ids(&[8, 9]),
-            count: 2,
-            destination: SearchDestination::Hand,
-            shuffle_after: false,
-        }, |e| e.submit_search_choice(ids(&[8, 8]))),
+        case!("search: more than the count", search(), |e| e
+            .submit_search_choice(ids(&[8, 9]))),
+        case!("search: not a candidate", search(), |e| e
+            .submit_search_choice(ids(&[7]))),
+        case!(
+            "search: a candidate twice",
+            ProcessState::AwaitingSearchChoice {
+                stack_id: ObjectId(50),
+                controller: P0,
+                events_so_far: Vec::new(),
+                candidates: ids(&[8, 9]),
+                count: 2,
+                destination: SearchDestination::Hand,
+                shuffle_after: false,
+            },
+            |e| e.submit_search_choice(ids(&[8, 8]))
+        ),
         // Attach choices.
-        case!("attach choice: not a candidate", attach(), |e| e.submit_attach_choice(ObjectId(9))),
-        case!("entry attach: not a candidate", entry_attach(), |e| e.submit_entry_attach_choice(Target::Object(ObjectId(9)))),
-        case!("entry attach: a player who is not offered", entry_attach(), |e| e.submit_entry_attach_choice(Target::Player(PlayerId(7)))),
-        case!("token attach: not a candidate", token_attach(), |e| e.submit_token_attach_choice(Target::Player(P1))),
+        case!("attach choice: not a candidate", attach(), |e| e
+            .submit_attach_choice(ObjectId(9))),
+        case!("entry attach: not a candidate", entry_attach(), |e| e
+            .submit_entry_attach_choice(Target::Object(ObjectId(9)))),
+        case!(
+            "entry attach: a player who is not offered",
+            entry_attach(),
+            |e| e.submit_entry_attach_choice(Target::Player(PlayerId(7)))
+        ),
+        case!("token attach: not a candidate", token_attach(), |e| e
+            .submit_token_attach_choice(Target::Player(P1))),
         // Devour and amplify, before and after a search.
-        case!("devour: not a candidate", devour(), |e| e.submit_devour_choice(ids(&[7]))),
-        case!("devour: a candidate twice", devour(), |e| e.submit_devour_choice(ids(&[8, 8]))),
-        case!("amplify: not a candidate", amplify(), |e| e.submit_amplify_choice(ids(&[7]))),
-        case!("amplify: a candidate twice", amplify(), |e| e.submit_amplify_choice(ids(&[9, 9]))),
-        case!("search devour: not a candidate", search_devour(), |e| e.submit_search_devour_choice(ids(&[7]))),
-        case!("search devour: a candidate twice", search_devour(), |e| e.submit_search_devour_choice(ids(&[8, 8]))),
-        case!("search amplify: not a candidate", search_amplify(), |e| e.submit_search_amplify_choice(ids(&[7]))),
-        case!("search amplify: a candidate twice", search_amplify(), |e| e.submit_search_amplify_choice(ids(&[9, 9]))),
+        case!("devour: not a candidate", devour(), |e| e
+            .submit_devour_choice(ids(&[7]))),
+        case!("devour: a candidate twice", devour(), |e| e
+            .submit_devour_choice(ids(&[8, 8]))),
+        case!("amplify: not a candidate", amplify(), |e| e
+            .submit_amplify_choice(ids(&[7]))),
+        case!("amplify: a candidate twice", amplify(), |e| e
+            .submit_amplify_choice(ids(&[9, 9]))),
+        case!("search devour: not a candidate", search_devour(), |e| e
+            .submit_search_devour_choice(ids(&[7]))),
+        case!("search devour: a candidate twice", search_devour(), |e| e
+            .submit_search_devour_choice(ids(&[8, 8]))),
+        case!("search amplify: not a candidate", search_amplify(), |e| e
+            .submit_search_amplify_choice(ids(&[7]))),
+        case!("search amplify: a candidate twice", search_amplify(), |e| e
+            .submit_search_amplify_choice(ids(&[9, 9]))),
         // Trigger ordering, targets and modes.
-        case!("trigger order: too short", trigger_order(), |e| e.submit_trigger_order(vec![trigger(1, P0)])),
-        case!("trigger order: a trigger from nowhere", trigger_order(), |e| e.submit_trigger_order(vec![trigger(1, P0), trigger(9, P0)])),
-        case!("trigger order: one trigger twice", trigger_order(), |e| e.submit_trigger_order(vec![trigger(1, P0), trigger(1, P0)])),
-        case!("trigger targets: a target no word offers", trigger_targets(), |e| e.submit_trigger_targets(vec![Target::Object(ObjectId(777))])),
-        case!("trigger modes: none chosen", trigger_modes(ModeChoice::Exactly(1)), |e| e.submit_trigger_mode_choice(Vec::new())),
-        case!("trigger modes: too many", trigger_modes(ModeChoice::Exactly(1)), |e| e.submit_trigger_mode_choice(vec![0, 1])),
-        case!("trigger modes: one twice", trigger_modes(ModeChoice::Exactly(2)), |e| e.submit_trigger_mode_choice(vec![0, 0])),
-        case!("trigger modes: a mode that does not exist", trigger_modes(ModeChoice::Exactly(1)), |e| e.submit_trigger_mode_choice(vec![9])),
-        case!("trigger modes: a pair that cannot combine", trigger_modes(ModeChoice::Exactly(2)), |e| e.submit_trigger_mode_choice(vec![0, 1])),
+        case!("trigger order: too short", trigger_order(), |e| e
+            .submit_trigger_order(vec![trigger(1, P0)])),
+        case!(
+            "trigger order: a trigger from nowhere",
+            trigger_order(),
+            |e| e.submit_trigger_order(vec![trigger(1, P0), trigger(9, P0)])
+        ),
+        case!("trigger order: one trigger twice", trigger_order(), |e| e
+            .submit_trigger_order(vec![trigger(1, P0), trigger(1, P0)])),
+        case!(
+            "trigger targets: a target no word offers",
+            trigger_targets(),
+            |e| e.submit_trigger_targets(vec![Target::Object(ObjectId(777))])
+        ),
+        case!(
+            "trigger modes: none chosen",
+            trigger_modes(ModeChoice::Exactly(1)),
+            |e| e.submit_trigger_mode_choice(Vec::new())
+        ),
+        case!(
+            "trigger modes: too many",
+            trigger_modes(ModeChoice::Exactly(1)),
+            |e| e.submit_trigger_mode_choice(vec![0, 1])
+        ),
+        case!(
+            "trigger modes: one twice",
+            trigger_modes(ModeChoice::Exactly(2)),
+            |e| e.submit_trigger_mode_choice(vec![0, 0])
+        ),
+        case!(
+            "trigger modes: a mode that does not exist",
+            trigger_modes(ModeChoice::Exactly(1)),
+            |e| e.submit_trigger_mode_choice(vec![9])
+        ),
+        case!(
+            "trigger modes: a pair that cannot combine",
+            trigger_modes(ModeChoice::Exactly(2)),
+            |e| e.submit_trigger_mode_choice(vec![0, 1])
+        ),
         // Replacement, legend rule, copy, discard.
-        case!("replacement: not a candidate", replacement(), |e| e.submit_replacement_choice(ReplacementCandidate::Registered(ObjectId(9)))),
-        case!("replacement: protection nobody offered", replacement(), |e| e.submit_replacement_choice(ReplacementCandidate::Protection(ObjectId(3)))),
-        case!("legend rule: not a candidate", legend(), |e| e.submit_legend_rule_choice(ObjectId(9))),
-        case!("copy: not a candidate", copy(), |e| e.submit_copy_choice(Some(ObjectId(9)))),
-        case!("discard choice: the wrong player", discard_choice(), |e| e.submit_discard_choice(P1, ObjectId(5))),
-        case!("discard choice: not a candidate", discard_choice(), |e| e.submit_discard_choice(P0, ObjectId(9))),
+        case!("replacement: not a candidate", replacement(), |e| e
+            .submit_replacement_choice(ReplacementCandidate::Registered(
+                ObjectId(9)
+            ))),
+        case!(
+            "replacement: protection nobody offered",
+            replacement(),
+            |e| e.submit_replacement_choice(ReplacementCandidate::Protection(ObjectId(3)))
+        ),
+        case!("legend rule: not a candidate", legend(), |e| e
+            .submit_legend_rule_choice(ObjectId(9))),
+        case!("copy: not a candidate", copy(), |e| e
+            .submit_copy_choice(Some(ObjectId(9)))),
+        case!("discard choice: the wrong player", discard_choice(), |e| e
+            .submit_discard_choice(P1, ObjectId(5))),
+        case!("discard choice: not a candidate", discard_choice(), |e| e
+            .submit_discard_choice(P0, ObjectId(9))),
         // Unless paid.
-        case!("unless paid: the wrong payer pays", unless_paid(), |e| e.submit_unless_paid_payment(P0, PaymentPlan { payments: Vec::new() })),
-        case!("unless paid: a plan that does not cover the cost", unless_paid(), |e| e.submit_unless_paid_payment(P1, PaymentPlan { payments: Vec::new() })),
-        case!("unless paid: the wrong payer declines", unless_paid(), |e| e.decline_unless_paid(P0)),
+        case!("unless paid: the wrong payer pays", unless_paid(), |e| e
+            .submit_unless_paid_payment(
+                P0,
+                PaymentPlan {
+                    payments: Vec::new()
+                }
+            )),
+        case!(
+            "unless paid: a plan that does not cover the cost",
+            unless_paid(),
+            |e| e.submit_unless_paid_payment(
+                P1,
+                PaymentPlan {
+                    payments: Vec::new()
+                }
+            )
+        ),
+        case!(
+            "unless paid: the wrong payer declines",
+            unless_paid(),
+            |e| e.decline_unless_paid(P0)
+        ),
         // Script choices.
-        case!("script target: an excluded object", script_pause(select_target()), |e| e.submit_script_choice(Target::Object(ObjectId(5)))),
-        case!("script target: an object that does not exist", script_pause(select_target()), |e| e.submit_script_choice(Target::Object(ObjectId(777)))),
-        case!("script target: answered as a yes or no", script_pause(select_target()), |e| e.submit_script_may_choice(true)),
-        case!("script may: answered with a target", script_pause(ScriptChoiceRequest::MayChoose), |e| e.submit_script_choice(Target::Player(P1))),
+        case!(
+            "script target: an excluded object",
+            script_pause(select_target()),
+            |e| e.submit_script_choice(Target::Object(ObjectId(5)))
+        ),
+        case!(
+            "script target: an object that does not exist",
+            script_pause(select_target()),
+            |e| e.submit_script_choice(Target::Object(ObjectId(777)))
+        ),
+        case!(
+            "script target: answered as a yes or no",
+            script_pause(select_target()),
+            |e| e.submit_script_may_choice(true)
+        ),
+        case!(
+            "script may: answered with a target",
+            script_pause(ScriptChoiceRequest::MayChoose),
+            |e| e.submit_script_choice(Target::Player(P1))
+        ),
         // Pregame.
-        case!("mulligan: the wrong player", mulligan(), |e| e.submit_mulligan_decision(action(P1, PlayerActionKind::KeepHand))),
-        case!("mulligan: an action that is not keep or mulligan", mulligan(), |e| e.submit_mulligan_decision(action(P0, PlayerActionKind::PassPriority))),
+        case!("mulligan: the wrong player", mulligan(), |e| e
+            .submit_mulligan_decision(action(
+                P1,
+                PlayerActionKind::KeepHand
+            ))),
+        case!(
+            "mulligan: an action that is not keep or mulligan",
+            mulligan(),
+            |e| e.submit_mulligan_decision(action(P0, PlayerActionKind::PassPriority))
+        ),
         case!("mulligan: past the limit", mulligan(), |e| {
             e.settings.max_mulligans = Some(0);
             e.submit_mulligan_decision(action(P0, PlayerActionKind::TakeMulligan))
         }),
-        case!("bottom: the wrong player", bottom(), |e| e.submit_bottom_cards(action(P1, PlayerActionKind::BottomCards { cards: ids(&[1, 2]) }))),
-        case!("bottom: too few", bottom(), |e| e.submit_bottom_cards(action(P0, PlayerActionKind::BottomCards { cards: ids(&[1]) }))),
-        case!("bottom: one card twice", bottom(), |e| e.submit_bottom_cards(action(P0, PlayerActionKind::BottomCards { cards: ids(&[1, 1]) }))),
-        case!("bottom: cards that are not in the hand", bottom(), |e| e.submit_bottom_cards(action(P0, PlayerActionKind::BottomCards { cards: ids(&[1, 2]) }))),
-        case!("bottom: the wrong kind of action", bottom(), |e| e.submit_bottom_cards(action(P0, PlayerActionKind::KeepHand))),
+        case!("bottom: the wrong player", bottom(), |e| e
+            .submit_bottom_cards(action(
+                P1,
+                PlayerActionKind::BottomCards {
+                    cards: ids(&[1, 2])
+                }
+            ))),
+        case!("bottom: too few", bottom(), |e| e.submit_bottom_cards(
+            action(P0, PlayerActionKind::BottomCards { cards: ids(&[1]) })
+        )),
+        case!("bottom: one card twice", bottom(), |e| e
+            .submit_bottom_cards(action(
+                P0,
+                PlayerActionKind::BottomCards {
+                    cards: ids(&[1, 1])
+                }
+            ))),
+        case!("bottom: cards that are not in the hand", bottom(), |e| e
+            .submit_bottom_cards(action(
+                P0,
+                PlayerActionKind::BottomCards {
+                    cards: ids(&[1, 2])
+                }
+            ))),
+        case!("bottom: the wrong kind of action", bottom(), |e| e
+            .submit_bottom_cards(action(P0, PlayerActionKind::KeepHand))),
         // A spell's mode, chosen at resolution.
-        case!("spell mode: none chosen", spell_mode(), |e| e.submit_mode_choice(Vec::new())),
-        case!("spell mode: too many", spell_mode(), |e| e.submit_mode_choice(vec![0, 1, 2])),
-        case!("spell mode: one twice", spell_mode(), |e| e.submit_mode_choice(vec![0, 0])),
-        case!("spell mode: a mode that does not exist", spell_mode(), |e| e.submit_mode_choice(vec![9])),
-        case!("spell mode: a pair that cannot combine", spell_mode(), |e| e.submit_mode_choice(vec![0, 1])),
+        case!("spell mode: none chosen", spell_mode(), |e| e
+            .submit_mode_choice(Vec::new())),
+        case!("spell mode: too many", spell_mode(), |e| e
+            .submit_mode_choice(vec![0, 1, 2])),
+        case!("spell mode: one twice", spell_mode(), |e| e
+            .submit_mode_choice(vec![0, 0])),
+        case!(
+            "spell mode: a mode that does not exist",
+            spell_mode(),
+            |e| e.submit_mode_choice(vec![9])
+        ),
+        case!(
+            "spell mode: a pair that cannot combine",
+            spell_mode(),
+            |e| e.submit_mode_choice(vec![0, 1])
+        ),
         // A payment, to prove an unrelated pause is not touched by a payer's mistake.
-        case!("payment: a plan for a free cost with a stray payment", ProcessState::AwaitingPayment {
-            stack_id: ObjectId(50),
-            payer: P0,
-            cost: free(),
-            source: ObjectId(1),
-            on_paid: PaymentResolution::StackObject,
-        }, |e| e.submit_payment(PaymentPlan { payments: vec![crate::types::cost::CostPayment::Life(3)] })),
+        case!(
+            "payment: a plan for a free cost with a stray payment",
+            ProcessState::AwaitingPayment {
+                stack_id: ObjectId(50),
+                payer: P0,
+                cost: free(),
+                source: ObjectId(1),
+                on_paid: PaymentResolution::StackObject,
+            },
+            |e| e.submit_payment(PaymentPlan {
+                payments: vec![crate::types::cost::CostPayment::Life(3)]
+            })
+        ),
     ]
 }
 
 fn engine_for(case: &Case) -> Engine {
     let mut state = minimal_state();
     // The spell whose mode is chosen at resolution.
-    state.objects.insert(ObjectId(50), object(ObjectId(50), definition(two_modes(), ModeChoice::Exactly(1))));
+    state.objects.insert(
+        ObjectId(50),
+        object(
+            ObjectId(50),
+            definition(two_modes(), ModeChoice::Exactly(1)),
+        ),
+    );
     let mut engine = Engine::new(state);
     engine.process_state = (case.pause)();
     engine
@@ -393,13 +596,21 @@ fn engine_for(case: &Case) -> Engine {
 #[test]
 fn a_bad_answer_to_any_pause_is_refused_and_changes_nothing() {
     let table = cases();
-    assert!(table.len() >= 50, "the table should cover every pause with a bad answer");
+    assert!(
+        table.len() >= 50,
+        "the table should cover every pause with a bad answer"
+    );
     for case in table {
         let mut engine = engine_for(&case);
         let before = engine.snapshot();
-        let refusal = (case.answer)(&mut engine).unwrap_or_else(|| panic!("{}: the engine accepted a bad answer", case.name));
+        let refusal = (case.answer)(&mut engine)
+            .unwrap_or_else(|| panic!("{}: the engine accepted a bad answer", case.name));
         // A wrong-pause refusal would pass the comparison below for the wrong reason.
-        assert!(!refusal.starts_with("NotAwaiting"), "{}: the pause was not the one under test ({refusal})", case.name);
+        assert!(
+            !refusal.starts_with("NotAwaiting"),
+            "{}: the pause was not the one under test ({refusal})",
+            case.name
+        );
         println!("{:<60} {refusal}", case.name);
         let after = engine.snapshot();
         assert!(
@@ -414,9 +625,9 @@ fn a_bad_answer_to_any_pause_is_refused_and_changes_nothing() {
 
 // Rejected and Internal
 
-use crate::commands::{apply_command, validate_command, Internal, Rejected};
-use crate::types::zone::Zone;
+use crate::commands::{Internal, Rejected, apply_command, validate_command};
 use crate::types::turn::{Phase, Step};
+use crate::types::zone::Zone;
 
 const LAND: ObjectId = ObjectId(7);
 
@@ -426,10 +637,24 @@ fn land_game() -> Engine {
     state.phase = Phase::Main;
     state.step = Step::PreCombatMain;
     state.zones = vec![
-        Zone { kind: ZoneKind::Hand, owner: Some(P0), contents: VecDeque::from([LAND]) },
-        Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
+        Zone {
+            kind: ZoneKind::Hand,
+            owner: Some(P0),
+            contents: VecDeque::from([LAND]),
+        },
+        Zone {
+            kind: ZoneKind::Battlefield,
+            owner: None,
+            contents: VecDeque::new(),
+        },
     ];
-    let mut land = object(LAND, CardDefinition { card_types: CardTypeSet::LAND, ..definition(Vec::new(), ModeChoice::Exactly(1)) });
+    let mut land = object(
+        LAND,
+        CardDefinition {
+            card_types: CardTypeSet::LAND,
+            ..definition(Vec::new(), ModeChoice::Exactly(1))
+        },
+    );
     land.zone = ZoneKind::Hand;
     state.objects.insert(LAND, land);
     Engine::new(state)
@@ -442,21 +667,36 @@ fn play_land() -> PlayerAction {
 #[test]
 fn submit_action_refuses_with_a_rejected_error_and_changes_nothing() {
     let mut engine = land_game();
-    engine.state_mut().zones.retain(|z| z.kind != ZoneKind::Battlefield);
+    engine
+        .state_mut()
+        .zones
+        .retain(|z| z.kind != ZoneKind::Battlefield);
     let before = engine.snapshot();
 
-    let refusal = engine.submit_action(play_land()).expect_err("there is no battlefield to play onto");
+    let refusal = engine
+        .submit_action(play_land())
+        .expect_err("there is no battlefield to play onto");
 
-    assert!(matches!(refusal, ActionError::Rejected(Rejected::IllegalAction(_))), "{refusal:?}");
+    assert!(
+        matches!(refusal, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "{refusal:?}"
+    );
     assert!(before == engine.snapshot(), "a refusal changes nothing");
-    assert!(engine.fatal_error().is_none(), "a rejection is not a fatal error");
+    assert!(
+        engine.fatal_error().is_none(),
+        "a rejection is not a fatal error"
+    );
 }
 
 #[test]
 fn a_zone_that_vanishes_after_validation_is_an_internal_error() {
     let mut engine = land_game();
-    let plan = validate_command(&engine.state, &engine.script_runtime, P0, play_land().kind).expect("the play is legal");
-    engine.state.zones.retain(|z| z.kind != ZoneKind::Battlefield);
+    let plan = validate_command(&engine.state, &engine.script_runtime, P0, play_land().kind)
+        .expect("the play is legal");
+    engine
+        .state
+        .zones
+        .retain(|z| z.kind != ZoneKind::Battlefield);
 
     let error = apply_command(&mut engine.state, plan).expect_err("the validated zone is gone");
 
@@ -470,16 +710,27 @@ fn an_action_that_is_rejected_after_it_was_queued_is_fatal_and_stays_fatal() {
     // Queue the action the way `submit_action` would, then break the state it
     // was validated against. Nothing in the public API can do this.
     engine.submit_action(play_land()).expect("legal");
-    engine.state.zones.retain(|z| z.kind != ZoneKind::Battlefield);
+    engine
+        .state
+        .zones
+        .retain(|z| z.kind != ZoneKind::Battlefield);
 
     let first = engine.step();
-    let StepStatus::Error(Internal(detail)) = first.status else { panic!("expected an Internal error") };
-    assert!(detail.contains("rejected after it was accepted"), "{detail}");
+    let StepStatus::Error(Internal(detail)) = first.status else {
+        panic!("expected an Internal error")
+    };
+    assert!(
+        detail.contains("rejected after it was accepted"),
+        "{detail}"
+    );
     assert!(engine.fatal_error().is_some());
 
     let ledger = engine.state.ledger.len();
     let second = engine.step();
-    assert!(matches!(second.status, StepStatus::Error(_)), "a fatal engine only reports the error");
+    assert!(
+        matches!(second.status, StepStatus::Error(_)),
+        "a fatal engine only reports the error"
+    );
     assert_eq!(engine.state.ledger.len(), ledger, "and writes nothing more");
 }
 
@@ -489,7 +740,14 @@ fn a_command_error_from_execute_command_keeps_the_two_kinds_apart() {
     let rejected = crate::commands::execute_command(
         &mut engine.state,
         &engine.script_runtime,
-        crate::types::command::EngineCommand { command_id: crate::types::ids::CommandId(0), actor: P1, action: PlayerActionKind::PassPriority },
+        crate::types::command::EngineCommand {
+            command_id: crate::types::ids::CommandId(0),
+            actor: P1,
+            action: PlayerActionKind::PassPriority,
+        },
     );
-    assert!(matches!(rejected, Err(crate::commands::CommandError::Rejected(_))), "{rejected:?}");
+    assert!(
+        matches!(rejected, Err(crate::commands::CommandError::Rejected(_))),
+        "{rejected:?}"
+    );
 }

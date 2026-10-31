@@ -56,7 +56,10 @@ impl AtomicManaSymbol {
     pub fn mana_value(&self) -> u32 {
         match self {
             AtomicManaSymbol::Generic(n) => *n,
-            AtomicManaSymbol::Colored(_) | AtomicManaSymbol::Colorless | AtomicManaSymbol::Snow | AtomicManaSymbol::Phyrexian(_) => 1,
+            AtomicManaSymbol::Colored(_)
+            | AtomicManaSymbol::Colorless
+            | AtomicManaSymbol::Snow
+            | AtomicManaSymbol::Phyrexian(_) => 1,
         }
     }
 
@@ -126,7 +129,9 @@ pub struct ManaCost {
 impl ManaCost {
     /// Union of colors across all symbols (CR 202.2).
     pub fn colors(&self) -> ColorSet {
-        self.symbols.iter().fold(ColorSet::empty(), |acc, s| acc | s.colors())
+        self.symbols
+            .iter()
+            .fold(ColorSet::empty(), |acc, s| acc | s.colors())
     }
 
     /// CR 202.3: sum of each symbol's contribution, which folds in the hybrid
@@ -215,7 +220,11 @@ impl ManaCost {
     /// CR 118.7d: `apply_colored_cost_delta` for the colorless (`{C}`)
     /// component.
     pub fn apply_colorless_cost_delta(&self, delta: i32) -> (ManaCost, i32) {
-        self.apply_specific_cost_delta(delta, |a| matches!(a, AtomicManaSymbol::Colorless), ManaSymbol::Atom(AtomicManaSymbol::Colorless))
+        self.apply_specific_cost_delta(
+            delta,
+            |a| matches!(a, AtomicManaSymbol::Colorless),
+            ManaSymbol::Atom(AtomicManaSymbol::Colorless),
+        )
     }
 
     /// Shared removal and spillover logic. `matches_atom` picks the bare
@@ -302,12 +311,16 @@ pub struct ManaCostParseError(pub String);
 /// error messages.
 fn parse_symbol_group(inner: &str, whole: &str) -> Result<ManaSymbol, ManaCostParseError> {
     if inner.is_empty() {
-        return Err(ManaCostParseError(format!("empty \"{{}}\" group in \"{whole}\"")));
+        return Err(ManaCostParseError(format!(
+            "empty \"{{}}\" group in \"{whole}\""
+        )));
     }
     if inner.chars().all(|c| c.is_ascii_digit()) {
-        let n: u32 = inner
-            .parse()
-            .map_err(|_| ManaCostParseError(format!("generic amount \"{inner}\" out of range in \"{whole}\"")))?;
+        let n: u32 = inner.parse().map_err(|_| {
+            ManaCostParseError(format!(
+                "generic amount \"{inner}\" out of range in \"{whole}\""
+            ))
+        })?;
         return Ok(ManaSymbol::Atom(AtomicManaSymbol::Generic(n)));
     }
     if inner == "X" {
@@ -326,8 +339,11 @@ fn parse_symbol_group(inner: &str, whole: &str) -> Result<ManaSymbol, ManaCostPa
     let parts: Vec<&str> = inner.split('/').collect();
     match parts.as_slice() {
         [a, b] if *b == "P" => {
-            let color = parse_color_letter(a)
-                .map_err(|_| ManaCostParseError(format!("\"{{{inner}}}\" needs a color before /P in \"{whole}\"")))?;
+            let color = parse_color_letter(a).map_err(|_| {
+                ManaCostParseError(format!(
+                    "\"{{{inner}}}\" needs a color before /P in \"{whole}\""
+                ))
+            })?;
             Ok(ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(color)))
         }
         [a, b] => {
@@ -337,32 +353,48 @@ fn parse_symbol_group(inner: &str, whole: &str) -> Result<ManaSymbol, ManaCostPa
         }
         [a, b, c] if *c == "P" => {
             let color_a = parse_color_letter(a).map_err(|_| {
-                ManaCostParseError(format!("\"{{{inner}}}\" needs two colors before /P in \"{whole}\""))
+                ManaCostParseError(format!(
+                    "\"{{{inner}}}\" needs two colors before /P in \"{whole}\""
+                ))
             })?;
             let color_b = parse_color_letter(b).map_err(|_| {
-                ManaCostParseError(format!("\"{{{inner}}}\" needs two colors before /P in \"{whole}\""))
+                ManaCostParseError(format!(
+                    "\"{{{inner}}}\" needs two colors before /P in \"{whole}\""
+                ))
             })?;
             Ok(ManaSymbol::Hybrid(
                 AtomicManaSymbol::Phyrexian(color_a),
                 AtomicManaSymbol::Colored(color_b),
             ))
         }
-        _ => Err(ManaCostParseError(format!("unrecognized mana symbol \"{{{inner}}}\" in \"{whole}\""))),
+        _ => Err(ManaCostParseError(format!(
+            "unrecognized mana symbol \"{{{inner}}}\" in \"{whole}\""
+        ))),
     }
 }
 
 /// A 2-part hybrid's atom: a generic amount or a single color, never `P`,
 /// which `parse_symbol_group` handles first.
-fn parse_hybrid_atom(part: &str, inner: &str, whole: &str) -> Result<AtomicManaSymbol, ManaCostParseError> {
+fn parse_hybrid_atom(
+    part: &str,
+    inner: &str,
+    whole: &str,
+) -> Result<AtomicManaSymbol, ManaCostParseError> {
     if part.chars().all(|c| c.is_ascii_digit()) && !part.is_empty() {
-        let n: u32 = part
-            .parse()
-            .map_err(|_| ManaCostParseError(format!("generic amount \"{part}\" out of range in \"{whole}\"")))?;
+        let n: u32 = part.parse().map_err(|_| {
+            ManaCostParseError(format!(
+                "generic amount \"{part}\" out of range in \"{whole}\""
+            ))
+        })?;
         return Ok(AtomicManaSymbol::Generic(n));
     }
     parse_color_letter(part)
         .map(AtomicManaSymbol::Colored)
-        .map_err(|_| ManaCostParseError(format!("unrecognized hybrid component \"{{{inner}}}\" in \"{whole}\"")))
+        .map_err(|_| {
+            ManaCostParseError(format!(
+                "unrecognized hybrid component \"{{{inner}}}\" in \"{whole}\""
+            ))
+        })
 }
 
 /// `pub` because the scenario crate's TOML loader reuses this WUBRG-letter
@@ -374,7 +406,9 @@ pub fn parse_color_letter(s: &str) -> Result<Color, ManaCostParseError> {
         "B" => Ok(Color::Black),
         "R" => Ok(Color::Red),
         "G" => Ok(Color::Green),
-        other => Err(ManaCostParseError(format!("unknown color letter \"{other}\""))),
+        other => Err(ManaCostParseError(format!(
+            "unknown color letter \"{other}\""
+        ))),
     }
 }
 
@@ -486,7 +520,6 @@ impl ManaPool {
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -496,11 +529,15 @@ mod tests {
     #[test]
     fn has_x_true_and_false_cases() {
         let with_x = ManaCost {
-            symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+            symbols: vec![
+                ManaSymbol::X,
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+            ],
         };
         assert!(with_x.has_x());
-        let without_x =
-            ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
+        let without_x = ManaCost {
+            symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+        };
         assert!(!without_x.has_x());
     }
 
@@ -518,32 +555,51 @@ mod tests {
 
     #[test]
     fn mana_value_no_mana_cost_is_zero() {
-        assert_eq!(ManaCost { symbols: Vec::new() }.mana_value(), 0);
+        assert_eq!(
+            ManaCost {
+                symbols: Vec::new()
+            }
+            .mana_value(),
+            0
+        );
     }
 
     #[test]
     fn mana_value_hybrid_uses_the_larger_component() {
         // CR 202.3f
         let cost = ManaCost {
-            symbols: vec![ManaSymbol::Hybrid(AtomicManaSymbol::Generic(2), AtomicManaSymbol::Colored(Color::White))],
+            symbols: vec![ManaSymbol::Hybrid(
+                AtomicManaSymbol::Generic(2),
+                AtomicManaSymbol::Colored(Color::White),
+            )],
         };
         assert_eq!(cost.mana_value(), 2);
         let color_hybrid = ManaCost {
-            symbols: vec![ManaSymbol::Hybrid(AtomicManaSymbol::Colored(Color::White), AtomicManaSymbol::Colored(Color::Blue))],
+            symbols: vec![ManaSymbol::Hybrid(
+                AtomicManaSymbol::Colored(Color::White),
+                AtomicManaSymbol::Colored(Color::Blue),
+            )],
         };
         assert_eq!(color_hybrid.mana_value(), 1);
     }
 
     #[test]
     fn mana_value_phyrexian_counts_as_one() {
-        let cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::Black))] };
+        let cost = ManaCost {
+            symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::Black))],
+        };
         assert_eq!(cost.mana_value(), 1);
     }
 
     #[test]
     fn mana_value_unresolved_x_is_zero_off_the_stack() {
         // CR 202.3e
-        let cost = ManaCost { symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Generic(1))] };
+        let cost = ManaCost {
+            symbols: vec![
+                ManaSymbol::X,
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+            ],
+        };
         assert_eq!(cost.mana_value(), 1);
     }
 
@@ -551,14 +607,19 @@ mod tests {
     fn mana_value_resolved_x_counts_the_announced_value() {
         // CR 202.3e
         // resolve_x must be applied first while on the stack.
-        let cost = ManaCost { symbols: vec![ManaSymbol::X] };
+        let cost = ManaCost {
+            symbols: vec![ManaSymbol::X],
+        };
         assert_eq!(cost.resolve_x(3).mana_value(), 3);
     }
 
     #[test]
     fn resolve_x_substitutes_generic_and_leaves_other_symbols_alone() {
         let cost = ManaCost {
-            symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+            symbols: vec![
+                ManaSymbol::X,
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+            ],
         };
         let resolved = cost.resolve_x(3);
         assert_eq!(
@@ -573,7 +634,9 @@ mod tests {
     #[test]
     fn resolve_x_gives_every_x_the_same_value() {
         // CR 107.3i
-        let cost = ManaCost { symbols: vec![ManaSymbol::X, ManaSymbol::X] };
+        let cost = ManaCost {
+            symbols: vec![ManaSymbol::X, ManaSymbol::X],
+        };
         let resolved = cost.resolve_x(2);
         assert_eq!(
             resolved.symbols,
@@ -608,7 +671,9 @@ mod tests {
     #[test]
     fn apply_colored_cost_delta_over_reduction_spills_the_excess() {
         // CR 118.7c
-        let cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White))] };
+        let cost = ManaCost {
+            symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White))],
+        };
         let (adjusted, spillover) = cost.apply_colored_cost_delta(Color::White, -2);
         assert_eq!(spillover, -1);
         assert!(adjusted.symbols.is_empty());
@@ -617,19 +682,30 @@ mod tests {
     #[test]
     fn apply_colored_cost_delta_with_no_matching_color_spills_entirely() {
         // CR 118.7b
-        let cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
+        let cost = ManaCost {
+            symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+        };
         let (adjusted, spillover) = cost.apply_colored_cost_delta(Color::White, -1);
         assert_eq!(spillover, -1);
-        assert_eq!(adjusted.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]);
+        assert_eq!(
+            adjusted.symbols,
+            vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]
+        );
     }
 
     #[test]
     fn apply_colorless_cost_delta_reduces_the_colorless_component() {
         let cost = ManaCost {
-            symbols: vec![AtomicManaSymbol::Colorless, AtomicManaSymbol::Colorless].into_iter().map(ManaSymbol::Atom).collect(),
+            symbols: vec![AtomicManaSymbol::Colorless, AtomicManaSymbol::Colorless]
+                .into_iter()
+                .map(ManaSymbol::Atom)
+                .collect(),
         };
         let (adjusted, spillover) = cost.apply_colorless_cost_delta(-3);
-        assert_eq!(spillover, -1, "only 2 {{C}} were there to consume, the third spills");
+        assert_eq!(
+            spillover, -1,
+            "only 2 {{C}} were there to consume, the third spills"
+        );
         assert!(adjusted.symbols.is_empty());
     }
 
@@ -684,7 +760,10 @@ mod tests {
     #[test]
     fn parse_plain_phyrexian() {
         let cost = ManaCost::parse("{W/P}").unwrap();
-        assert_eq!(cost.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))]);
+        assert_eq!(
+            cost.symbols,
+            vec![ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))]
+        );
     }
 
     #[test]
@@ -716,7 +795,10 @@ mod tests {
         let cost = ManaCost::parse("{X}{G}").unwrap();
         assert_eq!(
             cost.symbols,
-            vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Green))]
+            vec![
+                ManaSymbol::X,
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Green))
+            ]
         );
     }
 
@@ -726,7 +808,10 @@ mod tests {
         assert!(ManaCost::parse("{1").is_err(), "unterminated brace");
         assert!(ManaCost::parse("{Q}").is_err(), "unknown letter");
         assert!(ManaCost::parse("{}").is_err(), "empty group");
-        assert!(ManaCost::parse("{W/U/B}").is_err(), "3-part group not ending in P");
+        assert!(
+            ManaCost::parse("{W/U/B}").is_err(),
+            "3-part group not ending in P"
+        );
     }
 
     #[test]
@@ -750,8 +835,14 @@ mod tests {
 
     #[test]
     fn atomic_mana_symbol_colors() {
-        assert_eq!(AtomicManaSymbol::Colored(Color::Red).colors(), ColorSet::RED);
-        assert_eq!(AtomicManaSymbol::Phyrexian(Color::White).colors(), ColorSet::WHITE);
+        assert_eq!(
+            AtomicManaSymbol::Colored(Color::Red).colors(),
+            ColorSet::RED
+        );
+        assert_eq!(
+            AtomicManaSymbol::Phyrexian(Color::White).colors(),
+            ColorSet::WHITE
+        );
         assert_eq!(AtomicManaSymbol::Generic(2).colors(), ColorSet::empty());
         assert_eq!(AtomicManaSymbol::Colorless.colors(), ColorSet::empty());
         assert_eq!(AtomicManaSymbol::Snow.colors(), ColorSet::empty());
@@ -759,8 +850,14 @@ mod tests {
 
     #[test]
     fn mana_symbol_colors() {
-        assert_eq!(ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Green)).colors(), ColorSet::GREEN);
-        let hybrid = ManaSymbol::Hybrid(AtomicManaSymbol::Colored(Color::White), AtomicManaSymbol::Colored(Color::Blue));
+        assert_eq!(
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Green)).colors(),
+            ColorSet::GREEN
+        );
+        let hybrid = ManaSymbol::Hybrid(
+            AtomicManaSymbol::Colored(Color::White),
+            AtomicManaSymbol::Colored(Color::Blue),
+        );
         assert_eq!(hybrid.colors(), ColorSet::WHITE | ColorSet::BLUE);
         assert_eq!(ManaSymbol::X.colors(), ColorSet::empty());
     }
@@ -784,8 +881,16 @@ mod tests {
         let colored = ManaCost::parse("{R}").unwrap();
         let increased = colored.apply_cost_delta(1);
         assert_eq!(increased.symbols.len(), 2);
-        assert!(increased.symbols.contains(&ManaSymbol::Atom(AtomicManaSymbol::Generic(1))));
-        assert!(increased.symbols.contains(&ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))));
+        assert!(
+            increased
+                .symbols
+                .contains(&ManaSymbol::Atom(AtomicManaSymbol::Generic(1)))
+        );
+        assert!(
+            increased
+                .symbols
+                .contains(&ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)))
+        );
 
         assert_eq!(base.apply_cost_delta(0).symbols, base.symbols);
     }
@@ -800,8 +905,18 @@ mod tests {
     #[test]
     fn mana_pool_empty_resets_all_fields() {
         let mut pool = ManaPool {
-            white: 1, blue: 1, black: 1, red: 1, green: 1, colorless: 1,
-            snow_white: 1, snow_blue: 1, snow_black: 1, snow_red: 1, snow_green: 1, snow_colorless: 1,
+            white: 1,
+            blue: 1,
+            black: 1,
+            red: 1,
+            green: 1,
+            colorless: 1,
+            snow_white: 1,
+            snow_blue: 1,
+            snow_black: 1,
+            snow_red: 1,
+            snow_green: 1,
+            snow_colorless: 1,
             restricted: vec![ManaUnit::Colored(Color::White)],
         };
         pool.empty();
@@ -825,16 +940,26 @@ mod tests {
         assert_eq!(pool.colorless, 2);
         assert_eq!(pool.snow_colorless, 1);
 
-        pool.add_unit(ManaUnit::RestrictedColored(Color::Black, crate::types::card::CardTypeSet::CREATURE));
+        pool.add_unit(ManaUnit::RestrictedColored(
+            Color::Black,
+            crate::types::card::CardTypeSet::CREATURE,
+        ));
         assert_eq!(pool.restricted.len(), 1);
     }
 
     #[test]
     fn mana_unit_from_snow_source_tags_colored_and_colorless() {
-        assert_eq!(ManaUnit::Colored(Color::White).from_snow_source(), ManaUnit::SnowColored(Color::White));
-        assert_eq!(ManaUnit::Colorless.from_snow_source(), ManaUnit::SnowColorless);
+        assert_eq!(
+            ManaUnit::Colored(Color::White).from_snow_source(),
+            ManaUnit::SnowColored(Color::White)
+        );
+        assert_eq!(
+            ManaUnit::Colorless.from_snow_source(),
+            ManaUnit::SnowColorless
+        );
         // Restricted units stay restricted.
-        let restricted = ManaUnit::RestrictedColored(Color::Red, crate::types::card::CardTypeSet::CREATURE);
+        let restricted =
+            ManaUnit::RestrictedColored(Color::Red, crate::types::card::CardTypeSet::CREATURE);
         assert_eq!(restricted.from_snow_source(), restricted);
     }
 }

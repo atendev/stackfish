@@ -15,13 +15,17 @@ fn templates() -> &'static Table {
 }
 
 pub(crate) fn expand(root: &mut Table) {
-    let Some(Value::Array(cards)) = root.remove("cards") else { return };
+    let Some(Value::Array(cards)) = root.remove("cards") else {
+        return;
+    };
     let expanded = cards.into_iter().map(expand_one).collect();
     root.insert("cards".to_string(), Value::Array(expanded));
 }
 
 fn expand_one(card: Value) -> Value {
-    let Value::Table(mut entry) = card else { return card };
+    let Value::Table(mut entry) = card else {
+        return card;
+    };
     let Some(Value::String(name)) = entry.remove("template") else {
         return Value::Table(entry);
     };
@@ -61,15 +65,24 @@ mod tests {
     fn expand_one_merges_template_under_entry_fields() {
         let mut entry = Table::new();
         entry.insert("key".to_string(), Value::String("forest".to_string()));
-        entry.insert("template".to_string(), Value::String("test_land_green".to_string()));
-        entry.insert("name".to_string(), Value::String("Overridden Name".to_string()));
+        entry.insert(
+            "template".to_string(),
+            Value::String("test_land_green".to_string()),
+        );
+        entry.insert(
+            "name".to_string(),
+            Value::String("Overridden Name".to_string()),
+        );
 
         let Value::Table(result) = expand_one(Value::Table(entry)) else {
             panic!("expected a table back");
         };
 
         assert_eq!(result.get("key").unwrap().as_str(), Some("forest"));
-        assert_eq!(result.get("name").unwrap().as_str(), Some("Overridden Name"));
+        assert_eq!(
+            result.get("name").unwrap().as_str(),
+            Some("Overridden Name")
+        );
         assert_eq!(
             result.get("types").unwrap().as_array().unwrap()[0].as_str(),
             Some("Land")
@@ -96,7 +109,10 @@ mod tests {
     fn expand_one_panics_on_an_unknown_template_name() {
         let mut entry = Table::new();
         entry.insert("key".to_string(), Value::String("x".to_string()));
-        entry.insert("template".to_string(), Value::String("does_not_exist".to_string()));
+        entry.insert(
+            "template".to_string(),
+            Value::String("does_not_exist".to_string()),
+        );
         expand_one(Value::Table(entry));
     }
 }

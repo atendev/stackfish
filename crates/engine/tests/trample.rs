@@ -3,17 +3,24 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
-fn creature_definition(name: &str, power: i32, toughness: i32, keywords: KeywordSet) -> CardDefinition {
+fn creature_definition(
+    name: &str,
+    power: i32,
+    toughness: i32,
+    keywords: KeywordSet,
+) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -35,12 +42,18 @@ fn creature_definition(name: &str, power: i32, toughness: i32, keywords: Keyword
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject { tapped: true, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
+    GameObject {
+        tapped: true,
+        ..card_object(id, definition, owner, ZoneKind::Battlefield)
+    }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -62,7 +75,10 @@ fn assign_combat_damage(
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
 ) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::AssignCombatDamage { assignments },
+        })
         .expect("turn-based action, no priority required");
     drain(engine)
 }
@@ -72,24 +88,32 @@ fn try_assign_combat_damage(
     player: PlayerId,
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
 ) -> Result<StepStatus, ActionError> {
-    engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
-        ?;
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::AssignCombatDamage { assignments },
+    })?;
     Ok(drain(engine))
 }
 
 fn p1_life(engine: &Engine, p1: PlayerId) -> i32 {
-    engine.state().players.iter().find(|p| p.player_id == p1).unwrap().life
+    engine
+        .state()
+        .players
+        .iter()
+        .find(|p| p.player_id == p1)
+        .unwrap()
+        .life
 }
 
 // Reads the dealt amount from the ledger, since a blocker assigned lethal damage dies in the SBA pass and is gone by the assertion.
 fn damage_event_amount(engine: &Engine, source: ObjectId, target_object: ObjectId) -> Option<u32> {
     engine.state().ledger.iter().find_map(|e| match e.kind {
-        GameEventKind::DamageDealt { source: s, target: Target::Object(t), amount, .. }
-            if s == source && t == target_object =>
-        {
-            Some(amount)
-        }
+        GameEventKind::DamageDealt {
+            source: s,
+            target: Target::Object(t),
+            amount,
+            ..
+        } if s == source && t == target_object => Some(amount),
         _ => None,
     })
 }
@@ -103,14 +127,31 @@ fn unblocked_trampler_is_a_plain_full_power_hit() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE),
+            p0,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "unblocked needs no split, trample or not");
-    assert_eq!(p1_life(&engine, p1), 15, "702.19a: trample has no effect on an unblocked attacker");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "unblocked needs no split, trample or not"
+    );
+    assert_eq!(
+        p1_life(&engine, p1),
+        15,
+        "702.19a: trample has no effect on an unblocked attacker"
+    );
 }
 
 #[test]
@@ -123,15 +164,34 @@ fn single_blocker_trample_now_requires_a_chosen_split() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            creature_definition("Wall", 0, 2, KeywordSet::empty()),
+            p1,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let err = try_assign_combat_damage(&mut engine, p0, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
-        "a single trampling blocker still needs a chosen lethal-vs-excess split: got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "a single trampling blocker still needs a chosen lethal-vs-excess split: got {err:?}"
+    );
 }
 
 #[test]
@@ -144,16 +204,44 @@ fn single_blocker_trample_splits_lethal_and_excess_to_the_player() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            creature_definition("Wall", 0, 2, KeywordSet::empty()),
+            p1,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 2)])]);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
-    assert_eq!(damage_event_amount(&engine, attacker, blocker), Some(2), "the blocker got exactly its lethal amount");
-    assert_eq!(p1_life(&engine, p1), 17, "702.19b: the remaining 3 damage spills to the defending player");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
+    assert_eq!(
+        damage_event_amount(&engine, attacker, blocker),
+        Some(2),
+        "the blocker got exactly its lethal amount"
+    );
+    assert_eq!(
+        p1_life(&engine, p1),
+        17,
+        "702.19b: the remaining 3 damage spills to the defending player"
+    );
 }
 
 #[test]
@@ -166,15 +254,36 @@ fn trample_cannot_send_excess_until_the_blocker_gets_lethal() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            creature_definition("Wall", 0, 2, KeywordSet::empty()),
+            p1,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     // Only 1 of the 2 needed to be lethal, so claiming any of the remaining 4 for the player is rejected (CR 702.19b).
-    let err = try_assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 1)])]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "got {err:?}");
+    let err = try_assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 1)])])
+        .unwrap_err();
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -187,16 +296,40 @@ fn trample_may_assign_everything_to_the_blocker_leaving_nothing_for_the_player()
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            creature_definition("Wall", 0, 2, KeywordSet::empty()),
+            p1,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 5)])]);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
     assert_eq!(damage_event_amount(&engine, attacker, blocker), Some(5));
-    assert_eq!(p1_life(&engine, p1), 20, "controller may choose not to trample through at all");
+    assert_eq!(
+        p1_life(&engine, p1),
+        20,
+        "controller may choose not to trample through at all"
+    );
 }
 
 #[test]
@@ -210,18 +343,53 @@ fn multi_blocker_trample_distributes_lethal_then_spills_the_remainder() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker_1, attacker), (blocker_2, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 7, 7, KeywordSet::TRAMPLE), p0));
-    put_on_battlefield(&mut state, permanent(blocker_1, creature_definition("Wall1", 0, 2, KeywordSet::empty()), p1));
-    put_on_battlefield(&mut state, permanent(blocker_2, creature_definition("Wall2", 0, 3, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition("Rampager", 7, 7, KeywordSet::TRAMPLE),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker_1,
+            creature_definition("Wall1", 0, 2, KeywordSet::empty()),
+            p1,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker_2,
+            creature_definition("Wall2", 0, 3, KeywordSet::empty()),
+            p1,
+        ),
+    );
 
     let mut engine = Engine::new(state);
-    let status = assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker_1, 2), (blocker_2, 3)])]);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
+    let status = assign_combat_damage(
+        &mut engine,
+        p0,
+        vec![(attacker, vec![(blocker_1, 2), (blocker_2, 3)])],
+    );
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
     assert_eq!(damage_event_amount(&engine, attacker, blocker_1), Some(2));
     assert_eq!(damage_event_amount(&engine, attacker, blocker_2), Some(3));
-    assert_eq!(p1_life(&engine, p1), 18, "7 power - 2 - 3 = 2 spills to the defending player");
+    assert_eq!(
+        p1_life(&engine, p1),
+        18,
+        "7 power - 2 - 3 = 2 spills to the defending player"
+    );
 }
 
 #[test]
@@ -234,19 +402,45 @@ fn deathtouch_trample_only_needs_one_damage_to_call_a_blocker_lethal() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
     put_on_battlefield(
         &mut state,
-        permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE | KeywordSet::DEATHTOUCH), p0),
+        permanent(
+            attacker,
+            creature_definition(
+                "Rampager",
+                5,
+                5,
+                KeywordSet::TRAMPLE | KeywordSet::DEATHTOUCH,
+            ),
+            p0,
+        ),
     );
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 10, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            creature_definition("Wall", 0, 10, KeywordSet::empty()),
+            p1,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 1)])]);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
     assert_eq!(damage_event_amount(&engine, attacker, blocker), Some(1));
-    assert_eq!(p1_life(&engine, p1), 16, "deathtouch makes 1 damage lethal, the other 4 spill through");
+    assert_eq!(
+        p1_life(&engine, p1),
+        16,
+        "deathtouch makes 1 damage lethal, the other 4 spill through"
+    );
 }
 
 // CR 509.1h/510.1c
@@ -261,14 +455,31 @@ fn blocked_attacker_with_no_living_blockers_deals_no_damage_without_trample() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(long_dead_blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3, KeywordSet::empty()), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition("Bear", 3, 3, KeywordSet::empty()),
+            p0,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
-    assert_eq!(p1_life(&engine, p1), 20, "509.1h/510.1c: blocked with zero living blockers deals no damage, no trample");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
+    assert_eq!(
+        p1_life(&engine, p1),
+        20,
+        "509.1h/510.1c: blocked with zero living blockers deals no damage, no trample"
+    );
     assert!(
         !engine.state().ledger.iter().any(|e| matches!(
             e.kind,
@@ -288,12 +499,29 @@ fn blocked_trampler_with_no_living_blockers_deals_full_power_per_702_19d() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(long_dead_blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE),
+            p0,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
-    assert_eq!(p1_life(&engine, p1), 15, "702.19d: as though every blocker got lethal, so all 5 hit the defending player");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
+    assert_eq!(
+        p1_life(&engine, p1),
+        15,
+        "702.19d: as though every blocker got lethal, so all 5 hit the defending player"
+    );
 }

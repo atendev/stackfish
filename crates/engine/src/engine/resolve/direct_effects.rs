@@ -5,15 +5,16 @@ use std::ops::ControlFlow;
 
 use crate::commands;
 use crate::types::card::{CardTypeSet, KeywordSet};
-use crate::types::target::TargetSpec;
-use crate::types::effect::{
-    matches_effect_filter, AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter,
-    EffectPayload, EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
-};
 use crate::types::counter::CounterKind;
+use crate::types::effect::{
+    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter,
+    EffectPayload, EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload,
+    ReplacementSpec, matches_effect_filter,
+};
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::StackObject;
+use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::super::{Engine, StepStatus};
@@ -61,14 +62,22 @@ impl Engine {
     }
 
     /// Applies one life loss and records it. Shared with `ForEachPlayer`.
-    pub(in crate::engine) fn lose_life_now(&mut self, player: PlayerId, amount: u32, events: &mut Vec<GameEventKind>) {
+    pub(in crate::engine) fn lose_life_now(
+        &mut self,
+        player: PlayerId,
+        amount: u32,
+        events: &mut Vec<GameEventKind>,
+    ) {
         let delta = i32::try_from(amount).unwrap_or(i32::MAX);
         if delta == 0 {
             return;
         }
         if let Some(p) = self.state.player_mut(player) {
             p.lose_life(delta);
-            events.push(GameEventKind::LifeChanged { player, delta: -delta });
+            events.push(GameEventKind::LifeChanged {
+                player,
+                delta: -delta,
+            });
         }
     }
 
@@ -108,25 +117,34 @@ impl Engine {
         };
         let pair: Option<(ObjectId, ObjectId)> = match &top.target_requirement {
             Some(TargetSpec::Multiple(reqs)) if reqs.len() == 2 => {
-                match (modal_chunk_legals.first().map(Vec::as_slice), modal_chunk_legals.get(1).map(Vec::as_slice)) {
+                match (
+                    modal_chunk_legals.first().map(Vec::as_slice),
+                    modal_chunk_legals.get(1).map(Vec::as_slice),
+                ) {
                     (Some([first]), Some([second])) => object_of(first).zip(object_of(second)),
                     _ => None,
                 }
             }
-            Some(TargetSpec::Primitive(req)) if !req.up_to && !req.at_least => match (req.count, legal_targets) {
-                // Two target creatures fight; a bite has no dealer in this shape.
-                (2, [first, second]) if mutual => object_of(first).zip(object_of(second)),
-                // The ability's own source is the first creature.
-                (1, [target]) => object_of(target).map(|id| (top.source, id)),
-                _ => None,
-            },
+            Some(TargetSpec::Primitive(req)) if !req.up_to && !req.at_least => {
+                match (req.count, legal_targets) {
+                    // Two target creatures fight; a bite has no dealer in this shape.
+                    (2, [first, second]) if mutual => object_of(first).zip(object_of(second)),
+                    // The ability's own source is the first creature.
+                    (1, [target]) => object_of(target).map(|id| (top.source, id)),
+                    _ => None,
+                }
+            }
             _ => None,
         };
-        let Some((first, second)) = pair else { return ControlFlow::Continue(events) };
+        let Some((first, second)) = pair else {
+            return ControlFlow::Continue(events);
+        };
 
         // CR 701.14b
         let is_creature_on_battlefield = |id: ObjectId| {
-            self.state.object(id).is_some_and(|object| object.zone == ZoneKind::Battlefield)
+            self.state
+                .object(id)
+                .is_some_and(|object| object.zone == ZoneKind::Battlefield)
                 && crate::layers::effective_characteristics(&self.state, &self.script_runtime, id)
                     .card_types
                     .contains(CardTypeSet::CREATURE)
@@ -137,7 +155,9 @@ impl Engine {
 
         // Amounts are fixed up front; power of 0 or less, or unresolved, deals none (CR 120.8).
         let power_of = |id: ObjectId| {
-            commands::effective_power(&self.state, &self.script_runtime, id).filter(|power| *power > 0).map(|power| power as u32)
+            commands::effective_power(&self.state, &self.script_runtime, id)
+                .filter(|power| *power > 0)
+                .map(|power| power as u32)
         };
         let first_power = power_of(first);
         let second_power = power_of(second);
@@ -159,10 +179,8 @@ impl Engine {
             if let Some(power) = first_power {
                 push_damage(first, second, power);
             }
-            if mutual {
-                if let Some(power) = second_power {
-                    push_damage(second, first, power);
-                }
+            if mutual && let Some(power) = second_power {
+                push_damage(second, first, power);
             }
         }
         ControlFlow::Continue(events)
@@ -177,7 +195,11 @@ impl Engine {
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         for target in legal_targets {
             let Target::Object(id) = target else { continue };
-            events.push(GameEventKind::CounterAdded { object: *id, kind: kind.clone(), amount });
+            events.push(GameEventKind::CounterAdded {
+                object: *id,
+                kind: kind.clone(),
+                amount,
+            });
         }
         ControlFlow::Continue(events)
     }
@@ -186,12 +208,18 @@ impl Engine {
     /// pushing the event. Anything else is a no-op so a "becomes tapped" trigger
     /// can't fire (CR 603.2e).
     fn flip_tapped(&mut self, id: ObjectId, tap: bool, events: &mut Vec<GameEventKind>) {
-        let Some(object) = self.state.object_mut(id) else { return };
+        let Some(object) = self.state.object_mut(id) else {
+            return;
+        };
         if object.zone != ZoneKind::Battlefield || object.tapped == tap {
             return;
         }
         object.tapped = tap;
-        events.push(if tap { GameEventKind::Tapped { object: id } } else { GameEventKind::Untapped { object: id } });
+        events.push(if tap {
+            GameEventKind::Tapped { object: id }
+        } else {
+            GameEventKind::Untapped { object: id }
+        });
     }
 
     /// CR 701.26: every legal object target; players are skipped.
@@ -236,9 +264,9 @@ impl Engine {
                     .iter()
                     .copied()
                     .filter(|id| {
-                        self.state
-                            .object(*id)
-                            .is_some_and(|object| matches_effect_filter(filter, object, top.source, top.controller))
+                        self.state.object(*id).is_some_and(|object| {
+                            matches_effect_filter(filter, object, top.source, top.controller)
+                        })
                     })
                     .collect()
             })
@@ -263,13 +291,15 @@ impl Engine {
             self.state.continuous_effects.push(ContinuousEffect {
                 source: *id,
                 layer: Layer::PowerToughnessModifying,
-                affected: AffectedFilter::Primitive(EffectFilter { 
+                affected: AffectedFilter::Primitive(EffectFilter {
                     controller: None,
                     card_types: None,
                     subtypes: None,
-                    excluded_subtypes: None, supertypes: None, excluded_supertypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
                     self_only: true,
-                 }),
+                }),
                 effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power, toughness }),
                 timestamp,
                 duration: duration.clone(),
@@ -307,13 +337,15 @@ impl Engine {
             self.state.continuous_effects.push(ContinuousEffect {
                 source: *id,
                 layer: Layer::ControlChangingEffects,
-                affected: AffectedFilter::Primitive(EffectFilter { 
+                affected: AffectedFilter::Primitive(EffectFilter {
                     controller: None,
                     card_types: None,
                     subtypes: None,
-                    excluded_subtypes: None, supertypes: None, excluded_supertypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
                     self_only: true,
-                 }),
+                }),
                 effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
                 timestamp,
                 duration: duration.clone(),
@@ -339,7 +371,15 @@ impl Engine {
                 source: *id,
                 spec: ReplacementSpec::Primitive {
                     filter: EventFilter::WouldDie {
-                        affected: EffectFilter {  controller: None, card_types: None, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, self_only: true  },
+                        affected: EffectFilter {
+                            controller: None,
+                            card_types: None,
+                            subtypes: None,
+                            excluded_subtypes: None,
+                            supertypes: None,
+                            excluded_supertypes: None,
+                            self_only: true,
+                        },
                     },
                     payload: ReplacementPayload::Regenerate,
                 },

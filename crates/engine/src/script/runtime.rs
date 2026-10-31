@@ -6,26 +6,32 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Thread, ThreadStatus, Value};
 
-use crate::types::ability::{AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility};
+use crate::types::ability::{
+    AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility,
+};
 use crate::types::card::{CardDefinition, ScriptReference};
 use crate::types::cost::{AlternativeCost, CostModifier};
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::event::GameEventKind;
-use crate::types::zone::ZoneKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ManaCost;
-use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
+use crate::types::player::{
+    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier,
+};
 use crate::types::target::TargetSpec;
+use crate::types::zone::ZoneKind;
 
 use super::decode::{
-    decode_alternative_cost_table, decode_condition_value, decode_operation_value, decode_script_choice_request,
-    decode_target_spec_table,
+    decode_alternative_cost_table, decode_condition_value, decode_operation_value,
+    decode_script_choice_request, decode_target_spec_table,
 };
 use super::encode::{event_to_lua, state_to_lua};
 use super::globals::bind_game_globals;
-use super::tags::{result_items, EffectPrimitiveTag, ResultItem};
-use super::types::{OperationOutcome, ScriptContext, ScriptError, ScriptRegistry, ScriptZoneMoveKind};
+use super::tags::{EffectPrimitiveTag, ResultItem, result_items};
+use super::types::{
+    OperationOutcome, ScriptContext, ScriptError, ScriptRegistry, ScriptZoneMoveKind,
+};
 
 /// Owns the embedded Lua VM and every loaded card script. One per engine
 /// process, not per game: scripts load once and are reused across games, since
@@ -33,6 +39,12 @@ use super::types::{OperationOutcome, ScriptContext, ScriptError, ScriptRegistry,
 pub struct ScriptRuntime {
     lua: Lua,
     registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl Default for ScriptRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ScriptRuntime {
@@ -57,8 +69,11 @@ impl ScriptRuntime {
     /// script. Test and scenario fixtures use it to load a condition and an
     /// operation separately and build the `RegisteredAbility` from both handles.
     pub fn load_function(&mut self, source: &str) -> Result<ScriptHandle, ScriptError> {
-        let function: Function =
-            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Function = self
+            .lua
+            .load(source)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
         let key = self
             .lua
             .create_registry_value(function)
@@ -76,8 +91,11 @@ impl ScriptRuntime {
     /// resolved once here with no further Lua calls). See
     /// `decode_condition_value`, shared with `TriggeredAbilityBuilder::SetCondition`.
     pub fn load_condition(&mut self, source: &str) -> Result<ConditionSpec, ScriptError> {
-        let value: Value =
-            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let value: Value = self
+            .lua
+            .load(source)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
         decode_condition_value(&self.lua, &mut self.registry.borrow_mut(), value)
     }
 
@@ -91,8 +109,11 @@ impl ScriptRuntime {
         &mut self,
         source: &str,
     ) -> Result<(Option<AbilityEffect>, ScriptHandle), ScriptError> {
-        let value: Value =
-            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let value: Value = self
+            .lua
+            .load(source)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
         decode_operation_value(&self.lua, &mut self.registry.borrow_mut(), value)
     }
 
@@ -102,7 +123,9 @@ impl ScriptRuntime {
             .scripts
             .get(&handle)
             .ok_or_else(|| ScriptError::RuntimeError(format!("unknown ScriptHandle {handle:?}")))?;
-        self.lua.registry_value(key).map_err(|e| ScriptError::RuntimeError(e.to_string()))
+        self.lua
+            .registry_value(key)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
     /// Loads `definition.script_ref`'s source, evaluates it to a Lua table and
@@ -141,12 +164,18 @@ impl ScriptRuntime {
             }
         };
 
-        let module: Table =
-            self.lua.load(source_code).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let module: Table = self
+            .lua
+            .load(source_code)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
         // A plain spell's script declares only `operation()` and `target_requirement()`, so a missing `register_abilities` registers nothing. A field that is present but not a function is a load error.
-        let register_abilities: Option<Function> = module
-            .get("register_abilities")
-            .map_err(|e| ScriptError::LoadError(format!("card script's register_abilities is not a function: {e}")))?;
+        let register_abilities: Option<Function> =
+            module.get("register_abilities").map_err(|e| {
+                ScriptError::LoadError(format!(
+                    "card script's register_abilities is not a function: {e}"
+                ))
+            })?;
         if let Some(register_abilities) = register_abilities {
             register_abilities
                 .call::<_, ()>(source.0)
@@ -155,7 +184,7 @@ impl ScriptRuntime {
 
         let (queued, function_zones) = {
             let mut registry = self.registry.borrow_mut();
-            let queued: Vec<RegisteredAbility> = registry.pending_triggered.drain(..).collect();
+            let queued: Vec<RegisteredAbility> = std::mem::take(&mut registry.pending_triggered);
             let zones: std::collections::HashMap<usize, ZoneKind> =
                 registry.pending_function_zones.drain(..).collect();
             (queued, zones)
@@ -166,7 +195,10 @@ impl ScriptRuntime {
         let source_zone = state.object(source).map(|o| o.zone);
         let is_cast_trigger = |a: &RegisteredAbility| {
             a.kind == AbilityKind::Triggered
-                && matches!(a.condition, Some(ConditionSpec::Primitive(ConditionPrimitive::Cast)))
+                && matches!(
+                    a.condition,
+                    Some(ConditionSpec::Primitive(ConditionPrimitive::Cast))
+                )
         };
         let mut registered: Vec<RegisteredAbility> = Vec::new();
         let mut declared_zones: Vec<Option<ZoneKind>> = Vec::new();
@@ -175,7 +207,13 @@ impl ScriptRuntime {
             let keep = match declared {
                 Some(zone) => source_zone == Some(zone),
                 None if source_zone == Some(ZoneKind::Stack) => is_cast_trigger(&ability),
-                None if matches!(source_zone, Some(ZoneKind::Graveyard | ZoneKind::Exile | ZoneKind::Library)) => false,
+                None if matches!(
+                    source_zone,
+                    Some(ZoneKind::Graveyard | ZoneKind::Exile | ZoneKind::Library)
+                ) =>
+                {
+                    false
+                }
                 None => !is_cast_trigger(&ability),
             };
             if keep {
@@ -197,7 +235,7 @@ impl ScriptRuntime {
         // CR 113.6: an ability that declared `:SetFunctionsFrom(zone)` is kept only while its source is in that zone (Anger-style graveyard statics), and an undeclared one only on the battlefield. CR 604.3 characteristic-defining statics (`:SetCharacteristicDefining()`) bypass this filter below.
         // TODO: "functions in any zone" statics that aren't CDAs (a spell's own cost reduction) are still discarded off the battlefield; no such script-registered shape exists yet
         // TODO: a CDA registers only where a script run happens (hand, library, graveyard, exile, battlefield), not in the command zone
-        let on_battlefield = source_zone.map_or(true, |z| z == ZoneKind::Battlefield);
+        let on_battlefield = source_zone.is_none_or(|z| z == ZoneKind::Battlefield);
         fn take_functioning<T>(
             queue: &mut Vec<(T, Option<ZoneKind>)>,
             source_zone: Option<ZoneKind>,
@@ -216,11 +254,16 @@ impl ScriptRuntime {
         // CR 604.3: a characteristic-defining ability functions in all zones, so it bypasses the zone filter every other static goes through.
         let mut static_effects: Vec<ContinuousEffect> = {
             let mut registry = self.registry.borrow_mut();
-            let (cda, other): (Vec<_>, Vec<_>) =
-                registry.pending_static.drain(..).partition(|(_, _, characteristic_defining)| *characteristic_defining);
-            let mut kept: Vec<ContinuousEffect> = cda.into_iter().map(|(effect, _, _)| effect).collect();
-            let mut zoned: Vec<(ContinuousEffect, Option<ZoneKind>)> =
-                other.into_iter().map(|(effect, zone, _)| (effect, zone)).collect();
+            let (cda, other): (Vec<_>, Vec<_>) = registry
+                .pending_static
+                .drain(..)
+                .partition(|(_, _, characteristic_defining)| *characteristic_defining);
+            let mut kept: Vec<ContinuousEffect> =
+                cda.into_iter().map(|(effect, _, _)| effect).collect();
+            let mut zoned: Vec<(ContinuousEffect, Option<ZoneKind>)> = other
+                .into_iter()
+                .map(|(effect, zone, _)| (effect, zone))
+                .collect();
             kept.extend(take_functioning(&mut zoned, source_zone, on_battlefield));
             kept
         };
@@ -230,12 +273,18 @@ impl ScriptRuntime {
         }
         state.continuous_effects.append(&mut static_effects);
 
-        let mut replacement_effects: Vec<ReplacementEffect> =
-            take_functioning(&mut self.registry.borrow_mut().pending_replacement, source_zone, on_battlefield);
+        let mut replacement_effects: Vec<ReplacementEffect> = take_functioning(
+            &mut self.registry.borrow_mut().pending_replacement,
+            source_zone,
+            on_battlefield,
+        );
         state.replacement_effects.append(&mut replacement_effects);
 
-        let mut cost_modifiers: Vec<CostModifier> =
-            take_functioning(&mut self.registry.borrow_mut().pending_cost_modifiers, source_zone, on_battlefield);
+        let mut cost_modifiers: Vec<CostModifier> = take_functioning(
+            &mut self.registry.borrow_mut().pending_cost_modifiers,
+            source_zone,
+            on_battlefield,
+        );
         for modifier in &mut cost_modifiers {
             // The real controller (see `CostModifierBuilder`), since the builder has no `&GameState` to read it from.
             modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
@@ -245,8 +294,11 @@ impl ScriptRuntime {
         }
         state.cost_modifiers.append(&mut cost_modifiers);
 
-        let mut hand_size_modifiers: Vec<HandSizeModifier> =
-            take_functioning(&mut self.registry.borrow_mut().pending_hand_size_modifiers, source_zone, on_battlefield);
+        let mut hand_size_modifiers: Vec<HandSizeModifier> = take_functioning(
+            &mut self.registry.borrow_mut().pending_hand_size_modifiers,
+            source_zone,
+            on_battlefield,
+        );
         for modifier in &mut hand_size_modifiers {
             // The real controller and timestamp (see `HandSizeModifierBuilder`), since the builder has no `&GameState` to read the live controller or allocate a sequence number.
             modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
@@ -257,8 +309,11 @@ impl ScriptRuntime {
         }
         state.hand_size_modifiers.append(&mut hand_size_modifiers);
 
-        let mut hand_reveal_modifiers: Vec<HandRevealModifier> =
-            take_functioning(&mut self.registry.borrow_mut().pending_hand_reveal_modifiers, source_zone, on_battlefield);
+        let mut hand_reveal_modifiers: Vec<HandRevealModifier> = take_functioning(
+            &mut self.registry.borrow_mut().pending_hand_reveal_modifiers,
+            source_zone,
+            on_battlefield,
+        );
         for modifier in &mut hand_reveal_modifiers {
             // The real controller and timestamp, as for hand_size_modifiers above.
             modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
@@ -267,10 +322,15 @@ impl ScriptRuntime {
             );
             modifier.timestamp = state.allocate_sequence_no();
         }
-        state.hand_reveal_modifiers.append(&mut hand_reveal_modifiers);
+        state
+            .hand_reveal_modifiers
+            .append(&mut hand_reveal_modifiers);
 
-        let mut draw_limit_modifiers: Vec<DrawLimitModifier> =
-            take_functioning(&mut self.registry.borrow_mut().pending_draw_limit_modifiers, source_zone, on_battlefield);
+        let mut draw_limit_modifiers: Vec<DrawLimitModifier> = take_functioning(
+            &mut self.registry.borrow_mut().pending_draw_limit_modifiers,
+            source_zone,
+            on_battlefield,
+        );
         for modifier in &mut draw_limit_modifiers {
             // The real controller and timestamp, as for hand_size_modifiers above.
             modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
@@ -281,8 +341,11 @@ impl ScriptRuntime {
         }
         state.draw_limit_modifiers.append(&mut draw_limit_modifiers);
 
-        let mut land_play_modifiers: Vec<LandPlayModifier> =
-            take_functioning(&mut self.registry.borrow_mut().pending_land_play_modifiers, source_zone, on_battlefield);
+        let mut land_play_modifiers: Vec<LandPlayModifier> = take_functioning(
+            &mut self.registry.borrow_mut().pending_land_play_modifiers,
+            source_zone,
+            on_battlefield,
+        );
         for modifier in &mut land_play_modifiers {
             // The real controller, as for draw_limit_modifiers above. There is no timestamp to patch (see `LandPlayModifier`).
             modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
@@ -322,16 +385,30 @@ impl ScriptRuntime {
     /// does. Registering a scripted predicate's function needs only `&self`
     /// through the `Rc<RefCell<ScriptRegistry>>` interior mutability every
     /// builder relies on.
-    pub fn build_target_requirement(&self, source: &str) -> Result<Option<TargetSpec>, ScriptError> {
-        let module: Table =
-            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let function: Option<Function> =
-            module.get("target_requirement").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let Some(function) = function else { return Ok(None) };
-        let table: Table =
-            function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    pub fn build_target_requirement(
+        &self,
+        source: &str,
+    ) -> Result<Option<TargetSpec>, ScriptError> {
+        let module: Table = self
+            .lua
+            .load(source)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> = module
+            .get("target_requirement")
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else {
+            return Ok(None);
+        };
+        let table: Table = function
+            .call(())
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         let mut registry = self.registry.borrow_mut();
-        Ok(Some(decode_target_spec_table(&self.lua, &mut registry, table)?))
+        Ok(Some(decode_target_spec_table(
+            &self.lua,
+            &mut registry,
+            table,
+        )?))
     }
 
     /// CR 608.2m: a plain spell's own resolution effect (Armageddon's "Destroy
@@ -370,12 +447,20 @@ impl ScriptRuntime {
         &self,
         source: &str,
     ) -> Result<Option<(Option<AbilityEffect>, ScriptHandle)>, ScriptError> {
-        let module: Table =
-            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let function: Option<Function> =
-            module.get("operation").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let Some(function) = function else { return Ok(None) };
-        let value: Value = function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let module: Table = self
+            .lua
+            .load(source)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> = module
+            .get("operation")
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else {
+            return Ok(None);
+        };
+        let value: Value = function
+            .call(())
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         let mut registry = self.registry.borrow_mut();
         let decoded = decode_operation_value(&self.lua, &mut registry, value)?;
         Ok(Some(decoded))
@@ -394,16 +479,31 @@ impl ScriptRuntime {
     /// bool }`; see `decode_alternative_cost_table`). More than one entry is
     /// selectable, since `CastSpell::alternative_cost` is an `Option<usize>`
     /// index. A card with none returns `Ok(Vec::new())`.
-    pub fn build_alternative_costs(&self, source: &str) -> Result<Vec<AlternativeCost>, ScriptError> {
-        let module: Table =
-            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let function: Option<Function> =
-            module.get("alternative_costs").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let Some(function) = function else { return Ok(Vec::new()) };
-        let table: Table = function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    pub fn build_alternative_costs(
+        &self,
+        source: &str,
+    ) -> Result<Vec<AlternativeCost>, ScriptError> {
+        let module: Table = self
+            .lua
+            .load(source)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> = module
+            .get("alternative_costs")
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else {
+            return Ok(Vec::new());
+        };
+        let table: Table = function
+            .call(())
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         table
             .sequence_values::<Table>()
-            .map(|entry| decode_alternative_cost_table(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?))
+            .map(|entry| {
+                decode_alternative_cost_table(
+                    entry.map_err(|e| ScriptError::LoadError(e.to_string()))?,
+                )
+            })
             .collect()
     }
 
@@ -414,12 +514,20 @@ impl ScriptRuntime {
     /// since `CardDefinition.buyback_cost` is always a flat `ManaCost`. A card
     /// with none returns `Ok(None)`.
     pub fn build_buyback_cost(&self, source: &str) -> Result<Option<ManaCost>, ScriptError> {
-        let module: Table =
-            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let function: Option<Function> =
-            module.get("buyback_cost").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let Some(function) = function else { return Ok(None) };
-        let value: String = function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let module: Table = self
+            .lua
+            .load(source)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> = module
+            .get("buyback_cost")
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else {
+            return Ok(None);
+        };
+        let value: String = function
+            .call(())
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         let mana = ManaCost::parse(&value)
             .map_err(|e| ScriptError::LoadError(format!("buyback_cost(): {}", e.0)))?;
         Ok(Some(mana))
@@ -428,7 +536,11 @@ impl ScriptRuntime {
     /// Builds a minimal Lua argument set from `ctx` and calls the loaded
     /// function, expecting a bool. Only `GameEventKind::ZoneChange` is bridged
     /// (`event_to_lua`); every other event reaches the script as `nil`.
-    pub fn invoke_condition(&self, handle: ScriptHandle, ctx: &ScriptContext) -> Result<bool, ScriptError> {
+    pub fn invoke_condition(
+        &self,
+        handle: ScriptHandle,
+        ctx: &ScriptContext,
+    ) -> Result<bool, ScriptError> {
         let function = self.function(handle)?;
         let event_value = event_to_lua(&self.lua, ctx.event)?;
         // The state snapshot is a 4th argument, additive since Lua ignores extra arguments a function doesn't declare, so 3-argument condition scripts keep working. See `state_to_lua`.
@@ -474,8 +586,11 @@ impl ScriptRuntime {
         source: ObjectId,
         controller: PlayerId,
     ) -> Result<i32, ScriptError> {
-        let function: Function =
-            self.lua.load(source_code).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Function = self
+            .lua
+            .load(source_code)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
         let state_value = state_to_lua(&self.lua, state)?;
         function
             .call::<_, i32>((source.0, controller.0, state_value))
@@ -508,7 +623,13 @@ impl ScriptRuntime {
         let function = self.function(handle)?;
         let state_value = state_to_lua(&self.lua, state)?;
         function
-            .call::<_, bool>((object.0, source.0, controller.0, state_value, enchanted.map(|id| id.0)))
+            .call::<_, bool>((
+                object.0,
+                source.0,
+                controller.0,
+                state_value,
+                enchanted.map(|id| id.0),
+            ))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
@@ -531,12 +652,19 @@ impl ScriptRuntime {
         let function = self.function(handle)?;
         let state_value = state_to_lua(&self.lua, state)?;
         let result: Value = function
-            .call((source.0, controller.0, state_value, enchanted.map(|id| id.0)))
+            .call((
+                source.0,
+                controller.0,
+                state_value,
+                enchanted.map(|id| id.0),
+            ))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         match result {
             Value::Nil => Ok(None),
             Value::UserData(ud) if ud.is::<EffectPrimitiveTag>() => {
-                let tag = ud.borrow::<EffectPrimitiveTag>().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let tag = ud
+                    .borrow::<EffectPrimitiveTag>()
+                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
                 Ok(Some(tag.0.clone()))
             }
             other => Err(ScriptError::RuntimeError(format!(
@@ -546,7 +674,11 @@ impl ScriptRuntime {
         }
     }
 
-    pub fn invoke_cost(&self, handle: ScriptHandle, ctx: &ScriptContext) -> Result<(), ScriptError> {
+    pub fn invoke_cost(
+        &self,
+        handle: ScriptHandle,
+        ctx: &ScriptContext,
+    ) -> Result<(), ScriptError> {
         // TODO: same calling pattern as invoke_condition above.
         let _ = (handle, ctx);
         todo!()
@@ -608,8 +740,10 @@ impl ScriptRuntime {
         controller: PlayerId,
     ) -> Result<OperationOutcome, ScriptError> {
         let function = self.function(handle)?;
-        let thread =
-            self.lua.create_thread(function).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let thread = self
+            .lua
+            .create_thread(function)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         // A third `state` argument: the read-only snapshot condition, CDA and continuous-effect scripts get (`state_to_lua`). A `ForEachPlayer` body needs it to compute something like Balance's "fewest lands any player controls" before calling `Game.ChooseN`. Backward compatible, since Lua ignores an extra argument a function doesn't declare.
         let snapshot = state_to_lua(&self.lua, state)?;
         let result: Value = thread
@@ -644,23 +778,39 @@ impl ScriptRuntime {
         answer: Target,
     ) -> Result<OperationOutcome, ScriptError> {
         let thread = self.thread(thread_handle)?;
-        let answer_table = self.lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let answer_table = self
+            .lua
+            .create_table()
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         match answer {
             Target::Object(id) => {
-                answer_table.set("kind", "object").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                answer_table.set("id", id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table
+                    .set("kind", "object")
+                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table
+                    .set("id", id.0)
+                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             }
             Target::Player(id) => {
-                answer_table.set("kind", "player").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                answer_table.set("id", id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table
+                    .set("kind", "player")
+                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table
+                    .set("id", id.0)
+                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             }
             Target::Ability(id) => {
-                answer_table.set("kind", "ability").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                answer_table.set("id", id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table
+                    .set("kind", "ability")
+                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table
+                    .set("id", id.0)
+                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             }
         }
-        let result: Value =
-            thread.resume(answer_table).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let result: Value = thread
+            .resume(answer_table)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         self.handle_operation_result(thread, result, state, source, controller)
     }
 
@@ -678,8 +828,9 @@ impl ScriptRuntime {
         answer: bool,
     ) -> Result<OperationOutcome, ScriptError> {
         let thread = self.thread(thread_handle)?;
-        let result: Value =
-            thread.resume(answer).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let result: Value = thread
+            .resume(answer)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         self.handle_operation_result(thread, result, state, source, controller)
     }
 
@@ -705,14 +856,23 @@ impl ScriptRuntime {
                     result.type_name()
                 )));
             };
-            let request = decode_script_choice_request(&self.lua, &mut self.registry.borrow_mut(), request_table)?;
+            let request = decode_script_choice_request(
+                &self.lua,
+                &mut self.registry.borrow_mut(),
+                request_table,
+            )?;
             let thread_handle = self.stash_thread(thread)?;
-            return Ok(OperationOutcome::NeedsChoice { thread: thread_handle, request });
+            return Ok(OperationOutcome::NeedsChoice {
+                thread: thread_handle,
+                request,
+            });
         }
         let items = match result {
             Value::Nil => Vec::new(),
             other => result_items(&other).map_err(|message| {
-                ScriptError::RuntimeError(format!("operation must return a Game.Ops.* value or nil: {message}"))
+                ScriptError::RuntimeError(format!(
+                    "operation must return a Game.Ops.* value or nil: {message}"
+                ))
             })?,
         };
         let mut zone_moves: Vec<(ScriptZoneMoveKind, Vec<ObjectId>)> = Vec::new();
@@ -728,26 +888,58 @@ impl ScriptRuntime {
                     }
                 }
                 ResultItem::DrawCards(amount) => draw = Some(amount),
-                ResultItem::ZoneMove(kind, ids) => match zone_moves.iter_mut().find(|(k, _)| *k == kind) {
-                    Some((_, existing)) => existing.extend(ids),
-                    None => zone_moves.push((kind, ids)),
-                },
-                ResultItem::DealDamage { target, amount } => {
-                    events.push(GameEventKind::DamageDealt { source, target, amount, is_combat_damage: false });
-                }
-                ResultItem::AddCounters { target, counter, amount } => {
-                    // CR 122.1: counters sit only on an object, so a player pick is skipped, as `resolve_counters_effect` does.
-                    if let Target::Object(object) = target {
-                        events.push(GameEventKind::CounterAdded { object, kind: counter, amount });
+                ResultItem::ZoneMove(kind, ids) => {
+                    match zone_moves.iter_mut().find(|(k, _)| *k == kind) {
+                        Some((_, existing)) => existing.extend(ids),
+                        None => zone_moves.push((kind, ids)),
                     }
                 }
-                ResultItem::CastSpell { card, modes, targets, x_value, free } => {
-                    cast = Some(OperationOutcome::PendingCast { card, modes, targets, x_value, free });
+                ResultItem::DealDamage { target, amount } => {
+                    events.push(GameEventKind::DamageDealt {
+                        source,
+                        target,
+                        amount,
+                        is_combat_damage: false,
+                    });
+                }
+                ResultItem::AddCounters {
+                    target,
+                    counter,
+                    amount,
+                } => {
+                    // CR 122.1: counters sit only on an object, so a player pick is skipped, as `resolve_counters_effect` does.
+                    if let Target::Object(object) = target {
+                        events.push(GameEventKind::CounterAdded {
+                            object,
+                            kind: counter,
+                            amount,
+                        });
+                    }
+                }
+                ResultItem::CastSpell {
+                    card,
+                    modes,
+                    targets,
+                    x_value,
+                    free,
+                } => {
+                    cast = Some(OperationOutcome::PendingCast {
+                        card,
+                        modes,
+                        targets,
+                        x_value,
+                        free,
+                    });
                 }
             }
         }
         // TODO: one returned value that mixes a draw, a cast, zone moves and events needs an `OperationOutcome` that carries several requests
-        let pending = [!zone_moves.is_empty(), draw.is_some(), !events.is_empty(), cast.is_some()];
+        let pending = [
+            !zone_moves.is_empty(),
+            draw.is_some(),
+            !events.is_empty(),
+            cast.is_some(),
+        ];
         if pending.iter().filter(|present| **present).count() > 1 {
             return Err(ScriptError::RuntimeError(
                 "an operation can return only one of: zone moves (SacrificeChosen, DiscardChosen), DrawCards, \
@@ -775,11 +967,12 @@ impl ScriptRuntime {
     /// `scripts` and `Function`.
     fn thread(&self, handle: ScriptHandle) -> Result<Thread<'_>, ScriptError> {
         let registry = self.registry.borrow();
-        let key = registry
-            .suspended_threads
-            .get(&handle)
-            .ok_or_else(|| ScriptError::RuntimeError(format!("unknown suspended thread {handle:?}")))?;
-        self.lua.registry_value(key).map_err(|e| ScriptError::RuntimeError(e.to_string()))
+        let key = registry.suspended_threads.get(&handle).ok_or_else(|| {
+            ScriptError::RuntimeError(format!("unknown suspended thread {handle:?}"))
+        })?;
+        self.lua
+            .registry_value(key)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
     /// Stashes a just-yielded `Thread` in the registry under a fresh handle, as
@@ -787,7 +980,10 @@ impl ScriptRuntime {
     /// `decode_operation_value`. It is a `RegistryKey`, since `Thread<'lua>`
     /// can't outlive this call otherwise.
     fn stash_thread(&self, thread: Thread) -> Result<ScriptHandle, ScriptError> {
-        let key = self.lua.create_registry_value(thread).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let key = self
+            .lua
+            .create_registry_value(thread)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         let mut registry = self.registry.borrow_mut();
         let handle = registry.next_script_handle();
         registry.suspended_threads.insert(handle, key);

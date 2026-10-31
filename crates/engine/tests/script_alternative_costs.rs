@@ -5,7 +5,9 @@
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+};
 
 #[test]
 fn a_card_with_no_alternative_costs_function_returns_empty() {
@@ -15,8 +17,13 @@ fn a_card_with_no_alternative_costs_function_returns_empty() {
         function s.register_abilities(c) end
         return s
     "#;
-    let costs = runtime.build_alternative_costs(source).expect("script should load");
-    assert!(costs.is_empty(), "a card script with no alternative_costs() function grants none");
+    let costs = runtime
+        .build_alternative_costs(source)
+        .expect("script should load");
+    assert!(
+        costs.is_empty(),
+        "a card script with no alternative_costs() function grants none"
+    );
 }
 
 #[test]
@@ -27,8 +34,13 @@ fn a_card_with_no_buyback_cost_function_returns_none() {
         function s.register_abilities(c) end
         return s
     "#;
-    let cost = runtime.build_buyback_cost(source).expect("script should load");
-    assert!(cost.is_none(), "a card script with no buyback_cost() function has no buyback");
+    let cost = runtime
+        .build_buyback_cost(source)
+        .expect("script should load");
+    assert!(
+        cost.is_none(),
+        "a card script with no buyback_cost() function has no buyback"
+    );
 }
 
 #[test]
@@ -48,15 +60,29 @@ fn alternative_costs_function_decodes_a_flashback_shaped_entry() {
         end
         return s
     "#;
-    let costs = runtime.build_alternative_costs(source).expect("script should load");
+    let costs = runtime
+        .build_alternative_costs(source)
+        .expect("script should load");
     assert_eq!(costs.len(), 1);
-    let AlternativeCost::Replacement { description, cost, from_zone, exile_on_leaving_stack, escape } = &costs[0];
+    let AlternativeCost::Replacement {
+        description,
+        cost,
+        from_zone,
+        exile_on_leaving_stack,
+        escape,
+    } = &costs[0];
     assert_eq!(description, "Flashback {R}");
     assert_eq!(*from_zone, ZoneKind::Graveyard);
     assert!(*exile_on_leaving_stack);
     assert!(!escape, "escape defaults to false when omitted");
-    let mana = cost.mana.as_ref().expect("flashback cost has a mana component");
-    assert_eq!(mana.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]);
+    let mana = cost
+        .mana
+        .as_ref()
+        .expect("flashback cost has a mana component");
+    assert_eq!(
+        mana.symbols,
+        vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]
+    );
     assert!(cost.additional.is_empty());
 }
 
@@ -77,11 +103,21 @@ fn alternative_costs_function_decodes_an_escape_shaped_entry() {
         end
         return s
     "#;
-    let costs = runtime.build_alternative_costs(source).expect("script should load");
+    let costs = runtime
+        .build_alternative_costs(source)
+        .expect("script should load");
     assert_eq!(costs.len(), 1);
-    let AlternativeCost::Replacement { cost, escape, exile_on_leaving_stack, .. } = &costs[0];
+    let AlternativeCost::Replacement {
+        cost,
+        escape,
+        exile_on_leaving_stack,
+        ..
+    } = &costs[0];
     assert!(*escape);
-    assert!(!exile_on_leaving_stack, "exile_on_leaving_stack defaults to false when omitted");
+    assert!(
+        !exile_on_leaving_stack,
+        "exile_on_leaving_stack defaults to false when omitted"
+    );
     assert!(cost.mana.is_some());
     match &cost.additional[..] {
         [AdditionalCost::ExileFromGraveyard { count, .. }] => assert_eq!(*count, 4),
@@ -102,8 +138,14 @@ fn alternative_costs_function_can_declare_more_than_one_entry() {
         end
         return s
     "#;
-    let costs = runtime.build_alternative_costs(source).expect("script should load");
-    assert_eq!(costs.len(), 2, "a card can grant more than one alternative cost - selected by index at cast time");
+    let costs = runtime
+        .build_alternative_costs(source)
+        .expect("script should load");
+    assert_eq!(
+        costs.len(),
+        2,
+        "a card can grant more than one alternative cost - selected by index at cast time"
+    );
 }
 
 #[test]
@@ -122,9 +164,14 @@ fn alternative_costs_entry_rejects_two_mana_components() {
         end
         return s
     "#;
-    let err = runtime.build_alternative_costs(source).expect_err("two Mana() components should be rejected");
+    let err = runtime
+        .build_alternative_costs(source)
+        .expect_err("two Mana() components should be rejected");
     let message = format!("{err:?}");
-    assert!(message.contains("more than once"), "expected the duplicate-mana error, got {message}");
+    assert!(
+        message.contains("more than once"),
+        "expected the duplicate-mana error, got {message}"
+    );
 }
 
 #[test]
@@ -137,9 +184,14 @@ fn alternative_costs_entry_missing_costs_is_a_real_error() {
         end
         return s
     "#;
-    let err = runtime.build_alternative_costs(source).expect_err("a missing 'costs' key should error, not default to no cost");
+    let err = runtime
+        .build_alternative_costs(source)
+        .expect_err("a missing 'costs' key should error, not default to no cost");
     let message = format!("{err:?}");
-    assert!(message.contains("costs"), "expected an error naming the missing 'costs' key, got {message}");
+    assert!(
+        message.contains("costs"),
+        "expected an error naming the missing 'costs' key, got {message}"
+    );
 }
 
 #[test]
@@ -152,9 +204,14 @@ fn alternative_costs_entry_rejects_an_unknown_zone_name() {
         end
         return s
     "#;
-    let err = runtime.build_alternative_costs(source).expect_err("an unrecognized zone name should error");
+    let err = runtime
+        .build_alternative_costs(source)
+        .expect_err("an unrecognized zone name should error");
     let message = format!("{err:?}");
-    assert!(message.contains("Sideboard"), "expected an error naming the bad zone, got {message}");
+    assert!(
+        message.contains("Sideboard"),
+        "expected an error naming the bad zone, got {message}"
+    );
 }
 
 #[test]
@@ -165,8 +222,14 @@ fn buyback_cost_function_decodes_a_flat_mana_string() {
         function s.buyback_cost() return "{2}" end
         return s
     "#;
-    let cost = runtime.build_buyback_cost(source).expect("script should load").expect("declares a buyback cost");
-    assert_eq!(cost.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(2))]);
+    let cost = runtime
+        .build_buyback_cost(source)
+        .expect("script should load")
+        .expect("declares a buyback cost");
+    assert_eq!(
+        cost.symbols,
+        vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(2))]
+    );
 }
 
 #[test]
@@ -177,14 +240,18 @@ fn buyback_cost_function_surfaces_a_real_parse_error() {
         function s.buyback_cost() return "not a mana cost" end
         return s
     "#;
-    runtime.build_buyback_cost(source).expect_err("a malformed mana-cost string must be a real error, not a silent None");
+    runtime
+        .build_buyback_cost(source)
+        .expect_err("a malformed mana-cost string must be a real error, not a silent None");
 }
 
 fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Bear".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -229,9 +296,20 @@ fn bolt_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_script_flashback_bolt".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: Some(CardTypeSet::CREATURE),
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
@@ -246,8 +324,23 @@ fn two_player_state(pool: ManaPool) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![PlayerState { mana_pool: pool, ..player_state(p0) }, player_state(p1)],
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile]))
+        players: vec![
+            PlayerState {
+                mana_pool: pool,
+                ..player_state(p0)
+            },
+            player_state(p1),
+        ],
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
@@ -261,13 +354,23 @@ fn cast_spell(
 ) -> Result<(), ActionError> {
     engine.submit_action(PlayerAction {
         player,
-        kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost, pay_buyback },
+        kind: PlayerActionKind::CastSpell {
+            card,
+            modes: Vec::new(),
+            targets,
+            x_value: None,
+            alternative_cost,
+            pay_buyback,
+        },
     })
 }
 
 fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange { object, from, to, .. } = event.kind {
+        if let GameEventKind::ZoneChange {
+            object, from, to, ..
+        } = event.kind
+        {
             return (object, from, to);
         }
     }
@@ -294,26 +397,59 @@ fn a_script_declared_flashback_cost_casts_from_the_graveyard_and_exiles_on_resol
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(1);
-    let mut state = two_player_state(ManaPool { red: 1, ..ManaPool::default() });
-    state.objects.insert(card, card_object(card, bolt_definition(), p0, ZoneKind::Graveyard));
-    state.zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(card);
+    let mut state = two_player_state(ManaPool {
+        red: 1,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        card,
+        card_object(card, bolt_definition(), p0, ZoneKind::Graveyard),
+    );
+    state
+        .zone_mut(ZoneKind::Graveyard, Some(p0))
+        .unwrap()
+        .push_bottom(card);
     let creature = ObjectId(0);
-    state.objects.insert(creature, card_object(creature, creature_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
+    state.objects.insert(
+        creature,
+        card_object(creature, creature_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
 
     let mut engine = Engine::new(state);
-    let alternative_costs = engine.build_alternative_costs(script).expect("script should load");
+    let alternative_costs = engine
+        .build_alternative_costs(script)
+        .expect("script should load");
     assert_eq!(alternative_costs.len(), 1);
-    engine.state_mut().objects.get_mut(&card).unwrap().definition.alternative_costs = alternative_costs;
+    engine
+        .state_mut()
+        .objects
+        .get_mut(&card)
+        .unwrap()
+        .definition
+        .alternative_costs = alternative_costs;
 
-    cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], Some(0), false)
-        .expect("flashback cast from graveyard with the script-declared alternative announced");
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![Target::Object(creature)],
+        Some(0),
+        false,
+    )
+    .expect("flashback cast from graveyard with the script-declared alternative announced");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }));
 
     engine
         .submit_payment(PaymentPlan {
-            payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::Red)], phyrexian_life: 0 }],
+            payments: vec![CostPayment::Mana {
+                units: vec![ManaUnit::Colored(Color::Red)],
+                phyrexian_life: 0,
+            }],
         })
         .expect("the script-declared flashback's {R} paid with 1 red");
     drain(&mut engine);
@@ -321,13 +457,27 @@ fn a_script_declared_flashback_cost_casts_from_the_graveyard_and_exiles_on_resol
     let (_, from, to) = last_zone_change(&engine);
     assert_eq!((from, to), (ZoneKind::Graveyard, ZoneKind::Stack));
 
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
     let (_, from, to) = last_zone_change(&engine);
-    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Exile), "CR 702.34a: exiled instead of graveyard, same as direct construction");
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Stack, ZoneKind::Exile),
+        "CR 702.34a: exiled instead of graveyard, same as direct construction"
+    );
 }
 
 #[test]
@@ -341,33 +491,89 @@ fn a_script_declared_buyback_cost_returns_the_spell_to_hand_on_resolution() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(1);
-    let mut state = two_player_state(ManaPool { red: 1, colorless: 3, ..ManaPool::default() });
-    state.objects.insert(card, card_object(card, bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mut state = two_player_state(ManaPool {
+        red: 1,
+        colorless: 3,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        card,
+        card_object(card, bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
     let creature = ObjectId(0);
-    state.objects.insert(creature, card_object(creature, creature_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
+    state.objects.insert(
+        creature,
+        card_object(creature, creature_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
 
     let mut engine = Engine::new(state);
-    let buyback_cost = engine.build_buyback_cost(script).expect("script should load").expect("declares a buyback cost");
-    engine.state_mut().objects.get_mut(&card).unwrap().definition.buyback_cost = Some(buyback_cost);
+    let buyback_cost = engine
+        .build_buyback_cost(script)
+        .expect("script should load")
+        .expect("declares a buyback cost");
+    engine
+        .state_mut()
+        .objects
+        .get_mut(&card)
+        .unwrap()
+        .definition
+        .buyback_cost = Some(buyback_cost);
 
-    cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], None, true)
-        .expect("cast paying the script-declared buyback cost");
+    cast_spell(
+        &mut engine,
+        p0,
+        card,
+        vec![Target::Object(creature)],
+        None,
+        true,
+    )
+    .expect("cast paying the script-declared buyback cost");
     drain(&mut engine);
 
     // {1}{R} mana cost + {2} buyback = {3}{R} total: 1 red + 3 generic.
-    let units = vec![ManaUnit::Colored(Color::Red), ManaUnit::Colorless, ManaUnit::Colorless, ManaUnit::Colorless];
+    let units = vec![
+        ManaUnit::Colored(Color::Red),
+        ManaUnit::Colorless,
+        ManaUnit::Colorless,
+        ManaUnit::Colorless,
+    ];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units,
+                phyrexian_life: 0,
+            }],
+        })
         .expect("{1}{R} mana cost plus the script-declared {2} buyback cost");
     drain(&mut engine);
 
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
     let (_, from, to) = last_zone_change(&engine);
-    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Hand), "CR 702.27a: bought-back spell returns to hand, same as direct construction");
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Stack, ZoneKind::Hand),
+        "CR 702.27a: bought-back spell returns to hand, same as direct construction"
+    );
 }
