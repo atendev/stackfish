@@ -245,7 +245,7 @@ pub fn collect_triggers(
 
 /// CR 603.3b: groups `triggers` by controller in APNAP order. Order inside a
 /// group is the controller's choice, made later at the trigger-order pause.
-pub fn group_apnap(
+pub(crate) fn group_apnap(
     state: &GameState,
     triggers: Vec<PendingTrigger>,
 ) -> Vec<(PlayerId, Vec<PendingTrigger>)> {
@@ -270,7 +270,7 @@ pub fn group_apnap(
 }
 
 /// CR 101.4: `state.turn_order` rotated to start at the active player.
-pub fn apnap_player_order(state: &GameState) -> Vec<PlayerId> {
+pub(crate) fn apnap_player_order(state: &GameState) -> Vec<PlayerId> {
     let mut order: Vec<PlayerId> = Vec::new();
     match state
         .turn_order
@@ -288,7 +288,7 @@ pub fn apnap_player_order(state: &GameState) -> Vec<PlayerId> {
 
 /// CR 603.10: re-derives a departed source's last-known info from the ledger
 /// at stack-push time. `PendingTrigger` is `Copy`, so it cannot carry the snapshot.
-pub fn find_departed_lki(
+pub(crate) fn find_departed_lki(
     state: &GameState,
     source: ObjectId,
 ) -> Option<crate::types::object::GameObject> {

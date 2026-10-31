@@ -1,5 +1,6 @@
 use crate::types::card::CardDefinition;
 use crate::types::counter::CounterSet;
+#[cfg(test)]
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, SequenceNo};
 use crate::types::zone::ZoneKind;
@@ -17,7 +18,11 @@ pub struct VisibilityPolicy {
 
 impl VisibilityPolicy {
     /// Override layer only. Effective visibility also needs the zone default.
-    pub fn is_visible_to(&self, player: PlayerId) -> bool {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no consumer enforces visibility")
+    )]
+    pub(crate) fn is_visible_to(&self, player: PlayerId) -> bool {
         self.public || self.visible_to.contains(&player)
     }
 }
@@ -116,7 +121,8 @@ impl GameObject {
     /// `controlled_since_turn` reads `state.turn_number` so a caller cannot
     /// pass a stale value. Visibility is public on the battlefield and
     /// owner-only elsewhere; override it for a per-object exception.
-    pub fn new(
+    #[cfg(test)]
+    pub(crate) fn new(
         object_id: ObjectId,
         definition: CardDefinition,
         owner: PlayerId,

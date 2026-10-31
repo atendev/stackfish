@@ -822,7 +822,7 @@ impl CopyExceptions {
     /// machinery), `None` only for `TokenSpec::CopyOf`, where a new token has
     /// no identity to retain. `retain_name` and `retain_color` are a tested
     /// no-op in that case.
-    pub fn apply(
+    pub(crate) fn apply(
         &self,
         snapshot: &mut crate::types::card::CardDefinition,
         original: Option<&crate::types::card::CardDefinition>,
@@ -848,7 +848,7 @@ impl CopyExceptions {
 /// `CardDefinition` fields that stand in for rules text (see
 /// `AbilityEffect::ExchangeTextBoxes`). Overwrites `snapshot`'s with `other`'s
 /// and leaves the rest alone, unlike the full copy of `CopyExceptions`.
-pub fn apply_text_box(
+pub(crate) fn apply_text_box(
     snapshot: &mut crate::types::card::CardDefinition,
     other: &crate::types::card::CardDefinition,
 ) {
@@ -1023,7 +1023,7 @@ impl ConditionPrimitive {
     /// is the registered ability's source, not necessarily the event's object.
     /// `controller` and `active_player` are needed for the "your" relativity of
     /// `BeginningOfYourUpkeep` and its siblings.
-    pub fn matches(
+    pub(crate) fn matches(
         &self,
         source: ObjectId,
         controller: PlayerId,
@@ -1232,7 +1232,7 @@ pub enum InterveningIfPrimitive {
 }
 
 impl InterveningIfPrimitive {
-    pub fn holds(
+    pub(crate) fn holds(
         &self,
         state: &crate::types::game::GameState,
         controller: PlayerId,

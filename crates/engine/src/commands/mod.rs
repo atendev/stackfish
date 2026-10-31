@@ -72,7 +72,7 @@ impl Internal {
 /// What `execute_command` can fail with. `Rejected` leaves everything as it
 /// was; `Internal` is fatal.
 #[derive(Debug, Clone, PartialEq)]
-pub enum CommandError {
+pub(crate) enum CommandError {
     Rejected(Rejected),
     Internal(Internal),
 }
@@ -92,7 +92,7 @@ impl From<Internal> for CommandError {
 /// How priority moves after one `EngineCommand`. Returned instead of written to
 /// `state.priority_player` so the engine is the only place that writes it.
 #[derive(Debug)]
-pub enum PriorityHandoff {
+pub(crate) enum PriorityHandoff {
     /// Most variants: priority stays with whoever currently has it.
     Unchanged,
     /// `PassPriority` (CR 117.3c): priority moves to the next player in
@@ -104,7 +104,7 @@ pub enum PriorityHandoff {
 /// What carrying out one `EngineCommand` produced, for the engine to act on.
 /// Returned explicitly rather than inferred from `state` afterward.
 #[derive(Debug)]
-pub struct CommandOutcome {
+pub(crate) struct CommandOutcome {
     /// Proposed events, not yet final. The engine runs them through
     /// `ReplacementCheck` and `CommitEvents`, so this function never writes the
     /// ledger.
@@ -132,7 +132,7 @@ pub struct CommandOutcome {
 /// A cost that waits on `Engine::submit_payment` instead of being deducted
 /// inside the command. See `CommandOutcome::requires_payment`.
 #[derive(Debug)]
-pub struct PendingPaymentRequest {
+pub(crate) struct PendingPaymentRequest {
     pub stack_id: ObjectId,
     pub payer: PlayerId,
     pub cost: CostSpec,
@@ -152,7 +152,7 @@ pub struct PendingPaymentRequest {
 /// object only for `StackObject`. For `ManaAbility` it is a freshly allocated
 /// handle (CR 400.7) that nothing on `state.stack` matches.
 #[derive(Debug)]
-pub enum PaymentResolution {
+pub(crate) enum PaymentResolution {
     StackObject,
     /// CR 605's mana units to add once the cost commits. They are resolved at
     /// execution time (a fixed `AddMana` list, or an `AddManaChoice` with
@@ -284,7 +284,7 @@ pub(crate) fn apply_command(
 /// (replacement checks CR 614-616, then `CommitEvents`) so one place writes the
 /// ledger. It does not split `command` into sub-commands: the sub-steps are
 /// events.
-pub fn execute_command(
+pub(crate) fn execute_command(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
     command: EngineCommand,

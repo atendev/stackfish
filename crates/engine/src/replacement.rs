@@ -22,7 +22,7 @@ pub enum ReplacementCandidate {
 
 /// What `apply_replacements` produced for one proposed event. CR 616.1 has the
 /// affected player choose the order, so that case is a value the caller handles.
-pub enum ReplacementOutcome {
+pub(crate) enum ReplacementOutcome {
     /// The event's final form, ready for `CommitEvents`.
     Resolved(GameEventKind),
     /// CR 616.1: `affected_player` must choose which of `candidates` applies first.
@@ -253,7 +253,7 @@ fn is_battlefield_entry_modifier(spec: &ReplacementSpec) -> bool {
 /// CR 614, 615, 616: rewrites `proposed` by every matching replacement effect,
 /// rechecking after each rewrite until it stabilizes. The entry point, with
 /// nothing excluded.
-pub fn apply_replacements(
+pub(crate) fn apply_replacements(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
     proposed: GameEventKind,
@@ -618,7 +618,7 @@ pub fn pending_copy_choice(
 /// CR 702.54a: whether an opponent of `controller` was dealt damage this turn,
 /// combat or not. The turn starts after the latest `TurnStarted` in the ledger,
 /// or at the ledger's start if there is none. Damage to permanents does not count.
-pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bool {
+pub(crate) fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bool {
     let turn_start = state
         .ledger
         .iter()
@@ -635,7 +635,10 @@ pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bo
 /// `retire_object` later purges the card's own replacement entry. Shared by the
 /// cleanup-discard and cost-payment discard paths.
 // TODO: track which exile-instead-of-discard effect won the CR 616.1 ordering choice when more than one applies
-pub fn madness_marker_event(state: &GameState, event: &GameEventKind) -> Option<GameEventKind> {
+pub(crate) fn madness_marker_event(
+    state: &GameState,
+    event: &GameEventKind,
+) -> Option<GameEventKind> {
     let GameEventKind::ZoneChange {
         object,
         from: ZoneKind::Hand,

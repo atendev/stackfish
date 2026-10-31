@@ -233,7 +233,7 @@ pub struct StepResult {
 /// rather than a permanent off the battlefield (CR 701.9), so `source_zone()` is read
 /// instead of assuming the battlefield.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ScriptedZoneMoveKind {
+pub(crate) enum ScriptedZoneMoveKind {
     Destroy,
     Sacrifice,
     Exile,
@@ -296,7 +296,7 @@ impl ScriptedZoneMoveKind {
 /// What `continue_scripted_zone_move` does once its queue drains, so a devour
 /// sacrifice raised mid-search can resume the search instead of finalizing.
 #[derive(Debug)]
-pub enum ScriptedZoneMoveThen {
+pub(crate) enum ScriptedZoneMoveThen {
     /// `stack_id` is a resolving object already popped off the stack; push
     /// `StackObjectResolved` and hand off to `ReplacementCheck`.
     StackResolution { stack_id: ObjectId },
@@ -326,7 +326,7 @@ pub enum ScriptedZoneMoveThen {
 /// the cleanup discard. `from` and `to` are the zones it is claimed to move
 /// between, confirmed by the caller before queueing.
 #[derive(Clone, Copy, Debug)]
-pub struct PendingZoneMove {
+pub(crate) struct PendingZoneMove {
     pub id: ObjectId,
     pub from: ZoneKind,
     pub to: ZoneKind,
@@ -336,7 +336,7 @@ pub struct PendingZoneMove {
 /// identical either way; only what happens after the choice differs.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub enum ReplacementResumeTarget {
+pub(crate) enum ReplacementResumeTarget {
     /// A command's proposed events; `remaining` and `checked` carry the run.
     ReplacementCheck {
         remaining: VecDeque<GameEventKind>,
@@ -426,7 +426,7 @@ pub enum ReplacementResumeTarget {
 /// accumulate and apply only when `remaining_players` empties, so the actions
 /// happen simultaneously.
 #[derive(Debug)]
-pub struct EachPlayerLoop {
+pub(crate) struct EachPlayerLoop {
     pub source: ObjectId,
     pub operation: ScriptHandle,
     pub remaining_players: VecDeque<PlayerId>,
@@ -437,7 +437,7 @@ pub struct EachPlayerLoop {
 /// See `ReplacementResumeTarget::SbaDeath`. `CleanupSbaCheck` carries
 /// `since_ledger` through the pause for `finish_cleanup_sba_check`.
 #[derive(Debug)]
-pub enum SbaResumeThen {
+pub(crate) enum SbaResumeThen {
     SbaLoop,
     CleanupSbaCheck { since_ledger: usize },
 }
@@ -447,7 +447,7 @@ pub enum SbaResumeThen {
 /// (CR 704.3). `legal_actions()` reads state on demand, so it has no pause of its own.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub enum ProcessState {
+pub(crate) enum ProcessState {
     PriorityWindow,
     /// Accepted by `submit_action`; the next `step()` runs it.
     PendingAction(PlayerAction),
@@ -486,6 +486,13 @@ pub enum ProcessState {
     },
     /// CR 303.4d: several candidates for one Aura. It has no `then` because no
     /// producer dictates a pipeline, so the answer resumes `PriorityWindow`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "no effect produces several attach candidates for one Aura; only tests build it"
+        )
+    )]
     AwaitingAttachChoice {
         aura: ObjectId,
         controller: PlayerId,

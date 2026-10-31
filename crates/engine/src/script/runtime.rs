@@ -59,7 +59,7 @@ impl ScriptRuntime {
 
     /// Number of loaded callbacks; `Engine::snapshot` uses it to prove a
     /// rejected input registered nothing.
-    pub fn handle_count(&self) -> usize {
+    pub(crate) fn handle_count(&self) -> usize {
         self.registry.borrow().scripts.len()
     }
 
@@ -536,7 +536,7 @@ impl ScriptRuntime {
     /// Builds a minimal Lua argument set from `ctx` and calls the loaded
     /// function, expecting a bool. Only `GameEventKind::ZoneChange` is bridged
     /// (`event_to_lua`); every other event reaches the script as `nil`.
-    pub fn invoke_condition(
+    pub(crate) fn invoke_condition(
         &self,
         handle: ScriptHandle,
         ctx: &ScriptContext,
@@ -674,7 +674,8 @@ impl ScriptRuntime {
         }
     }
 
-    pub fn invoke_cost(
+    #[expect(dead_code, reason = "no payment path calls a script cost callback")]
+    pub(crate) fn invoke_cost(
         &self,
         handle: ScriptHandle,
         ctx: &ScriptContext,
@@ -691,7 +692,7 @@ impl ScriptRuntime {
     /// cast or activation, not a `Game.SelectTargets` suspension (see
     /// `ScriptChoiceRequest::SelectTarget`), so it needs no coroutine. Called
     /// from `commands::target_is_legal`.
-    pub fn invoke_target_legal(
+    pub(crate) fn invoke_target_legal(
         &self,
         handle: ScriptHandle,
         state: &GameState,
@@ -709,7 +710,7 @@ impl ScriptRuntime {
     /// `TargetFilter::PlayerScript`'s body, the player twin of
     /// `invoke_target_legal`: `function(player, source, controller, state) ->
     /// bool`. Called from `commands::target_is_legal`.
-    pub fn invoke_player_target_legal(
+    pub(crate) fn invoke_player_target_legal(
         &self,
         handle: ScriptHandle,
         state: &GameState,
@@ -769,7 +770,7 @@ impl ScriptRuntime {
     /// needs it to build a real `GameEventKind`, and a suspended coroutine
     /// doesn't remember it, so `ProcessState::AwaitingScriptChoice.source`
     /// carries it through the pause.
-    pub fn resume_operation(
+    pub(crate) fn resume_operation(
         &self,
         thread_handle: ScriptHandle,
         state: &mut GameState,
@@ -819,7 +820,7 @@ impl ScriptRuntime {
     /// yes/no answer, so this resumes with a raw Lua boolean and not
     /// `resume_operation`'s tagged table. It shares the `handle_operation_result`
     /// tail, and only `Engine::submit_script_may_choice` should call it.
-    pub fn resume_operation_bool(
+    pub(crate) fn resume_operation_bool(
         &self,
         thread_handle: ScriptHandle,
         state: &mut GameState,

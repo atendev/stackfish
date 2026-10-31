@@ -100,7 +100,7 @@ impl PlayerAction {
 
 /// Fully specified, validated executable unit produced from a `PlayerAction`.
 #[derive(Clone, PartialEq, Debug)]
-pub struct EngineCommand {
+pub(crate) struct EngineCommand {
     pub command_id: CommandId,
     pub actor: PlayerId,
     pub action: PlayerActionKind,

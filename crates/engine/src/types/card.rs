@@ -26,7 +26,7 @@ pub enum PTValue {
 impl PTValue {
     /// `Some` only for `Fixed`. A CDA needs its script run; see
     /// `layers::effective_characteristics`.
-    pub fn as_fixed(&self) -> Option<i32> {
+    pub(crate) fn as_fixed(&self) -> Option<i32> {
         match self {
             PTValue::Fixed(n) => Some(*n),
             PTValue::CharacteristicDefining { .. } => None,

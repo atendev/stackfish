@@ -627,10 +627,6 @@ impl Engine {
         self.pipeline_context.is_some()
     }
 
-    pub fn settings(&self) -> &GameSettings {
-        &self.settings
-    }
-
     pub fn step(&mut self) -> StepResult {
         if let Some(internal) = &self.fatal {
             return StepResult {

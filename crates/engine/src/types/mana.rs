@@ -53,7 +53,7 @@ pub enum AtomicManaSymbol {
 impl AtomicManaSymbol {
     /// CR 202.3, 202.3g: this atom's contribution to mana value. `Generic(n)`
     /// is `n`, and every other atom is 1 however it is paid.
-    pub fn mana_value(&self) -> u32 {
+    pub(crate) fn mana_value(&self) -> u32 {
         match self {
             AtomicManaSymbol::Generic(n) => *n,
             AtomicManaSymbol::Colored(_)
@@ -65,7 +65,7 @@ impl AtomicManaSymbol {
 
     /// Colors this atom contributes to a card's color (CR 202.2) — empty for
     /// `Generic`/`Colorless`/`Snow`.
-    pub fn colors(&self) -> ColorSet {
+    pub(crate) fn colors(&self) -> ColorSet {
         match self {
             AtomicManaSymbol::Colored(c) | AtomicManaSymbol::Phyrexian(c) => {
                 let mut set = ColorSet::empty();
@@ -102,7 +102,7 @@ impl ManaSymbol {
     /// takes the larger atom (`{2/W}` is 2), and a raw `X` is 0. An on-stack
     /// `{X}` is substituted first with `ManaCost::resolve_x`; see
     /// `ManaCost::mana_value`.
-    pub fn mana_value(&self) -> u32 {
+    pub(crate) fn mana_value(&self) -> u32 {
         match self {
             ManaSymbol::Atom(a) => a.mana_value(),
             ManaSymbol::Hybrid(a, b) => a.mana_value().max(b.mana_value()),
@@ -112,7 +112,7 @@ impl ManaSymbol {
 
     /// Union of the symbol's atom colors. A hybrid has all its component
     /// colors (CR 107.4e, 107.4f).
-    pub fn colors(&self) -> ColorSet {
+    pub(crate) fn colors(&self) -> ColorSet {
         match self {
             ManaSymbol::Atom(a) => a.colors(),
             ManaSymbol::Hybrid(a, b) => a.colors() | b.colors(),
@@ -146,7 +146,7 @@ impl ManaCost {
 
     /// Whether the cost has an `{X}` (CR 107.3a), so an X value must be
     /// announced before payment.
-    pub fn has_x(&self) -> bool {
+    pub(crate) fn has_x(&self) -> bool {
         self.symbols.iter().any(|s| matches!(s, ManaSymbol::X))
     }
 
@@ -154,7 +154,7 @@ impl ManaCost {
     /// shared value). `X` is always a bare top-level symbol, never inside a
     /// `Hybrid`, so the substitution is flat. The result has no `X` left, so
     /// `PaymentPlan::validate` treats it like any other cost.
-    pub fn resolve_x(&self, x: u32) -> ManaCost {
+    pub(crate) fn resolve_x(&self, x: u32) -> ManaCost {
         ManaCost {
             symbols: self
                 .symbols
@@ -177,7 +177,7 @@ impl ManaCost {
     /// matching modifier's `amount`. Applying them one by one depends on
     /// order: base `{1}` with `-2` then `+1` gives `{1}`, but `+1` then `-2`
     /// gives `{0}`. Summing first and clamping once is order-independent.
-    pub fn apply_cost_delta(&self, delta: i32) -> ManaCost {
+    pub(crate) fn apply_cost_delta(&self, delta: i32) -> ManaCost {
         let current: i32 = self
             .symbols
             .iter()
@@ -209,7 +209,7 @@ impl ManaCost {
     /// positive `delta` just adds pips; see `CostModifierTarget`. Reductions
     /// that interact with hybrid and Phyrexian symbols (CR 118.7e, 118.7f)
     /// are not modeled.
-    pub fn apply_colored_cost_delta(&self, color: Color, delta: i32) -> (ManaCost, i32) {
+    pub(crate) fn apply_colored_cost_delta(&self, color: Color, delta: i32) -> (ManaCost, i32) {
         self.apply_specific_cost_delta(
             delta,
             |a| matches!(a, AtomicManaSymbol::Colored(c) if *c == color),
@@ -219,7 +219,7 @@ impl ManaCost {
 
     /// CR 118.7d: `apply_colored_cost_delta` for the colorless (`{C}`)
     /// component.
-    pub fn apply_colorless_cost_delta(&self, delta: i32) -> (ManaCost, i32) {
+    pub(crate) fn apply_colorless_cost_delta(&self, delta: i32) -> (ManaCost, i32) {
         self.apply_specific_cost_delta(
             delta,
             |a| matches!(a, AtomicManaSymbol::Colorless),
@@ -475,7 +475,7 @@ impl ManaUnit {
 
 impl ManaPool {
     /// CR 500.5, 106.4: empties the pool as a step or phase ends.
-    pub fn empty(&mut self) {
+    pub(crate) fn empty(&mut self) {
         *self = ManaPool::default();
     }
 

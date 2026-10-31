@@ -17,7 +17,12 @@ pub struct Emblem {
 }
 
 impl Emblem {
-    pub fn new(emblem_id: ObjectId, source: ObjectId, ability_text: impl Into<String>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(
+        emblem_id: ObjectId,
+        source: ObjectId,
+        ability_text: impl Into<String>,
+    ) -> Self {
         Emblem {
             emblem_id,
             source,
@@ -56,7 +61,8 @@ pub struct PlayerState {
 }
 
 impl PlayerState {
-    pub fn new(player_id: PlayerId, starting_life: i32) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(player_id: PlayerId, starting_life: i32) -> Self {
         PlayerState {
             player_id,
             life: starting_life,
@@ -77,7 +83,7 @@ impl PlayerState {
         self.life -= amount;
     }
 
-    pub fn gain_life(&mut self, amount: i32) {
+    pub(crate) fn gain_life(&mut self, amount: i32) {
         self.life += amount;
     }
 
