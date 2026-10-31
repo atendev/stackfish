@@ -13,19 +13,27 @@ Commits should be straight and to the point, but in readable and understandable 
 > [IMPORTANT] Do not add anything else. No attribution line, nothing.
 
 ## Vertical Slice Instructions
-- all slices start with a detailed requirements report of the following information:
-  - What does a successful implementation look like?
-  - What requirements from the comp rulse are there?
-  - What TODO's are we going to need to mark since they aren't implemented yet?
-  - What tests will we want to add so that we can make sure this section works properly?
-- create a branch `phase5/<feature-name>` and push to origin.
-- implement the given instructions for the feature.
-- As you implement, make sure to mark any stubbed parts that aren't implemented with TODO marks for later.
-  - Eg: Implementing PlayLand, we don't have continuous effects for 'play additional lands' effects, so we mark the PlayLand action with a TODO so we know to implement that later.
-- make sure to stop and commit at appropritate times, but always check for permission before committing.
-- When done with implementation, give a detailed report in the chat as indicated in the workflow document.
-- Don't delete the branch, as I will manually inspect the code after for changes.
-- If all is good, I will instruct to commit, merge, and push.
+Every ticket runs this loop without waiting on me, except for the two button prompts. Subagents are `haiku` or `sonnet`, your pick per job. A fork or subagent cannot spawn agents, so it runs the audit inline.
+
+### Implementation tickets
+1. Write a requirements report:
+   - What does a successful implementation look like?
+   - What requirements from the comp rules are there?
+   - What TODO's are we going to need to mark since they aren't implemented yet?
+   - What tests will we want to add so that we can make sure this section works properly?
+2. Spawn a subagent (default `haiku`) to audit the report. It is read-only: it may not edit files. It returns `APPROVE` or a list of required changes. Apply the changes and re-audit until it approves.
+3. Create a local branch `phase5/<feature-name>`. Do not push it to origin.
+4. Implement the feature. Mark every stubbed part with a TODO (eg: PlayLand has no "play additional lands" effects yet, so the PlayLand action gets a TODO). Commit on the branch at sensible points without asking.
+5. Spawn a subagent (default `sonnet`) to audit the work. It is read-only. It runs the tests, checks the code against the approved report and the comp rules, checks the comment rules and, for Lua API changes, the game stub in the docs. It returns `APPROVE` or a list of problems. Fix them and re-audit until it approves.
+6. Report in the chat as the workflow document describes, then ask with `AskUserQuestion`: options `Merge` and `Don't merge`.
+7. On `Merge`: merge into master, push master, then delete the local branch. On `Don't merge`: keep the branch and wait for my instructions.
+
+### Grilling tickets
+1. Write a report listing the ticket's questions and what is needed to answer them.
+2. Spawn a read-only subagent (default `haiku`) to audit the report. Same `APPROVE` or changes loop.
+3. Spawn a subagent (default `sonnet`) to answer the questions from the docs, comp rules and code. It does not ask me anything.
+4. Give me the answers in the chat, then ask with `AskUserQuestion`: options `Approve` and `Deny`.
+5. On `Approve`: fill in the ticket's Resolution and close it per `.plan/README.md`. On `Deny`: ask what to change and redo step 3.
 
 ## IMPORTANT
 - Always use the unslop skill

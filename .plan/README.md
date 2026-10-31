@@ -25,6 +25,10 @@ This folder holds the Wayfinder map for the project. Commit it. It is the record
 - `grilling` is a conversation with the user. This is the default. Mode is HITL.
 - `task` is manual work needed before a decision, such as signing up for a service. Mode is HITL or AFK.
 
+## Running a ticket
+
+Follow the loop in the project `CLAUDE.md` under Vertical Slice Instructions. Implementation tickets end in a Merge / Don't merge prompt. Grilling tickets end in an Approve / Deny prompt. Close the ticket only after Merge or Approve.
+
 ## Claiming and closing a ticket
 
 1. Set `claimed: true` in the ticket.
