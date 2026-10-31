@@ -3,7 +3,7 @@ id: 066
 title: Build the check script, pre-commit hook, toolchain pin and CI workflow
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: [059]
 claimed: false
 ---
@@ -23,4 +23,6 @@ Build the 059 decision: `tools/check.sh`, a versioned pre-commit hook with an in
 
 ## Resolution
 
-<Filled in at close: the decision and the reason for it.>
+Built on `phase5/check-script-hook-ci` (`94bfc01`) and merged to `master`. `tools/check.sh` runs fmt and clippy by default and adds `cargo test --workspace` and the `tools` unittests with `--full`. `tools/hooks/pre-commit` runs the fast mode. `tools/install-hooks.sh` copies only that hook, refuses when `core.hooksPath` is set, never overwrites a backup and leaves the LFS hooks alone. `rust-toolchain.toml` pins 1.98.0, and `.github/workflows/ci.yml` runs `check.sh --full` on push to `master` and on manual dispatch.
+
+CI installs the toolchain with `rustup toolchain install`, not `rustup show`, because `rustup show` stopped installing in rustup 1.28. A later step asserts the version. `check.sh --full` prints a `::notice::` when `db_scripts_smoke.rs` will skip. It uses the same check as the test. `tools/test_check_sh.py` covers the script with fake `cargo` and `python3` programs, and the installer and hook in throwaway repos. The notes are in `CLAUDE.md` under Checks and in `docs/implementation/29-checks.md`. The first CI run happens when `master` is pushed.
