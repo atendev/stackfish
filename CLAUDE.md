@@ -33,7 +33,9 @@ Every ticket runs this loop without waiting on me, except for the two button pro
 2. Spawn a read-only subagent (default `haiku`) to audit the report. Same `APPROVE` or changes loop.
 3. Spawn a subagent (default `sonnet`) to answer the questions from the docs, comp rules and code. It does not ask me anything.
 4. Give me the answers in the chat, then ask with `AskUserQuestion`: options `Approve` and `Deny`.
-5. On `Approve`: fill in the ticket's Resolution and close it per `.plan/README.md`. On `Deny`: ask what to change and redo step 3.
+5. On `Approve`: create a local branch `phase5/<ticket-slug>`, fill in the ticket's Resolution, close it per `.plan/README.md`, and commit. On `Deny`: ask what to change and redo step 3.
+6. Ask with `AskUserQuestion`: options `Merge` and `Don't merge`. Never merge on a chat reply alone.
+7. On `Merge`: merge into master, push master, then delete the local branch. On `Don't merge`: keep the branch and wait for my instructions.
 
 ## IMPORTANT
 - Always use the unslop skill
