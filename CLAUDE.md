@@ -37,6 +37,9 @@ Every ticket runs this loop without waiting on me, except for the two button pro
 6. Ask with `AskUserQuestion`: options `Merge` and `Don't merge`. Never merge on a chat reply alone.
 7. On `Merge`: merge into master, push master, then delete the local branch. On `Don't merge`: keep the branch and wait for my instructions.
 
+### Final summary
+End every ticket, of either type, with a summary of the changes in five sentences or fewer. Run `unslop` on it before sending.
+
 ## IMPORTANT
 - Always use the unslop skill
 - If we are making changes to the Lua API, you need to check the game stub in the docs to make sure things are updated properly
