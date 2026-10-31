@@ -26,7 +26,7 @@ pub enum PTValue {
 impl PTValue {
     /// `Some` only for `Fixed`. A CDA needs its script run; see
     /// `layers::effective_characteristics`.
-    pub fn as_fixed(&self) -> Option<i32> {
+    pub(crate) fn as_fixed(&self) -> Option<i32> {
         match self {
             PTValue::Fixed(n) => Some(*n),
             PTValue::CharacteristicDefining { .. } => None,
@@ -80,7 +80,7 @@ bitflags! {
 }
 
 bitflags! {
-    /// Bitmask of `Keyword` (CR 702), limited to keywords that change an
+    /// Bitmask of keywords (CR 702), limited to keywords that change an
     /// existing engine checkpoint: blocking legality, summoning sickness,
     /// timing, SBA lethal checks and damage. Keywords that are sugar for an
     /// activated or triggered ability (Cycling, Equip, Persist) are registered
@@ -180,26 +180,6 @@ bitflags! {
         /// TODO: "attacks a specific player if able" and "blocks if able" need a parameter or a second bit (CR 509.1c)
         const ATTACKS_EACH_COMBAT = 1 << 23;
     }
-}
-
-/// Named keyword, per CR 702. Use this for matching/comparison; use
-/// `KeywordSet` for storage on a card.
-#[derive(Clone, PartialEq, Debug)]
-pub enum Keyword {
-    Flying,
-    Reach,
-    Menace,
-    Vigilance,
-    Haste,
-    Defender,
-    Flash,
-    Deathtouch,
-    Indestructible,
-    Lifelink,
-    Wither,
-    Infect,
-    FirstStrike,
-    DoubleStrike,
 }
 
 /// Subtype string (creature type, land type, spell subtype). The space is

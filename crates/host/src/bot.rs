@@ -120,8 +120,6 @@ pub struct Bot {
     record: bool,
     watchers: Vec<u32>,
     events: HashMap<u32, Vec<Value>>,
-    /// Every request and response, in order, when kept.
-    transcript: Option<Vec<Vec<u8>>>,
 }
 
 const FNV_OFFSET: u64 = 0xCBF2_9CE4_8422_2325;
@@ -159,7 +157,6 @@ impl Bot {
             record: false,
             watchers: Vec::new(),
             events: HashMap::new(),
-            transcript: None,
         }
     }
 
@@ -190,18 +187,6 @@ impl Bot {
     /// How many illegal Answers were turned down, by Decision shape and mechanic.
     pub fn illegal_by_shape(&self) -> &BTreeMap<String, usize> {
         &self.illegal_by_shape
-    }
-
-    /// Keeps every request and response, for `transcript`.
-    pub fn keeping_transcript(mut self) -> Bot {
-        self.transcript = Some(Vec::new());
-        self
-    }
-
-    /// The requests and responses in order, as bytes. Empty unless
-    /// `keeping_transcript` was set.
-    pub fn transcript(&self) -> &[Vec<u8>] {
-        self.transcript.as_deref().unwrap_or_default()
     }
 
     /// The events `seat` received, in order. Empty unless `recording` was set.
@@ -303,10 +288,6 @@ impl Bot {
         let bytes = serde_json::to_vec(&request).expect("a request holds only JSON values");
         let reply = session.handle(&bytes);
         self.hash = fnv(fnv(self.hash, &bytes), &reply);
-        if let Some(transcript) = &mut self.transcript {
-            transcript.push(bytes);
-            transcript.push(reply.clone());
-        }
         let value: Value = serde_json::from_slice(&reply)
             .map_err(|e| protocol(format!("a response is not JSON: {e}")))?;
         Ok(value["body"].clone())

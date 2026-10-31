@@ -2,6 +2,9 @@
 resolver = "2"
 members = ["crates/engine", "crates/scenario", "crates/cli", "crates/testutil", "crates/carddb", "crates/host", "crates/godot"]
 
+[workspace.lints.rust]
+unreachable_pub = "warn"
+
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

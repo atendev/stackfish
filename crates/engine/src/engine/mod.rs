@@ -627,23 +627,14 @@ impl Engine {
         self.pipeline_context.is_some()
     }
 
-    pub fn settings(&self) -> &GameSettings {
-        &self.settings
-    }
-
     pub fn step(&mut self) -> StepResult {
-        let events_start = self.state.ledger.len();
         if let Some(internal) = &self.fatal {
             return StepResult {
-                events_added: events_start..events_start,
                 status: StepStatus::Error(internal.clone()),
             };
         }
         let status = self.advance();
-        StepResult {
-            events_added: events_start..self.state.ledger.len(),
-            status,
-        }
+        StepResult { status }
     }
 
     /// Wraps each kind in a `GameEvent`, allocating its ids, and pushes it to the ledger.

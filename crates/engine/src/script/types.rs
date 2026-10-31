@@ -40,7 +40,6 @@ pub struct ScriptContext<'a> {
     pub source: ObjectId,
     pub controller: PlayerId,
     pub event: Option<&'a GameEvent>,
-    pub chosen_targets: Vec<Target>,
 }
 
 /// A card script's request for player input mid-resolution, yielded from a

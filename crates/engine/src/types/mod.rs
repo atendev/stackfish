@@ -2,23 +2,23 @@
 //! bridge live in sibling modules; see `docs/DESIGN.md`.
 
 pub mod ability;
-pub mod card;
-pub mod combat;
-pub mod command;
+pub(crate) mod card;
+pub(crate) mod combat;
+pub(crate) mod command;
 pub mod config;
 pub mod cost;
 pub mod counter;
-pub mod effect;
-pub mod event;
-pub mod game;
-pub mod ids;
+pub(crate) mod effect;
+pub(crate) mod event;
+pub(crate) mod game;
+pub(crate) mod ids;
 pub mod mana;
-pub mod object;
-pub mod player;
-pub mod stack;
-pub mod target;
+pub(crate) mod object;
+pub(crate) mod player;
+pub(crate) mod stack;
+pub(crate) mod target;
 pub mod turn;
-pub mod zone;
+pub(crate) mod zone;
 
 pub use ability::*;
 pub use card::*;

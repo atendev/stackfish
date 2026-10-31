@@ -1,5 +1,6 @@
 use crate::types::card::CardDefinition;
 use crate::types::counter::CounterSet;
+#[cfg(test)]
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, SequenceNo};
 use crate::types::zone::ZoneKind;
@@ -17,7 +18,11 @@ pub struct VisibilityPolicy {
 
 impl VisibilityPolicy {
     /// Override layer only. Effective visibility also needs the zone default.
-    pub fn is_visible_to(&self, player: PlayerId) -> bool {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no consumer enforces visibility")
+    )]
+    pub(crate) fn is_visible_to(&self, player: PlayerId) -> bool {
         self.public || self.visible_to.contains(&player)
     }
 }
@@ -116,7 +121,8 @@ impl GameObject {
     /// `controlled_since_turn` reads `state.turn_number` so a caller cannot
     /// pass a stale value. Visibility is public on the battlefield and
     /// owner-only elsewhere; override it for a per-object exception.
-    pub fn new(
+    #[cfg(test)]
+    pub(crate) fn new(
         object_id: ObjectId,
         definition: CardDefinition,
         owner: PlayerId,
@@ -154,11 +160,6 @@ impl GameObject {
             copy_generation: 0,
             entered_via_escape: false,
         }
-    }
-
-    /// On the battlefield (CR 110.1).
-    pub fn is_permanent(&self) -> bool {
-        self.zone == ZoneKind::Battlefield
     }
 }
 
@@ -258,30 +259,6 @@ mod tests {
         };
         assert!(policy.is_visible_to(PlayerId(0)));
         assert!(!policy.is_visible_to(PlayerId(1)));
-    }
-
-    #[test]
-    fn new_object_starts_as_permanent_only_on_battlefield() {
-        let state = dummy_state();
-        let battlefield = GameObject::new(
-            ObjectId(0),
-            dummy_definition(),
-            PlayerId(0),
-            ZoneKind::Battlefield,
-            SequenceNo(0),
-            &state,
-        );
-        assert!(battlefield.is_permanent());
-
-        let hand = GameObject::new(
-            ObjectId(1),
-            dummy_definition(),
-            PlayerId(0),
-            ZoneKind::Hand,
-            SequenceNo(0),
-            &state,
-        );
-        assert!(!hand.is_permanent());
     }
 
     #[test]

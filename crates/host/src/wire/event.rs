@@ -9,7 +9,7 @@ use super::{U64, WireCardType, WireTarget, WireZone, card_types};
 
 #[derive(Serialize, Clone, Copy, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum WirePhase {
+pub(crate) enum WirePhase {
     PreGame,
     Beginning,
     Main,
@@ -31,7 +31,7 @@ impl From<Phase> for WirePhase {
 
 #[derive(Serialize, Clone, Copy, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum WireStep {
+pub(crate) enum WireStep {
     Untap,
     Upkeep,
     Draw,
@@ -69,7 +69,7 @@ impl From<Step> for WireStep {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WireCounterKind {
+pub(crate) enum WireCounterKind {
     PlusOnePlusOne,
     MinusOneMinusOne,
     Loyalty,
@@ -96,14 +96,14 @@ impl From<&CounterKind> for WireCounterKind {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireCounter {
+pub(crate) struct WireCounter {
     pub counter: WireCounterKind,
     pub amount: i32,
 }
 
 #[derive(Serialize, Clone, Copy, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum WireSupertype {
+pub(crate) enum WireSupertype {
     Basic,
     Legendary,
     Snow,
@@ -134,7 +134,7 @@ fn pt_text(value: &Option<PTValue>) -> Option<String> {
 /// consumed: the printed characteristics from its definition, plus the state it
 /// had. Layer effects are not applied.
 #[derive(Serialize, Clone, Debug)]
-pub struct WireObjectSummary {
+pub(crate) struct WireObjectSummary {
     pub object: U64,
     pub name: String,
     pub owner: u32,
@@ -187,7 +187,7 @@ impl From<&GameObject> for WireObjectSummary {
 /// A Seat that may not see an object's id can still learn its identity, such as
 /// an opponent watching a card leave a hand.
 #[derive(Serialize, Clone, Debug)]
-pub struct WireIdentity {
+pub(crate) struct WireIdentity {
     pub name: String,
     pub mana_cost: String,
     pub supertypes: Vec<WireSupertype>,
@@ -219,7 +219,7 @@ impl From<&GameObject> for WireIdentity {
 /// One card of a `revealed` event. `object` is absent for a Seat that cannot
 /// see the card's id, such as an opponent of the player whose hand it is in.
 #[derive(Serialize, Clone, Debug)]
-pub struct WireRevealedCard {
+pub(crate) struct WireRevealedCard {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub object: Option<U64>,
     pub identity: WireIdentity,
@@ -228,7 +228,7 @@ pub struct WireRevealedCard {
 /// One ledger entry. Every variant has a `kind` tag.
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WireEventKind {
+pub(crate) enum WireEventKind {
     /// `object` is the new id and `previous` the old one. Each is absent for a
     /// Seat that could not see the object in that zone. `owner` is the player
     /// whose hand or library a hidden move came from or went to, so a Seat can
@@ -610,7 +610,7 @@ impl WireEventKind {
 /// A ledger entry with its ids. `sequence_no` gives the total order, so a host
 /// can play a batch back at its own pace.
 #[derive(Serialize, Clone, Debug)]
-pub struct WireEvent {
+pub(crate) struct WireEvent {
     pub event_id: U64,
     pub sequence_no: U64,
     #[serde(skip_serializing_if = "Option::is_none")]

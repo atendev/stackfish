@@ -824,7 +824,7 @@ impl ReplacementEffect {
     /// Rewrites `event` per this effect's payload, once `matches` confirmed it
     /// applies. A mismatched pairing falls back to returning the event
     /// unchanged.
-    pub fn apply(&self, event: GameEventKind) -> GameEventKind {
+    pub(crate) fn apply(&self, event: GameEventKind) -> GameEventKind {
         let ReplacementSpec::Primitive { payload, .. } = &self.spec else {
             return event;
         };

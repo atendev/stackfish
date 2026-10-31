@@ -11,8 +11,7 @@ B5 of the host protocol map (`phase5/proof-game-bot`). A random bot plays whole 
 - `stackfish_host::Bot` is a client of a `Session`. `Bot::new(seed).play(&mut session, max_answers)` plays to
   `game_over` and returns an `Outcome` (`winner`, `answers`, `rejected`, `transcript_hash`). `step` answers one
   Decision, which is what a host that runs a game across frames would call.
-- `Bot::recording(&[spectator seats])` keeps every event each Seat receives (`events(seat)`). `keeping_transcript()`
-  keeps every request and response (`transcript()`).
+- `Bot::recording(&[spectator seats])` keeps every event each Seat receives (`events(seat)`).
 
 ## The card set
 

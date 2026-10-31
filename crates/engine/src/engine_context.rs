@@ -3,7 +3,7 @@ use crate::types::ids::{CommandId, EventId};
 /// State carried through one pipeline run so committed events keep their
 /// causal references and trigger collection knows where the run began.
 #[derive(Debug)]
-pub struct PipelineContext {
+pub(crate) struct PipelineContext {
     pub since_ledger: usize,
     pub caused_by_command: Option<CommandId>,
     pub parent_event: Option<EventId>,
@@ -11,7 +11,7 @@ pub struct PipelineContext {
 
 /// Where the pipeline goes once the current run's SBA and trigger stages settle.
 #[derive(Debug)]
-pub enum PipelineExit {
+pub(crate) enum PipelineExit {
     BackToPriority,
     ResolveStackTop,
     AdvanceTurnStep,

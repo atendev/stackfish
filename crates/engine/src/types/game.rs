@@ -217,7 +217,7 @@ impl GameState {
     /// CR 500.7, 500.8: returns whether `player`'s current `step` is skipped,
     /// consuming the entry. A skipped step runs no turn-based actions and
     /// opens no priority window.
-    pub fn consume_step_skip(&mut self, player: PlayerId, step: Step) -> bool {
+    pub(crate) fn consume_step_skip(&mut self, player: PlayerId, step: Step) -> bool {
         if let Some(pos) = self
             .pending_step_skips
             .iter()

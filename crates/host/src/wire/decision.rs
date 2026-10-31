@@ -10,7 +10,7 @@ use super::mana::mana_cost_string;
 use super::{U64, WireCandidate, WireColor, WireIdentity, WireTarget};
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireTrigger {
+pub(crate) struct WireTrigger {
     pub source: U64,
     pub controller: u32,
     pub ability: U64,
@@ -32,7 +32,7 @@ impl From<&PendingTrigger> for WireTrigger {
 
 #[derive(Serialize, Clone, Copy, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum WireRest {
+pub(crate) enum WireRest {
     LibraryBottom,
     Graveyard,
 }
@@ -50,7 +50,7 @@ impl From<PartitionRest> for WireRest {
 // TODO: `sacrifice`, `discard`, `tap_permanents` and `exile_from_graveyard` carry no filter; the engine does not list eligible objects for a Payment Decision
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WireAdditionalCost {
+pub(crate) enum WireAdditionalCost {
     TapSelf,
     Sacrifice,
     SacrificeSelf,
@@ -89,7 +89,7 @@ impl From<&AdditionalCost> for WireAdditionalCost {
 /// The cost a Payment Decision asks for. `mana` is brace notation such as
 /// `{2}{R}`, empty when the cost has no mana part.
 #[derive(Serialize, Clone, Debug)]
-pub struct WireCost {
+pub(crate) struct WireCost {
     pub mana: String,
     pub additional: Vec<WireAdditionalCost>,
 }
@@ -109,7 +109,7 @@ impl From<&CostSpec> for WireCost {
 
 /// One target word of a trigger: how many targets it takes and what it offers.
 #[derive(Serialize, Clone, Debug)]
-pub struct WireTargetWord {
+pub(crate) struct WireTargetWord {
     pub min: u32,
     /// Absent for an "N or more" word.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,7 +150,7 @@ fn target_words(
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireSlot {
+pub(crate) struct WireSlot {
     pub candidates: Vec<WireTarget>,
     pub min: u32,
     /// Absent for an "N or more" word.
@@ -178,7 +178,7 @@ fn slots(slots: &[TargetSlot]) -> Vec<WireSlot> {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WireEntryTargets {
+pub(crate) enum WireEntryTargets {
     Fixed { slots: Vec<WireSlot> },
     PerMode { modes: Vec<Vec<WireSlot>> },
 }
@@ -195,7 +195,7 @@ impl From<&EntryTargets> for WireEntryTargets {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireModeRange {
+pub(crate) struct WireModeRange {
     pub mode_count: usize,
     pub min: u32,
     pub max: u32,
@@ -222,7 +222,7 @@ impl From<&ModeRange> for WireModeRange {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireColorChoice {
+pub(crate) struct WireColorChoice {
     pub count: u32,
     pub colors: Vec<WireColor>,
 }
@@ -231,7 +231,7 @@ pub struct WireColorChoice {
 /// without checking that the player can pay for it.
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WireEntry {
+pub(crate) enum WireEntry {
     PlayLand {
         card: U64,
     },
@@ -304,7 +304,7 @@ impl From<&Entry> for WireEntry {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireAttacker {
+pub(crate) struct WireAttacker {
     pub attacker: U64,
     pub defenders: Vec<WireTarget>,
     pub required: bool,
@@ -321,7 +321,7 @@ impl From<&AttackerEntry> for WireAttacker {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireBlocker {
+pub(crate) struct WireBlocker {
     pub blocker: U64,
     pub attackers: Vec<U64>,
 }
@@ -336,7 +336,7 @@ impl From<&BlockerEntry> for WireBlocker {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireDamageSplit {
+pub(crate) struct WireDamageSplit {
     pub source: U64,
     pub power: u32,
     pub recipients: Vec<U64>,
@@ -359,7 +359,7 @@ impl From<&DamageSplitEntry> for WireDamageSplit {
 /// same name.
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "shape", rename_all = "snake_case")]
-pub enum WireShape {
+pub(crate) enum WireShape {
     Pick {
         candidates: Vec<WireCandidate>,
         min: usize,
@@ -472,7 +472,7 @@ impl From<&ReplyShape> for WireShape {
 /// The identity of a card a Decision offers from a zone the chooser cannot
 /// otherwise see, such as a library search or a scry.
 #[derive(Serialize, Clone, Debug)]
-pub struct WireCardIdentity {
+pub(crate) struct WireCardIdentity {
     pub object: U64,
     pub identity: WireIdentity,
 }
@@ -482,7 +482,7 @@ pub struct WireCardIdentity {
 /// must not branch on it. `identities` names the cards in hidden zones that
 /// the chooser is shown.
 #[derive(Serialize, Clone, Debug)]
-pub struct WireDecision {
+pub(crate) struct WireDecision {
     pub id: U64,
     pub player: u32,
     pub mechanic: &'static str,
@@ -494,7 +494,7 @@ pub struct WireDecision {
 
 impl WireDecision {
     /// The Decision as the chooser sees it.
-    pub fn full(decision: &Decision, identities: Vec<WireCardIdentity>) -> Self {
+    pub(crate) fn full(decision: &Decision, identities: Vec<WireCardIdentity>) -> Self {
         WireDecision {
             id: U64(decision.id.0),
             player: decision.player.0,
@@ -506,7 +506,7 @@ impl WireDecision {
 
     /// The Decision as any other Seat sees it. `public` says which of the
     /// Decision's object candidates lie in public zones.
-    pub fn opaque(decision: &Decision, public: impl Fn(&Candidate) -> bool) -> Self {
+    pub(crate) fn opaque(decision: &Decision, public: impl Fn(&Candidate) -> bool) -> Self {
         let candidates = pick_candidates(&decision.shape)
             .into_iter()
             .filter(|c| public(c))
@@ -580,7 +580,7 @@ fn pick_candidates(shape: &ReplyShape) -> Vec<Candidate> {
 /// may be hidden: Pick and Targets candidates and Partition cards. Priority
 /// entries are left out, because they name the chooser's own hand and the
 /// battlefield.
-pub fn offered_objects(shape: &ReplyShape) -> Vec<ObjectId> {
+pub(crate) fn offered_objects(shape: &ReplyShape) -> Vec<ObjectId> {
     let mut found: Vec<ObjectId> = pick_candidates(shape)
         .into_iter()
         .filter_map(|c| match c {

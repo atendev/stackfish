@@ -30,7 +30,7 @@ impl FilterSpec {
     /// because this type never depends on `ScriptRuntime`. `random` doesn't
     /// affect matching. A filter with `extra` set never matches, since
     /// resolving it needs the script bridge.
-    pub fn matches(
+    pub(crate) fn matches(
         &self,
         object: &GameObject,
         object_controller: PlayerId,
@@ -213,7 +213,7 @@ pub enum CostModifierTarget {
 /// modifier's own `controller`'s perspective. Amounts are summed within each
 /// group (generic, each color, colorless) before applying, not applied one by
 /// one. See `CostModifier` for why.
-pub fn apply_cost_modifiers(
+pub(crate) fn apply_cost_modifiers(
     base: &ManaCost,
     modifiers: &[CostModifier],
     spell: &GameObject,
@@ -675,7 +675,7 @@ impl PaymentPlan {
     /// (CR 107.4c), Phyrexian (CR 107.4f), snow (CR 107.4h) and hybrid symbols
     /// are handled.
     // TODO: return a `Result` with a reason once the failure modes are designed
-    pub fn validate(
+    pub(crate) fn validate(
         &self,
         spec: &CostSpec,
         state: &GameState,

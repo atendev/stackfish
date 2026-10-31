@@ -1,6 +1,6 @@
 # Scenario File Format
 
-> Living doc — update when `crates/scenario/src/lib.rs`'s schema changes (new action/assertion
+> Living doc — update when `crates/scenario/src/schema.rs` changes (new action/assertion
 > variants, fewer simplifications, etc). If this doc and the code disagree, the code wins; fix
 > the doc.
 
@@ -25,7 +25,7 @@ crashing the run — that's expected pre-Phase 7, not a failure. Only an asserti
 and got the wrong answer counts as a hard failure.
 
 The CLI's output describes each action/assertion next to its result (`ActionSpec::describe`/
-`AssertionSpec::describe` in `crates/scenario/src/lib.rs`), e.g.:
+`AssertionSpec::describe` in `crates/scenario/src/schema.rs`), e.g.:
 
 ```
 -- actions --
@@ -250,7 +250,7 @@ choice (CR 118.13a), not implied by the cost.
 
 **Simplification:** mana cost is `generic_cost` + `colors` (+ optional `has_x`), not a parsed cost
 string like `"{2}{R}"` — no mana-cost-string parser exists anywhere yet. Can't currently express
-hybrid or Phyrexian mana on a test fixture. Extend `CardSpec` in `crates/scenario/src/lib.rs` if a
+hybrid or Phyrexian mana on a test fixture. Extend `CardSpec` in `crates/scenario/src/schema.rs` if a
 scenario needs one of those.
 
 **X costs (CR 107.3/601.2b):** set `has_x = true` on a `[[cards]]` entry to give it a bare `{X}` in
@@ -1233,7 +1233,7 @@ opening hand size.
 **A card's key keeps resolving correctly across zone moves.** `play_land`/`cast_spell`/resolution
 all mint a *new* `ObjectId` for the moved object (CR 400.7) instead of reusing the old one — every
 `[[setup]]` card key is tracked and automatically re-pointed at its new id after each action that
-moves it (`remap_moved_card_ids` in `crates/scenario/src/lib.rs`), so `object_zone`/later actions
+moves it (`remap_moved_card_ids` in `crates/scenario/src/report.rs`), so `object_zone`/later actions
 referencing `"bear"` keep working after it's been cast, resolved, etc. You don't need to do anything
 for this — just keep using the same key from `[[setup]]` throughout the file.
 
@@ -1457,7 +1457,7 @@ equals = "beginning"
 
 ## Extending the format
 
-The schema lives in `crates/scenario/src/lib.rs` (`ScenarioFile` and friends — `PlayerSpec`,
+The schema lives in `crates/scenario/src/schema.rs` (`ScenarioFile` and friends — `PlayerSpec`,
 `CardSpec`, `SetupEntry`, `ActionSpec`, `AssertionSpec`, `GameSpec`, `GamePlayerSpec`,
 `GameSettingsSpec`). Adding a new action or assertion variant is: add the enum variant + its
 TOML-facing fields, add the matching arm in `to_player_action` or `check_assertion`, update this

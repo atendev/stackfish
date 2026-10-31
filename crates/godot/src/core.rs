@@ -10,13 +10,13 @@ use stackfish_host::{CardSource, Session};
 static OFF_THREAD_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 /// How many `Core`s were dropped on a thread other than their owner's.
-pub fn off_thread_drops() -> usize {
+pub(crate) fn off_thread_drops() -> usize {
     OFF_THREAD_DROPS.load(Ordering::Relaxed)
 }
 
 /// Why a call returned no bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Failure {
+pub(crate) enum Failure {
     /// The call came from a thread other than the one that made the instance.
     WrongThread,
     /// The engine panicked. Every later call fails the same way.
@@ -28,7 +28,7 @@ pub enum Failure {
 }
 
 impl Failure {
-    pub fn code(self) -> &'static str {
+    pub(crate) fn code(self) -> &'static str {
         match self {
             Failure::WrongThread => "wrong_thread",
             Failure::Panicked => "panicked",
@@ -38,7 +38,7 @@ impl Failure {
     }
 }
 
-pub struct Core {
+pub(crate) struct Core {
     owner: ThreadId,
     session: Option<Session>,
     dead: bool,
@@ -72,7 +72,11 @@ impl Core {
 
     /// Creates the Session from a `setup` request. A refused setup returns the error
     /// response and leaves no Session, so `create` can be retried.
-    pub fn create(&mut self, request: &[u8], cards: &dyn CardSource) -> Result<Vec<u8>, Failure> {
+    pub(crate) fn create(
+        &mut self,
+        request: &[u8],
+        cards: &dyn CardSource,
+    ) -> Result<Vec<u8>, Failure> {
         self.guard()?;
         if self.session.is_some() {
             return self.fail(Failure::AlreadyCreated);
@@ -87,13 +91,13 @@ impl Core {
         }
     }
 
-    pub fn handle(&mut self, request: &[u8]) -> Result<Vec<u8>, Failure> {
+    pub(crate) fn handle(&mut self, request: &[u8]) -> Result<Vec<u8>, Failure> {
         self.run(|session| session.handle(request))
     }
 
     /// The code of the last failure, or an empty string if the last call worked. From a
     /// wrong thread it is always `wrong_thread`, and the stored value stays untouched.
-    pub fn last_error(&self) -> &'static str {
+    pub(crate) fn last_error(&self) -> &'static str {
         if !self.on_owner_thread() {
             return Failure::WrongThread.code();
         }

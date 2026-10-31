@@ -16,7 +16,7 @@ pub const DEFAULT_STEP_CAP: u64 = 100_000;
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct DeckEntry {
+pub(crate) struct DeckEntry {
     /// The card's `oracle_id` UUID.
     pub card: String,
     pub count: u32,
@@ -24,7 +24,7 @@ pub struct DeckEntry {
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct PlayerSetup {
+pub(crate) struct PlayerSetup {
     pub deck: Vec<DeckEntry>,
     /// `oracle_id` UUIDs for the command zone. Empty outside Commander.
     #[serde(default)]
@@ -43,7 +43,7 @@ where
 /// `max_mulligans` takes `null` for "no limit".
 #[derive(Deserialize, Default, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct SettingOverrides {
+pub(crate) struct SettingOverrides {
     pub shuffle_libraries: Option<bool>,
     pub starting_hand_size: Option<u8>,
     pub skip_mulligan: Option<bool>,
@@ -88,7 +88,7 @@ impl SettingOverrides {
 /// needs; only the host sets it, and a player Seat never has it.
 #[derive(Deserialize, Default, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct SpectatorSetup {
+pub(crate) struct SpectatorSetup {
     #[serde(default)]
     pub omniscient: bool,
 }
@@ -97,7 +97,7 @@ pub struct SpectatorSetup {
 /// `PlayerId(i)` and Seat `i`. Spectator Seats follow the player Seats. CR 103.1
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct SetupBody {
+pub(crate) struct SetupBody {
     pub players: Vec<PlayerSetup>,
     #[serde(default)]
     pub spectators: Vec<SpectatorSetup>,
@@ -109,7 +109,7 @@ pub struct SetupBody {
 }
 
 #[derive(Debug)]
-pub struct SetupError(pub String);
+pub(crate) struct SetupError(pub String);
 
 struct Format {
     settings: GameSettings,
@@ -136,7 +136,7 @@ fn format_preset(name: &str) -> Option<Format> {
     }
 }
 
-pub struct Built {
+pub(crate) struct Built {
     pub config: GameConfig,
     pub step_cap: u64,
 }
@@ -160,7 +160,7 @@ impl Resolver<'_> {
     }
 }
 
-pub fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, SetupError> {
+pub(crate) fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, SetupError> {
     if body.players.len() < 2 {
         return Err(SetupError(format!(
             "a game needs at least 2 players, got {}",

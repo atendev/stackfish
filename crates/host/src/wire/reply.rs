@@ -8,7 +8,7 @@ use super::{U64, WireCandidate, WireColor, WireTarget};
 /// The body of an `answer` request: the Decision it answers and the reply.
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct AnswerBody {
+pub(crate) struct AnswerBody {
     pub decision: U64,
     pub reply: WireReply,
 }
@@ -100,7 +100,7 @@ impl From<WireCast> for CastAnnouncement {
 /// `PlayerActionKind` has a reply shape of its own.
 #[derive(Deserialize, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum WireAction {
+pub(crate) enum WireAction {
     CastSpell {
         card: U64,
         #[serde(default)]
@@ -168,28 +168,28 @@ impl WireAction {
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct WireAttack {
+pub(crate) struct WireAttack {
     pub attacker: U64,
     pub defender: WireTarget,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct WireBlock {
+pub(crate) struct WireBlock {
     pub blocker: U64,
     pub attacker: U64,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct WireDamage {
+pub(crate) struct WireDamage {
     pub recipient: U64,
     pub amount: u32,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct WireAssignment {
+pub(crate) struct WireAssignment {
     pub source: U64,
     pub splits: Vec<WireDamage>,
 }
@@ -198,7 +198,7 @@ pub struct WireAssignment {
 /// `order` holds indices into the Decision's `items`.
 #[derive(Deserialize, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum WireReply {
+pub(crate) enum WireReply {
     Pick {
         picks: Vec<WireCandidate>,
     },
@@ -247,7 +247,7 @@ fn objects(ids: Vec<U64>) -> Vec<ObjectId> {
 impl WireReply {
     /// The engine reply. `player` is the Seat's player, which a priority action
     /// names.
-    pub fn into_reply(self, player: stackfish_engine::PlayerId) -> Reply {
+    pub(crate) fn into_reply(self, player: stackfish_engine::PlayerId) -> Reply {
         match self {
             WireReply::Pick { picks } => Reply::Pick(picks.into_iter().map(Into::into).collect()),
             WireReply::YesNo { value } => Reply::YesNo(value),
