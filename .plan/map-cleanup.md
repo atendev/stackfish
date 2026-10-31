@@ -43,6 +43,8 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 065: Built the 064 decisions on `phase5/narrow-visibility`: dead items deleted, engine, carddb, scenario, host and godot items narrowed to what the compiler proves, and `unreachable_pub` is a workspace lint for host, godot, carddb and scenario. Three test-only constructors are `cfg(test)` rather than deleted. [closed/065-build-narrow-visibility.md]
 - 059: A versioned pre-commit hook runs fmt and clippy, and a GitHub Actions workflow on push to `master` adds `cargo test --workspace` and the `tools` unittest. Both go through one `tools/check.sh`. `rust-toolchain.toml` pins 1.98.0, `comment_diff.py` stays manual, and CI skips the private `stackfish-db` smoke test as a known gap. The build is 066. [closed/059-precommit-or-ci-check.md]
 - 066: Built `tools/check.sh` (fast fmt and clippy, `--full` adds tests), the versioned pre-commit hook and installer, the 1.98.0 toolchain pin and the CI workflow on push to `master`. CI installs with `rustup toolchain install` and prints a notice when the db smoke test skips. [closed/066-build-check-script-hook-and-ci.md]
+- 060: Rust integration tests stay in Rust, because the scenario schema can express only about 20 to 30 of them and single-file scenario failures are vaguer. `tests/scenarios/phase5/` gets renamed into feature folders without the prefix (068). Shared test helpers (069), per-file scenario failures (070) and a small TOML move (071) are optional. [closed/060-rust-tests-to-toml-scenarios.md]
+- 067: Deferred. CI does not check out the private `stackfish-db`, because each run would pull about 0.58 GiB of LFS against a 10 GiB a month quota, and the smoke test already runs locally. The plan for a later reversal (deploy key, `STACKFISH_DB_DIR` in the test, opt-in `STACKFISH_DB_REQUIRED=1`) is in the ticket. [closed/067-ci-access-to-stackfish-db.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -69,8 +71,11 @@ Stop the test binary sprawl, drop the `phase5_` prefix, and fill in missing modu
 - 047 Audit `crates/engine/src/` modules for missing `#[cfg(test)]` unit tests. Type research, AFK. Blocked by 041. Closed.
   - List pure helpers and data structures in `crates/engine/src/` that have no local unit tests and are only exercised end-to-end.
 - 048 Add unit tests for pure engine helpers. Type build, HITL. Blocked by 047. Closed. A follow-up, 049, covered helpers that need a small `GameState` or layer stubs. Closed.
-- 060 Decide which repetitive Rust tests become TOML scenarios and whether to rename `phase5_*.toml`. Type grilling, HITL. Blocked by 046.
-  - Inspect the reorganized test suite and `crates/engine/tests/scenarios/phase5/phase5_*.toml` to decide which table-style Rust tests should move to TOML scenarios and how the TOML scenario directory should be named.
+- 060 Decide which repetitive Rust tests become TOML scenarios and whether to rename `phase5_*.toml`. Type grilling, HITL. Blocked by 046. Closed.
+- 068 Rename the phase5 TOML scenarios into feature folders and fix their references. Type task, HITL. Follows 060.
+- 069 Move duplicated engine test helpers into `stackfish_testutil`. Type task, HITL. Follows 060. Optional.
+- 070 Report scenario failures per file instead of stopping at the first. Type task, HITL. Follows 060. Optional.
+- 071 Move the targeting and layer tests the scenario schema can express to TOML. Type task, HITL. Blocked by 070. Optional.
 
 ### C. Lua API audit and cleanup
 
@@ -101,15 +106,15 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 - 058 Update `docs/DESIGN.md` to reflect the new module layout. Type task, HITL. Blocked by 038, 040, 041, 046.
 - 059 Decide on a pre-commit or CI check for `fmt`, `clippy`, and `comment_diff.py`. Type grilling, HITL. Blocked by 057. Closed. The build is 066.
 - 066 Build the check script, pre-commit hook, toolchain pin and CI workflow. Type task, HITL. Follows 059. Closed.
-- 067 Decide whether CI gets read access to `stackfish-db` and a strict missing-db mode. Type grilling, HITL. Blocked by 066. Optional.
+- 067 Decide whether CI gets read access to `stackfish-db` and a strict missing-db mode. Type grilling, HITL. Blocked by 066. Optional. Closed as deferred.
 
 ## Frontier
 
 Open and unblocked:
 
-- 060, 067
+- 068, 069, 070
 
-Blocked: none.
+Blocked: 071 (by 070).
 
 ## Not yet specified
 
