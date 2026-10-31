@@ -18,7 +18,11 @@ pub struct Emblem {
 
 impl Emblem {
     pub fn new(emblem_id: ObjectId, source: ObjectId, ability_text: impl Into<String>) -> Self {
-        Emblem { emblem_id, source, ability_text: ability_text.into() }
+        Emblem {
+            emblem_id,
+            source,
+            ability_text: ability_text.into(),
+        }
     }
 }
 
@@ -81,7 +85,11 @@ impl PlayerState {
     /// repeat the 21 threshold. Takes the commander's name
     /// (`object.definition.name`), not an id.
     pub fn commander_damage_from(&self, source_name: &str) -> u32 {
-        self.commander_damage_taken.iter().find(|(s, _)| s == source_name).map(|(_, n)| *n).unwrap_or(0)
+        self.commander_damage_taken
+            .iter()
+            .find(|(s, _)| s == source_name)
+            .map(|(_, n)| *n)
+            .unwrap_or(0)
     }
 }
 
@@ -121,16 +129,21 @@ pub struct HandSizeModifier {
 /// CR 402.2: `player`'s maximum hand size, `None` for no maximum. Modifiers
 /// do not stack, and the latest `timestamp` wins. The caller supplies `base`
 /// (normally 7). `state` is used only for `HandSizeAffected::EnchantedPlayer`.
-pub fn effective_max_hand_size(state: &GameState, modifiers: &[HandSizeModifier], player: PlayerId, base: u32) -> Option<u32> {
+pub fn effective_max_hand_size(
+    state: &GameState,
+    modifiers: &[HandSizeModifier],
+    player: PlayerId,
+    base: u32,
+) -> Option<u32> {
     let winner = modifiers
         .iter()
         .filter(|m| match m.affected {
             HandSizeAffected::Filter(FilterController::You) => player == m.controller,
             HandSizeAffected::Filter(FilterController::Opponent) => player != m.controller,
             HandSizeAffected::Filter(FilterController::Any) => true,
-            HandSizeAffected::EnchantedPlayer => {
-                state.object(m.source).is_some_and(|o| o.attached_to_player == Some(player))
-            }
+            HandSizeAffected::EnchantedPlayer => state
+                .object(m.source)
+                .is_some_and(|o| o.attached_to_player == Some(player)),
         })
         .max_by_key(|m| m.timestamp.0);
     match winner {
@@ -173,14 +186,18 @@ pub struct HandRevealModifier {
 /// across applicable modifiers, since reveal has no magnitude to conflict
 /// (CR 701.20c). There is no `viewer` parameter: reveal shows to all, unlike
 /// a "look at" effect (CR 701.20e).
-pub fn is_hand_revealed(state: &GameState, modifiers: &[HandRevealModifier], player: PlayerId) -> bool {
+pub fn is_hand_revealed(
+    state: &GameState,
+    modifiers: &[HandRevealModifier],
+    player: PlayerId,
+) -> bool {
     modifiers.iter().any(|m| match m.affected {
         HandRevealAffected::Filter(FilterController::You) => player == m.controller,
         HandRevealAffected::Filter(FilterController::Opponent) => player != m.controller,
         HandRevealAffected::Filter(FilterController::Any) => true,
-        HandRevealAffected::EnchantedPlayer => {
-            state.object(m.source).is_some_and(|o| o.attached_to_player == Some(player))
-        }
+        HandRevealAffected::EnchantedPlayer => state
+            .object(m.source)
+            .is_some_and(|o| o.attached_to_player == Some(player)),
     })
 }
 
@@ -262,7 +279,10 @@ pub fn effective_land_play_limit(modifiers: &[LandPlayModifier], player: PlayerI
 /// `ZoneChange` events by `last_known_info.owner`, since the card may no
 /// longer be in `state.objects`.
 pub fn cards_drawn_this_turn(state: &GameState, player: PlayerId) -> u32 {
-    let turn_start = state.ledger.iter().rposition(|e| matches!(e.kind, GameEventKind::TurnStarted { .. }));
+    let turn_start = state
+        .ledger
+        .iter()
+        .rposition(|e| matches!(e.kind, GameEventKind::TurnStarted { .. }));
     let scan_from = turn_start.map(|i| i + 1).unwrap_or(0);
     state.ledger[scan_from..]
         .iter()
@@ -287,7 +307,11 @@ mod tests {
         assert_eq!(p.player_id, PlayerId(0));
         assert_eq!(p.life, 20);
         assert_eq!(p.mana_pool, ManaPool::default());
-        assert_eq!(p.counters.count(&crate::types::counter::CounterKind::Poison), 0);
+        assert_eq!(
+            p.counters
+                .count(&crate::types::counter::CounterKind::Poison),
+            0
+        );
         assert!(p.emblems.is_empty());
         assert!(p.commander_damage_taken.is_empty());
         assert!(!p.eliminated);
@@ -307,7 +331,8 @@ mod tests {
     #[test]
     fn commander_damage_from_reads_entry_or_zero() {
         let mut p = PlayerState::new(PlayerId(0), 20);
-        p.commander_damage_taken.push(("K commanders".to_string(), 7));
+        p.commander_damage_taken
+            .push(("K commanders".to_string(), 7));
         assert_eq!(p.commander_damage_from("K commanders"), 7);
         assert_eq!(p.commander_damage_from("Other"), 0);
     }
@@ -325,8 +350,20 @@ mod tests {
         let source = ObjectId(0);
         let p0 = PlayerId(0);
         let modifiers = vec![
-            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::You), limit: 5, timestamp: SequenceNo(1) },
-            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::You), limit: 2, timestamp: SequenceNo(2) },
+            DrawLimitModifier {
+                source,
+                controller: p0,
+                affected: DrawLimitAffected::Filter(FilterController::You),
+                limit: 5,
+                timestamp: SequenceNo(1),
+            },
+            DrawLimitModifier {
+                source,
+                controller: p0,
+                affected: DrawLimitAffected::Filter(FilterController::You),
+                limit: 2,
+                timestamp: SequenceNo(2),
+            },
         ];
         assert_eq!(effective_draw_limit(&modifiers, p0), Some(2));
     }
@@ -337,9 +374,27 @@ mod tests {
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let modifiers = vec![
-            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::You), limit: 1, timestamp: SequenceNo(0) },
-            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::Opponent), limit: 2, timestamp: SequenceNo(0) },
-            DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::Any), limit: 3, timestamp: SequenceNo(0) },
+            DrawLimitModifier {
+                source,
+                controller: p0,
+                affected: DrawLimitAffected::Filter(FilterController::You),
+                limit: 1,
+                timestamp: SequenceNo(0),
+            },
+            DrawLimitModifier {
+                source,
+                controller: p0,
+                affected: DrawLimitAffected::Filter(FilterController::Opponent),
+                limit: 2,
+                timestamp: SequenceNo(0),
+            },
+            DrawLimitModifier {
+                source,
+                controller: p0,
+                affected: DrawLimitAffected::Filter(FilterController::Any),
+                limit: 3,
+                timestamp: SequenceNo(0),
+            },
         ];
         // Latest among You (1) and Any (3) is 3.
         assert_eq!(effective_draw_limit(&modifiers, p0), Some(3));
@@ -358,9 +413,24 @@ mod tests {
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let modifiers = vec![
-            LandPlayModifier { source, controller: p0, affected: LandPlayAffected::Filter(FilterController::You), additional: 1 },
-            LandPlayModifier { source, controller: p0, affected: LandPlayAffected::Filter(FilterController::You), additional: 2 },
-            LandPlayModifier { source, controller: p0, affected: LandPlayAffected::Filter(FilterController::Opponent), additional: 5 },
+            LandPlayModifier {
+                source,
+                controller: p0,
+                affected: LandPlayAffected::Filter(FilterController::You),
+                additional: 1,
+            },
+            LandPlayModifier {
+                source,
+                controller: p0,
+                affected: LandPlayAffected::Filter(FilterController::You),
+                additional: 2,
+            },
+            LandPlayModifier {
+                source,
+                controller: p0,
+                affected: LandPlayAffected::Filter(FilterController::Opponent),
+                additional: 5,
+            },
         ];
         // CR 305.2: base 1 plus all applicable additional plays for the player.
         assert_eq!(effective_land_play_limit(&modifiers, p0), 4);
@@ -370,9 +440,12 @@ mod tests {
     #[test]
     fn effective_land_play_limit_any_applies_to_every_player() {
         let source = ObjectId(0);
-        let modifiers = vec![
-            LandPlayModifier { source, controller: PlayerId(0), affected: LandPlayAffected::Filter(FilterController::Any), additional: 3 },
-        ];
+        let modifiers = vec![LandPlayModifier {
+            source,
+            controller: PlayerId(0),
+            affected: LandPlayAffected::Filter(FilterController::Any),
+            additional: 3,
+        }];
         assert_eq!(effective_land_play_limit(&modifiers, PlayerId(0)), 4);
         assert_eq!(effective_land_play_limit(&modifiers, PlayerId(1)), 4);
     }

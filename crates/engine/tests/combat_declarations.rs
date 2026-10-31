@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state, zones};
@@ -14,7 +14,9 @@ fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -35,8 +37,16 @@ fn creature_definition(name: &str) -> CardDefinition {
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId, controlled_since_turn: u32) -> GameObject {
-    GameObject { controlled_since_turn, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
+fn permanent(
+    id: ObjectId,
+    definition: CardDefinition,
+    owner: PlayerId,
+    controlled_since_turn: u32,
+) -> GameObject {
+    GameObject {
+        controlled_since_turn,
+        ..card_object(id, definition, owner, ZoneKind::Battlefield)
+    }
 }
 
 fn combat_state() -> GameState {
@@ -62,7 +72,10 @@ fn combat_state_3p() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -85,12 +98,10 @@ fn try_declare_attackers(
     player: PlayerId,
     attackers: Vec<(ObjectId, Target)>,
 ) -> Result<StepStatus, ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::DeclareAttackers { attackers },
-        })
-        ?;
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::DeclareAttackers { attackers },
+    })?;
     Ok(drain(engine))
 }
 
@@ -100,7 +111,10 @@ fn declare_blockers(
     blocks: Vec<(ObjectId, ObjectId)>,
 ) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::DeclareBlockers { blocks },
+        })
         .expect("player holds priority");
     drain(engine)
 }
@@ -110,9 +124,10 @@ fn try_declare_blockers(
     player: PlayerId,
     blocks: Vec<(ObjectId, ObjectId)>,
 ) -> Result<StepStatus, ActionError> {
-    engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
-        ?;
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::DeclareBlockers { blocks },
+    })?;
     Ok(drain(engine))
 }
 
@@ -124,11 +139,17 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
         }
         let active = engine.state().priority_player;
         engine
-            .submit_action(PlayerAction { player: active, kind: PlayerActionKind::PassPriority })
+            .submit_action(PlayerAction {
+                player: active,
+                kind: PlayerActionKind::PassPriority,
+            })
             .expect("priority window");
         drain(engine);
     }
-    panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
+    panic!(
+        "never reached DeclareBlockers - state.step = {:?}",
+        engine.state().step
+    );
 }
 
 #[test]
@@ -137,17 +158,27 @@ fn declare_attackers_taps_and_records_combat_state() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
 
     let mut engine = Engine::new(state);
     let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(engine.state().object(attacker).unwrap().tapped, "508.1f: attacking taps it");
+    assert!(
+        engine.state().object(attacker).unwrap().tapped,
+        "508.1f: attacking taps it"
+    );
     let combat = engine.state().combat.as_ref().expect("attackers recorded");
     assert_eq!(combat.attackers, vec![(attacker, Target::Player(p1))]);
     assert!(combat.declared_defenders.is_empty());
-    assert_eq!(engine.state().consecutive_passes, 0, "508: declaring breaks the pass chain");
+    assert_eq!(
+        engine.state().consecutive_passes,
+        0,
+        "508: declaring breaks the pass chain"
+    );
 
     let kinds: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
     assert!(matches!(kinds[0], GameEventKind::Tapped { object } if *object == attacker));
@@ -164,7 +195,10 @@ fn declare_attackers_allows_zero_attackers() {
     let mut engine = Engine::new(state);
     let status = declare_attackers(&mut engine, p0, Vec::new());
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert!(engine.state().combat.is_some(), "508.1: declaring zero attackers still declares");
+    assert!(
+        engine.state().combat.is_some(),
+        "508.1: declaring zero attackers still declares"
+    );
 }
 
 #[test]
@@ -173,7 +207,10 @@ fn declare_attackers_rejects_non_active_player() {
     let state = combat_state();
     let mut engine = Engine::new(state);
     let err = try_declare_attackers(&mut engine, p1, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -184,7 +221,10 @@ fn declare_attackers_rejects_wrong_step() {
     state.phase = Phase::Main;
     let mut engine = Engine::new(state);
     let err = try_declare_attackers(&mut engine, p0, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -194,7 +234,10 @@ fn declare_attackers_rejects_redeclaration() {
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, Vec::new());
     let err = try_declare_attackers(&mut engine, p0, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -203,12 +246,22 @@ fn declare_attackers_rejects_uncontrolled_creature() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p1, 0),
+    );
 
     let mut engine = Engine::new(state);
-    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert!(!engine.state().object(attacker).unwrap().tapped, "no partial mutation");
+    let err =
+        try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert!(
+        !engine.state().object(attacker).unwrap().tapped,
+        "no partial mutation"
+    );
     assert!(engine.state().combat.is_none());
 }
 
@@ -223,8 +276,12 @@ fn declare_attackers_rejects_non_creature() {
     put_on_battlefield(&mut state, permanent(attacker, definition, p0, 0));
 
     let mut engine = Engine::new(state);
-    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    let err =
+        try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -238,8 +295,12 @@ fn declare_attackers_rejects_already_tapped_creature() {
     put_on_battlefield(&mut state, object);
 
     let mut engine = Engine::new(state);
-    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    let err =
+        try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -249,12 +310,22 @@ fn declare_attackers_rejects_summoning_sick_creature() {
     let attacker = ObjectId(0);
     // Controlled since turn 1, the current turn, and not since it began, so it is sick (CR 508.1a, 302.6).
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 1));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 1),
+    );
 
     let mut engine = Engine::new(state);
-    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert!(!engine.state().object(attacker).unwrap().tapped, "no partial mutation");
+    let err =
+        try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert!(
+        !engine.state().object(attacker).unwrap().tapped,
+        "no partial mutation"
+    );
 }
 
 #[test]
@@ -264,7 +335,10 @@ fn declare_attackers_allows_creature_controlled_since_before_turn_began() {
     let attacker = ObjectId(0);
     // controlled_since_turn 0 < last_active_turn_number[p0] (1) - not sick.
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
 
     let mut engine = Engine::new(state);
     let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
@@ -277,12 +351,19 @@ fn declare_attackers_rejects_invalid_target() {
     let p0 = PlayerId(0);
     let attacker = ObjectId(0);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
 
     let mut engine = Engine::new(state);
     // Targeting self is illegal - no opponent named p0.
-    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p0))]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    let err =
+        try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p0))]).unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -292,7 +373,10 @@ fn declare_attackers_is_atomic_across_a_mixed_legal_illegal_batch() {
     let legal = ObjectId(0);
     let already_tapped = ObjectId(1);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(legal, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(legal, creature_definition("Bear"), p0, 0),
+    );
     let mut tapped_object = permanent(already_tapped, creature_definition("Wolf"), p0, 0);
     tapped_object.tapped = true;
     put_on_battlefield(&mut state, tapped_object);
@@ -301,10 +385,20 @@ fn declare_attackers_is_atomic_across_a_mixed_legal_illegal_batch() {
     let err = try_declare_attackers(
         &mut engine,
         p0,
-        vec![(legal, Target::Player(p1)), (already_tapped, Target::Player(p1))],
-    ).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert!(!engine.state().object(legal).unwrap().tapped, "508.1: illegal batch taps nobody");
+        vec![
+            (legal, Target::Player(p1)),
+            (already_tapped, Target::Player(p1)),
+        ],
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert!(
+        !engine.state().object(legal).unwrap().tapped,
+        "508.1: illegal batch taps nobody"
+    );
     assert!(engine.state().combat.is_none());
 }
 
@@ -315,8 +409,14 @@ fn declare_blockers_records_blocks() {
     let attacker = ObjectId(0);
     let blocker = ObjectId(1);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker, creature_definition("Wall"), p1, 0),
+    );
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
@@ -327,7 +427,10 @@ fn declare_blockers_records_blocks() {
     let combat = engine.state().combat.as_ref().unwrap();
     assert_eq!(combat.blocks, vec![(blocker, attacker)]);
     assert!(combat.declared_defenders.contains(&p1));
-    assert!(!engine.state().object(blocker).unwrap().tapped, "509: blocking doesn't tap");
+    assert!(
+        !engine.state().object(blocker).unwrap().tapped,
+        "509: blocking doesn't tap"
+    );
 
     let kinds: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
     assert!(kinds.iter().any(|k| matches!(
@@ -344,14 +447,27 @@ fn declare_blockers_allows_multiple_blockers_on_same_attacker() {
     let blocker_a = ObjectId(1);
     let blocker_b = ObjectId(2);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
-    put_on_battlefield(&mut state, permanent(blocker_a, creature_definition("Wall"), p1, 0));
-    put_on_battlefield(&mut state, permanent(blocker_b, creature_definition("Wall2"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker_a, creature_definition("Wall"), p1, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker_b, creature_definition("Wall2"), p1, 0),
+    );
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker_a, attacker), (blocker_b, attacker)]);
+    let status = declare_blockers(
+        &mut engine,
+        p1,
+        vec![(blocker_a, attacker), (blocker_b, attacker)],
+    );
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
     assert_eq!(engine.state().combat.as_ref().unwrap().blocks.len(), 2);
 }
@@ -362,12 +478,18 @@ fn declare_blockers_rejects_non_defending_player() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     let err = try_declare_blockers(&mut engine, p0, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -381,13 +503,22 @@ fn declare_blockers_rejects_wrong_step() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: Vec::new(),
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker, creature_definition("Wall"), p1, 0),
+    );
 
     let mut engine = Engine::new(state);
     let err = try_declare_blockers(&mut engine, p1, vec![(blocker, attacker)]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -397,8 +528,14 @@ fn declare_blockers_rejects_redeclaration() {
     let attacker = ObjectId(0);
     let blocker = ObjectId(1);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker, creature_definition("Wall"), p1, 0),
+    );
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
@@ -406,7 +543,10 @@ fn declare_blockers_rejects_redeclaration() {
     declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
     // Only AdvanceTurnStep changes the step, which isolates the declared_defenders redeclaration check.
     let err = try_declare_blockers(&mut engine, p1, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -416,7 +556,10 @@ fn declare_blockers_rejects_uncontrolled_or_tapped_blocker() {
     let attacker = ObjectId(0);
     let tapped_blocker = ObjectId(1);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
     let mut blocker_object = permanent(tapped_blocker, creature_definition("Wall"), p1, 0);
     blocker_object.tapped = true;
     put_on_battlefield(&mut state, blocker_object);
@@ -425,7 +568,10 @@ fn declare_blockers_rejects_uncontrolled_or_tapped_blocker() {
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
     let err = try_declare_blockers(&mut engine, p1, vec![(tapped_blocker, attacker)]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -436,15 +582,27 @@ fn declare_blockers_rejects_unknown_attacker_reference() {
     let not_attacking = ObjectId(2);
     let blocker = ObjectId(1);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
-    put_on_battlefield(&mut state, permanent(not_attacking, creature_definition("Bear2"), p0, 0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(not_attacking, creature_definition("Bear2"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker, creature_definition("Wall"), p1, 0),
+    );
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
     let err = try_declare_blockers(&mut engine, p1, vec![(blocker, not_attacking)]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -455,19 +613,39 @@ fn declare_blockers_rejects_duplicate_blocker_assignment() {
     let attacker_b = ObjectId(2);
     let blocker = ObjectId(1);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker_a, creature_definition("Bear"), p0, 0));
-    put_on_battlefield(&mut state, permanent(attacker_b, creature_definition("Bear2"), p0, 0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker_a, creature_definition("Bear"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker_b, creature_definition("Bear2"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker, creature_definition("Wall"), p1, 0),
+    );
 
     let mut engine = Engine::new(state);
     declare_attackers(
         &mut engine,
         p0,
-        vec![(attacker_a, Target::Player(p1)), (attacker_b, Target::Player(p1))],
+        vec![
+            (attacker_a, Target::Player(p1)),
+            (attacker_b, Target::Player(p1)),
+        ],
     );
     pass_to_declare_blockers(&mut engine);
-    let err = try_declare_blockers(&mut engine, p1, vec![(blocker, attacker_a), (blocker, attacker_b)]).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    let err = try_declare_blockers(
+        &mut engine,
+        p1,
+        vec![(blocker, attacker_a), (blocker, attacker_b)],
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -476,11 +654,17 @@ fn declare_blockers_rejects_no_attackers_declared_yet() {
     let blocker = ObjectId(1);
     let mut state = combat_state();
     state.step = Step::DeclareBlockers;
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker, creature_definition("Wall"), p1, 0),
+    );
 
     let mut engine = Engine::new(state);
     let err = try_declare_blockers(&mut engine, p1, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -489,7 +673,10 @@ fn combat_state_clears_at_end_of_combat() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
@@ -502,12 +689,18 @@ fn combat_state_clears_at_end_of_combat() {
         }
         let active = engine.state().priority_player;
         engine
-            .submit_action(PlayerAction { player: active, kind: PlayerActionKind::PassPriority })
+            .submit_action(PlayerAction {
+                player: active,
+                kind: PlayerActionKind::PassPriority,
+            })
             .expect("priority window");
         drain(&mut engine);
     }
     assert_eq!(engine.state().step, Step::PostCombatMain);
-    assert!(engine.state().combat.is_none(), "506.4: combat status ends with the combat phase");
+    assert!(
+        engine.state().combat.is_none(),
+        "506.4: combat status ends with the combat phase"
+    );
 }
 
 #[test]
@@ -520,16 +713,31 @@ fn three_player_each_defending_player_declares_blockers_separately() {
     let blocker_p1 = ObjectId(2);
     let blocker_p2 = ObjectId(3);
     let mut state = combat_state_3p();
-    put_on_battlefield(&mut state, permanent(attacker_p1, creature_definition("Bear1"), p0, 0));
-    put_on_battlefield(&mut state, permanent(attacker_p2, creature_definition("Bear2"), p0, 0));
-    put_on_battlefield(&mut state, permanent(blocker_p1, creature_definition("Wall1"), p1, 0));
-    put_on_battlefield(&mut state, permanent(blocker_p2, creature_definition("Wall2"), p2, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker_p1, creature_definition("Bear1"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker_p2, creature_definition("Bear2"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker_p1, creature_definition("Wall1"), p1, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker_p2, creature_definition("Wall2"), p2, 0),
+    );
 
     let mut engine = Engine::new(state);
     declare_attackers(
         &mut engine,
         p0,
-        vec![(attacker_p1, Target::Player(p1)), (attacker_p2, Target::Player(p2))],
+        vec![
+            (attacker_p1, Target::Player(p1)),
+            (attacker_p2, Target::Player(p2)),
+        ],
     );
     pass_to_declare_blockers(&mut engine);
 
@@ -543,7 +751,10 @@ fn three_player_each_defending_player_declares_blockers_separately() {
     let status = declare_blockers(&mut engine, p2, vec![(blocker_p2, attacker_p2)]);
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
     let combat = engine.state().combat.as_ref().unwrap();
-    assert_eq!(combat.blocks, vec![(blocker_p1, attacker_p1), (blocker_p2, attacker_p2)]);
+    assert_eq!(
+        combat.blocks,
+        vec![(blocker_p1, attacker_p1), (blocker_p2, attacker_p2)]
+    );
     assert_eq!(combat.declared_defenders, vec![p1, p2]);
 }
 
@@ -554,14 +765,20 @@ fn declare_blockers_rejects_a_player_nobody_is_attacking() {
     let p2 = PlayerId(2);
     let attacker = ObjectId(0);
     let mut state = combat_state_3p();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
 
     let mut engine = Engine::new(state);
     // Only p1 is attacked - p2 has no defending-player role this combat.
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
     let err = try_declare_blockers(&mut engine, p2, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 #[test]
@@ -572,19 +789,28 @@ fn declare_blockers_planeswalker_controller_is_the_defending_player() {
     let attacker = ObjectId(0);
     let planeswalker = ObjectId(1);
     let mut state = combat_state_3p();
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear"), p0, 0),
+    );
     let mut pw_definition = creature_definition("Walker");
     pw_definition.card_types = CardTypeSet::PLANESWALKER;
     put_on_battlefield(&mut state, permanent(planeswalker, pw_definition, p2, 0));
 
     let mut engine = Engine::new(state);
     // The attacker is aimed at p2's planeswalker (CR 506.4d), so p2 is the defending player and not the first nonactive player.
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Object(planeswalker))]);
+    declare_attackers(
+        &mut engine,
+        p0,
+        vec![(attacker, Target::Object(planeswalker))],
+    );
     pass_to_declare_blockers(&mut engine);
 
     let err = try_declare_blockers(&mut engine, p1, Vec::new()).unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
-        "p1 controls nothing being attacked - not a defending player this combat");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "p1 controls nothing being attacked - not a defending player this combat"
+    );
 
     let status = declare_blockers(&mut engine, p2, Vec::new());
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));

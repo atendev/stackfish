@@ -32,7 +32,9 @@ impl<'de> Deserialize<'de> for U64 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
         if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(D::Error::custom(format!("{text:?} is not a decimal string")));
+            return Err(D::Error::custom(format!(
+                "{text:?} is not a decimal string"
+            )));
         }
         text.parse().map(U64).map_err(D::Error::custom)
     }
@@ -137,11 +139,18 @@ const CARD_TYPES: [(CardTypeSet, WireCardType); 9] = [
 ];
 
 pub(crate) fn card_types(set: CardTypeSet) -> Vec<WireCardType> {
-    CARD_TYPES.iter().filter(|(flag, _)| set.contains(*flag)).map(|(_, wire)| *wire).collect()
+    CARD_TYPES
+        .iter()
+        .filter(|(flag, _)| set.contains(*flag))
+        .map(|(_, wire)| *wire)
+        .collect()
 }
 
 pub(crate) fn card_type_set(types: &[WireCardType]) -> CardTypeSet {
-    CARD_TYPES.iter().filter(|(_, wire)| types.contains(wire)).fold(CardTypeSet::empty(), |set, (flag, _)| set | *flag)
+    CARD_TYPES
+        .iter()
+        .filter(|(_, wire)| types.contains(wire))
+        .fold(CardTypeSet::empty(), |set, (flag, _)| set | *flag)
 }
 
 /// An object, a player or an ability on the stack (CR 113.9).
@@ -192,10 +201,16 @@ impl From<Candidate> for WireCandidate {
             Candidate::Target(Target::Player(player)) => WireCandidate::Player { id: player.0 },
             Candidate::Target(Target::Ability(id)) => WireCandidate::Ability { id: id.into() },
             Candidate::Replacement(ReplacementCandidate::Registered(id)) => {
-                WireCandidate::Replacement { source: id.into(), protection: false }
+                WireCandidate::Replacement {
+                    source: id.into(),
+                    protection: false,
+                }
             }
             Candidate::Replacement(ReplacementCandidate::Protection(id)) => {
-                WireCandidate::Replacement { source: id.into(), protection: true }
+                WireCandidate::Replacement {
+                    source: id.into(),
+                    protection: true,
+                }
             }
         }
     }
@@ -205,14 +220,18 @@ impl From<WireCandidate> for Candidate {
     fn from(candidate: WireCandidate) -> Self {
         match candidate {
             WireCandidate::Object { id } => Candidate::Target(Target::Object(id.into())),
-            WireCandidate::Player { id } => Candidate::Target(Target::Player(stackfish_engine::PlayerId(id))),
+            WireCandidate::Player { id } => {
+                Candidate::Target(Target::Player(stackfish_engine::PlayerId(id)))
+            }
             WireCandidate::Ability { id } => Candidate::Target(Target::Ability(id.into())),
-            WireCandidate::Replacement { source, protection: false } => {
-                Candidate::Replacement(ReplacementCandidate::Registered(source.into()))
-            }
-            WireCandidate::Replacement { source, protection: true } => {
-                Candidate::Replacement(ReplacementCandidate::Protection(source.into()))
-            }
+            WireCandidate::Replacement {
+                source,
+                protection: false,
+            } => Candidate::Replacement(ReplacementCandidate::Registered(source.into())),
+            WireCandidate::Replacement {
+                source,
+                protection: true,
+            } => Candidate::Replacement(ReplacementCandidate::Protection(source.into())),
         }
     }
 }

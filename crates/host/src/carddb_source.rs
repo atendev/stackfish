@@ -23,12 +23,10 @@ impl CardDbCardSource {
 
 impl CardSource for CardDbCardSource {
     fn load(&self, key: &str) -> Result<CardDefinition, CardSourceError> {
-        self.db
-            .load_by_oracle_id(key)
-            .map_err(|e| match e {
-                CardLoadError::NotFound(_) => CardSourceError(format!("no card found for key {key:?}")),
-                other => CardSourceError(format!("card {key:?} failed to load: {other}")),
-            })
+        self.db.load_by_oracle_id(key).map_err(|e| match e {
+            CardLoadError::NotFound(_) => CardSourceError(format!("no card found for key {key:?}")),
+            other => CardSourceError(format!("card {key:?} failed to load: {other}")),
+        })
     }
 }
 
@@ -42,8 +40,10 @@ mod tests {
         use std::sync::atomic::{AtomicU32, Ordering};
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir()
-            .join(format!("stackfish-carddb-source-test-{}-{n}.sqlite", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "stackfish-carddb-source-test-{}-{n}.sqlite",
+            std::process::id()
+        ));
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             "
@@ -123,7 +123,10 @@ mod tests {
         let card = source.load("alpha-1").unwrap();
         assert_eq!(card.name, "Alpha Bear");
         assert!(
-            matches!(card.script_ref, stackfish_engine::ScriptReference::Inline(_)),
+            matches!(
+                card.script_ref,
+                stackfish_engine::ScriptReference::Inline(_)
+            ),
             "script_ref should be inline"
         );
     }

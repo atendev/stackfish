@@ -9,8 +9,8 @@ mod legal_actions;
 mod open;
 
 pub use entry::{
-    ActivateEntry, AttackerEntry, BlockerEntry, CastEntry, ColorChoice, DamageSplitEntry, Entry, EntryTargets, ModeRange,
-    TargetSlot,
+    ActivateEntry, AttackerEntry, BlockerEntry, CastEntry, ColorChoice, DamageSplitEntry, Entry,
+    EntryTargets, ModeRange, TargetSlot,
 };
 
 use crate::replacement::ReplacementCandidate;
@@ -52,7 +52,11 @@ pub enum ReplyShape {
     /// Choose between `min` and `max` of `candidates`. The order of the
     /// chosen list matters only for the mulligan bottom-card Decision, where
     /// it is the order the cards go on the bottom of the library.
-    Pick { candidates: Vec<Candidate>, min: usize, max: usize },
+    Pick {
+        candidates: Vec<Candidate>,
+        min: usize,
+        max: usize,
+    },
     /// A yes or no. `true` means the optional thing happens: take the
     /// mulligan, return the commander, say yes to a script's `MayChoose`.
     YesNo,
@@ -62,17 +66,29 @@ pub enum ReplyShape {
     /// Choose between `min` and `max` mode indices out of `mode_count`.
     /// `repeatable` allows the same index twice (CR 700.2d). `solo_only`
     /// lists the ascending indices that can only be chosen alone.
-    Modes { mode_count: usize, min: u32, max: u32, repeatable: bool, solo_only: Vec<u32> },
+    Modes {
+        mode_count: usize,
+        min: u32,
+        max: u32,
+        repeatable: bool,
+        solo_only: Vec<u32>,
+    },
     /// Split `cards` into a list kept on top, in order, and the rest, which
     /// go to `rest`.
-    Partition { cards: Vec<ObjectId>, rest: PartitionRest },
+    Partition {
+        cards: Vec<ObjectId>,
+        rest: PartitionRest,
+    },
     /// Pay `cost` with a `PaymentPlan`. A `None` reply means the player
     /// cannot pay (CR 601.6 unwinds the cast) or declines to pay an
     /// unless-paid cost (CR 118.12).
     Payment { cost: CostSpec },
     /// Choose targets for a trigger: one candidate list per target word of
     /// `spec`, in order. The reply is one list per word.
-    Targets { spec: TargetSpec, candidates: Vec<Vec<Target>> },
+    Targets {
+        spec: TargetSpec,
+        candidates: Vec<Vec<Target>>,
+    },
     /// Cast `card` as the resolving ability allows (Madness CR 702.35a,
     /// Cascade CR 702.85a), or decline with `None`. Cascade with no
     /// qualifying card has `card: None` and only accepts a decline.
@@ -113,7 +129,10 @@ pub enum Reply {
     YesNo(bool),
     Order(Vec<usize>),
     Modes(Vec<u32>),
-    Partition { top: Vec<ObjectId>, rest: Vec<ObjectId> },
+    Partition {
+        top: Vec<ObjectId>,
+        rest: Vec<ObjectId>,
+    },
     Payment(Option<PaymentPlan>),
     Targets(Vec<Vec<Target>>),
     MayCast(Option<CastAnnouncement>),
@@ -174,7 +193,10 @@ pub struct Rejection {
 
 impl Rejection {
     pub(crate) fn new(code: RejectionCode, message: impl Into<String>) -> Self {
-        Rejection { code, message: message.into() }
+        Rejection {
+            code,
+            message: message.into(),
+        }
     }
 }
 
@@ -190,7 +212,10 @@ pub(crate) struct DecisionTracker {
 
 impl DecisionTracker {
     pub(crate) fn new() -> Self {
-        DecisionTracker { next: 1, open: None }
+        DecisionTracker {
+            next: 1,
+            open: None,
+        }
     }
 
     /// The id of the open Decision, allocating a fresh one the first time

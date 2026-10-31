@@ -20,7 +20,8 @@ use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::legality::{
-    has_summoning_sickness, is_sorcery_speed, legal_target_candidates_for_x, requirement_depends_on_x, solo_only_modes,
+    has_summoning_sickness, is_sorcery_speed, legal_target_candidates_for_x,
+    requirement_depends_on_x, solo_only_modes,
 };
 
 /// Every entry the priority player may take, with `Pass` last.
@@ -39,19 +40,29 @@ fn play_land_entries(state: &GameState, player: PlayerId, entries: &mut Vec<Entr
         return;
     }
     let played = *state.lands_played_this_turn.get(&player).unwrap_or(&0);
-    if played >= crate::types::player::effective_land_play_limit(&state.land_play_modifiers, player) {
+    if played >= crate::types::player::effective_land_play_limit(&state.land_play_modifiers, player)
+    {
         return;
     }
-    let Some(hand) = state.zone(ZoneKind::Hand, Some(player)) else { return };
+    let Some(hand) = state.zone(ZoneKind::Hand, Some(player)) else {
+        return;
+    };
     for &id in hand.contents.iter() {
-        let Some(object) = state.object(id) else { continue };
+        let Some(object) = state.object(id) else {
+            continue;
+        };
         if object.controller == player && object.definition.card_types.contains(CardTypeSet::LAND) {
             entries.push(Entry::PlayLand { card: id });
         }
     }
 }
 
-fn cast_entries(state: &GameState, script_runtime: &ScriptRuntime, player: PlayerId, entries: &mut Vec<Entry>) {
+fn cast_entries(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    player: PlayerId,
+    entries: &mut Vec<Entry>,
+) {
     let mut ids: Vec<ObjectId> = state.objects.keys().copied().collect();
     ids.sort();
     for id in ids {
@@ -86,11 +97,17 @@ fn cast_entries(state: &GameState, script_runtime: &ScriptRuntime, player: Playe
         // Instants and flash are castable whenever the player holds priority. Everything else needs the sorcery window.
         let instant_speed = definition.card_types.contains(CardTypeSet::INSTANT)
             || definition.keywords.contains(KeywordSet::FLASH);
-        let timing_ok = if instant_speed { state.priority_player == player } else { is_sorcery_speed(state, player) };
+        let timing_ok = if instant_speed {
+            state.priority_player == player
+        } else {
+            is_sorcery_speed(state, player)
+        };
         if !timing_ok {
             continue;
         }
-        let Some((modes, targets)) = cast_modes_and_targets(state, script_runtime, player, id, definition) else {
+        let Some((modes, targets)) =
+            cast_modes_and_targets(state, script_runtime, player, id, definition)
+        else {
             continue;
         };
         entries.push(Entry::Cast(CastEntry {
@@ -115,22 +132,41 @@ fn cast_modes_and_targets(
     definition: &CardDefinition,
 ) -> Option<(Option<ModeRange>, EntryTargets)> {
     if definition.modes.is_empty() {
-        let slots = target_slots(state, script_runtime, definition.target_requirement.as_ref(), player, card);
+        let slots = target_slots(
+            state,
+            script_runtime,
+            definition.target_requirement.as_ref(),
+            player,
+            card,
+        );
         return slots_are_satisfiable(&slots).then_some((None, EntryTargets::Fixed(slots)));
     }
     let per_mode: Vec<Vec<TargetSlot>> = definition
         .modes
         .iter()
-        .map(|mode| target_slots(state, script_runtime, mode.target_requirement.as_ref(), player, card))
+        .map(|mode| {
+            target_slots(
+                state,
+                script_runtime,
+                mode.target_requirement.as_ref(),
+                player,
+                card,
+            )
+        })
         .collect();
     let range = mode_range(definition);
-    let usable = per_mode.iter().filter(|slots| slots_are_satisfiable(slots)).count() as u32;
+    let usable = per_mode
+        .iter()
+        .filter(|slots| slots_are_satisfiable(slots))
+        .count() as u32;
     // A solo-only mode counts only toward a selection of one mode. Choosing
     // it twice from a repeatable range is still two modes.
     let joinable = per_mode
         .iter()
         .enumerate()
-        .filter(|(index, slots)| slots_are_satisfiable(slots) && !range.solo_only.contains(&(*index as u32)))
+        .filter(|(index, slots)| {
+            slots_are_satisfiable(slots) && !range.solo_only.contains(&(*index as u32))
+        })
         .count() as u32;
     let listed = if range.min <= 1 {
         usable >= range.min
@@ -161,7 +197,13 @@ fn mode_range(definition: &CardDefinition) -> ModeRange {
             max,
             repeatable: false,
             chosen_by_opponent: false,
-            pawprint_weights: Some(definition.modes.iter().map(|mode| mode.pawprint_weight).collect()),
+            pawprint_weights: Some(
+                definition
+                    .modes
+                    .iter()
+                    .map(|mode| mode.pawprint_weight)
+                    .collect(),
+            ),
             solo_only: solo_only_modes(&definition.modes),
         },
         _ => ModeRange {
@@ -176,7 +218,12 @@ fn mode_range(definition: &CardDefinition) -> ModeRange {
     }
 }
 
-fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: PlayerId, entries: &mut Vec<Entry>) {
+fn activate_entries(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    player: PlayerId,
+    entries: &mut Vec<Entry>,
+) {
     // `ability_index` counts every ability registered to a source, not only
     // the activated ones (`find_ability`).
     let mut seen: HashMap<ObjectId, u32> = HashMap::new();
@@ -187,7 +234,9 @@ fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: P
         if ability.kind != AbilityKind::Activated {
             continue;
         }
-        let Some(source) = state.object(ability.source) else { continue };
+        let Some(source) = state.object(ability.source) else {
+            continue;
+        };
         if crate::layers::effective_controller(state, script_runtime, ability.source) != player {
             continue;
         }
@@ -195,26 +244,42 @@ fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: P
         // CR 602.1/112.6/113.6
         // Battlefield unless Cycling's discard cost or a script's `SetFunctionsFrom` says otherwise.
         let cost = ability.cost.as_ref();
-        let requires_hand = cost.is_some_and(|c| c.additional.iter().any(|a| matches!(a, AdditionalCost::DiscardSelf)));
+        let requires_hand = cost.is_some_and(|c| {
+            c.additional
+                .iter()
+                .any(|a| matches!(a, AdditionalCost::DiscardSelf))
+        });
         let required_zone = state
             .ability_function_zones
             .get(&ability.id)
             .copied()
-            .unwrap_or(if requires_hand { ZoneKind::Hand } else { ZoneKind::Battlefield });
+            .unwrap_or(if requires_hand {
+                ZoneKind::Hand
+            } else {
+                ZoneKind::Battlefield
+            });
         if source.zone != required_zone {
             continue;
         }
         // CR 702.6a
-        if matches!(ability.effect, Some(AbilityEffect::Attach)) && !is_sorcery_speed(state, player) {
+        if matches!(ability.effect, Some(AbilityEffect::Attach)) && !is_sorcery_speed(state, player)
+        {
             continue;
         }
 
-        let mana_ability = matches!(ability.effect, Some(AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. }));
+        let mana_ability = matches!(
+            ability.effect,
+            Some(AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. })
+        );
         let has_real_cost = cost.is_some_and(|c| c.mana.is_some() || !c.additional.is_empty());
         let taps_source = if mana_ability && !has_real_cost {
             true
         } else {
-            cost.is_some_and(|c| c.additional.iter().any(|a| matches!(a, AdditionalCost::TapSelf)))
+            cost.is_some_and(|c| {
+                c.additional
+                    .iter()
+                    .any(|a| matches!(a, AdditionalCost::TapSelf))
+            })
         };
         // CR 602.5a/302.6
         // A {T} cost needs an untapped source, and a creature also needs to be free of summoning sickness.
@@ -229,7 +294,13 @@ fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: P
         let targets = if mana_ability {
             Vec::new()
         } else {
-            target_slots(state, script_runtime, ability.target.as_ref(), player, ability.source)
+            target_slots(
+                state,
+                script_runtime,
+                ability.target.as_ref(),
+                player,
+                ability.source,
+            )
         };
         if !slots_are_satisfiable(&targets) {
             continue;
@@ -237,10 +308,16 @@ fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: P
         let color_choice = match &ability.effect {
             Some(AbilityEffect::AddManaChoice { count, choices }) => Some(ColorChoice {
                 count: *count,
-                colors: [Color::White, Color::Blue, Color::Black, Color::Red, Color::Green]
-                    .into_iter()
-                    .filter(|&color| choices.contains_color(color))
-                    .collect(),
+                colors: [
+                    Color::White,
+                    Color::Blue,
+                    Color::Black,
+                    Color::Red,
+                    Color::Green,
+                ]
+                .into_iter()
+                .filter(|&color| choices.contains_color(color))
+                .collect(),
             }),
             _ => None,
         };
@@ -248,7 +325,9 @@ fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: P
             source: ability.source,
             ability_index,
             targets,
-            x: cost.and_then(|c| c.mana.as_ref()).is_some_and(|m| m.has_x()),
+            x: cost
+                .and_then(|c| c.mana.as_ref())
+                .is_some_and(|m| m.has_x()),
             mana_ability,
             color_choice,
         }));
@@ -272,12 +351,27 @@ fn target_slots(
     requirements
         .into_iter()
         .map(|requirement| {
-            let mut candidates = legal_target_candidates_for_x(state, script_runtime, requirement, player, source, true);
+            let mut candidates = legal_target_candidates_for_x(
+                state,
+                script_runtime,
+                requirement,
+                player,
+                source,
+                true,
+            );
             candidates.sort_by_key(target_order);
             TargetSlot {
                 candidates,
-                min: if requirement.up_to { 0 } else { requirement.count },
-                max: if requirement.at_least { None } else { Some(requirement.count) },
+                min: if requirement.up_to {
+                    0
+                } else {
+                    requirement.count
+                },
+                max: if requirement.at_least {
+                    None
+                } else {
+                    Some(requirement.count)
+                },
                 x_dependent: requirement_depends_on_x(requirement),
             }
         })
@@ -296,5 +390,7 @@ pub(crate) fn target_order(target: &Target) -> (u8, u64) {
 /// Every word has at least as many candidates as it must name. A word cannot
 /// name the same target twice (CR 601.2c).
 fn slots_are_satisfiable(slots: &[TargetSlot]) -> bool {
-    slots.iter().all(|slot| slot.candidates.len() as u32 >= slot.min)
+    slots
+        .iter()
+        .all(|slot| slot.candidates.len() as u32 >= slot.min)
 }

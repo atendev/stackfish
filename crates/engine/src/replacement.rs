@@ -41,8 +41,18 @@ pub enum ReplacementOutcome {
 /// CR 616.1: the permanent's controller if the affected slot is an object,
 /// otherwise the player. The fallback keeps the function total for a shape it
 /// cannot construct.
-fn affected_player_for(event: &GameEventKind, state: &GameState, script_runtime: &ScriptRuntime) -> PlayerId {
-    let fallback = || state.turn_order.first().copied().expect("a game always has players");
+fn affected_player_for(
+    event: &GameEventKind,
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+) -> PlayerId {
+    let fallback = || {
+        state
+            .turn_order
+            .first()
+            .copied()
+            .expect("a game always has players")
+    };
     match event {
         GameEventKind::DamageDealt { target, .. } => match target {
             Target::Player(pid) => *pid,
@@ -68,14 +78,22 @@ pub(crate) fn apply_one_replacement(
     source: ObjectId,
     event: GameEventKind,
 ) -> GameEventKind {
-    let Some(idx) = state.replacement_effects.iter().position(|r| r.source == source) else {
+    let Some(idx) = state
+        .replacement_effects
+        .iter()
+        .position(|r| r.source == source)
+    else {
         return event;
     };
     apply_replacement_at_index(state, idx, event)
 }
 
 /// Index-based body of `apply_one_replacement`, for callers where `source` is not unique.
-fn apply_replacement_at_index(state: &mut GameState, idx: usize, event: GameEventKind) -> GameEventKind {
+fn apply_replacement_at_index(
+    state: &mut GameState,
+    idx: usize,
+    event: GameEventKind,
+) -> GameEventKind {
     let rewritten = state.replacement_effects[idx].apply(event);
     match state.replacement_effects[idx].consumption {
         ConsumptionPolicy::OneShot => {
@@ -104,9 +122,17 @@ pub(crate) fn apply_one_replacement_or_protection(
     match chosen {
         ReplacementCandidate::Registered(source) => apply_one_replacement(state, source, event),
         ReplacementCandidate::Protection(_) => match event {
-            GameEventKind::DamageDealt { source, target, is_combat_damage, .. } => {
-                GameEventKind::DamageDealt { source, target, amount: 0, is_combat_damage }
-            }
+            GameEventKind::DamageDealt {
+                source,
+                target,
+                is_combat_damage,
+                ..
+            } => GameEventKind::DamageDealt {
+                source,
+                target,
+                amount: 0,
+                is_combat_damage,
+            },
             other => other,
         },
     }
@@ -124,28 +150,44 @@ fn protection_prevents(
     script_runtime: &ScriptRuntime,
     event: &GameEventKind,
 ) -> Option<ObjectId> {
-    let GameEventKind::DamageDealt { source, target, .. } = event else { return None };
-    let Target::Object(target_id) = target else { return None };
-    let (Some(source_obj), Some(target_obj)) = (state.object(*source), state.object(*target_id)) else {
+    let GameEventKind::DamageDealt { source, target, .. } = event else {
+        return None;
+    };
+    let Target::Object(target_id) = target else {
+        return None;
+    };
+    let (Some(source_obj), Some(target_obj)) = (state.object(*source), state.object(*target_id))
+    else {
         return None;
     };
     let source_controller = source_obj.controller;
     let target_controller = target_obj.controller;
-    let target_characteristics = crate::layers::effective_characteristics(state, script_runtime, *target_id);
-    let source_characteristics = crate::layers::effective_characteristics(state, script_runtime, *source);
+    let target_characteristics =
+        crate::layers::effective_characteristics(state, script_runtime, *target_id);
+    let source_characteristics =
+        crate::layers::effective_characteristics(state, script_runtime, *source);
     let protected = target_characteristics.protection_everything
-        || target_characteristics.protection_colors.intersects(source_characteristics.colors)
-        || target_characteristics.protection_card_types.intersects(source_characteristics.card_types)
+        || target_characteristics
+            .protection_colors
+            .intersects(source_characteristics.colors)
+        || target_characteristics
+            .protection_card_types
+            .intersects(source_characteristics.card_types)
         || target_characteristics
             .protection_subtypes
             .iter()
             .any(|s| source_characteristics.subtypes.contains(s))
-        || target_characteristics.protection_names.contains(&source_characteristics.name)
-        || target_characteristics.protection_players.iter().any(|who| match who {
-            FilterController::You => source_controller == target_controller,
-            FilterController::Opponent => source_controller != target_controller,
-            FilterController::Any => false,
-        });
+        || target_characteristics
+            .protection_names
+            .contains(&source_characteristics.name)
+        || target_characteristics
+            .protection_players
+            .iter()
+            .any(|who| match who {
+                FilterController::You => source_controller == target_controller,
+                FilterController::Opponent => source_controller != target_controller,
+                FilterController::Any => false,
+            });
     protected.then_some(*target_id)
 }
 
@@ -155,16 +197,37 @@ fn protection_prevents(
 ///
 /// Unreachable in play today, so the tests call `apply_replacements` directly.
 fn apply_token_zone_lock(state: &GameState, event: GameEventKind) -> GameEventKind {
-    let GameEventKind::ZoneChange { object, from, to, last_known_info } = event else {
+    let GameEventKind::ZoneChange {
+        object,
+        from,
+        to,
+        last_known_info,
+    } = event
+    else {
         return event;
     };
     let Some(obj) = state.object(object) else {
-        return GameEventKind::ZoneChange { object, from, to, last_known_info };
+        return GameEventKind::ZoneChange {
+            object,
+            from,
+            to,
+            last_known_info,
+        };
     };
     if obj.is_token && obj.zone != ZoneKind::Battlefield {
-        return GameEventKind::ZoneChange { object, from, to: from, last_known_info };
+        return GameEventKind::ZoneChange {
+            object,
+            from,
+            to: from,
+            last_known_info,
+        };
     }
-    GameEventKind::ZoneChange { object, from, to, last_known_info }
+    GameEventKind::ZoneChange {
+        object,
+        from,
+        to,
+        last_known_info,
+    }
 }
 
 /// Whether `spec` is a battlefield-entry modifier (tapped, the counters family,
@@ -291,7 +354,12 @@ pub fn apply_enters_battlefield_modifiers(
     colors_spent: ColorSet,
 ) -> Vec<GameEventKind> {
     // Rebuilt per use because `GameEventKind` is not `Clone`; it is matched, never committed.
-    let candidate = || GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
+    let candidate = || GameEventKind::ZoneChange {
+        object,
+        from,
+        to: ZoneKind::Battlefield,
+        last_known_info: None,
+    };
     // Indices, not source ids: one source can carry several matching payloads (CR 707.2).
     let matching: Vec<usize> = state
         .replacement_effects
@@ -329,19 +397,31 @@ pub fn apply_enters_battlefield_modifiers(
             }
             // Only proposes the event; the caller commits it (see the doc comment).
             ReplacementPayload::EntersWithCounters { kind, amount } => {
-                counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
+                counter_events.push(GameEventKind::CounterAdded {
+                    object,
+                    kind,
+                    amount,
+                });
             }
             // CR 702.54a: gated on an opponent having been dealt damage this turn.
             ReplacementPayload::EntersWithCountersBloodthirst { kind, amount } => {
                 let controller = state.object(object).map(|o| o.controller);
                 if controller.is_some_and(|c| opponent_damaged_this_turn(state, c)) {
-                    counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
+                    counter_events.push(GameEventKind::CounterAdded {
+                        object,
+                        kind,
+                        amount,
+                    });
                 }
             }
             // CR 702.138c: gated on `entered_via_escape`, already set on `object`.
             ReplacementPayload::EntersWithCountersEscape { kind, amount } => {
                 if state.object(object).is_some_and(|o| o.entered_via_escape) {
-                    counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
+                    counter_events.push(GameEventKind::CounterAdded {
+                        object,
+                        kind,
+                        amount,
+                    });
                 }
             }
             // CR 702.44a: kind and amount are derived here; `ColorSet` has one bit per color.
@@ -356,7 +436,11 @@ pub fn apply_enters_battlefield_modifiers(
                     } else {
                         CounterKind::Charge
                     };
-                    counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
+                    counter_events.push(GameEventKind::CounterAdded {
+                        object,
+                        kind,
+                        amount,
+                    });
                 }
             }
             _ => continue,
@@ -385,15 +469,28 @@ pub fn pending_devour_choice(
     from: ZoneKind,
     controller: PlayerId,
 ) -> Option<(i32, Vec<ObjectId>)> {
-    let candidate = GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
-    let (per_creature, quality) = state.replacement_effects.iter().find_map(|r| match &r.spec {
-        ReplacementSpec::Primitive { payload: ReplacementPayload::EntersWithCountersDevour { per_creature, quality }, .. }
-            if r.matches(&candidate, false, state, script_runtime) =>
-        {
-            Some((*per_creature, quality.clone()))
-        }
-        _ => None,
-    })?;
+    let candidate = GameEventKind::ZoneChange {
+        object,
+        from,
+        to: ZoneKind::Battlefield,
+        last_known_info: None,
+    };
+    let (per_creature, quality) = state
+        .replacement_effects
+        .iter()
+        .find_map(|r| match &r.spec {
+            ReplacementSpec::Primitive {
+                payload:
+                    ReplacementPayload::EntersWithCountersDevour {
+                        per_creature,
+                        quality,
+                    },
+                ..
+            } if r.matches(&candidate, false, state, script_runtime) => {
+                Some((*per_creature, quality.clone()))
+            }
+            _ => None,
+        })?;
     let candidates: Vec<ObjectId> = state
         .objects
         .values()
@@ -401,15 +498,17 @@ pub fn pending_devour_choice(
             if obj.zone != ZoneKind::Battlefield || obj.controller != controller {
                 return false;
             }
-            let effective = crate::layers::effective_characteristics(state, script_runtime, obj.object_id);
+            let effective =
+                crate::layers::effective_characteristics(state, script_runtime, obj.object_id);
             if !effective.card_types.contains(CardTypeSet::CREATURE) {
                 return false;
             }
             // CR 702.82c
             if let Some(quality) = &quality
-                && !effective.subtypes.contains(quality) {
-                    return false;
-                }
+                && !effective.subtypes.contains(quality)
+            {
+                return false;
+            }
             true
         })
         .map(|obj| obj.object_id)
@@ -434,16 +533,24 @@ pub fn pending_amplify_choice(
     from: ZoneKind,
     controller: PlayerId,
 ) -> Option<(i32, Vec<ObjectId>)> {
-    let candidate = GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
-    let per_card = state.replacement_effects.iter().find_map(|r| match &r.spec {
-        ReplacementSpec::Primitive { payload: ReplacementPayload::EntersWithCountersAmplify { per_card }, .. }
-            if r.matches(&candidate, false, state, script_runtime) =>
-        {
-            Some(*per_card)
-        }
-        _ => None,
-    })?;
-    let object_subtypes = crate::layers::effective_characteristics(state, script_runtime, object).subtypes;
+    let candidate = GameEventKind::ZoneChange {
+        object,
+        from,
+        to: ZoneKind::Battlefield,
+        last_known_info: None,
+    };
+    let per_card = state
+        .replacement_effects
+        .iter()
+        .find_map(|r| match &r.spec {
+            ReplacementSpec::Primitive {
+                payload: ReplacementPayload::EntersWithCountersAmplify { per_card },
+                ..
+            } if r.matches(&candidate, false, state, script_runtime) => Some(*per_card),
+            _ => None,
+        })?;
+    let object_subtypes =
+        crate::layers::effective_characteristics(state, script_runtime, object).subtypes;
     if object_subtypes.is_empty() {
         return None;
     }
@@ -478,15 +585,22 @@ pub fn pending_copy_choice(
     object: ObjectId,
     from: ZoneKind,
 ) -> Option<(CopyExceptions, Vec<ObjectId>)> {
-    let candidate = GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
-    let exceptions = state.replacement_effects.iter().find_map(|r| match &r.spec {
-        ReplacementSpec::Primitive { payload: ReplacementPayload::EntersAsCopy(exceptions), .. }
-            if r.matches(&candidate, false, state, script_runtime) =>
-        {
-            Some(exceptions.clone())
-        }
-        _ => None,
-    })?;
+    let candidate = GameEventKind::ZoneChange {
+        object,
+        from,
+        to: ZoneKind::Battlefield,
+        last_known_info: None,
+    };
+    let exceptions = state
+        .replacement_effects
+        .iter()
+        .find_map(|r| match &r.spec {
+            ReplacementSpec::Primitive {
+                payload: ReplacementPayload::EntersAsCopy(exceptions),
+                ..
+            } if r.matches(&candidate, false, state, script_runtime) => Some(exceptions.clone()),
+            _ => None,
+        })?;
     let candidates: Vec<ObjectId> = state
         .objects
         .values()
@@ -508,7 +622,10 @@ pub fn pending_copy_choice(
 /// combat or not. The turn starts after the latest `TurnStarted` in the ledger,
 /// or at the ledger's start if there is none. Damage to permanents does not count.
 pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bool {
-    let turn_start = state.ledger.iter().rposition(|e| matches!(e.kind, GameEventKind::TurnStarted { .. }));
+    let turn_start = state
+        .ledger
+        .iter()
+        .rposition(|e| matches!(e.kind, GameEventKind::TurnStarted { .. }));
     let scan_from = turn_start.map(|i| i + 1).unwrap_or(0);
     state.ledger[scan_from..]
         .iter()
@@ -522,8 +639,12 @@ pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bo
 /// cleanup-discard and cost-payment discard paths.
 // TODO: track which exile-instead-of-discard effect won the CR 616.1 ordering choice when more than one applies
 pub fn madness_marker_event(state: &GameState, event: &GameEventKind) -> Option<GameEventKind> {
-    let GameEventKind::ZoneChange { object, from: ZoneKind::Hand, to: ZoneKind::Exile, last_known_info: Some(lki) } =
-        event
+    let GameEventKind::ZoneChange {
+        object,
+        from: ZoneKind::Hand,
+        to: ZoneKind::Exile,
+        last_known_info: Some(lki),
+    } = event
     else {
         return None;
     };
@@ -542,16 +663,23 @@ pub fn madness_marker_event(state: &GameState, event: &GameEventKind) -> Option<
     if !has_own_madness_redirect {
         return None;
     }
-    Some(GameEventKind::MadnessExiled { object: *object, last_known_info: lki.clone() })
+    Some(GameEventKind::MadnessExiled {
+        object: *object,
+        last_known_info: lki.clone(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
-    use crate::types::counter::CounterSet;
+    use crate::types::card::{
+        CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet,
+    };
     use crate::types::cost::FilterController;
-    use crate::types::effect::{EffectFilter, EventFilter, ReplacementEffect, ReplacementPayload, ReplacementSpec};
+    use crate::types::counter::CounterSet;
+    use crate::types::effect::{
+        EffectFilter, EventFilter, ReplacementEffect, ReplacementPayload, ReplacementSpec,
+    };
     use crate::types::game::RngState;
     use crate::types::ids::SequenceNo;
     use crate::types::mana::ManaPool;
@@ -568,7 +696,9 @@ mod tests {
             definition: CardDefinition {
                 definition_id: 1,
                 name: "Test Object".to_string(),
-                mana_cost: crate::types::mana::ManaCost { symbols: Vec::new() },
+                mana_cost: crate::types::mana::ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator: None,
                 supertypes: SupertypeSet::empty(),
                 card_types,
@@ -599,12 +729,16 @@ mod tests {
             deathtouched: false,
             counters: CounterSet::new(),
             attachments: Vec::new(),
-            attached_to: None, attached_to_player: None,
+            attached_to: None,
+            attached_to_player: None,
             timestamp: SequenceNo(0),
             controlled_since_turn: 0,
             is_commander: false,
             is_token: false,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
@@ -664,7 +798,10 @@ mod tests {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: RngState { seed: 1, draws_consumed: 0 },
+            rng: RngState {
+                seed: 1,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no: 0,
             next_object_id: 1000,
@@ -682,76 +819,141 @@ mod tests {
     }
 
     fn no_filter() -> EffectFilter {
-        EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
+        EffectFilter {
+            card_types: None,
+            controller: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }
     }
 
     #[test]
     fn resolves_unchanged_with_nothing_registered() {
         let mut state = state_with(Vec::new());
-        let event = GameEventKind::DamageDealt { source: ObjectId(0), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+        let event = GameEventKind::DamageDealt {
+            source: ObjectId(0),
+            target: Target::Player(PlayerId(0)),
+            amount: 5,
+            is_combat_damage: false,
+        };
+        let ReplacementOutcome::Resolved(resolved) =
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        else {
             panic!("expected Resolved with no replacement effects registered");
         };
-        assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 5, .. }));
+        assert!(matches!(
+            resolved,
+            GameEventKind::DamageDealt { amount: 5, .. }
+        ));
     }
 
     #[test]
     fn resolves_unchanged_when_nothing_matches() {
         let effect_source = ObjectId(0);
-        let mut state = state_with(vec![object(effect_source, PlayerId(0), CardTypeSet::ARTIFACT)]);
+        let mut state = state_with(vec![object(
+            effect_source,
+            PlayerId(0),
+            CardTypeSet::ARTIFACT,
+        )]);
         state.replacement_effects.push(ReplacementEffect {
             source: effect_source,
             spec: ReplacementSpec::Primitive {
                 filter: EventFilter::DamageDealt {
-                    affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), ..no_filter() },
+                    affected: EffectFilter {
+                        card_types: Some(CardTypeSet::CREATURE),
+                        ..no_filter()
+                    },
                 },
                 payload: ReplacementPayload::PreventDamage,
             },
             consumption: ConsumptionPolicy::Repeatable,
         });
         // The target is an Artifact, so the creature filter does not match.
-        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Object(effect_source), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+        let event = GameEventKind::DamageDealt {
+            source: ObjectId(1),
+            target: Target::Object(effect_source),
+            amount: 5,
+            is_combat_damage: false,
+        };
+        let ReplacementOutcome::Resolved(resolved) =
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        else {
             panic!("expected Resolved - filter doesn't match");
         };
-        assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 5, .. }));
+        assert!(matches!(
+            resolved,
+            GameEventKind::DamageDealt { amount: 5, .. }
+        ));
     }
 
     #[test]
     fn one_shot_effect_applies_once_then_is_removed() {
         let effect_source = ObjectId(0);
-        let mut state = state_with(vec![object(effect_source, PlayerId(0), CardTypeSet::ARTIFACT)]);
+        let mut state = state_with(vec![object(
+            effect_source,
+            PlayerId(0),
+            CardTypeSet::ARTIFACT,
+        )]);
         state.replacement_effects.push(ReplacementEffect {
             source: effect_source,
             spec: ReplacementSpec::Primitive {
-                filter: EventFilter::DamageDealt { affected: no_filter() },
+                filter: EventFilter::DamageDealt {
+                    affected: no_filter(),
+                },
                 payload: ReplacementPayload::PreventDamage,
             },
             consumption: ConsumptionPolicy::OneShot,
         });
 
-        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+        let event = GameEventKind::DamageDealt {
+            source: ObjectId(1),
+            target: Target::Player(PlayerId(0)),
+            amount: 5,
+            is_combat_damage: false,
+        };
+        let ReplacementOutcome::Resolved(resolved) =
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        else {
             panic!("expected a single match to resolve");
         };
-        assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 0, .. }));
-        assert!(state.replacement_effects.is_empty(), "OneShot must be consumed after applying");
+        assert!(matches!(
+            resolved,
+            GameEventKind::DamageDealt { amount: 0, .. }
+        ));
+        assert!(
+            state.replacement_effects.is_empty(),
+            "OneShot must be consumed after applying"
+        );
     }
 
     #[test]
     fn limited_uses_decrements_then_expires() {
         let effect_source = ObjectId(0);
-        let mut state = state_with(vec![object(effect_source, PlayerId(0), CardTypeSet::ARTIFACT)]);
+        let mut state = state_with(vec![object(
+            effect_source,
+            PlayerId(0),
+            CardTypeSet::ARTIFACT,
+        )]);
         state.replacement_effects.push(ReplacementEffect {
             source: effect_source,
             spec: ReplacementSpec::Primitive {
-                filter: EventFilter::DamageDealt { affected: no_filter() },
+                filter: EventFilter::DamageDealt {
+                    affected: no_filter(),
+                },
                 payload: ReplacementPayload::PreventDamage,
             },
             consumption: ConsumptionPolicy::LimitedUses(2),
         });
 
-        let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
+        let event = || GameEventKind::DamageDealt {
+            source: ObjectId(1),
+            target: Target::Player(PlayerId(0)),
+            amount: 5,
+            is_combat_damage: false,
+        };
         apply_replacements(&mut state, &ScriptRuntime::new(), event(), false);
         assert_eq!(
             state.replacement_effects.first().map(|r| r.consumption),
@@ -760,26 +962,44 @@ mod tests {
         );
 
         apply_replacements(&mut state, &ScriptRuntime::new(), event(), false);
-        assert!(state.replacement_effects.is_empty(), "second use exhausts LimitedUses(1) and removes it");
+        assert!(
+            state.replacement_effects.is_empty(),
+            "second use exhausts LimitedUses(1) and removes it"
+        );
     }
 
     #[test]
     fn repeatable_effect_is_never_consumed() {
         let effect_source = ObjectId(0);
-        let mut state = state_with(vec![object(effect_source, PlayerId(0), CardTypeSet::ARTIFACT)]);
+        let mut state = state_with(vec![object(
+            effect_source,
+            PlayerId(0),
+            CardTypeSet::ARTIFACT,
+        )]);
         state.replacement_effects.push(ReplacementEffect {
             source: effect_source,
             spec: ReplacementSpec::Primitive {
-                filter: EventFilter::DamageDealt { affected: no_filter() },
+                filter: EventFilter::DamageDealt {
+                    affected: no_filter(),
+                },
                 payload: ReplacementPayload::PreventDamage,
             },
             consumption: ConsumptionPolicy::Repeatable,
         });
 
-        let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
+        let event = || GameEventKind::DamageDealt {
+            source: ObjectId(1),
+            target: Target::Player(PlayerId(0)),
+            amount: 5,
+            is_combat_damage: false,
+        };
         apply_replacements(&mut state, &ScriptRuntime::new(), event(), false);
         apply_replacements(&mut state, &ScriptRuntime::new(), event(), false);
-        assert_eq!(state.replacement_effects.len(), 1, "Repeatable is never removed or decremented");
+        assert_eq!(
+            state.replacement_effects.len(),
+            1,
+            "Repeatable is never removed or decremented"
+        );
     }
 
     #[test]
@@ -794,20 +1014,34 @@ mod tests {
             state.replacement_effects.push(ReplacementEffect {
                 source,
                 spec: ReplacementSpec::Primitive {
-                    filter: EventFilter::DamageDealt { affected: no_filter() },
+                    filter: EventFilter::DamageDealt {
+                        affected: no_filter(),
+                    },
                     payload: ReplacementPayload::PreventDamage,
                 },
                 consumption: ConsumptionPolicy::Repeatable,
             });
         }
 
-        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::NeedsOrderingChoice { affected_player, candidates, .. } =
-            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        let event = GameEventKind::DamageDealt {
+            source: ObjectId(2),
+            target: Target::Player(PlayerId(0)),
+            amount: 5,
+            is_combat_damage: false,
+        };
+        let ReplacementOutcome::NeedsOrderingChoice {
+            affected_player,
+            candidates,
+            ..
+        } = apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
         else {
             panic!("expected a pause - two effects match the same event");
         };
-        assert_eq!(affected_player, PlayerId(0), "damage to a player - that player is affected");
+        assert_eq!(
+            affected_player,
+            PlayerId(0),
+            "damage to a player - that player is affected"
+        );
         assert_eq!(candidates.len(), 2);
         assert!(
             candidates.contains(&ReplacementCandidate::Registered(a))
@@ -823,13 +1057,18 @@ mod tests {
         let p1 = PlayerId(1);
         let source_a = ObjectId(0);
         let source_b = ObjectId(1);
-        let mut state =
-            state_with(vec![object(source_a, p1, CardTypeSet::ARTIFACT), object(source_b, p0, CardTypeSet::ARTIFACT)]);
+        let mut state = state_with(vec![
+            object(source_a, p1, CardTypeSet::ARTIFACT),
+            object(source_b, p0, CardTypeSet::ARTIFACT),
+        ]);
         state.replacement_effects.push(ReplacementEffect {
             source: source_a,
             spec: ReplacementSpec::Primitive {
                 filter: EventFilter::DamageDealt {
-                    affected: EffectFilter {  controller: Some(FilterController::You), ..no_filter() },
+                    affected: EffectFilter {
+                        controller: Some(FilterController::You),
+                        ..no_filter()
+                    },
                 },
                 payload: ReplacementPayload::RedirectDamage(Target::Player(p0)),
             },
@@ -839,16 +1078,28 @@ mod tests {
             source: source_b,
             spec: ReplacementSpec::Primitive {
                 filter: EventFilter::DamageDealt {
-                    affected: EffectFilter {  controller: Some(FilterController::You), ..no_filter() },
+                    affected: EffectFilter {
+                        controller: Some(FilterController::You),
+                        ..no_filter()
+                    },
                 },
                 payload: ReplacementPayload::PreventDamage,
             },
             consumption: ConsumptionPolicy::Repeatable,
         });
 
-        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p1), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
-            panic!("only one effect matches at any single point - never a real multi-match pause here");
+        let event = GameEventKind::DamageDealt {
+            source: ObjectId(2),
+            target: Target::Player(p1),
+            amount: 5,
+            is_combat_damage: false,
+        };
+        let ReplacementOutcome::Resolved(resolved) =
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        else {
+            panic!(
+                "only one effect matches at any single point - never a real multi-match pause here"
+            );
         };
         assert!(
             matches!(resolved, GameEventKind::DamageDealt { target: Target::Player(pid), amount: 0, .. } if pid == p0),
@@ -861,14 +1112,31 @@ mod tests {
     #[test]
     fn token_zone_lock_blocks_a_second_move_for_an_already_departed_token() {
         let id = ObjectId(0);
-        let token = GameObject { zone: ZoneKind::Graveyard, is_token: true, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
+        let token = GameObject {
+            zone: ZoneKind::Graveyard,
+            is_token: true,
+            ..object(id, PlayerId(0), CardTypeSet::CREATURE)
+        };
         let mut state = state_with(vec![token]);
-        let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Graveyard, to: ZoneKind::Exile, last_known_info: None };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+        let event = GameEventKind::ZoneChange {
+            object: id,
+            from: ZoneKind::Graveyard,
+            to: ZoneKind::Exile,
+            last_known_info: None,
+        };
+        let ReplacementOutcome::Resolved(resolved) =
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        else {
             panic!("no registered effects, no ordering choice possible");
         };
         assert!(
-            matches!(resolved, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }),
+            matches!(
+                resolved,
+                GameEventKind::ZoneChange {
+                    to: ZoneKind::Graveyard,
+                    ..
+                }
+            ),
             "CR 111.8: the token must stay in its current zone instead of moving to Exile: {resolved:?}"
         );
     }
@@ -876,14 +1144,31 @@ mod tests {
     #[test]
     fn token_zone_lock_blocks_a_departed_token_from_returning_to_the_battlefield() {
         let id = ObjectId(0);
-        let token = GameObject { zone: ZoneKind::Graveyard, is_token: true, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
+        let token = GameObject {
+            zone: ZoneKind::Graveyard,
+            is_token: true,
+            ..object(id, PlayerId(0), CardTypeSet::CREATURE)
+        };
         let mut state = state_with(vec![token]);
-        let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Graveyard, to: ZoneKind::Battlefield, last_known_info: None };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+        let event = GameEventKind::ZoneChange {
+            object: id,
+            from: ZoneKind::Graveyard,
+            to: ZoneKind::Battlefield,
+            last_known_info: None,
+        };
+        let ReplacementOutcome::Resolved(resolved) =
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        else {
             panic!("no registered effects, no ordering choice possible");
         };
         assert!(
-            matches!(resolved, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }),
+            matches!(
+                resolved,
+                GameEventKind::ZoneChange {
+                    to: ZoneKind::Graveyard,
+                    ..
+                }
+            ),
             "CR 111.8 explicitly covers \"come back onto the battlefield\" too: {resolved:?}"
         );
     }
@@ -891,14 +1176,31 @@ mod tests {
     #[test]
     fn token_zone_lock_allows_the_first_move_off_the_battlefield() {
         let id = ObjectId(0);
-        let token = GameObject { zone: ZoneKind::Battlefield, is_token: true, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
+        let token = GameObject {
+            zone: ZoneKind::Battlefield,
+            is_token: true,
+            ..object(id, PlayerId(0), CardTypeSet::CREATURE)
+        };
         let mut state = state_with(vec![token]);
-        let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+        let event = GameEventKind::ZoneChange {
+            object: id,
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Graveyard,
+            last_known_info: None,
+        };
+        let ReplacementOutcome::Resolved(resolved) =
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        else {
             panic!("no registered effects, no ordering choice possible");
         };
         assert!(
-            matches!(resolved, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }),
+            matches!(
+                resolved,
+                GameEventKind::ZoneChange {
+                    to: ZoneKind::Graveyard,
+                    ..
+                }
+            ),
             "a token's first move off the battlefield isn't covered by CR 111.8: {resolved:?}"
         );
     }
@@ -907,14 +1209,30 @@ mod tests {
     fn token_zone_lock_ignores_non_token_objects() {
         let id = ObjectId(0);
         // CR 111.8: applies to tokens only.
-        let card = GameObject { zone: ZoneKind::Graveyard, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
+        let card = GameObject {
+            zone: ZoneKind::Graveyard,
+            ..object(id, PlayerId(0), CardTypeSet::CREATURE)
+        };
         let mut state = state_with(vec![card]);
-        let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Graveyard, to: ZoneKind::Exile, last_known_info: None };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+        let event = GameEventKind::ZoneChange {
+            object: id,
+            from: ZoneKind::Graveyard,
+            to: ZoneKind::Exile,
+            last_known_info: None,
+        };
+        let ReplacementOutcome::Resolved(resolved) =
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
+        else {
             panic!("no registered effects, no ordering choice possible");
         };
         assert!(
-            matches!(resolved, GameEventKind::ZoneChange { to: ZoneKind::Exile, .. }),
+            matches!(
+                resolved,
+                GameEventKind::ZoneChange {
+                    to: ZoneKind::Exile,
+                    ..
+                }
+            ),
             "a non-token card already off the battlefield isn't locked in place: {resolved:?}"
         );
     }

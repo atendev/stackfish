@@ -12,7 +12,9 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
+use crate::types::player::{
+    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier,
+};
 use crate::types::target::TargetFilter;
 
 #[derive(Debug)]
@@ -53,7 +55,10 @@ pub enum ScriptChoiceRequest {
     /// chosen. `Engine::submit_script_choice` checks it directly and not in
     /// `TargetFilter::Object`, which ~50 sites construct and none of the
     /// others need an exclusion set.
-    SelectTarget { filter: TargetFilter, exclude_ids: Vec<ObjectId> },
+    SelectTarget {
+        filter: TargetFilter,
+        exclude_ids: Vec<ObjectId>,
+    },
     /// `Game.MayChoose()` (CR 608.2d): a plain yes/no choice, where any `bool`
     /// is legal. `Game.ChooseN`'s `up_to` mode reuses it to ask "one more?"
     /// before each optional pick.
@@ -111,10 +116,21 @@ pub enum ScriptZoneMoveKind {
 #[derive(Debug)]
 pub enum OperationOutcome {
     Finished,
-    NeedsChoice { thread: ScriptHandle, request: ScriptChoiceRequest },
+    NeedsChoice {
+        thread: ScriptHandle,
+        request: ScriptChoiceRequest,
+    },
     PendingZoneMoves(Vec<(ScriptZoneMoveKind, Vec<ObjectId>)>),
-    PendingCast { card: ObjectId, modes: Vec<u32>, targets: Vec<Target>, x_value: Option<u32>, free: bool },
-    PendingDraw { amount: u32 },
+    PendingCast {
+        card: ObjectId,
+        modes: Vec<u32>,
+        targets: Vec<Target>,
+        x_value: Option<u32>,
+        free: bool,
+    },
+    PendingDraw {
+        amount: u32,
+    },
     PendingEvents(Vec<GameEventKind>),
 }
 
@@ -158,18 +174,22 @@ pub(crate) struct ScriptRegistry {
     /// For `Game.CreateHandSizeModifier`'s builder (CR 402.2), drained into
     /// `GameState.hand_size_modifiers`, with a placeholder `controller`
     /// resolved at drain as in `pending_cost_modifiers`.
-    pub(crate) pending_hand_size_modifiers: Vec<(HandSizeModifier, Option<crate::types::zone::ZoneKind>)>,
+    pub(crate) pending_hand_size_modifiers:
+        Vec<(HandSizeModifier, Option<crate::types::zone::ZoneKind>)>,
     /// For `Game.CreateHandRevealModifier`'s builder (CR 701.20a, 303.4m),
     /// drained into `GameState.hand_reveal_modifiers`, with the same
     /// placeholders.
-    pub(crate) pending_hand_reveal_modifiers: Vec<(HandRevealModifier, Option<crate::types::zone::ZoneKind>)>,
+    pub(crate) pending_hand_reveal_modifiers:
+        Vec<(HandRevealModifier, Option<crate::types::zone::ZoneKind>)>,
     /// For `Game.CreateDrawLimitModifier`'s builder (CR 121.2b), drained into
     /// `GameState.draw_limit_modifiers`, with the same placeholders.
-    pub(crate) pending_draw_limit_modifiers: Vec<(DrawLimitModifier, Option<crate::types::zone::ZoneKind>)>,
+    pub(crate) pending_draw_limit_modifiers:
+        Vec<(DrawLimitModifier, Option<crate::types::zone::ZoneKind>)>,
     /// For `Game.CreateLandPlayModifier`'s builder (CR 305.2), drained into
     /// `GameState.land_play_modifiers`. A placeholder `controller` only, since
     /// `LandPlayModifier` has no `timestamp`.
-    pub(crate) pending_land_play_modifiers: Vec<(LandPlayModifier, Option<crate::types::zone::ZoneKind>)>,
+    pub(crate) pending_land_play_modifiers:
+        Vec<(LandPlayModifier, Option<crate::types::zone::ZoneKind>)>,
     /// A coroutine `Thread` suspended mid-`invoke_operation` at a
     /// `Game.SelectTargets` call, keyed in the `ScriptHandle` space `scripts`
     /// uses (sharing `next_handle`). A separate map because `resume_operation`

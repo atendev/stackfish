@@ -6,13 +6,17 @@ use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 fn creature_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -37,7 +41,9 @@ fn land_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::LAND,
@@ -62,7 +68,9 @@ fn equipment_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ARTIFACT,
@@ -87,7 +95,9 @@ fn fortification_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ARTIFACT,
@@ -112,7 +122,9 @@ fn search_spell_definition(destination: SearchDestination) -> CardDefinition {
     CardDefinition {
         definition_id: 40,
         name: "Test Search Spell".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::SORCERY,
@@ -129,7 +141,14 @@ fn search_spell_definition(destination: SearchDestination) -> CardDefinition {
         alternative_costs: Vec::new(),
         buyback_cost: None,
         effect: Some(AbilityEffect::Search {
-            filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: None,
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
             count: 1,
             destination,
             shuffle_after: true,
@@ -143,7 +162,11 @@ fn two_player_state(library: Vec<ObjectId>) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let mut zones = hand_battlefield_graveyard_zones(p0, p1);
-    zones.push(Zone { kind: ZoneKind::Library, owner: Some(p0), contents: VecDeque::from(library) });
+    zones.push(Zone {
+        kind: ZoneKind::Library,
+        owner: Some(p0),
+        contents: VecDeque::from(library),
+    });
     zones.push(Zone::new(ZoneKind::Library, Some(p1)));
     GameState {
         step: Step::PreCombatMain,
@@ -154,7 +177,10 @@ fn two_player_state(library: Vec<ObjectId>) -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -162,22 +188,46 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -189,13 +239,40 @@ fn equipment_with_one_legal_creature_attaches_immediately_no_pause() {
     let bear = ObjectId(11);
     let card = ObjectId(2);
     let mut state = two_player_state(vec![sword]);
-    state.objects.insert(sword, card_object(sword, equipment_definition(1, "Test Sword"), p0, ZoneKind::Library));
-    put_on_battlefield(&mut state, card_object(bear, creature_definition(2, "Bear"), p0, ZoneKind::Battlefield));
+    state.objects.insert(
+        sword,
+        card_object(
+            sword,
+            equipment_definition(1, "Test Sword"),
+            p0,
+            ZoneKind::Library,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear,
+            creature_definition(2, "Bear"),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
     state.objects.insert(
         card,
-        card_object(card, search_spell_definition(SearchDestination::Battlefield { tapped: false, enters_attached: true }), p0, ZoneKind::Hand),
+        card_object(
+            card,
+            search_spell_definition(SearchDestination::Battlefield {
+                tapped: false,
+                enters_attached: true,
+            }),
+            p0,
+            ZoneKind::Hand,
+        ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -206,14 +283,35 @@ fn equipment_with_one_legal_creature_attaches_immediately_no_pause() {
     };
     assert_eq!(candidates, vec![sword]);
 
-    engine.submit_search_choice(vec![sword]).expect("sword is the only candidate");
+    engine
+        .submit_search_choice(vec![sword])
+        .expect("sword is the only candidate");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "no attach-choice pause with only one legal candidate, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "no attach-choice pause with only one legal candidate, got {status:?}"
+    );
 
-    let battlefield: Vec<ObjectId> = engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.iter().copied().collect();
-    let new_sword = *battlefield.iter().find(|id| **id != bear).expect("the sword entered the battlefield");
-    assert_eq!(engine.state().object(new_sword).unwrap().attached_to, Some(bear));
-    assert_eq!(engine.state().object(bear).unwrap().attachments, vec![new_sword]);
+    let battlefield: Vec<ObjectId> = engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .iter()
+        .copied()
+        .collect();
+    let new_sword = *battlefield
+        .iter()
+        .find(|id| **id != bear)
+        .expect("the sword entered the battlefield");
+    assert_eq!(
+        engine.state().object(new_sword).unwrap().attached_to,
+        Some(bear)
+    );
+    assert_eq!(
+        engine.state().object(bear).unwrap().attachments,
+        vec![new_sword]
+    );
 }
 
 #[test]
@@ -225,23 +323,65 @@ fn equipment_with_two_legal_creatures_pauses_and_resumes_the_search_afterward() 
     let bear_b = ObjectId(12);
     let card = ObjectId(2);
     let mut state = two_player_state(vec![sword]);
-    state.objects.insert(sword, card_object(sword, equipment_definition(1, "Test Sword"), p0, ZoneKind::Library));
-    put_on_battlefield(&mut state, card_object(bear_a, creature_definition(2, "Bear A"), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(bear_b, creature_definition(3, "Bear B"), p0, ZoneKind::Battlefield));
+    state.objects.insert(
+        sword,
+        card_object(
+            sword,
+            equipment_definition(1, "Test Sword"),
+            p0,
+            ZoneKind::Library,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear_a,
+            creature_definition(2, "Bear A"),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear_b,
+            creature_definition(3, "Bear B"),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
     state.objects.insert(
         card,
-        card_object(card, search_spell_definition(SearchDestination::Battlefield { tapped: false, enters_attached: true }), p0, ZoneKind::Hand),
+        card_object(
+            card,
+            search_spell_definition(SearchDestination::Battlefield {
+                tapped: false,
+                enters_attached: true,
+            }),
+            p0,
+            ZoneKind::Hand,
+        ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
-    engine.submit_search_choice(vec![sword]).expect("sword is a candidate");
+    engine
+        .submit_search_choice(vec![sword])
+        .expect("sword is a candidate");
 
     let status = drain(&mut engine);
-    let StepStatus::AwaitingEntryAttachChoice { player, attaching: paused_sword, candidates } = status else {
+    let StepStatus::AwaitingEntryAttachChoice {
+        player,
+        attaching: paused_sword,
+        candidates,
+    } = status
+    else {
         panic!("expected a CR 301.5e attach-choice pause, got {status:?}")
     };
     assert_eq!(player, p0);
@@ -258,15 +398,32 @@ fn equipment_with_two_legal_creatures_pauses_and_resumes_the_search_afterward() 
         Target::Ability(id) => id.0,
     });
     assert_eq!(sorted, expected, "both bears are legal equip targets");
-    assert_eq!(engine.state().object(paused_sword).unwrap().zone, ZoneKind::Battlefield);
-    assert_eq!(engine.state().object(paused_sword).unwrap().attached_to, None);
+    assert_eq!(
+        engine.state().object(paused_sword).unwrap().zone,
+        ZoneKind::Battlefield
+    );
+    assert_eq!(
+        engine.state().object(paused_sword).unwrap().attached_to,
+        None
+    );
 
-    engine.submit_entry_attach_choice(Target::Object(bear_b)).expect("bear_b is an offered candidate");
+    engine
+        .submit_entry_attach_choice(Target::Object(bear_b))
+        .expect("bear_b is an offered candidate");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "the search's remaining work (shuffle, resolve) should finish, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "the search's remaining work (shuffle, resolve) should finish, got {status:?}"
+    );
 
-    assert_eq!(engine.state().object(paused_sword).unwrap().attached_to, Some(bear_b));
-    assert_eq!(engine.state().object(bear_b).unwrap().attachments, vec![paused_sword]);
+    assert_eq!(
+        engine.state().object(paused_sword).unwrap().attached_to,
+        Some(bear_b)
+    );
+    assert_eq!(
+        engine.state().object(bear_b).unwrap().attachments,
+        vec![paused_sword]
+    );
 }
 
 #[test]
@@ -277,26 +434,64 @@ fn equipment_with_zero_legal_creatures_enters_unattached() {
     let card = ObjectId(2);
     // No creatures anywhere: unlike an Aura (CR 303.4g), the Equipment still enters, unattached.
     let mut state = two_player_state(vec![sword]);
-    state.objects.insert(sword, card_object(sword, equipment_definition(1, "Test Sword"), p0, ZoneKind::Library));
+    state.objects.insert(
+        sword,
+        card_object(
+            sword,
+            equipment_definition(1, "Test Sword"),
+            p0,
+            ZoneKind::Library,
+        ),
+    );
     state.objects.insert(
         card,
-        card_object(card, search_spell_definition(SearchDestination::Battlefield { tapped: false, enters_attached: true }), p0, ZoneKind::Hand),
+        card_object(
+            card,
+            search_spell_definition(SearchDestination::Battlefield {
+                tapped: false,
+                enters_attached: true,
+            }),
+            p0,
+            ZoneKind::Hand,
+        ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
-    engine.submit_search_choice(vec![sword]).expect("sword is the only candidate");
+    engine
+        .submit_search_choice(vec![sword])
+        .expect("sword is the only candidate");
 
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    let battlefield: Vec<ObjectId> = engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.iter().copied().collect();
-    assert_eq!(battlefield.len(), 1, "CR 301.5e: the Equipment enters the battlefield despite no legal attach target");
-    assert_eq!(engine.state().object(battlefield[0]).unwrap().attached_to, None);
-    assert!(engine.state().object(sword).is_none(), "the library object was replaced by the battlefield one");
+    let battlefield: Vec<ObjectId> = engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .iter()
+        .copied()
+        .collect();
+    assert_eq!(
+        battlefield.len(),
+        1,
+        "CR 301.5e: the Equipment enters the battlefield despite no legal attach target"
+    );
+    assert_eq!(
+        engine.state().object(battlefield[0]).unwrap().attached_to,
+        None
+    );
+    assert!(
+        engine.state().object(sword).is_none(),
+        "the library object was replaced by the battlefield one"
+    );
 }
 
 #[test]
@@ -308,26 +503,84 @@ fn fortification_with_one_legal_land_attaches_immediately_and_ignores_a_creature
     let forest = ObjectId(12);
     let card = ObjectId(2);
     let mut state = two_player_state(vec![wall]);
-    state.objects.insert(wall, card_object(wall, fortification_definition(1, "Test Wall"), p0, ZoneKind::Library));
-    put_on_battlefield(&mut state, card_object(bear, creature_definition(2, "Bear"), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, card_object(forest, land_definition(3, "Forest"), p0, ZoneKind::Battlefield));
+    state.objects.insert(
+        wall,
+        card_object(
+            wall,
+            fortification_definition(1, "Test Wall"),
+            p0,
+            ZoneKind::Library,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear,
+            creature_definition(2, "Bear"),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            forest,
+            land_definition(3, "Forest"),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
     state.objects.insert(
         card,
-        card_object(card, search_spell_definition(SearchDestination::Battlefield { tapped: false, enters_attached: true }), p0, ZoneKind::Hand),
+        card_object(
+            card,
+            search_spell_definition(SearchDestination::Battlefield {
+                tapped: false,
+                enters_attached: true,
+            }),
+            p0,
+            ZoneKind::Hand,
+        ),
     );
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
-    engine.submit_search_choice(vec![wall]).expect("wall is the only candidate");
+    engine
+        .submit_search_choice(vec![wall])
+        .expect("wall is the only candidate");
 
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "a single legal land candidate attaches immediately, no pause, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "a single legal land candidate attaches immediately, no pause, got {status:?}"
+    );
 
-    let battlefield: Vec<ObjectId> = engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.iter().copied().collect();
-    let new_wall = *battlefield.iter().find(|id| **id != bear && **id != forest).expect("the fortification entered the battlefield");
-    assert_eq!(engine.state().object(new_wall).unwrap().attached_to, Some(forest), "attached to the land, not the creature present on the battlefield");
-    assert_eq!(engine.state().object(bear).unwrap().attachments, Vec::<ObjectId>::new(), "the creature was never a candidate");
+    let battlefield: Vec<ObjectId> = engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .iter()
+        .copied()
+        .collect();
+    let new_wall = *battlefield
+        .iter()
+        .find(|id| **id != bear && **id != forest)
+        .expect("the fortification entered the battlefield");
+    assert_eq!(
+        engine.state().object(new_wall).unwrap().attached_to,
+        Some(forest),
+        "attached to the land, not the creature present on the battlefield"
+    );
+    assert_eq!(
+        engine.state().object(bear).unwrap().attachments,
+        Vec::<ObjectId>::new(),
+        "the creature was never a candidate"
+    );
 }

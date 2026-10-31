@@ -42,8 +42,7 @@ pub(crate) fn validate_declare_attackers(
     }
     if state.phase != Phase::Combat || state.step != Step::DeclareAttackers {
         return Err(Rejected::IllegalAction(
-            "attackers can only be declared during the declare attackers step"
-                .to_string(),
+            "attackers can only be declared during the declare attackers step".to_string(),
         ));
     }
     if state.combat.is_some() {
@@ -76,7 +75,8 @@ pub(crate) fn validate_declare_attackers(
     let attackers = attackers
         .into_iter()
         .map(|(attacker, target)| {
-            let taps = !effective_keywords(state, script_runtime, attacker).contains(KeywordSet::VIGILANCE);
+            let taps = !effective_keywords(state, script_runtime, attacker)
+                .contains(KeywordSet::VIGILANCE);
             (attacker, target, taps)
         })
         .collect();
@@ -163,11 +163,15 @@ pub(crate) fn validate_declare_bands(
         let mut member_bands_with_other: Vec<Vec<crate::Subtype>> = Vec::new();
         let mut member_bands_with_other_supertypes: Vec<SupertypeSet> = Vec::new();
         for member in band {
-            let (_, member_target) = combat.attackers.iter().find(|(id, _)| id == member).ok_or_else(|| {
-                Rejected::IllegalAction(
-                    "a band member isn't actually attacking this combat".to_string(),
-                )
-            })?;
+            let (_, member_target) = combat
+                .attackers
+                .iter()
+                .find(|(id, _)| id == member)
+                .ok_or_else(|| {
+                    Rejected::IllegalAction(
+                        "a band member isn't actually attacking this combat".to_string(),
+                    )
+                })?;
             if seen.contains(member) {
                 return Err(Rejected::IllegalAction(
                     "a creature can be in at most one band".to_string(),
@@ -209,23 +213,32 @@ pub(crate) fn validate_declare_bands(
         // CR 702.22c
         // Second path: at least one member has bands-with-other for some quality Q and
         // every other member's subtypes include Q. Tries each named quality in turn.
-        let quality_shape = member_bands_with_other.iter().enumerate().any(|(i, qualities)| {
-            qualities.iter().any(|quality| {
-                member_subtypes
-                    .iter()
-                    .enumerate()
-                    .all(|(j, subtypes)| j == i || subtypes.contains(quality))
-            })
-        });
+        let quality_shape = member_bands_with_other
+            .iter()
+            .enumerate()
+            .any(|(i, qualities)| {
+                qualities.iter().any(|quality| {
+                    member_subtypes
+                        .iter()
+                        .enumerate()
+                        .all(|(j, subtypes)| j == i || subtypes.contains(quality))
+                })
+            });
         // CR 702.22c/m
         // The supertype form: the same any-one-quality shape, against each member's
         // `supertypes` bitset.
         let supertype_quality_shape =
-            member_bands_with_other_supertypes.iter().enumerate().any(|(i, qualities)| {
-                qualities.iter().any(|quality| {
-                    member_supertypes.iter().enumerate().all(|(j, supertypes)| j == i || supertypes.contains(quality))
-                })
-            });
+            member_bands_with_other_supertypes
+                .iter()
+                .enumerate()
+                .any(|(i, qualities)| {
+                    qualities.iter().any(|quality| {
+                        member_supertypes
+                            .iter()
+                            .enumerate()
+                            .all(|(j, supertypes)| j == i || supertypes.contains(quality))
+                    })
+                });
         if !plain_banding_shape && !quality_shape && !supertype_quality_shape {
             return Err(Rejected::IllegalAction(
                 "a band needs either at least one attacking creature with banding (and \
@@ -243,7 +256,10 @@ pub(crate) fn apply_declare_bands(
     state: &mut GameState,
     plan: BandsPlan,
 ) -> Result<CommandOutcome, Internal> {
-    let combat = state.combat.as_mut().ok_or_else(|| Internal::new("declare bands: the validated combat is gone"))?;
+    let combat = state
+        .combat
+        .as_mut()
+        .ok_or_else(|| Internal::new("declare bands: the validated combat is gone"))?;
     combat.bands = plan.bands;
 
     Ok(CommandOutcome {
@@ -325,13 +341,17 @@ pub(crate) fn validate_declare_blockers(
     // duplicate (blocker, member) pair is skipped.
     let mut propagated: Vec<(ObjectId, ObjectId)> = Vec::new();
     for (blocker, attacker) in &blocks {
-        let Some(band) = combat.bands.iter().find(|band| band.contains(attacker)) else { continue };
+        let Some(band) = combat.bands.iter().find(|band| band.contains(attacker)) else {
+            continue;
+        };
         for member in band {
             if member == attacker || !combat.attackers.iter().any(|(id, _)| id == member) {
                 continue;
             }
-            let already =
-                blocks.iter().chain(propagated.iter()).any(|(b, a)| b == blocker && a == member);
+            let already = blocks
+                .iter()
+                .chain(propagated.iter())
+                .any(|(b, a)| b == blocker && a == member);
             if !already {
                 propagated.push((*blocker, *member));
             }
@@ -348,10 +368,15 @@ pub(crate) fn apply_declare_blockers(
     let BlockersPlan { actor, blocks } = plan;
     let events = blocks
         .iter()
-        .map(|(blocker, attacker)| GameEventKind::BlockerDeclared { blocker: *blocker, attacker: *attacker })
+        .map(|(blocker, attacker)| GameEventKind::BlockerDeclared {
+            blocker: *blocker,
+            attacker: *attacker,
+        })
         .collect();
-    let combat =
-        state.combat.as_mut().ok_or_else(|| Internal::new("declare blockers: the validated combat is gone"))?;
+    let combat = state
+        .combat
+        .as_mut()
+        .ok_or_else(|| Internal::new("declare blockers: the validated combat is gone"))?;
     combat.blocks.extend(blocks);
     combat.declared_defenders.push(actor);
 
@@ -376,12 +401,21 @@ pub(crate) fn apply_declare_blockers(
 /// propagates only the blocked state: every other living, still-attacking member
 /// of `target`'s band becomes blocked by no one, like `target`.
 pub(crate) fn mark_effect_blocked(state: &mut GameState, target: ObjectId) {
-    let Some(combat) = state.combat.as_mut() else { return };
+    let Some(combat) = state.combat.as_mut() else {
+        return;
+    };
     if !combat.attackers.iter().any(|(id, _)| *id == target) {
         return;
     }
     mark_one_effect_blocked(combat, target);
-    let Some(band) = combat.bands.iter().find(|band| band.contains(&target)).cloned() else { return };
+    let Some(band) = combat
+        .bands
+        .iter()
+        .find(|band| band.contains(&target))
+        .cloned()
+    else {
+        return;
+    };
     for member in band {
         if member == target || !combat.attackers.iter().any(|(id, _)| *id == member) {
             continue;
@@ -391,7 +425,8 @@ pub(crate) fn mark_effect_blocked(state: &mut GameState, target: ObjectId) {
 }
 
 fn mark_one_effect_blocked(combat: &mut CombatState, attacker: ObjectId) {
-    let already = combat.blocks.iter().any(|(_, a)| *a == attacker) || combat.effect_blocked.contains(&attacker);
+    let already = combat.blocks.iter().any(|(_, a)| *a == attacker)
+        || combat.effect_blocked.contains(&attacker);
     if !already {
         combat.effect_blocked.push(attacker);
     }
@@ -409,7 +444,9 @@ pub(crate) fn attacker_can_attack(
     // CR 508.1a: only a creature on the battlefield can be declared as an
     // attacker.
     if object.zone != ZoneKind::Battlefield {
-        return Err(Rejected::IllegalAction("a chosen attacker is not on the battlefield".to_string()));
+        return Err(Rejected::IllegalAction(
+            "a chosen attacker is not on the battlefield".to_string(),
+        ));
     }
     // CR 508.1a: attacking requires *current* control, per
     // layers::effective_controller.
@@ -468,8 +505,7 @@ pub(crate) fn attack_target_is_legal(
             }
         }
         Target::Object(target_id) => {
-            let target_object =
-                state.object(*target_id).ok_or(Rejected::InvalidTarget)?;
+            let target_object = state.object(*target_id).ok_or(Rejected::InvalidTarget)?;
             // CR 508.1b: an attacked planeswalker or battle is a permanent.
             if target_object.zone != ZoneKind::Battlefield {
                 return Err(Rejected::IllegalAction(
@@ -478,9 +514,7 @@ pub(crate) fn attack_target_is_legal(
             }
             // CR 508.1b: the target permanent's *current*
             // controller must be an opponent.
-            if crate::layers::effective_controller(state, script_runtime, *target_id)
-                == actor
-            {
+            if crate::layers::effective_controller(state, script_runtime, *target_id) == actor {
                 return Err(Rejected::IllegalAction(
                     "an attacker's target permanent must be controlled by an \
                      opponent"
@@ -522,7 +556,9 @@ pub(crate) fn block_is_legal(
     // CR 509.1a: only a creature on the battlefield can be declared as a
     // blocker.
     if blocker_object.zone != ZoneKind::Battlefield {
-        return Err(Rejected::IllegalAction("a chosen blocker is not on the battlefield".to_string()));
+        return Err(Rejected::IllegalAction(
+            "a chosen blocker is not on the battlefield".to_string(),
+        ));
     }
     // CR 509.1a: blocking requires *current* control.
     if crate::layers::effective_controller(state, script_runtime, blocker) != actor {
@@ -530,8 +566,14 @@ pub(crate) fn block_is_legal(
             "actor does not control a chosen blocker".to_string(),
         ));
     }
-    if !blocker_object.definition.card_types.contains(CardTypeSet::CREATURE)
-        || blocker_object.definition.card_types.contains(CardTypeSet::BATTLE)
+    if !blocker_object
+        .definition
+        .card_types
+        .contains(CardTypeSet::CREATURE)
+        || blocker_object
+            .definition
+            .card_types
+            .contains(CardTypeSet::BATTLE)
     {
         return Err(Rejected::IllegalAction(
             "a chosen blocker is not a creature, or is also a battle".to_string(),
@@ -598,7 +640,9 @@ pub(crate) fn block_is_legal(
     // Fear: only artifact or black creatures can block. Intimidate: only artifact
     // creatures or creatures sharing a color with the attacker.
     if attacker_keywords.contains(KeywordSet::FEAR)
-        && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
+        && !(blocker_characteristics
+            .card_types
+            .contains(CardTypeSet::ARTIFACT)
             || blocker_characteristics.colors.contains(ColorSet::BLACK))
     {
         return Err(Rejected::IllegalAction(
@@ -608,8 +652,12 @@ pub(crate) fn block_is_legal(
         ));
     }
     if attacker_keywords.contains(KeywordSet::INTIMIDATE)
-        && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
-            || blocker_characteristics.colors.intersects(attacker_characteristics.colors))
+        && !(blocker_characteristics
+            .card_types
+            .contains(CardTypeSet::ARTIFACT)
+            || blocker_characteristics
+                .colors
+                .intersects(attacker_characteristics.colors))
     {
         return Err(Rejected::IllegalAction(
             "an attacker with intimidate can only be blocked by an artifact \
@@ -621,7 +669,9 @@ pub(crate) fn block_is_legal(
     // CR 702.28b
     // Shadow is symmetric: a shadow creature blocks and is blocked only by shadow
     // creatures.
-    if attacker_keywords.contains(KeywordSet::SHADOW) != blocker_keywords.contains(KeywordSet::SHADOW) {
+    if attacker_keywords.contains(KeywordSet::SHADOW)
+        != blocker_keywords.contains(KeywordSet::SHADOW)
+    {
         return Err(Rejected::IllegalAction(
             "shadow creatures can only block or be blocked by other shadow \
              creatures"
@@ -647,7 +697,9 @@ pub(crate) fn block_is_legal(
     // land with the specified subtype. Unlike Fear, Intimidate, Shadow and
     // Horsemanship above, this checks the defending player's battlefield and not
     // the blocker (see EffectiveCharacteristics::landwalk_subtypes).
-    if !attacker_characteristics.landwalk_subtypes.is_empty() || !attacker_characteristics.landwalk_qualities.is_empty() {
+    if !attacker_characteristics.landwalk_subtypes.is_empty()
+        || !attacker_characteristics.landwalk_qualities.is_empty()
+    {
         let defender_controls_matching_land = state.objects.values().any(|land| {
             if land.zone != ZoneKind::Battlefield
                 || crate::layers::effective_controller(state, script_runtime, land.object_id) != actor
@@ -684,7 +736,9 @@ pub(crate) fn block_is_legal(
     // quality compares raw GameObject.controller fields relative to the attacker's
     // controller, as target_has_protection_from does.
     if attacker_characteristics.protection_everything
-        || attacker_characteristics.protection_colors.intersects(blocker_characteristics.colors)
+        || attacker_characteristics
+            .protection_colors
+            .intersects(blocker_characteristics.colors)
         || attacker_characteristics
             .protection_card_types
             .intersects(blocker_characteristics.card_types)
@@ -693,12 +747,18 @@ pub(crate) fn block_is_legal(
             .iter()
             .any(|s| blocker_characteristics.subtypes.contains(s))
         || attacker_characteristics
-            .protection_names.contains(&blocker_characteristics.name)
-        || attacker_characteristics.protection_players.iter().any(|who| match who {
-            FilterController::You => blocker_object.controller == attacker_object.controller,
-            FilterController::Opponent => blocker_object.controller != attacker_object.controller,
-            FilterController::Any => false,
-        })
+            .protection_names
+            .contains(&blocker_characteristics.name)
+        || attacker_characteristics
+            .protection_players
+            .iter()
+            .any(|who| match who {
+                FilterController::You => blocker_object.controller == attacker_object.controller,
+                FilterController::Opponent => {
+                    blocker_object.controller != attacker_object.controller
+                }
+                FilterController::Any => false,
+            })
     {
         return Err(Rejected::IllegalAction(
             "an attacker with protection from a quality can't be blocked by a \

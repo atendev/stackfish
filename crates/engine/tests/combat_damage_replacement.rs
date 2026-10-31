@@ -4,13 +4,15 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -32,12 +34,18 @@ fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject { tapped: true, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
+    GameObject {
+        tapped: true,
+        ..card_object(id, definition, owner, ZoneKind::Battlefield)
+    }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -59,7 +67,10 @@ fn assign_combat_damage(
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
 ) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::AssignCombatDamage { assignments },
+        })
         .expect("turn-based action, no priority required");
     drain(engine)
 }
@@ -74,15 +85,32 @@ fn prevent_damage_effect_stops_combat_damage_from_landing() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
-    put_on_battlefield(&mut state, permanent(shield_source, creature_definition("Ward", 0, 1), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear", 3, 3), p0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(shield_source, creature_definition("Ward", 0, 1), p1),
+    );
     state.replacement_effects.push(ReplacementEffect {
         source: shield_source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::PreventDamage,
         },
@@ -93,7 +121,10 @@ fn prevent_damage_effect_stops_combat_damage_from_landing() {
     assign_combat_damage(&mut engine, p0, Vec::new());
 
     let p1_life = engine.state().player(p1).unwrap().life;
-    assert_eq!(p1_life, 20, "the registered PreventDamage effect must have stopped the damage from landing");
+    assert_eq!(
+        p1_life, 20,
+        "the registered PreventDamage effect must have stopped the damage from landing"
+    );
 
     let dealt = engine
         .state()
@@ -117,15 +148,32 @@ fn redirect_damage_effect_changes_who_actually_loses_life() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
-    put_on_battlefield(&mut state, permanent(redirect_source, creature_definition("Redirector", 0, 1), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear", 3, 3), p0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(redirect_source, creature_definition("Redirector", 0, 1), p1),
+    );
     state.replacement_effects.push(ReplacementEffect {
         source: redirect_source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: None,
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::RedirectDamage(Target::Player(p0)),
         },
@@ -135,6 +183,14 @@ fn redirect_damage_effect_changes_who_actually_loses_life() {
     let mut engine = Engine::new(state);
     assign_combat_damage(&mut engine, p0, Vec::new());
 
-    assert_eq!(engine.state().player(p1).unwrap().life, 20, "damage was redirected away from p1");
-    assert_eq!(engine.state().player(p0).unwrap().life, 17, "p0 took the redirected 3 damage instead");
+    assert_eq!(
+        engine.state().player(p1).unwrap().life,
+        20,
+        "damage was redirected away from p1"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        17,
+        "p0 took the redirected 3 damage instead"
+    );
 }

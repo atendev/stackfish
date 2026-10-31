@@ -11,7 +11,9 @@ use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId};
 use crate::types::stack::StackObject;
 
-use super::super::{EachPlayerLoop, Engine, ProcessState, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatus};
+use super::super::{
+    EachPlayerLoop, Engine, ProcessState, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatus,
+};
 
 impl Engine {
     /// CR 101.4: builds the APNAP player order. No players is a defensive no-op.
@@ -35,7 +37,9 @@ impl Engine {
             all_players.extend(order);
             // `LoseLife` has no zone move; `Sacrifice` just drives an empty queue to the shared tail.
             let kind = match inner.as_ref() {
-                AbilityEffect::SacrificeRandom { .. } | AbilityEffect::LoseLife(_) => ScriptedZoneMoveKind::Sacrifice,
+                AbilityEffect::SacrificeRandom { .. } | AbilityEffect::LoseLife(_) => {
+                    ScriptedZoneMoveKind::Sacrifice
+                }
                 AbilityEffect::DiscardRandom { .. } => ScriptedZoneMoveKind::Discard,
                 AbilityEffect::Mill(_) => ScriptedZoneMoveKind::Mill,
                 _ => unreachable!(
@@ -64,7 +68,9 @@ impl Engine {
             self.process_state = self.continue_scripted_zone_move(
                 kind,
                 ids,
-                ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+                ScriptedZoneMoveThen::StackResolution {
+                    stack_id: top.stack_id,
+                },
                 events,
             );
             return ControlFlow::Break(StepStatus::Progressed);
@@ -77,11 +83,18 @@ impl Engine {
             sacrifice_ids: Vec::new(),
             discard_ids: Vec::new(),
         };
-        let result =
-            self.script_runtime.invoke_operation(each_player.operation, &mut self.state, each_player.source, first_player);
+        let result = self.script_runtime.invoke_operation(
+            each_player.operation,
+            &mut self.state,
+            each_player.source,
+            first_player,
+        );
         if let Err(ref e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
-                message: format!("operation script error on source {:?}: {e:?}", each_player.source),
+                message: format!(
+                    "operation script error on source {:?}: {e:?}",
+                    each_player.source
+                ),
             }]);
         }
         let outcome = result.unwrap_or(OperationOutcome::Finished);
@@ -110,9 +123,19 @@ impl Engine {
     ) -> ProcessState {
         match outcome {
             OperationOutcome::NeedsChoice { thread, request } => {
-                ProcessState::AwaitingScriptChoice { thread, request, stack_id, source, controller, events_so_far, each_player }
+                ProcessState::AwaitingScriptChoice {
+                    thread,
+                    request,
+                    stack_id,
+                    source,
+                    controller,
+                    events_so_far,
+                    each_player,
+                }
             }
-            OperationOutcome::Finished => self.advance_or_finish_each_player(stack_id, events_so_far, each_player),
+            OperationOutcome::Finished => {
+                self.advance_or_finish_each_player(stack_id, events_so_far, each_player)
+            }
             // No pause of its own, so it works inside or outside a `ForEachPlayer` loop.
             OperationOutcome::PendingEvents(new_events) => {
                 let mut events_so_far = events_so_far;
@@ -128,7 +151,11 @@ impl Engine {
             // CR 101.4: mid-loop answers fold into the running totals instead of moving.
             // Outside a loop there is nothing to batch, so they move at once.
             OperationOutcome::PendingZoneMoves(moves) => match &mut each_player {
-                None => self.chain_pending_zone_moves(moves, ScriptedZoneMoveThen::StackResolution { stack_id }, events_so_far),
+                None => self.chain_pending_zone_moves(
+                    moves,
+                    ScriptedZoneMoveThen::StackResolution { stack_id },
+                    events_so_far,
+                ),
                 Some(loop_state) => {
                     for (kind, ids) in moves {
                         match kind {
@@ -142,8 +169,23 @@ impl Engine {
             // A `Game.Ops.CastSpell` result reached after a resumed coroutine; see
             // `resolve_pending_cast`.
             // TODO: a per-player cast request mid-loop is skipped as if the player returned `Finished`
-            OperationOutcome::PendingCast { card, modes, targets, x_value, free } => match each_player {
-                None => self.resolve_pending_cast(card, modes, targets, x_value, free, stack_id, controller, events_so_far),
+            OperationOutcome::PendingCast {
+                card,
+                modes,
+                targets,
+                x_value,
+                free,
+            } => match each_player {
+                None => self.resolve_pending_cast(
+                    card,
+                    modes,
+                    targets,
+                    x_value,
+                    free,
+                    stack_id,
+                    controller,
+                    events_so_far,
+                ),
                 Some(_) => self.advance_or_finish_each_player(stack_id, events_so_far, each_player),
             },
         }
@@ -160,24 +202,45 @@ impl Engine {
         let Some(mut loop_state) = each_player else {
             let mut final_events: VecDeque<GameEventKind> = events_so_far.into();
             final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
-            return ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() };
+            return ProcessState::ReplacementCheck {
+                remaining: final_events,
+                checked: Vec::new(),
+            };
         };
         let Some(next_player) = loop_state.remaining_players.pop_front() else {
             let moves = vec![
                 (ScriptZoneMoveKind::Sacrifice, loop_state.sacrifice_ids),
                 (ScriptZoneMoveKind::Discard, loop_state.discard_ids),
             ];
-            return self.chain_pending_zone_moves(moves, ScriptedZoneMoveThen::StackResolution { stack_id }, events_so_far);
+            return self.chain_pending_zone_moves(
+                moves,
+                ScriptedZoneMoveThen::StackResolution { stack_id },
+                events_so_far,
+            );
         };
-        let result =
-            self.script_runtime.invoke_operation(loop_state.operation, &mut self.state, loop_state.source, next_player);
+        let result = self.script_runtime.invoke_operation(
+            loop_state.operation,
+            &mut self.state,
+            loop_state.source,
+            next_player,
+        );
         if let Err(ref e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
-                message: format!("operation script error on source {:?}: {e:?}", loop_state.source),
+                message: format!(
+                    "operation script error on source {:?}: {e:?}",
+                    loop_state.source
+                ),
             }]);
         }
         let outcome = result.unwrap_or(OperationOutcome::Finished);
         let source = loop_state.source;
-        self.settle_script_operation_outcome(outcome, stack_id, source, next_player, events_so_far, Some(loop_state))
+        self.settle_script_operation_outcome(
+            outcome,
+            stack_id,
+            source,
+            next_player,
+            events_so_far,
+            Some(loop_state),
+        )
     }
 }

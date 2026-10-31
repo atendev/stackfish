@@ -11,7 +11,9 @@ fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types,
@@ -40,7 +42,14 @@ fn sacrifice_cost() -> CostSpec {
     CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     }
@@ -50,7 +59,14 @@ fn discard_cost() -> CostSpec {
     CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Discard {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
         }],
         alternative: Vec::new(),
     }
@@ -72,7 +88,9 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, PlayerId, ObjectId, ObjectId, ObjectId) {
+fn state_with_cost(
+    cost: CostSpec,
+) -> (GameState, PlayerId, PlayerId, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let source = ObjectId(0);
@@ -80,16 +98,48 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, PlayerId, ObjectId, 
     let hand_card = ObjectId(2);
 
     let mut objects = HashMap::new();
-    objects.insert(source, object(source, vanilla_definition("Source", CardTypeSet::ARTIFACT), p0, ZoneKind::Battlefield));
-    objects.insert(fodder, object(fodder, vanilla_definition("Fodder", CardTypeSet::CREATURE), p0, ZoneKind::Battlefield));
-    objects.insert(hand_card, object(hand_card, vanilla_definition("Hand Card", CardTypeSet::CREATURE), p0, ZoneKind::Hand));
+    objects.insert(
+        source,
+        object(
+            source,
+            vanilla_definition("Source", CardTypeSet::ARTIFACT),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    objects.insert(
+        fodder,
+        object(
+            fodder,
+            vanilla_definition("Fodder", CardTypeSet::CREATURE),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    objects.insert(
+        hand_card,
+        object(
+            hand_card,
+            vanilla_definition("Hand Card", CardTypeSet::CREATURE),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
 
     let state = GameState {
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
         objects,
         zones: vec![
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::from([source, fodder]) },
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::from([hand_card]) },
+            Zone {
+                kind: ZoneKind::Battlefield,
+                owner: None,
+                contents: VecDeque::from([source, fodder]),
+            },
+            Zone {
+                kind: ZoneKind::Hand,
+                owner: Some(p0),
+                contents: VecDeque::from([hand_card]),
+            },
             Zone::new(ZoneKind::Graveyard, Some(p0)),
             Zone::new(ZoneKind::Graveyard, Some(p1)),
         ],
@@ -115,9 +165,19 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, PlayerId, ObjectId, 
 }
 
 fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -135,7 +195,10 @@ fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: Obj
         })
         .expect("player holds priority");
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the ability's cost, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the ability's cost, got {status:?}"
+    );
 }
 
 #[test]
@@ -145,7 +208,9 @@ fn dies_trigger_fires_and_resolves_after_a_sacrifice_cost_payment() {
 
     activate_and_await_payment(&mut engine, p0, source);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(fodder)],
+        })
         .expect("a legal Sacrifice(fodder) payment pays a Sacrifice{Creature} cost");
     let status = drain(&mut engine);
 
@@ -153,7 +218,10 @@ fn dies_trigger_fires_and_resolves_after_a_sacrifice_cost_payment() {
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "activator keeps priority after paying (CR 601.2i-equivalent for abilities): {status:?}"
     );
-    assert!(engine.state().object(fodder).is_none(), "fodder is gone - sacrificed to the graveyard");
+    assert!(
+        engine.state().object(fodder).is_none(),
+        "fodder is gone - sacrificed to the graveyard"
+    );
     assert_eq!(
         engine.state().stack.len(),
         2,
@@ -163,8 +231,16 @@ fn dies_trigger_fires_and_resolves_after_a_sacrifice_cost_payment() {
     // Both players pass, and the Dies trigger on top of the stack resolves first.
     let status = pass_both(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().stack.len(), 1, "the Dies trigger resolved, the activated ability remains");
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied from fodder's Dies trigger");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the Dies trigger resolved, the activated ability remains"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "GainLife(1) applied from fodder's Dies trigger"
+    );
 }
 
 #[test]
@@ -172,19 +248,39 @@ fn dies_trigger_does_not_fire_for_a_permanent_that_was_not_sacrificed() {
     // A creature that stays on the battlefield must not fire its Dies trigger because another permanent was sacrificed.
     let (mut state, p0, _p1, source, fodder, _hand_card) = state_with_cost(sacrifice_cost());
     let bystander = ObjectId(3);
-    state.objects.insert(bystander, object(bystander, vanilla_definition("Bystander", CardTypeSet::CREATURE), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bystander);
+    state.objects.insert(
+        bystander,
+        object(
+            bystander,
+            vanilla_definition("Bystander", CardTypeSet::CREATURE),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bystander);
     state.abilities.push(dies_ability(bystander));
 
     let mut engine = Engine::new(state);
     activate_and_await_payment(&mut engine, p0, source);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(fodder)],
+        })
         .expect("a legal Sacrifice(fodder) payment pays a Sacrifice{Creature} cost");
     drain(&mut engine);
 
-    assert_eq!(engine.state().stack.len(), 2, "only fodder's Dies trigger fired, not bystander's");
-    assert!(engine.state().object(bystander).is_some(), "bystander is untouched, still on the battlefield");
+    assert_eq!(
+        engine.state().stack.len(),
+        2,
+        "only fodder's Dies trigger fired, not bystander's"
+    );
+    assert!(
+        engine.state().object(bystander).is_some(),
+        "bystander is untouched, still on the battlefield"
+    );
 }
 
 #[test]
@@ -197,16 +293,25 @@ fn discard_cost_captures_departed_abilities_without_a_behavior_change() {
 
     activate_and_await_payment(&mut engine, p0, source);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Discard(hand_card)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Discard(hand_card)],
+        })
         .expect("a legal Discard(hand_card) payment pays a Discard{Creature} cost");
     let status = drain(&mut engine);
 
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert!(engine.state().object(hand_card).is_none(), "hand_card discarded to the graveyard");
+    assert!(
+        engine.state().object(hand_card).is_none(),
+        "hand_card discarded to the graveyard"
+    );
     assert_eq!(
         engine.state().stack.len(),
         1,
         "only the activated ability itself is on the stack - Dies doesn't fire off a Hand departure"
     );
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "no GainLife - the Dies condition never matched");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "no GainLife - the Dies condition never matched"
+    );
 }

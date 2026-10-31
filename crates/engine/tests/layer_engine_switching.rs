@@ -11,7 +11,9 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -33,7 +35,12 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    card_object(id, creature_definition(power, toughness), owner, ZoneKind::Battlefield)
+    card_object(
+        id,
+        creature_definition(power, toughness),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
 fn base_state() -> GameState {
@@ -49,7 +56,10 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -72,11 +82,25 @@ fn continuous_effect(
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
+    EffectFilter {
+        controller: None,
+        card_types: None,
+        self_only: false,
+        subtypes: None,
+        excluded_subtypes: None,
+        supertypes: None,
+        excluded_supertypes: None,
+    }
 }
 
 fn switch_effect(source: ObjectId, timestamp: u64) -> ContinuousEffect {
-    continuous_effect(source, Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT, no_filter(), timestamp)
+    continuous_effect(
+        source,
+        Layer::PowerToughnessSwitching,
+        EffectPrimitive::SwitchPT,
+        no_filter(),
+        timestamp,
+    )
 }
 
 #[test]
@@ -104,7 +128,10 @@ fn a_later_modify_effect_still_contributes_to_the_pre_switch_sum() {
     state.continuous_effects.push(continuous_effect(
         bear,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 0, toughness: 1 },
+        EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: 1,
+        },
         no_filter(),
         0,
     ));
@@ -112,7 +139,10 @@ fn a_later_modify_effect_still_contributes_to_the_pre_switch_sum() {
     state.continuous_effects.push(continuous_effect(
         bear,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 5, toughness: 0 },
+        EffectPrimitive::ModifyPT {
+            power: 5,
+            toughness: 0,
+        },
         no_filter(),
         2,
     ));
@@ -134,7 +164,10 @@ fn two_switch_effects_on_the_same_object_cancel_out() {
     state.continuous_effects.push(continuous_effect(
         bear,
         Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT { power: 0, toughness: 1 },
+        EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: 1,
+        },
         no_filter(),
         0,
     ));
@@ -162,15 +195,31 @@ fn effect_filter_still_scopes_a_switch_effect() {
         source,
         Layer::PowerToughnessSwitching,
         EffectPrimitive::SwitchPT,
-        EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+        EffectFilter {
+            controller: Some(FilterController::You),
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        },
         0,
     ));
 
     let own = effective_characteristics(&state, &ScriptRuntime::new(), own_creature);
     let opposing = effective_characteristics(&state, &ScriptRuntime::new(), opposing_creature);
 
-    assert_eq!((own.power, own.toughness), (Some(3), Some(1)), "controller's own creature should be switched");
-    assert_eq!((opposing.power, opposing.toughness), (Some(1), Some(3)), "an opponent's creature should be untouched");
+    assert_eq!(
+        (own.power, own.toughness),
+        (Some(3), Some(1)),
+        "controller's own creature should be switched"
+    );
+    assert_eq!(
+        (opposing.power, opposing.toughness),
+        (Some(1), Some(3)),
+        "an opponent's creature should be untouched"
+    );
 }
 
 #[test]

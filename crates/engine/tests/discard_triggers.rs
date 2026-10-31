@@ -5,13 +5,15 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -36,7 +38,9 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: id.0,
         name: "Test Card".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -55,11 +59,17 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     };
-    GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Hand) }
+    GameObject {
+        controlled_since_turn: 1,
+        ..card_object(id, definition, owner, ZoneKind::Hand)
+    }
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
+    GameObject {
+        controlled_since_turn: 1,
+        ..card_object(id, definition, owner, ZoneKind::Battlefield)
+    }
 }
 
 fn state_at_end_step() -> GameState {
@@ -70,7 +80,17 @@ fn state_at_end_step() -> GameState {
         phase: Phase::Ending,
         step: Step::End,
         last_active_turn_number: HashMap::from([(p0, 2), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Battlefield, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Library,
+                ZoneKind::Hand,
+                ZoneKind::Graveyard,
+                ZoneKind::Battlefield,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
@@ -79,7 +99,10 @@ fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) -> V
     for i in 0..count {
         let id = ObjectId(100 + i as u64);
         state.objects.insert(id, vanilla_card(id, player));
-        state.zone_mut(ZoneKind::Hand, Some(player)).unwrap().push_bottom(id);
+        state
+            .zone_mut(ZoneKind::Hand, Some(player))
+            .unwrap()
+            .push_bottom(id);
         ids.push(id);
     }
     ids
@@ -95,15 +118,26 @@ fn step_until_pause(engine: &mut Engine) -> StepStatus {
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).expect("PassPriority should be accepted");
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .expect("PassPriority should be accepted");
 }
 
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     let s = step_until_pause(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p0), "expected p0 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p0),
+        "expected p0 end-step priority, got {s:?}"
+    );
     pass(engine, p0);
     let s = step_until_pause(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p1), "expected p1 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p1),
+        "expected p1 end-step priority, got {s:?}"
+    );
     pass(engine, p1);
     step_until_pause(engine)
 }
@@ -114,8 +148,14 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let watcher = ObjectId(0);
-    state.objects.insert(watcher, permanent(watcher, creature_definition("Watcher"), p0));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(watcher);
+    state.objects.insert(
+        watcher,
+        permanent(watcher, creature_definition("Watcher"), p0),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(watcher);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -134,20 +174,36 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
 
     let mut engine = Engine::new(state);
     let status = pass_through_end_step(&mut engine, p0, p1);
-    assert!(matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0));
+    assert!(
+        matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0)
+    );
 
     engine.submit_discard(vec![ids[0]]).expect("valid discard");
     // The DiscardsCard trigger must be collected and on the stack by the time this settles.
     let status = step_until_pause(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected priority reopened by the trigger, got {status:?}");
-    assert_eq!(engine.state().stack.len(), 1, "the DiscardsCard trigger was collected and pushed");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "expected priority reopened by the trigger, got {status:?}"
+    );
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the DiscardsCard trigger was collected and pushed"
+    );
 
     pass(&mut engine, p0);
     step_until_pause(&mut engine);
     pass(&mut engine, p1);
     let status = step_until_pause(&mut engine);
-    assert!(engine.state().stack.is_empty(), "the triggered ability resolved");
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied from the DiscardsCard trigger");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the triggered ability resolved"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "GainLife(1) applied from the DiscardsCard trigger"
+    );
 
     // One more full pass round (empty stack) actually advances the turn.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
@@ -155,7 +211,10 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
     step_until_pause(&mut engine);
     pass(&mut engine, p1);
     let status = step_until_pause(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "expected p1 Upkeep, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p1),
+        "expected p1 Upkeep, got {status:?}"
+    );
     assert_eq!(engine.state().phase, Phase::Beginning);
     assert_eq!(engine.state().step, Step::Upkeep);
 }
@@ -166,8 +225,14 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let watcher = ObjectId(0);
-    state.objects.insert(watcher, permanent(watcher, creature_definition("Watcher"), p0));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(watcher);
+    state.objects.insert(
+        watcher,
+        permanent(watcher, creature_definition("Watcher"), p0),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(watcher);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -185,15 +250,23 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
 
     let mut engine = Engine::new(state);
     pass_through_end_step(&mut engine, p0, p1);
-    engine.submit_discard(vec![ids[0], ids[1]]).expect("valid discard");
+    engine
+        .submit_discard(vec![ids[0], ids[1]])
+        .expect("valid discard");
     let status = step_until_pause(&mut engine);
 
     // Two cards matched by the same ability's id pause for p0 to order them (CR 603.3b), the same group-size proof as trigger_once_per_turn.rs.
     match status {
         StepStatus::AwaitingTriggerOrderChoice { player, group } => {
             assert_eq!(player, p0);
-            assert_eq!(group.len(), 2, "both discarded cards triggered their own instance");
+            assert_eq!(
+                group.len(),
+                2,
+                "both discarded cards triggered their own instance"
+            );
         }
-        other => panic!("expected AwaitingTriggerOrderChoice for two same-controller triggers, got {other:?}"),
+        other => panic!(
+            "expected AwaitingTriggerOrderChoice for two same-controller triggers, got {other:?}"
+        ),
     }
 }

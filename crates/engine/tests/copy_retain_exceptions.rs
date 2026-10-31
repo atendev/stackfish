@@ -14,7 +14,9 @@ fn doppelganger_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Doppelganger".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         // Its own original color - blue, distinct from what it copies.
         color_indicator: Some(ColorSet::BLUE),
         supertypes: SupertypeSet::empty(),
@@ -41,7 +43,9 @@ fn bear_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Bear".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: Some(ColorSet::RED),
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -72,9 +76,20 @@ fn become_copy_ability(source: ObjectId, exceptions: CopyExceptions) -> Register
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: Some(CardTypeSet::CREATURE),
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),
@@ -116,7 +131,11 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         combat: None,
         last_active_turn_number: HashMap::from([(p0, 1)]),
         objects: objects_map,
-        zones: vec![Zone { kind: ZoneKind::Battlefield, owner: None, contents: bf_contents }],
+        zones: vec![Zone {
+            kind: ZoneKind::Battlefield,
+            owner: None,
+            contents: bf_contents,
+        }],
         stack: Vec::new(),
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
@@ -127,7 +146,10 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         land_play_modifiers: Vec::new(),
         abilities,
         ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
+        rng: RngState {
+            seed: 1,
+            draws_consumed: 0,
+        },
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 1000,
@@ -144,19 +166,37 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
     }
 }
 
-fn activate_pay_and_resolve(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) {
+fn activate_pay_and_resolve(
+    engine: &mut Engine,
+    player: PlayerId,
+    source: ObjectId,
+    targets: Vec<Target>,
+) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets,
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");
     drain(engine);
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("free cost");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("free cost");
     drain(engine);
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
 }
 
@@ -165,7 +205,10 @@ fn retain_name_keeps_the_copys_own_name() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { retain_name: true, ..CopyExceptions::default() };
+    let exceptions = CopyExceptions {
+        retain_name: true,
+        ..CopyExceptions::default()
+    };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -178,8 +221,15 @@ fn retain_name_keeps_the_copys_own_name() {
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
 
     let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
-    assert_eq!(chars.name, "Doppelganger", "retain_name keeps the copy's own original name");
-    assert_eq!(chars.power, Some(2), "everything else still comes from the copied object");
+    assert_eq!(
+        chars.name, "Doppelganger",
+        "retain_name keeps the copy's own original name"
+    );
+    assert_eq!(
+        chars.power,
+        Some(2),
+        "everything else still comes from the copied object"
+    );
     assert!(chars.keywords.contains(KeywordSet::FLYING));
 }
 
@@ -188,7 +238,10 @@ fn retain_color_keeps_the_copys_own_color() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { retain_color: true, ..CopyExceptions::default() };
+    let exceptions = CopyExceptions {
+        retain_color: true,
+        ..CopyExceptions::default()
+    };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -201,8 +254,15 @@ fn retain_color_keeps_the_copys_own_color() {
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
 
     let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
-    assert_eq!(chars.colors, ColorSet::BLUE, "retain_color keeps the copy's own original color, not the copied Bear's red");
-    assert_eq!(chars.name, "Bear", "name still comes from the copied object");
+    assert_eq!(
+        chars.colors,
+        ColorSet::BLUE,
+        "retain_color keeps the copy's own original color, not the copied Bear's red"
+    );
+    assert_eq!(
+        chars.name, "Bear",
+        "name still comes from the copied object"
+    );
 }
 
 #[test]
@@ -222,7 +282,11 @@ fn without_retain_color_the_copy_adopts_the_copied_objects_color() {
     activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
 
     let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
-    assert_eq!(chars.colors, ColorSet::RED, "no retain_color exception - the copy is red like Bear");
+    assert_eq!(
+        chars.colors,
+        ColorSet::RED,
+        "no retain_color exception - the copy is red like Bear"
+    );
 }
 
 #[test]
@@ -253,17 +317,39 @@ fn retain_name_and_retain_color_combine_with_pt_and_keyword_exceptions() {
     assert_eq!(chars.name, "Doppelganger", "retained");
     assert_eq!(chars.colors, ColorSet::BLUE, "retained");
     assert_eq!(chars.power, Some(9), "overridden by set_power_toughness");
-    assert_eq!(chars.toughness, Some(9), "overridden by set_power_toughness");
-    assert!(chars.keywords.contains(KeywordSet::TRAMPLE), "added by add_keywords");
-    assert!(chars.keywords.contains(KeywordSet::FLYING), "still comes from the copied object");
+    assert_eq!(
+        chars.toughness,
+        Some(9),
+        "overridden by set_power_toughness"
+    );
+    assert!(
+        chars.keywords.contains(KeywordSet::TRAMPLE),
+        "added by add_keywords"
+    );
+    assert!(
+        chars.keywords.contains(KeywordSet::FLYING),
+        "still comes from the copied object"
+    );
 }
 
 #[test]
 fn retain_name_and_retain_color_are_a_no_op_for_a_freshly_created_copy_token() {
-    let mut state = one_player_state(vec![card_object(ObjectId(1), bear_definition(), PlayerId(0), ZoneKind::Battlefield)], Vec::new());
+    let mut state = one_player_state(
+        vec![card_object(
+            ObjectId(1),
+            bear_definition(),
+            PlayerId(0),
+            ZoneKind::Battlefield,
+        )],
+        Vec::new(),
+    );
     let p0 = PlayerId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { retain_name: true, retain_color: true, ..CopyExceptions::default() };
+    let exceptions = CopyExceptions {
+        retain_name: true,
+        retain_color: true,
+        ..CopyExceptions::default()
+    };
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -274,7 +360,10 @@ fn retain_name_and_retain_color_are_a_no_op_for_a_freshly_created_copy_token() {
         cost: None,
         target: None,
         operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(bear, exceptions), count: 1 }),
+        effect: Some(AbilityEffect::CreateToken {
+            spec: TokenSpec::CopyOf(bear, exceptions),
+            count: 1,
+        }),
         intervening_if: None,
     });
     let mut engine = Engine::new(state);
@@ -291,7 +380,10 @@ fn retain_name_and_retain_color_are_a_no_op_for_a_freshly_created_copy_token() {
         .find(|&id| id != bear)
         .expect("a token was created");
     let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), token_id);
-    assert_eq!(chars.name, "Bear", "no prior identity to retain from - the token is fully the copied object's name");
+    assert_eq!(
+        chars.name, "Bear",
+        "no prior identity to retain from - the token is fully the copied object's name"
+    );
     assert_eq!(chars.colors, ColorSet::RED, "same for color");
 }
 

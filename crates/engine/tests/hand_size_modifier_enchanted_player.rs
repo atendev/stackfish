@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 const ENCHANTED_PLAYER_HAND_SIZE_THREE: &str = r#"
 local s = {}
@@ -24,7 +24,9 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: id.0,
         name: "Test Card".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -43,14 +45,19 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     };
-    GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Hand) }
+    GameObject {
+        controlled_since_turn: 1,
+        ..card_object(id, definition, owner, ZoneKind::Hand)
+    }
 }
 
 fn aura_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Enchant Player Hand Size Aura".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -79,7 +86,17 @@ fn state_at_end_step() -> GameState {
         phase: Phase::Ending,
         step: Step::End,
         last_active_turn_number: HashMap::from([(p0, 2), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Battlefield, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Library,
+                ZoneKind::Hand,
+                ZoneKind::Graveyard,
+                ZoneKind::Battlefield,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
@@ -87,13 +104,19 @@ fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) {
     for i in 0..count {
         let id = ObjectId(100 + i as u64);
         state.objects.insert(id, vanilla_card(id, player));
-        state.zone_mut(ZoneKind::Hand, Some(player)).unwrap().push_bottom(id);
+        state
+            .zone_mut(ZoneKind::Hand, Some(player))
+            .unwrap()
+            .push_bottom(id);
     }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -107,15 +130,26 @@ fn step_until_pause(engine: &mut Engine) -> StepStatus {
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).expect("PassPriority should be accepted");
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .expect("PassPriority should be accepted");
 }
 
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     let s = step_until_pause(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p0), "expected p0 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p0),
+        "expected p0 end-step priority, got {s:?}"
+    );
     pass(engine, p0);
     let s = step_until_pause(engine);
-    assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p1), "expected p1 end-step priority, got {s:?}");
+    assert!(
+        matches!(s, StepStatus::AwaitingAction { player } if player == p1),
+        "expected p1 end-step priority, got {s:?}"
+    );
     pass(engine, p1);
     step_until_pause(engine)
 }
@@ -125,16 +159,28 @@ fn run_card_script_self_registers_an_enchanted_player_hand_size_modifier() {
     let mut state = state_at_end_step();
     let aura = ObjectId(0);
     let definition = aura_definition(ENCHANTED_PLAYER_HAND_SIZE_THREE);
-    state.objects.insert(aura, card_object(aura, definition.clone(), PlayerId(1), ZoneKind::Battlefield));
+    state.objects.insert(
+        aura,
+        card_object(aura, definition.clone(), PlayerId(1), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, aura).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, aura)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.hand_size_modifiers.len(), 1);
     let modifier = &state.hand_size_modifiers[0];
     assert_eq!(modifier.source, aura);
-    assert_eq!(modifier.controller, PlayerId(1), "controller resolved from the Aura's own live controller at drain time");
-    assert!(matches!(modifier.affected, HandSizeAffected::EnchantedPlayer));
+    assert_eq!(
+        modifier.controller,
+        PlayerId(1),
+        "controller resolved from the Aura's own live controller at drain time"
+    );
+    assert!(matches!(
+        modifier.affected,
+        HandSizeAffected::EnchantedPlayer
+    ));
     assert_eq!(modifier.effect, HandSizeEffect::SetTo(3));
 }
 

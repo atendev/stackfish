@@ -57,7 +57,9 @@ pub(super) struct Described {
 }
 
 fn objects(ids: &[ObjectId]) -> Vec<Candidate> {
-    ids.iter().map(|&id| Candidate::Target(Target::Object(id))).collect()
+    ids.iter()
+        .map(|&id| Candidate::Target(Target::Object(id)))
+        .collect()
 }
 
 fn targets(list: &[Target]) -> Vec<Candidate> {
@@ -69,12 +71,21 @@ fn hand(engine: &Engine, player: PlayerId) -> Vec<Candidate> {
     engine
         .state()
         .zone(ZoneKind::Hand, Some(player))
-        .map(|zone| zone.contents.iter().map(|&id| Candidate::Target(Target::Object(id))).collect())
+        .map(|zone| {
+            zone.contents
+                .iter()
+                .map(|&id| Candidate::Target(Target::Object(id)))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 fn pick(candidates: Vec<Candidate>, min: usize, max: usize) -> ReplyShape {
-    ReplyShape::Pick { candidates, min, max }
+    ReplyShape::Pick {
+        candidates,
+        min,
+        max,
+    }
 }
 
 /// Every object and player a `Game.SelectTargets` ask may legally pick,
@@ -89,13 +100,29 @@ fn script_select_candidates(
     source: ObjectId,
 ) -> Vec<Candidate> {
     let state = engine.state();
-    let mut ids: Vec<ObjectId> = state.objects.keys().copied().filter(|id| !exclude_ids.contains(id)).collect();
+    let mut ids: Vec<ObjectId> = state
+        .objects
+        .keys()
+        .copied()
+        .filter(|id| !exclude_ids.contains(id))
+        .collect();
     ids.sort();
     let objects = ids.into_iter().map(Target::Object);
     let players = state.players.iter().map(|p| Target::Player(p.player_id));
     objects
         .chain(players)
-        .filter(|&t| commands::target_is_legal(state, engine.script_runtime(), t, filter, controller, source, false, None))
+        .filter(|&t| {
+            commands::target_is_legal(
+                state,
+                engine.script_runtime(),
+                t,
+                filter,
+                controller,
+                source,
+                false,
+                None,
+            )
+        })
         .map(Candidate::Target)
         .collect()
 }
@@ -112,106 +139,264 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
             priority_window(engine)
         }
 
-        ProcessState::AwaitingReplacementChoice { affected_player, candidates, .. } => (
+        ProcessState::AwaitingReplacementChoice {
+            affected_player,
+            candidates,
+            ..
+        } => (
             *affected_player,
             "Replacement order",
-            pick(candidates.iter().map(|&c| Candidate::Replacement(c)).collect(), 1, 1),
+            pick(
+                candidates
+                    .iter()
+                    .map(|&c| Candidate::Replacement(c))
+                    .collect(),
+                1,
+                1,
+            ),
             Route::ReplacementChoice,
         ),
-        ProcessState::AwaitingLegendRuleChoice { player, candidates, .. } => {
-            (*player, "Legend rule", pick(objects(candidates), 1, 1), Route::LegendRule)
-        }
+        ProcessState::AwaitingLegendRuleChoice {
+            player, candidates, ..
+        } => (
+            *player,
+            "Legend rule",
+            pick(objects(candidates), 1, 1),
+            Route::LegendRule,
+        ),
         ProcessState::AwaitingCommanderReturnChoice { player, .. } => {
             (*player, "Commander return", YesNo, Route::CommanderReturn)
         }
-        ProcessState::AwaitingAttachChoice { controller, candidates, .. } => {
-            (*controller, "Attach", pick(objects(candidates), 1, 1), Route::AttachChoice)
+        ProcessState::AwaitingAttachChoice {
+            controller,
+            candidates,
+            ..
+        } => (
+            *controller,
+            "Attach",
+            pick(objects(candidates), 1, 1),
+            Route::AttachChoice,
+        ),
+        ProcessState::AwaitingEntryAttachChoice {
+            controller,
+            candidates,
+            ..
+        } => (
+            *controller,
+            "Attach on entry",
+            pick(targets(candidates), 1, 1),
+            Route::EntryAttachChoice,
+        ),
+        ProcessState::AwaitingTokenAttachChoice {
+            controller,
+            candidates,
+            ..
+        } => (
+            *controller,
+            "Attach on entry",
+            pick(targets(candidates), 1, 1),
+            Route::TokenAttachChoice,
+        ),
+        ProcessState::AwaitingDevourChoice {
+            controller,
+            candidates,
+            ..
+        } => (
+            *controller,
+            "Devour",
+            pick(objects(candidates), 0, candidates.len()),
+            Route::Devour,
+        ),
+        ProcessState::AwaitingAmplifyChoice {
+            controller,
+            candidates,
+            ..
+        } => (
+            *controller,
+            "Amplify",
+            pick(objects(candidates), 0, candidates.len()),
+            Route::Amplify,
+        ),
+        ProcessState::AwaitingSearchDevourChoice {
+            controller,
+            candidates,
+            ..
+        } => (
+            *controller,
+            "Devour",
+            pick(objects(candidates), 0, candidates.len()),
+            Route::SearchDevour,
+        ),
+        ProcessState::AwaitingSearchAmplifyChoice {
+            controller,
+            candidates,
+            ..
+        } => (
+            *controller,
+            "Amplify",
+            pick(objects(candidates), 0, candidates.len()),
+            Route::SearchAmplify,
+        ),
+        ProcessState::AwaitingMadnessChoice { player, card, .. } => (
+            *player,
+            "Madness",
+            MayCast { card: Some(*card) },
+            Route::Madness,
+        ),
+        ProcessState::AwaitingCascadeChoice {
+            player, candidate, ..
+        } => (
+            *player,
+            "Cascade",
+            MayCast { card: *candidate },
+            Route::Cascade,
+        ),
+        ProcessState::AwaitingUnlessPaidChoice {
+            payer_queue, cost, ..
+        } => {
+            let payer = *payer_queue
+                .front()
+                .expect("payer_queue is never empty while paused");
+            (
+                payer,
+                "Unless paid",
+                Payment { cost: cost.clone() },
+                Route::UnlessPaid,
+            )
         }
-        ProcessState::AwaitingEntryAttachChoice { controller, candidates, .. } => {
-            (*controller, "Attach on entry", pick(targets(candidates), 1, 1), Route::EntryAttachChoice)
-        }
-        ProcessState::AwaitingTokenAttachChoice { controller, candidates, .. } => {
-            (*controller, "Attach on entry", pick(targets(candidates), 1, 1), Route::TokenAttachChoice)
-        }
-        ProcessState::AwaitingDevourChoice { controller, candidates, .. } => {
-            (*controller, "Devour", pick(objects(candidates), 0, candidates.len()), Route::Devour)
-        }
-        ProcessState::AwaitingAmplifyChoice { controller, candidates, .. } => {
-            (*controller, "Amplify", pick(objects(candidates), 0, candidates.len()), Route::Amplify)
-        }
-        ProcessState::AwaitingSearchDevourChoice { controller, candidates, .. } => {
-            (*controller, "Devour", pick(objects(candidates), 0, candidates.len()), Route::SearchDevour)
-        }
-        ProcessState::AwaitingSearchAmplifyChoice { controller, candidates, .. } => {
-            (*controller, "Amplify", pick(objects(candidates), 0, candidates.len()), Route::SearchAmplify)
-        }
-        ProcessState::AwaitingMadnessChoice { player, card, .. } => {
-            (*player, "Madness", MayCast { card: Some(*card) }, Route::Madness)
-        }
-        ProcessState::AwaitingCascadeChoice { player, candidate, .. } => {
-            (*player, "Cascade", MayCast { card: *candidate }, Route::Cascade)
-        }
-        ProcessState::AwaitingUnlessPaidChoice { payer_queue, cost, .. } => {
-            let payer = *payer_queue.front().expect("payer_queue is never empty while paused");
-            (payer, "Unless paid", Payment { cost: cost.clone() }, Route::UnlessPaid)
-        }
-        ProcessState::AwaitingDiscardChoice { player, candidates, .. } => {
-            (*player, "Discard", pick(objects(candidates), 1, 1), Route::DiscardChoice)
-        }
-        ProcessState::AwaitingCopyChoice { controller, candidates, .. } => {
-            (*controller, "Copy", pick(objects(candidates), 0, 1), Route::CopyChoice)
-        }
-        ProcessState::AwaitingScriptChoice { request, controller, source, .. } => match request {
-            ScriptChoiceRequest::SelectTarget { filter, exclude_ids } => (
+        ProcessState::AwaitingDiscardChoice {
+            player, candidates, ..
+        } => (
+            *player,
+            "Discard",
+            pick(objects(candidates), 1, 1),
+            Route::DiscardChoice,
+        ),
+        ProcessState::AwaitingCopyChoice {
+            controller,
+            candidates,
+            ..
+        } => (
+            *controller,
+            "Copy",
+            pick(objects(candidates), 0, 1),
+            Route::CopyChoice,
+        ),
+        ProcessState::AwaitingScriptChoice {
+            request,
+            controller,
+            source,
+            ..
+        } => match request {
+            ScriptChoiceRequest::SelectTarget {
+                filter,
+                exclude_ids,
+            } => (
                 *controller,
                 "Choose target",
-                pick(script_select_candidates(engine, filter, exclude_ids, *controller, *source), 1, 1),
+                pick(
+                    script_select_candidates(engine, filter, exclude_ids, *controller, *source),
+                    1,
+                    1,
+                ),
                 Route::ScriptSelect,
             ),
             ScriptChoiceRequest::MayChoose => (*controller, "May", YesNo, Route::ScriptMay),
         },
-        ProcessState::AwaitingScryChoice { controller, cards, .. } => (
+        ProcessState::AwaitingScryChoice {
+            controller, cards, ..
+        } => (
             *controller,
             "Scry",
-            Partition { cards: cards.clone(), rest: PartitionRest::LibraryBottom },
+            Partition {
+                cards: cards.clone(),
+                rest: PartitionRest::LibraryBottom,
+            },
             Route::Scry,
         ),
-        ProcessState::AwaitingSurveilChoice { controller, cards, .. } => (
+        ProcessState::AwaitingSurveilChoice {
+            controller, cards, ..
+        } => (
             *controller,
             "Surveil",
-            Partition { cards: cards.clone(), rest: PartitionRest::Graveyard },
+            Partition {
+                cards: cards.clone(),
+                rest: PartitionRest::Graveyard,
+            },
             Route::Surveil,
         ),
-        ProcessState::AwaitingSearchChoice { controller, candidates, count, .. } => {
+        ProcessState::AwaitingSearchChoice {
+            controller,
+            candidates,
+            count,
+            ..
+        } => {
             // CR 401.2: library order is hidden from every player, so the list
             // is sorted by id and never follows the library.
             let mut sorted = candidates.clone();
             sorted.sort();
-            (*controller, "Search", pick(objects(&sorted), 0, *count as usize), Route::Search)
+            (
+                *controller,
+                "Search",
+                pick(objects(&sorted), 0, *count as usize),
+                Route::Search,
+            )
         }
-        ProcessState::AwaitTriggerOrderChoice { player, group, .. } => {
-            (*player, "Trigger order", Order { items: group.clone() }, Route::TriggerOrder(group.clone()))
-        }
-        ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, .. } => (
+        ProcessState::AwaitTriggerOrderChoice { player, group, .. } => (
+            *player,
+            "Trigger order",
+            Order {
+                items: group.clone(),
+            },
+            Route::TriggerOrder(group.clone()),
+        ),
+        ProcessState::AwaitingTriggerTargets {
+            trigger,
+            spec,
+            candidates,
+            ..
+        } => (
             trigger.controller,
             "Trigger targets",
             targets_shape(spec, candidates),
             Route::TriggerTargets,
         ),
-        ProcessState::AwaitingTriggerModeChoice { modes, mode_choice, chooser, .. } => {
+        ProcessState::AwaitingTriggerModeChoice {
+            modes,
+            mode_choice,
+            chooser,
+            ..
+        } => {
             let (min, max, repeatable) = mode_choice.bounds();
             (
                 *chooser,
                 "Trigger mode",
-                Modes { mode_count: modes.len(), min, max, repeatable, solo_only: commands::solo_only_modes(modes) },
+                Modes {
+                    mode_count: modes.len(),
+                    min,
+                    max,
+                    repeatable,
+                    solo_only: commands::solo_only_modes(modes),
+                },
                 Route::TriggerMode,
             )
         }
-        ProcessState::AwaitingPayment { payer, cost, .. } => {
-            (*payer, "Payment", Payment { cost: cost.clone() }, Route::Payment)
-        }
-        ProcessState::AwaitingModeChoice { stack_id, chooser, min, max } => {
-            let modes = engine.state().object(*stack_id).map_or(&[][..], |o| &o.definition.modes[..]);
+        ProcessState::AwaitingPayment { payer, cost, .. } => (
+            *payer,
+            "Payment",
+            Payment { cost: cost.clone() },
+            Route::Payment,
+        ),
+        ProcessState::AwaitingModeChoice {
+            stack_id,
+            chooser,
+            min,
+            max,
+        } => {
+            let modes = engine
+                .state()
+                .object(*stack_id)
+                .map_or(&[][..], |o| &o.definition.modes[..]);
             (
                 *chooser,
                 "Spell mode",
@@ -225,13 +410,21 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
                 Route::SpellMode,
             )
         }
-        ProcessState::AwaitingDiscard { player, excess } => {
-            (*player, "Cleanup discard", pick(hand(engine, *player), *excess, *excess), Route::CleanupDiscard)
+        ProcessState::AwaitingDiscard { player, excess } => (
+            *player,
+            "Cleanup discard",
+            pick(hand(engine, *player), *excess, *excess),
+            Route::CleanupDiscard,
+        ),
+        ProcessState::AwaitingMulliganDecision { player } => {
+            (*player, "Mulligan", YesNo, Route::Mulligan)
         }
-        ProcessState::AwaitingMulliganDecision { player } => (*player, "Mulligan", YesNo, Route::Mulligan),
-        ProcessState::AwaitingBottomCardChoice { player, count, .. } => {
-            (*player, "Mulligan bottom", pick(hand(engine, *player), *count, *count), Route::BottomCards)
-        }
+        ProcessState::AwaitingBottomCardChoice { player, count, .. } => (
+            *player,
+            "Mulligan bottom",
+            pick(hand(engine, *player), *count, *count),
+            Route::BottomCards,
+        ),
 
         // The engine is running or finished: no player has to answer.
         ProcessState::PendingAction(_)
@@ -245,11 +438,19 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
         | ProcessState::CleanupSbaCheck
         | ProcessState::GameOver { .. } => return None,
     };
-    Some(Described { player, mechanic, shape, route })
+    Some(Described {
+        player,
+        mechanic,
+        shape,
+        route,
+    })
 }
 
 fn targets_shape(spec: &TargetSpec, candidates: &[Vec<Target>]) -> ReplyShape {
-    ReplyShape::Targets { spec: spec.clone(), candidates: candidates.to_vec() }
+    ReplyShape::Targets {
+        spec: spec.clone(),
+        candidates: candidates.to_vec(),
+    }
 }
 
 /// A priority window is also where the turn-based combat actions happen
@@ -270,10 +471,27 @@ fn priority_window(engine: &Engine) -> (PlayerId, &'static str, ReplyShape, Rout
     }
     if let Some(player) = commands::next_blocking_player(state, engine.script_runtime()) {
         let blockers = engine.legal_blockers(player);
-        return (player, "Declare blockers", ReplyShape::DeclareBlockers { blockers }, Route::DeclareBlockers);
+        return (
+            player,
+            "Declare blockers",
+            ReplyShape::DeclareBlockers { blockers },
+            Route::DeclareBlockers,
+        );
     }
     if let Some((player, splits)) = engine.pending_damage_splits() {
-        return (player, "Assign combat damage", ReplyShape::AssignDamage { splits }, Route::AssignDamage);
+        return (
+            player,
+            "Assign combat damage",
+            ReplyShape::AssignDamage { splits },
+            Route::AssignDamage,
+        );
     }
-    (state.priority_player, "Priority", ReplyShape::Action { entries: engine.legal_actions() }, Route::Priority)
+    (
+        state.priority_player,
+        "Priority",
+        ReplyShape::Action {
+            entries: engine.legal_actions(),
+        },
+        Route::Priority,
+    )
 }

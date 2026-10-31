@@ -3,8 +3,8 @@
 
 use std::ops::ControlFlow;
 
-use crate::types::stack::StackObject;
 use crate::types::event::GameEventKind;
+use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
 use super::super::{Engine, ProcessState, StepStatus};
@@ -33,6 +33,9 @@ impl Engine {
             stack_id: top.stack_id,
             events_so_far: events,
         };
-        ControlFlow::Break(StepStatus::AwaitingMadnessChoice { player: controller, card: exile_id })
+        ControlFlow::Break(StepStatus::AwaitingMadnessChoice {
+            player: controller,
+            card: exile_id,
+        })
     }
 }

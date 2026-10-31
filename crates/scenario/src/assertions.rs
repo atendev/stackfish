@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::*;
 
-use crate::schema::*;
 use crate::actions::resolve_card;
 use crate::build::{parse_counter_kind, parse_phase, parse_step, parse_zone_kind};
+use crate::schema::*;
 
 pub enum AssertionOutcome {
     Passed,
@@ -19,7 +19,11 @@ pub(crate) fn check_assertion(
     match spec {
         AssertionSpec::Life { player, equals } => {
             let pid = PlayerId(*player);
-            let actual = state.players.iter().find(|p| p.player_id == pid).map(|p| p.life);
+            let actual = state
+                .players
+                .iter()
+                .find(|p| p.player_id == pid)
+                .map(|p| p.life);
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {
@@ -34,7 +38,10 @@ pub(crate) fn check_assertion(
             if actual == *equals {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.to_string(), actual: actual.to_string() }
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: actual.to_string(),
+                }
             }
         }
         AssertionSpec::ObjectZone { card, equals } => {
@@ -47,17 +54,32 @@ pub(crate) fn check_assertion(
                 .find(|z| z.contents.contains(&object_id))
                 .map(|z| z.kind)
                 .or_else(|| {
-                    state.stack.iter().any(|s| s.stack_id == object_id).then_some(ZoneKind::Stack)
+                    state
+                        .stack
+                        .iter()
+                        .any(|s| s.stack_id == object_id)
+                        .then_some(ZoneKind::Stack)
                 });
             if actual_kind == Some(expected_kind) {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.clone(), actual: format!("{actual_kind:?}") }
+                AssertionOutcome::Failed {
+                    expected: equals.clone(),
+                    actual: format!("{actual_kind:?}"),
+                }
             }
         }
-        AssertionSpec::ManaPool { player, color, equals } => {
+        AssertionSpec::ManaPool {
+            player,
+            color,
+            equals,
+        } => {
             let pid = PlayerId(*player);
-            let pool = state.players.iter().find(|p| p.player_id == pid).map(|p| &p.mana_pool);
+            let pool = state
+                .players
+                .iter()
+                .find(|p| p.player_id == pid)
+                .map(|p| &p.mana_pool);
             let actual = pool.map(|pool| match color.as_str() {
                 "white" => pool.white,
                 "blue" => pool.blue,
@@ -70,7 +92,10 @@ pub(crate) fn check_assertion(
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: format!("{actual:?}"),
+                }
             }
         }
         AssertionSpec::Tapped { card, equals } => {
@@ -79,16 +104,26 @@ pub(crate) fn check_assertion(
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: format!("{actual:?}"),
+                }
             }
         }
         AssertionSpec::Eliminated { player, equals } => {
             let pid = PlayerId(*player);
-            let actual = state.players.iter().find(|p| p.player_id == pid).map(|p| p.eliminated);
+            let actual = state
+                .players
+                .iter()
+                .find(|p| p.player_id == pid)
+                .map(|p| p.eliminated);
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: format!("{actual:?}"),
+                }
             }
         }
         AssertionSpec::Phase { equals } => {
@@ -96,7 +131,10 @@ pub(crate) fn check_assertion(
             if state.phase == expected {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.clone(), actual: format!("{:?}", state.phase) }
+                AssertionOutcome::Failed {
+                    expected: equals.clone(),
+                    actual: format!("{:?}", state.phase),
+                }
             }
         }
         AssertionSpec::Step { equals } => {
@@ -104,7 +142,10 @@ pub(crate) fn check_assertion(
             if state.step == expected {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.clone(), actual: format!("{:?}", state.step) }
+                AssertionOutcome::Failed {
+                    expected: equals.clone(),
+                    actual: format!("{:?}", state.step),
+                }
             }
         }
         AssertionSpec::ActivePlayer { equals } => {
@@ -140,31 +181,53 @@ pub(crate) fn check_assertion(
             if actual == *equals {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.to_string(), actual: actual.to_string() }
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: actual.to_string(),
+                }
             }
         }
         AssertionSpec::ObjectCounters { card, kind, equals } => {
             let object_id = resolve_card(card, card_ids);
             let counter_kind = parse_counter_kind(kind);
-            let actual = state.object(object_id).map(|o| o.counters.count(&counter_kind));
+            let actual = state
+                .object(object_id)
+                .map(|o| o.counters.count(&counter_kind));
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: format!("{actual:?}"),
+                }
             }
         }
-        AssertionSpec::PlayerCounters { player, kind, equals } => {
+        AssertionSpec::PlayerCounters {
+            player,
+            kind,
+            equals,
+        } => {
             let pid = PlayerId(*player);
             let counter_kind = parse_counter_kind(kind);
-            let actual =
-                state.players.iter().find(|p| p.player_id == pid).map(|p| p.counters.count(&counter_kind));
+            let actual = state
+                .players
+                .iter()
+                .find(|p| p.player_id == pid)
+                .map(|p| p.counters.count(&counter_kind));
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: format!("{actual:?}"),
+                }
             }
         }
-        AssertionSpec::CommanderDamage { player, source_card, equals } => {
+        AssertionSpec::CommanderDamage {
+            player,
+            source_card,
+            equals,
+        } => {
             let pid = PlayerId(*player);
             // The lookup key is the commander's name, read off its live object. `card_ids` is
             // remapped only after pregame, so a recast mid-scenario cannot be followed.
@@ -172,12 +235,19 @@ pub(crate) fn check_assertion(
             let source_id = resolve_card(source_card, card_ids);
             let source_name = state.object(source_id).map(|o| o.definition.name.clone());
             let actual = source_name.and_then(|name| {
-                state.players.iter().find(|p| p.player_id == pid).map(|p| p.commander_damage_from(&name))
+                state
+                    .players
+                    .iter()
+                    .find(|p| p.player_id == pid)
+                    .map(|p| p.commander_damage_from(&name))
             });
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: format!("{actual:?}"),
+                }
             }
         }
         AssertionSpec::BandMembers { card, equals } => {
@@ -202,9 +272,11 @@ pub(crate) fn check_assertion(
             if matches {
                 AssertionOutcome::Passed
             } else {
-                AssertionOutcome::Failed { expected: format!("{equals:?}"), actual: format!("{actual_band:?}") }
+                AssertionOutcome::Failed {
+                    expected: format!("{equals:?}"),
+                    actual: format!("{actual_band:?}"),
+                }
             }
         }
     }
 }
-

@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones,
+};
 
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
@@ -36,7 +38,15 @@ fn bear_definition(definition_id: u64, name: &str, script: Option<&str>) -> Card
             Some(source) => ScriptReference::Inline(source.to_string()),
             None => ScriptReference::ByKey("bear".to_string()),
         },
-        ..minimal_card_definition(definition_id, name, "bear", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            definition_id,
+            name,
+            "bear",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -64,7 +74,15 @@ fn doom_definition(spec: TargetSpec) -> CardDefinition {
     CardDefinition {
         target_requirement: Some(spec),
         effect: Some(AbilityEffect::Destroy),
-        ..minimal_card_definition(40, "Test Doom", "test_doom", ManaCost { symbols: Vec::new() }, CardTypeSet::INSTANT)
+        ..minimal_card_definition(
+            40,
+            "Test Doom",
+            "test_doom",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::INSTANT,
+        )
     }
 }
 
@@ -76,25 +94,52 @@ fn two_player_state() -> GameState {
     GameState {
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(P0, 1), (P1, 1)]),
-        ..base_two_player_state(zones(P0, P1, &[ZoneKind::Hand, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            P0,
+            P1,
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, id: ObjectId, definition: CardDefinition, owner: PlayerId) {
-    state.objects.insert(id, card_object(id, definition, owner, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+fn put_on_battlefield(
+    state: &mut GameState,
+    id: ObjectId,
+    definition: CardDefinition,
+    owner: PlayerId,
+) {
+    state.objects.insert(
+        id,
+        card_object(id, definition, owner, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
 }
 
 fn put_in_hand(state: &mut GameState, id: ObjectId, definition: CardDefinition, owner: PlayerId) {
-    state.objects.insert(id, card_object(id, definition, owner, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(owner)).unwrap().push_bottom(id);
+    state
+        .objects
+        .insert(id, card_object(id, definition, owner, ZoneKind::Hand));
+    state
+        .zone_mut(ZoneKind::Hand, Some(owner))
+        .unwrap()
+        .push_bottom(id);
 }
 
 fn run_battlefield_scripts(state: &mut GameState, ids: &[ObjectId]) {
     let mut runtime = ScriptRuntime::new();
     for &id in ids {
         let definition = state.object(id).expect("fixture object").definition.clone();
-        runtime.run_card_script(state, &definition, id).expect("script registers");
+        runtime
+            .run_card_script(state, &definition, id)
+            .expect("script registers");
     }
 }
 
@@ -102,23 +147,44 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Targ
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None, pay_buyback: false },
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
-fn cast_and_pay(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> StepStatus {
+fn cast_and_pay(
+    engine: &mut Engine,
+    player: PlayerId,
+    card: ObjectId,
+    targets: Vec<Target>,
+) -> StepStatus {
     cast(engine, player, card, targets);
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected the cast's (free) payment pause, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a free cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected the cast's (free) payment pause, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a free cost");
     drain(engine)
 }
 
 fn accept_trigger_order(engine: &mut Engine, status: StepStatus) -> StepStatus {
     match status {
         StepStatus::AwaitingTriggerOrderChoice { group, .. } => {
-            engine.submit_trigger_order(group).expect("offered order is valid");
+            engine
+                .submit_trigger_order(group)
+                .expect("offered order is valid");
             drain(engine)
         }
         other => other,
@@ -126,9 +192,19 @@ fn accept_trigger_order(engine: &mut Engine, status: StepStatus) -> StepStatus {
 }
 
 fn pass_both(engine: &mut Engine) -> StepStatus {
-    engine.submit_action(PlayerAction { player: P0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: P0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: P1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: P1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -138,28 +214,51 @@ fn became_target_events(engine: &Engine, object: ObjectId) -> Vec<(ObjectId, Pla
         .ledger
         .iter()
         .filter_map(|e| match e.kind {
-            GameEventKind::BecameTarget { object: o, by, by_controller } if o == object => Some((by, by_controller)),
+            GameEventKind::BecameTarget {
+                object: o,
+                by,
+                by_controller,
+            } if o == object => Some((by, by_controller)),
             _ => None,
         })
         .collect()
 }
 
 fn ward_triggers_on_stack(engine: &Engine) -> Vec<&StackObject> {
-    engine.state().stack.iter().filter(|s| matches!(s.kind, StackEntryKind::TriggeredAbility)).collect()
+    engine
+        .state()
+        .stack
+        .iter()
+        .filter(|s| matches!(s.kind, StackEntryKind::TriggeredAbility))
+        .collect()
 }
 
 fn spell_on_stack(engine: &Engine) -> ObjectId {
-    engine.state().stack.iter().find(|s| matches!(s.kind, StackEntryKind::Spell)).expect("a spell is on the stack").stack_id
+    engine
+        .state()
+        .stack
+        .iter()
+        .find(|s| matches!(s.kind, StackEntryKind::Spell))
+        .expect("a spell is on the stack")
+        .stack_id
 }
 
 fn on_battlefield(engine: &Engine, id: ObjectId) -> bool {
-    engine.state().object(id).is_some_and(|o| o.zone == ZoneKind::Battlefield)
+    engine
+        .state()
+        .object(id)
+        .is_some_and(|o| o.zone == ZoneKind::Battlefield)
 }
 
 fn ward_bear_vs_doom() -> (Engine, ObjectId, ObjectId) {
     let (bear, doom) = (ObjectId(10), ObjectId(11));
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, bear, bear_definition(1, "Ward Bear", Some(WARD_2)), P1);
+    put_on_battlefield(
+        &mut state,
+        bear,
+        bear_definition(1, "Ward Bear", Some(WARD_2)),
+        P1,
+    );
     put_in_hand(&mut state, doom, single_doom(), P0);
     run_battlefield_scripts(&mut state, &[bear]);
     (Engine::new(state), bear, doom)
@@ -173,15 +272,32 @@ fn an_opponents_spell_targeting_a_ward_permanent_puts_a_ward_trigger_above_it() 
     let status = cast_and_pay(&mut engine, P0, doom, vec![Target::Object(bear)]);
     let doom = spell_on_stack(&engine);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == P0), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == P0),
+        "got {status:?}"
+    );
     assert_eq!(engine.state().stack.len(), 2, "Doom and the ward trigger");
     let ward = engine.state().stack.last().unwrap();
     assert!(matches!(ward.kind, StackEntryKind::TriggeredAbility));
     assert_eq!(ward.source, bear);
-    assert_eq!(ward.controller, P1, "the ward permanent's controller controls the trigger");
-    assert_eq!(ward.targets, vec![Target::Object(doom)], "it targets the spell that caused it");
-    assert_eq!(became_target_events(&engine, bear), vec![(doom, P0)], "one BecameTarget, naming the spell and its controller");
-    assert!(on_battlefield(&engine, bear), "ward does not stop the spell from targeting");
+    assert_eq!(
+        ward.controller, P1,
+        "the ward permanent's controller controls the trigger"
+    );
+    assert_eq!(
+        ward.targets,
+        vec![Target::Object(doom)],
+        "it targets the spell that caused it"
+    );
+    assert_eq!(
+        became_target_events(&engine, bear),
+        vec![(doom, P0)],
+        "one BecameTarget, naming the spell and its controller"
+    );
+    assert!(
+        on_battlefield(&engine, bear),
+        "ward does not stop the spell from targeting"
+    );
 }
 
 #[test]
@@ -191,19 +307,36 @@ fn declining_the_ward_cost_counters_the_spell() {
     let doom = spell_on_stack(&engine);
 
     let status = pass_both(&mut engine);
-    let StepStatus::AwaitingUnlessPaidChoice { payer, cost, otherwise } = status else {
+    let StepStatus::AwaitingUnlessPaidChoice {
+        payer,
+        cost,
+        otherwise,
+    } = status
+    else {
         panic!("expected AwaitingUnlessPaidChoice, got {status:?}")
     };
-    assert_eq!(payer, P0, "the player whose spell targeted the permanent pays, not the ward controller");
+    assert_eq!(
+        payer, P0,
+        "the player whose spell targeted the permanent pays, not the ward controller"
+    );
     assert_eq!(cost.mana.as_ref().expect("mana cost").mana_value(), 2);
     assert!(matches!(otherwise, UnlessPaidConsequence::Counter));
 
-    engine.decline_unless_paid(P0).expect("declining is always legal");
+    engine
+        .decline_unless_paid(P0)
+        .expect("declining is always legal");
     drain(&mut engine);
 
-    assert!(engine.state().stack.is_empty(), "Doom was countered and never resolved");
+    assert!(
+        engine.state().stack.is_empty(),
+        "Doom was countered and never resolved"
+    );
     assert!(on_battlefield(&engine, bear), "the ward permanent survived");
-    let countered = engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Countered { stack_id } if stack_id == doom));
+    let countered = engine
+        .state()
+        .ledger
+        .iter()
+        .any(|e| matches!(e.kind, GameEventKind::Countered { stack_id } if stack_id == doom));
     assert!(countered, "expected a Countered event for Doom");
 }
 
@@ -214,17 +347,35 @@ fn paying_the_ward_cost_lets_the_spell_resolve() {
     engine.state_mut().players[0].mana_pool.colorless = 2;
 
     let status = pass_both(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingUnlessPaidChoice { payer, .. } if payer == P0), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingUnlessPaidChoice { payer, .. } if payer == P0),
+        "got {status:?}"
+    );
     let units = vec![ManaUnit::Colorless, ManaUnit::Colorless];
     engine
-        .submit_unless_paid_payment(P0, PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .submit_unless_paid_payment(
+            P0,
+            PaymentPlan {
+                payments: vec![CostPayment::Mana {
+                    units,
+                    phyrexian_life: 0,
+                }],
+            },
+        )
         .expect("two generic covers {2}");
     drain(&mut engine);
-    assert_eq!(engine.state().player(P0).unwrap().mana_pool.colorless, 0, "the ward cost was really spent");
+    assert_eq!(
+        engine.state().player(P0).unwrap().mana_pool.colorless,
+        0,
+        "the ward cost was really spent"
+    );
     assert_eq!(engine.state().stack.len(), 1, "only Doom is left");
 
     pass_both(&mut engine);
-    assert!(!on_battlefield(&engine, bear), "Doom resolved and destroyed the bear");
+    assert!(
+        !on_battlefield(&engine, bear),
+        "Doom resolved and destroyed the bear"
+    );
 }
 
 #[test]
@@ -235,8 +386,15 @@ fn a_ward_payment_that_is_too_small_is_rejected_and_declining_still_counters() {
     pass_both(&mut engine);
 
     let units = vec![ManaUnit::Colorless];
-    let rejected =
-        engine.submit_unless_paid_payment(P0, PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] });
+    let rejected = engine.submit_unless_paid_payment(
+        P0,
+        PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units,
+                phyrexian_life: 0,
+            }],
+        },
+    );
     assert!(rejected.is_err(), "one mana does not cover {{2}}");
 
     engine.decline_unless_paid(P0).unwrap();
@@ -249,7 +407,12 @@ fn a_ward_payment_that_is_too_small_is_rejected_and_declining_still_counters() {
 fn a_ward_permanents_own_controller_targeting_it_does_not_trigger_ward() {
     let (bear, doom) = (ObjectId(10), ObjectId(11));
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, bear, bear_definition(1, "Ward Bear", Some(WARD_2)), P0);
+    put_on_battlefield(
+        &mut state,
+        bear,
+        bear_definition(1, "Ward Bear", Some(WARD_2)),
+        P0,
+    );
     put_in_hand(&mut state, doom, single_doom(), P0);
     run_battlefield_scripts(&mut state, &[bear]);
     let mut engine = Engine::new(state);
@@ -259,7 +422,11 @@ fn a_ward_permanents_own_controller_targeting_it_does_not_trigger_ward() {
 
     assert_eq!(engine.state().stack.len(), 1, "only Doom, no ward trigger");
     assert!(ward_triggers_on_stack(&engine).is_empty());
-    assert_eq!(became_target_events(&engine, bear), vec![(doom, P0)], "the event still happens, ward just ignores it");
+    assert_eq!(
+        became_target_events(&engine, bear),
+        vec![(doom, P0)],
+        "the event still happens, ward just ignores it"
+    );
 }
 
 #[test]
@@ -285,7 +452,10 @@ fn the_ward_trigger_fizzles_cleanly_if_the_spell_is_already_gone() {
 
     let status = pass_both(&mut engine);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "no payment is asked for a spell that is gone, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "no payment is asked for a spell that is gone, got {status:?}"
+    );
     assert!(engine.state().stack.is_empty());
 }
 
@@ -294,7 +464,12 @@ fn the_ward_trigger_fizzles_cleanly_if_the_spell_is_already_gone() {
 fn two_ward_instances_trigger_separately_and_only_the_first_decline_matters() {
     let (bear, doom) = (ObjectId(10), ObjectId(11));
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, bear, bear_definition(1, "Double Ward Bear", Some(WARD_1_AND_2)), P1);
+    put_on_battlefield(
+        &mut state,
+        bear,
+        bear_definition(1, "Double Ward Bear", Some(WARD_1_AND_2)),
+        P1,
+    );
     put_in_hand(&mut state, doom, single_doom(), P0);
     run_battlefield_scripts(&mut state, &[bear]);
     let mut engine = Engine::new(state);
@@ -302,17 +477,31 @@ fn two_ward_instances_trigger_separately_and_only_the_first_decline_matters() {
     let status = cast_and_pay(&mut engine, P0, doom, vec![Target::Object(bear)]);
     accept_trigger_order(&mut engine, status);
 
-    assert_eq!(ward_triggers_on_stack(&engine).len(), 2, "one trigger per instance of ward");
-    assert_eq!(became_target_events(&engine, bear).len(), 1, "but the permanent became a target once");
+    assert_eq!(
+        ward_triggers_on_stack(&engine).len(),
+        2,
+        "one trigger per instance of ward"
+    );
+    assert_eq!(
+        became_target_events(&engine, bear).len(),
+        1,
+        "but the permanent became a target once"
+    );
 
     let status = pass_both(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingUnlessPaidChoice { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingUnlessPaidChoice { .. }),
+        "got {status:?}"
+    );
     engine.decline_unless_paid(P0).unwrap();
     let status = drain(&mut engine);
 
     // Doom is countered, so the second ward trigger has nothing left to
     // counter and does not ask again.
-    assert!(!matches!(status, StepStatus::AwaitingUnlessPaidChoice { .. }), "got {status:?}");
+    assert!(
+        !matches!(status, StepStatus::AwaitingUnlessPaidChoice { .. }),
+        "got {status:?}"
+    );
     assert!(on_battlefield(&engine, bear));
 }
 
@@ -320,17 +509,36 @@ fn two_ward_instances_trigger_separately_and_only_the_first_decline_matters() {
 fn a_spell_targeting_two_ward_permanents_triggers_each_of_them() {
     let (bear_a, bear_b, doom) = (ObjectId(10), ObjectId(12), ObjectId(11));
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, bear_a, bear_definition(1, "Ward Bear A", Some(WARD_2)), P1);
-    put_on_battlefield(&mut state, bear_b, bear_definition(2, "Ward Bear B", Some(WARD_2)), P1);
+    put_on_battlefield(
+        &mut state,
+        bear_a,
+        bear_definition(1, "Ward Bear A", Some(WARD_2)),
+        P1,
+    );
+    put_on_battlefield(
+        &mut state,
+        bear_b,
+        bear_definition(2, "Ward Bear B", Some(WARD_2)),
+        P1,
+    );
     let both = TargetSpec::Multiple(vec![creature_word(), creature_word()]);
     put_in_hand(&mut state, doom, doom_definition(both), P0);
     run_battlefield_scripts(&mut state, &[bear_a, bear_b]);
     let mut engine = Engine::new(state);
 
-    let status = cast_and_pay(&mut engine, P0, doom, vec![Target::Object(bear_a), Target::Object(bear_b)]);
+    let status = cast_and_pay(
+        &mut engine,
+        P0,
+        doom,
+        vec![Target::Object(bear_a), Target::Object(bear_b)],
+    );
     accept_trigger_order(&mut engine, status);
 
-    assert_eq!(ward_triggers_on_stack(&engine).len(), 2, "one ward trigger per ward permanent");
+    assert_eq!(
+        ward_triggers_on_stack(&engine).len(),
+        2,
+        "one ward trigger per ward permanent"
+    );
     assert_eq!(became_target_events(&engine, bear_a).len(), 1);
     assert_eq!(became_target_events(&engine, bear_b).len(), 1);
 }
@@ -339,15 +547,29 @@ fn a_spell_targeting_two_ward_permanents_triggers_each_of_them() {
 fn naming_the_same_permanent_under_two_target_words_is_one_trigger() {
     let (bear, doom) = (ObjectId(10), ObjectId(11));
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, bear, bear_definition(1, "Ward Bear", Some(WARD_2)), P1);
+    put_on_battlefield(
+        &mut state,
+        bear,
+        bear_definition(1, "Ward Bear", Some(WARD_2)),
+        P1,
+    );
     let twice = TargetSpec::Multiple(vec![creature_word(), creature_word()]);
     put_in_hand(&mut state, doom, doom_definition(twice), P0);
     run_battlefield_scripts(&mut state, &[bear]);
     let mut engine = Engine::new(state);
 
-    cast_and_pay(&mut engine, P0, doom, vec![Target::Object(bear), Target::Object(bear)]);
+    cast_and_pay(
+        &mut engine,
+        P0,
+        doom,
+        vec![Target::Object(bear), Target::Object(bear)],
+    );
 
-    assert_eq!(became_target_events(&engine, bear).len(), 1, "CR 603.2c: one event for the one permanent");
+    assert_eq!(
+        became_target_events(&engine, bear).len(),
+        1,
+        "CR 603.2c: one event for the one permanent"
+    );
     assert_eq!(ward_triggers_on_stack(&engine).len(), 1);
 }
 
@@ -355,11 +577,24 @@ fn naming_the_same_permanent_under_two_target_words_is_one_trigger() {
 fn an_activated_ability_targeting_a_ward_permanent_triggers_ward_and_can_be_countered() {
     let (bear, pinger) = (ObjectId(10), ObjectId(13));
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, bear, bear_definition(1, "Ward Bear", Some(WARD_2)), P1);
+    put_on_battlefield(
+        &mut state,
+        bear,
+        bear_definition(1, "Ward Bear", Some(WARD_2)),
+        P1,
+    );
     put_on_battlefield(
         &mut state,
         pinger,
-        minimal_card_definition(3, "Test Pinger", "pinger", ManaCost { symbols: Vec::new() }, CardTypeSet::ARTIFACT),
+        minimal_card_definition(
+            3,
+            "Test Pinger",
+            "pinger",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::ARTIFACT,
+        ),
         P0,
     );
     run_battlefield_scripts(&mut state, &[bear]);
@@ -370,7 +605,11 @@ fn an_activated_ability_targeting_a_ward_permanent_triggers_ward_and_can_be_coun
         source: pinger,
         kind: AbilityKind::Activated,
         condition: None,
-        cost: Some(CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() }),
+        cost: Some(CostSpec {
+            mana: None,
+            additional: Vec::new(),
+            alternative: Vec::new(),
+        }),
         target: Some(TargetSpec::Primitive(creature_word())),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Destroy),
@@ -391,21 +630,48 @@ fn an_activated_ability_targeting_a_ward_permanent_triggers_ward_and_can_be_coun
         })
         .expect("P0 holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).unwrap();
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .unwrap();
     drain(&mut engine);
 
-    assert_eq!(engine.state().stack.len(), 2, "the activated ability and the ward trigger");
-    let activated = engine.state().stack.iter().find(|s| matches!(s.kind, StackEntryKind::ActivatedAbility)).unwrap().stack_id;
+    assert_eq!(
+        engine.state().stack.len(),
+        2,
+        "the activated ability and the ward trigger"
+    );
+    let activated = engine
+        .state()
+        .stack
+        .iter()
+        .find(|s| matches!(s.kind, StackEntryKind::ActivatedAbility))
+        .unwrap()
+        .stack_id;
     let ward = engine.state().stack.last().unwrap();
-    assert_eq!(ward.targets, vec![Target::Ability(activated)], "an ability is targeted as Target::Ability");
+    assert_eq!(
+        ward.targets,
+        vec![Target::Ability(activated)],
+        "an ability is targeted as Target::Ability"
+    );
 
     let status = pass_both(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingUnlessPaidChoice { payer, .. } if payer == P0), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingUnlessPaidChoice { payer, .. } if payer == P0),
+        "got {status:?}"
+    );
     engine.decline_unless_paid(P0).unwrap();
     drain(&mut engine);
 
-    assert!(engine.state().stack.is_empty(), "the activated ability was countered");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the activated ability was countered"
+    );
     assert!(on_battlefield(&engine, bear));
 }
 
@@ -414,13 +680,35 @@ fn a_triggered_ability_targeting_a_ward_permanent_triggers_ward() {
     let (bear, reaper) = (ObjectId(10), ObjectId(14));
     let mut state = GameState {
         phase: Phase::PreGame,
-        ..base_two_player_state(zones(P0, P1, &[ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Graveyard]))
+        ..base_two_player_state(zones(
+            P0,
+            P1,
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Library,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+            ],
+        ))
     };
-    put_on_battlefield(&mut state, bear, bear_definition(1, "Ward Bear", Some(WARD_2)), P1);
+    put_on_battlefield(
+        &mut state,
+        bear,
+        bear_definition(1, "Ward Bear", Some(WARD_2)),
+        P1,
+    );
     put_on_battlefield(
         &mut state,
         reaper,
-        minimal_card_definition(4, "Test Reaper", "reaper", ManaCost { symbols: Vec::new() }, CardTypeSet::ARTIFACT),
+        minimal_card_definition(
+            4,
+            "Test Reaper",
+            "reaper",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::ARTIFACT,
+        ),
         P0,
     );
     run_battlefield_scripts(&mut state, &[bear]);
@@ -430,7 +718,9 @@ fn a_triggered_ability_targeting_a_ward_permanent_triggers_ward() {
         id: AbilityId(900),
         source: reaper,
         kind: AbilityKind::Triggered,
-        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
+        condition: Some(ConditionSpec::Primitive(
+            ConditionPrimitive::BeginningOfYourUpkeep,
+        )),
         cost: None,
         target: Some(TargetSpec::Primitive(creature_word())),
         operation: ScriptHandle(0),
@@ -440,17 +730,45 @@ fn a_triggered_ability_targeting_a_ward_permanent_triggers_ward() {
     let mut engine = Engine::new(state);
 
     // Upkeep: Reaper's trigger asks P0 for its target.
-    engine.submit_action(PlayerAction { player: P0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: P0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: P1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: P1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingTriggerTargets { .. }), "got {status:?}");
-    engine.submit_trigger_targets(vec![Target::Object(bear)]).expect("the bear is an offered candidate");
+    assert!(
+        matches!(status, StepStatus::AwaitingTriggerTargets { .. }),
+        "got {status:?}"
+    );
+    engine
+        .submit_trigger_targets(vec![Target::Object(bear)])
+        .expect("the bear is an offered candidate");
     let status = drain(&mut engine);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
-    assert_eq!(engine.state().stack.len(), 2, "Reaper's trigger and the ward trigger it caused");
-    let reaper_trigger = engine.state().stack.iter().find(|s| s.source == reaper).unwrap().stack_id;
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
+    assert_eq!(
+        engine.state().stack.len(),
+        2,
+        "Reaper's trigger and the ward trigger it caused"
+    );
+    let reaper_trigger = engine
+        .state()
+        .stack
+        .iter()
+        .find(|s| s.source == reaper)
+        .unwrap()
+        .stack_id;
     let ward = engine.state().stack.last().unwrap();
     assert_eq!(ward.source, bear);
     assert_eq!(ward.targets, vec![Target::Ability(reaper_trigger)]);
@@ -494,20 +812,51 @@ fn a_selecttargets_answer_checks_protection_against_the_abilitys_source_not_its_
     // An ability's stack id is no object in the state, so passing it as the protection source could never match a quality protection. The check now gets the real source permanent, a red land.
     let (land, protected_bear, plain_bear) = (ObjectId(20), ObjectId(10), ObjectId(12));
     let mut state = two_player_state();
-    put_on_battlefield(&mut state, protected_bear, bear_definition(1, "Protected Bear", None), P1);
-    put_on_battlefield(&mut state, plain_bear, bear_definition(2, "Plain Bear", None), P1);
-    state.continuous_effects.push(protection_from_red(protected_bear));
+    put_on_battlefield(
+        &mut state,
+        protected_bear,
+        bear_definition(1, "Protected Bear", None),
+        P1,
+    );
+    put_on_battlefield(
+        &mut state,
+        plain_bear,
+        bear_definition(2, "Plain Bear", None),
+        P1,
+    );
+    state
+        .continuous_effects
+        .push(protection_from_red(protected_bear));
     let red_land = CardDefinition {
         color_indicator: Some(ColorSet::RED),
         script_ref: ScriptReference::Inline(RED_LAND_SELECT_CREATURE_THEN_DESTROY.to_string()),
-        ..minimal_card_definition(5, "Red Land", "red_land", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            5,
+            "Red Land",
+            "red_land",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     };
     put_in_hand(&mut state, land, red_land, P0);
     let mut engine = Engine::new(state);
 
-    engine.submit_action(PlayerAction { player: P0, kind: PlayerActionKind::PlayLand { card: land } }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: P0,
+            kind: PlayerActionKind::PlayLand { card: land },
+        })
+        .unwrap();
     drain(&mut engine);
-    let land_on_battlefield = *engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.back().unwrap();
+    let land_on_battlefield = *engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .back()
+        .unwrap();
     engine
         .submit_action(PlayerAction {
             player: P0,
@@ -521,15 +870,27 @@ fn a_selecttargets_answer_checks_protection_against_the_abilitys_source_not_its_
         })
         .unwrap();
     drain(&mut engine);
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).unwrap();
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .unwrap();
     drain(&mut engine);
     let status = pass_both(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingScriptChoice { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingScriptChoice { .. }),
+        "got {status:?}"
+    );
 
     let rejected = engine.submit_script_choice(Target::Object(protected_bear));
     assert!(
-        matches!(rejected, Err(stackfish_engine::engine::ScriptChoiceError::InvalidCandidate)),
+        matches!(
+            rejected,
+            Err(stackfish_engine::engine::ScriptChoiceError::InvalidCandidate)
+        ),
         "a creature with protection from red cannot be chosen by a red source, got {rejected:?}"
     );
-    engine.submit_script_choice(Target::Object(plain_bear)).expect("an unprotected creature is a legal choice");
+    engine
+        .submit_script_choice(Target::Object(plain_bear))
+        .expect("an unprotected creature is a legal choice");
 }

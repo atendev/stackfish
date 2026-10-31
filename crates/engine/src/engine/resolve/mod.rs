@@ -38,21 +38,22 @@ impl Engine {
         // resolvable yet, so pause without popping. `submit_mode_choice` patches it
         // in place and re-enters here.
         if let Some(top) = self.state.stack.last()
-            && let Some(pending) = &top.pending_mode_choice {
-                let status = StepStatus::AwaitingModeChoice {
-                    player: pending.chooser,
-                    stack_id: top.stack_id,
-                    min: pending.min,
-                    max: pending.max,
-                };
-                self.process_state = ProcessState::AwaitingModeChoice {
-                    stack_id: top.stack_id,
-                    chooser: pending.chooser,
-                    min: pending.min,
-                    max: pending.max,
-                };
-                return status;
-            }
+            && let Some(pending) = &top.pending_mode_choice
+        {
+            let status = StepStatus::AwaitingModeChoice {
+                player: pending.chooser,
+                stack_id: top.stack_id,
+                min: pending.min,
+                max: pending.max,
+            };
+            self.process_state = ProcessState::AwaitingModeChoice {
+                stack_id: top.stack_id,
+                chooser: pending.chooser,
+                min: pending.min,
+                max: pending.max,
+            };
+            return status;
+        }
         // A leftover continuation from an unfinished resolution must not resume into this one.
         self.modal_continuation = None;
         let Some(mut top) = self.state.stack.pop() else {
@@ -63,8 +64,11 @@ impl Engine {
         // CR 117.3b: priority returns to the active player once the object resolves.
         self.state.priority_player = self.state.active_player;
         let since_ledger = self.state.ledger.len();
-        self.pipeline_context =
-            Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
+        self.pipeline_context = Some(PipelineContext {
+            since_ledger,
+            caused_by_command: None,
+            parent_event: None,
+        });
         self.pipeline_exit = PipelineExit::BackToPriority;
 
         // CR 608.2b: recheck every target against current state. `legal_targets` empty
@@ -85,22 +89,36 @@ impl Engine {
             )
         };
         let legal_targets: Vec<Target> = match &top.target_requirement {
-            Some(TargetSpec::Primitive(req)) => {
-                top.targets.iter().copied().filter(|t| is_legal_now(t, req)).collect()
-            }
+            Some(TargetSpec::Primitive(req)) => top
+                .targets
+                .iter()
+                .copied()
+                .filter(|t| is_legal_now(t, req))
+                .collect(),
             // CR 601.2c, 608.2b: each word's legal subset, concatenated for the
             // uniform-verb effect arms. A failed split means the targets were invalid at
             // cast time; fall back to empty instead of panicking.
-            Some(TargetSpec::Multiple(reqs)) => {
-                commands::split_targets_by_requirement(&self.state, &self.script_runtime, reqs, &top.targets, top.controller, top.source, top.x_value)
-                    .map(|chunks| {
-                        reqs.iter()
-                            .zip(chunks)
-                            .flat_map(|(req, chunk)| chunk.into_iter().filter(|t| is_legal_now(t, req)).collect::<Vec<_>>())
-                            .collect()
+            Some(TargetSpec::Multiple(reqs)) => commands::split_targets_by_requirement(
+                &self.state,
+                &self.script_runtime,
+                reqs,
+                &top.targets,
+                top.controller,
+                top.source,
+                top.x_value,
+            )
+            .map(|chunks| {
+                reqs.iter()
+                    .zip(chunks)
+                    .flat_map(|(req, chunk)| {
+                        chunk
+                            .into_iter()
+                            .filter(|t| is_legal_now(t, req))
+                            .collect::<Vec<_>>()
                     })
-                    .unwrap_or_default()
-            }
+                    .collect()
+            })
+            .unwrap_or_default(),
             // No targets, or a `Script`-backed requirement that can't be evaluated here.
             _ => top.targets.clone(),
         };
@@ -108,16 +126,24 @@ impl Engine {
         // list loses. Computed here so the borrow of `self.state` ends before the
         // mutating match below.
         let modal_chunk_legals: Vec<Vec<Target>> = match &top.target_requirement {
-            Some(TargetSpec::Multiple(reqs)) => {
-                commands::split_targets_by_requirement(&self.state, &self.script_runtime, reqs, &top.targets, top.controller, top.source, top.x_value)
-                    .map(|chunks| {
-                        reqs.iter()
-                            .zip(chunks)
-                            .map(|(req, chunk)| chunk.into_iter().filter(|t| is_legal_now(t, req)).collect())
-                            .collect()
+            Some(TargetSpec::Multiple(reqs)) => commands::split_targets_by_requirement(
+                &self.state,
+                &self.script_runtime,
+                reqs,
+                &top.targets,
+                top.controller,
+                top.source,
+                top.x_value,
+            )
+            .map(|chunks| {
+                reqs.iter()
+                    .zip(chunks)
+                    .map(|(req, chunk)| {
+                        chunk.into_iter().filter(|t| is_legal_now(t, req)).collect()
                     })
-                    .unwrap_or_default()
-            }
+                    .collect()
+            })
+            .unwrap_or_default(),
             _ => Vec::new(),
         };
         let fizzles = match &top.target_requirement {
@@ -132,9 +158,12 @@ impl Engine {
         // CR 603.4: an intervening-if is rechecked at resolution; false removes the
         // ability like a fizzle. `None` never fizzles this way.
         let intervening_if_fizzles = match &top.intervening_if {
-            Some(InterveningIfSpec::Primitive(p)) => {
-                !p.holds(&self.state, top.controller, top.source, top.source_lki.as_ref())
-            }
+            Some(InterveningIfSpec::Primitive(p)) => !p.holds(
+                &self.state,
+                top.controller,
+                top.source,
+                top.source_lki.as_ref(),
+            ),
             // A script error counts as "doesn't hold" and is logged as a `ScriptError`.
             Some(InterveningIfSpec::Script(handle)) => {
                 let holds = match self.script_runtime.invoke_intervening_if(
@@ -165,13 +194,20 @@ impl Engine {
             // CR 608.2b: a fizzled spell does nothing and lands in its owner's graveyard,
             // or exile if cast with an exiling alternative cost (CR 702.34a).
             if matches!(top.kind, StackEntryKind::Spell) {
-                let destination =
-                    if top.exile_on_leaving_stack { ZoneKind::Exile } else { ZoneKind::Graveyard };
-                if let Some(event) = self.move_resolving_spell(top.stack_id, destination, false, false) {
+                let destination = if top.exile_on_leaving_stack {
+                    ZoneKind::Exile
+                } else {
+                    ZoneKind::Graveyard
+                };
+                if let Some(event) =
+                    self.move_resolving_spell(top.stack_id, destination, false, false)
+                {
                     events.push(event);
                 }
             }
-            events.push(GameEventKind::Fizzled { stack_id: top.stack_id });
+            events.push(GameEventKind::Fizzled {
+                stack_id: top.stack_id,
+            });
         } else {
             // TODO: look up `top.operation` and invoke it via `invoke_operation` once the script bridge allows
 
@@ -180,7 +216,9 @@ impl Engine {
             // before the zone move removes `top.stack_id` from `objects` (CR 400.7).
             let is_instant_or_sorcery = matches!(top.kind, StackEntryKind::Spell)
                 && self.state.object(top.stack_id).is_some_and(|obj| {
-                    obj.definition.card_types.intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY)
+                    obj.definition
+                        .card_types
+                        .intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY)
                 });
 
             if matches!(top.kind, StackEntryKind::Spell) {
@@ -202,15 +240,20 @@ impl Engine {
                 StackEntryKind::TriggeredAbility | StackEntryKind::ActivatedAbility
             ) || is_instant_or_sorcery
             {
-                match self.resolve_ability_effect(&top, &legal_targets, &modal_chunk_legals, events) {
+                match self.resolve_ability_effect(&top, &legal_targets, &modal_chunk_legals, events)
+                {
                     ControlFlow::Break(status) => return status,
                     ControlFlow::Continue(resumed) => events = resumed,
                 }
             }
-            events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
+            events.push(GameEventKind::StackObjectResolved {
+                stack_id: top.stack_id,
+            });
         }
-        self.process_state =
-            ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
+        self.process_state = ProcessState::ReplacementCheck {
+            remaining: events.into(),
+            checked: Vec::new(),
+        };
         StepStatus::Progressed
     }
 
@@ -231,10 +274,17 @@ impl Engine {
                 self.resolve_modal_effect(top, effects, words, modal_chunk_legals, events)
             }
             // CR 608.2c: a modal loop with every entry chosen and one shared target set.
-            Some(AbilityEffect::Chain { entries, words }) => {
-                self.resolve_chain_effect(top, entries, words.as_deref(), legal_targets, modal_chunk_legals, events)
+            Some(AbilityEffect::Chain { entries, words }) => self.resolve_chain_effect(
+                top,
+                entries,
+                words.as_deref(),
+                legal_targets,
+                modal_chunk_legals,
+                events,
+            ),
+            Some(AbilityEffect::GainLife(amount)) => {
+                self.resolve_gain_life_effect(top, *amount, events)
             }
-            Some(AbilityEffect::GainLife(amount)) => self.resolve_gain_life_effect(top, *amount, events),
             // CR 608.2m: damage emits a `DamageDealt` event through the replacement
             // pipeline so prevention and lifelink apply. Never combat damage (CR 903.10a).
             // CR 608.2b: individually illegal targets are skipped.
@@ -246,7 +296,9 @@ impl Engine {
             // (CR 614.8) and indestructibility doesn't apply (CR 702.12b). An ordering
             // pause (CR 616.1) resumes the remaining targets afterward.
             // TODO: "sacrifice a permanent you control" needs a resolution-time player choice
-            Some(AbilityEffect::Sacrifice) => self.resolve_sacrifice_effect(top, legal_targets, events),
+            Some(AbilityEffect::Sacrifice) => {
+                self.resolve_sacrifice_effect(top, legal_targets, events)
+            }
             // CR 701.8: destroy each legal target independently. A zone change always
             // describes a completed move, so this can't push an unapplied event. A
             // regeneration shield can intercept it (CR 614.8). An ordering pause
@@ -254,11 +306,15 @@ impl Engine {
             // TODO: a "can't be regenerated" qualifier (CR 701.19c)
             Some(AbilityEffect::Destroy) => self.resolve_destroy_effect(top, legal_targets, events),
             // CR 509.1h: mutates `CombatState` directly via `mark_effect_blocked`.
-            Some(AbilityEffect::BecomeBlocked) => self.resolve_become_blocked_effect(legal_targets, events),
+            Some(AbilityEffect::BecomeBlocked) => {
+                self.resolve_become_blocked_effect(legal_targets, events)
+            }
             // CR 701.8: untargeted; collects every battlefield object matching `filter`
             // and uses the same pipeline as `Destroy`, so indestructibility and
             // ordering pauses apply.
-            Some(AbilityEffect::DestroyAll(filter)) => self.resolve_destroy_all_effect(top, filter, events),
+            Some(AbilityEffect::DestroyAll(filter)) => {
+                self.resolve_destroy_all_effect(top, filter, events)
+            }
             // CR 701.21: candidates drawn without replacement via `next_rng`.
             Some(AbilityEffect::SacrificeRandom { filter, count }) => {
                 self.resolve_sacrifice_random_effect(top, filter, *count, events)
@@ -268,28 +324,52 @@ impl Engine {
             // TODO: exiling from the graveyard or hand needs the source zone known at resolution
             Some(AbilityEffect::Exile) => self.resolve_exile_effect(top, legal_targets, events),
             // CR 610.3
-            Some(AbilityEffect::ExileUntilSourceLeaves) => self.resolve_exile_until_source_leaves_effect(top, legal_targets, events),
+            Some(AbilityEffect::ExileUntilSourceLeaves) => {
+                self.resolve_exile_until_source_leaves_effect(top, legal_targets, events)
+            }
             // CR 400.3
-            Some(AbilityEffect::ReturnToHand) => self.resolve_return_to_hand_effect(top, legal_targets, events),
+            Some(AbilityEffect::ReturnToHand) => {
+                self.resolve_return_to_hand_effect(top, legal_targets, events)
+            }
             // CR 400.3: untargeted.
-            Some(AbilityEffect::ReturnSelfToHand) => self.resolve_return_self_to_hand_effect(top, events),
-            Some(AbilityEffect::ReturnAllToHand { filter, zone }) => self.resolve_return_all_to_hand_effect(top, filter, *zone, events),
+            Some(AbilityEffect::ReturnSelfToHand) => {
+                self.resolve_return_self_to_hand_effect(top, events)
+            }
+            Some(AbilityEffect::ReturnAllToHand { filter, zone }) => {
+                self.resolve_return_all_to_hand_effect(top, filter, *zone, events)
+            }
             Some(AbilityEffect::ExileSelf) => self.resolve_exile_self_effect(top, events),
-            Some(AbilityEffect::ExileAll { filter, zone }) => self.resolve_exile_all_effect(top, filter, *zone, events),
+            Some(AbilityEffect::ExileAll { filter, zone }) => {
+                self.resolve_exile_all_effect(top, filter, *zone, events)
+            }
             // CR 110.2a: replacement-checked, with the full entry treatment.
-            Some(AbilityEffect::ReturnToBattlefield { control, tapped }) => {
-                self.resolve_return_to_battlefield_effect(top, legal_targets, *control, *tapped, events)
-            }
-            Some(AbilityEffect::ReturnAllToBattlefield { filter, zone, control, tapped }) => {
-                self.resolve_return_all_to_battlefield_effect(top, filter, *zone, *control, *tapped, events)
-            }
+            Some(AbilityEffect::ReturnToBattlefield { control, tapped }) => self
+                .resolve_return_to_battlefield_effect(
+                    top,
+                    legal_targets,
+                    *control,
+                    *tapped,
+                    events,
+                ),
+            Some(AbilityEffect::ReturnAllToBattlefield {
+                filter,
+                zone,
+                control,
+                tapped,
+            }) => self.resolve_return_all_to_battlefield_effect(
+                top, filter, *zone, *control, *tapped, events,
+            ),
             // CR 701.26: each flips `tapped` and pushes an event only on a real change.
             Some(AbilityEffect::Tap) => self.resolve_tap_effect(legal_targets, true, events),
             Some(AbilityEffect::Untap) => self.resolve_tap_effect(legal_targets, false, events),
             Some(AbilityEffect::TapSelf) => self.resolve_tap_self_effect(top, true, events),
             Some(AbilityEffect::UntapSelf) => self.resolve_tap_self_effect(top, false, events),
-            Some(AbilityEffect::TapAll { filter }) => self.resolve_tap_all_effect(top, filter, true, events),
-            Some(AbilityEffect::UntapAll { filter }) => self.resolve_tap_all_effect(top, filter, false, events),
+            Some(AbilityEffect::TapAll { filter }) => {
+                self.resolve_tap_all_effect(top, filter, true, events)
+            }
+            Some(AbilityEffect::UntapAll { filter }) => {
+                self.resolve_tap_all_effect(top, filter, false, events)
+            }
             // CR 701.6a: removes a different stack object than `top`.
             Some(AbilityEffect::Counter) => self.resolve_counter_effect(legal_targets, events),
             // CR 118.12: pauses for a mid-resolution payment decision.
@@ -297,12 +377,18 @@ impl Engine {
                 self.resolve_unless_paid_effect(top, legal_targets, cost, otherwise, events)
             }
             // CR 701.9b: like `SacrificeRandom`, from the controller's hand.
-            Some(AbilityEffect::DiscardRandom { filter, count }) => self.resolve_discard_random_effect(top, filter, *count, events),
+            Some(AbilityEffect::DiscardRandom { filter, count }) => {
+                self.resolve_discard_random_effect(top, filter, *count, events)
+            }
             // CR 701.9b: pauses for the targeted player's own choice.
-            Some(AbilityEffect::Discard { count }) => self.resolve_discard_effect(top, legal_targets, *count, events),
+            Some(AbilityEffect::Discard { count }) => {
+                self.resolve_discard_effect(top, legal_targets, *count, events)
+            }
             // CR 101.4: invokes the operation per player in APNAP order, accumulating
             // zone-move ids so the actions happen simultaneously.
-            Some(AbilityEffect::ForEachPlayer(wrapped)) => self.resolve_for_each_player_effect(top, wrapped, events),
+            Some(AbilityEffect::ForEachPlayer(wrapped)) => {
+                self.resolve_for_each_player_effect(top, wrapped, events)
+            }
             // CR 122.1a: pushes an unapplied `CounterAdded`, like damage. Each legal
             // object target gets the full amount (CR 601.2d); players are skipped.
             Some(AbilityEffect::Counters { kind, amount }) => {
@@ -310,9 +396,11 @@ impl Engine {
             }
             // CR 611.2a: each legal object target gets its own continuous effect pushed
             // directly, pinned to the target with `self_only`.
-            Some(AbilityEffect::Pump { power, toughness, duration }) => {
-                self.resolve_pump_effect(legal_targets, *power, *toughness, duration, events)
-            }
+            Some(AbilityEffect::Pump {
+                power,
+                toughness,
+                duration,
+            }) => self.resolve_pump_effect(legal_targets, *power, *toughness, duration, events),
             // CR 613.1b: like `Pump` but layer 2. The new controller is always `top.controller`.
             Some(AbilityEffect::GainControl(duration)) => {
                 self.resolve_gain_control_effect(top, legal_targets, duration, events)
@@ -320,7 +408,9 @@ impl Engine {
             // CR 701.19a: each legal object target gets a one-shot shield pinned with
             // `self_only`. A target that can't be regenerated gets none, checked at
             // creation (CR 701.19c).
-            Some(AbilityEffect::Regenerate) => self.resolve_regenerate_effect(legal_targets, events),
+            Some(AbilityEffect::Regenerate) => {
+                self.resolve_regenerate_effect(legal_targets, events)
+            }
             // CR 121: the controller draws, routed through replacement checks so "would
             // draw" effects intercept each draw. A count queue (`ScriptedDraw`) since each
             // draw re-peeks the library. Stops at an empty library.
@@ -329,9 +419,13 @@ impl Engine {
                 self.resolve_draw_cards_effect(top, legal_targets, *amount, events)
             }
             // CR 701.17a: the controller, or the first legal player target.
-            Some(AbilityEffect::Mill(amount)) => self.resolve_mill_effect(top, legal_targets, *amount, events),
+            Some(AbilityEffect::Mill(amount)) => {
+                self.resolve_mill_effect(top, legal_targets, *amount, events)
+            }
             // CR 119.3
-            Some(AbilityEffect::LoseLife(amount)) => self.resolve_lose_life_effect(top, legal_targets, *amount, events),
+            Some(AbilityEffect::LoseLife(amount)) => {
+                self.resolve_lose_life_effect(top, legal_targets, *amount, events)
+            }
             // CR 701.21a: untargeted.
             Some(AbilityEffect::SacrificeSelf) => self.resolve_sacrifice_self_effect(top, events),
             // CR 701.19b: `shuffle_library` logs its own events, so none are pushed.
@@ -343,8 +437,19 @@ impl Engine {
             Some(AbilityEffect::Surveil(n)) => self.resolve_surveil_effect(top, *n, events),
             // CR 701.23a: searches the whole library, pre-filtered so the answer only
             // needs a subset check. No candidates means no pause.
-            Some(AbilityEffect::Search { filter, count, destination, shuffle_after }) => self
-                .resolve_search_effect(top, filter, *count, *destination, *shuffle_after, events),
+            Some(AbilityEffect::Search {
+                filter,
+                count,
+                destination,
+                shuffle_after,
+            }) => self.resolve_search_effect(
+                top,
+                filter,
+                *count,
+                *destination,
+                *shuffle_after,
+                events,
+            ),
             // CR 707.2: `top.source` becomes a copy of its first target's copiable values,
             // written once to `copiable_override` (layer 1, CR 613.1a). Triggers no
             // enters or leaves effects (CR 707.4). The old self-registered abilities are
@@ -355,10 +460,16 @@ impl Engine {
             // CR 612.5: pairwise, so both targets are rechecked against their own
             // requirement instead of the flattened list. Fewer than two legal objects
             // is a no-op.
-            Some(AbilityEffect::ExchangeTextBoxes) => self.resolve_exchange_text_boxes_effect(top, events),
+            Some(AbilityEffect::ExchangeTextBoxes) => {
+                self.resolve_exchange_text_boxes_effect(top, events)
+            }
             // CR 701.14: reads per-word chunks to keep the pairing.
-            Some(AbilityEffect::Fight) => self.resolve_fight_effect(top, legal_targets, modal_chunk_legals, true, events),
-            Some(AbilityEffect::Bite) => self.resolve_fight_effect(top, legal_targets, modal_chunk_legals, false, events),
+            Some(AbilityEffect::Fight) => {
+                self.resolve_fight_effect(top, legal_targets, modal_chunk_legals, true, events)
+            }
+            Some(AbilityEffect::Bite) => {
+                self.resolve_fight_effect(top, legal_targets, modal_chunk_legals, false, events)
+            }
             // CR 111: creates tokens under the controller's control. Named tokens register
             // their abilities. Scripts are skipped except for `CopyOf` (CR 707.10f), whose
             // definition is a snapshot with abilities. Cessation is enforced by

@@ -23,7 +23,11 @@ impl Engine {
     ) -> ControlFlow<StepStatus, (StackObject, Vec<GameEventKind>)> {
         // The destination must be decided before `move_resolving_spell`.
         let destination = self.state.object(top.stack_id).map(|obj| {
-            if obj.definition.card_types.intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY) {
+            if obj
+                .definition
+                .card_types
+                .intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY)
+            {
                 // CR 702.27a: buyback is checked before exile-on-leaving; it is the more specific choice.
                 if top.bought_back {
                     ZoneKind::Hand
@@ -51,14 +55,25 @@ impl Engine {
                 to: ZoneKind::Battlefield,
                 last_known_info: None,
             };
-            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+            match replacement::apply_replacements(
+                &mut self.state,
+                &self.script_runtime,
+                proposed,
+                false,
+            ) {
                 ReplacementOutcome::Resolved(GameEventKind::ZoneChange { to, .. }) => to,
                 // Defensive: a would-move candidate only rewrites back into a zone change.
                 ReplacementOutcome::Resolved(_) => destination,
                 // CR 616.1: two or more redirects get an ordering choice. Nothing is placed
                 // yet, so the owned `top` and `legal_targets` ride along in
                 // `ReplacementResumeTarget::PermanentEntry`.
-                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                ReplacementOutcome::NeedsOrderingChoice {
+                    affected_player,
+                    event,
+                    candidates,
+                    excluded,
+                    ..
+                } => {
                     self.process_state = ProcessState::AwaitingReplacementChoice {
                         affected_player,
                         pending_event: event,
@@ -96,12 +111,20 @@ impl Engine {
         destination: ZoneKind,
     ) -> ControlFlow<ProcessState, (StackObject, Vec<GameEventKind>)> {
         let run_script = destination == ZoneKind::Battlefield;
-        if let Some(event) = self.move_resolving_spell(top.stack_id, destination, run_script, top.escaped) {
+        if let Some(event) =
+            self.move_resolving_spell(top.stack_id, destination, run_script, top.escaped)
+        {
             // CR 303.4b: an Aura attaches to its legality-checked sole target.
             // TODO: other attached-entry shapes (CR 303.4f, 303.4h) have no producer here
             let new_battlefield_aura = match &event {
-                GameEventKind::ZoneChange { object, to: ZoneKind::Battlefield, .. }
-                    if self.state.object(*object).is_some_and(|o| commands::is_aura(&o.definition)) =>
+                GameEventKind::ZoneChange {
+                    object,
+                    to: ZoneKind::Battlefield,
+                    ..
+                } if self
+                    .state
+                    .object(*object)
+                    .is_some_and(|o| commands::is_aura(&o.definition)) =>
                 {
                     Some(*object)
                 }
@@ -109,7 +132,12 @@ impl Engine {
             };
             // CR 603.6d: the object's script already ran in `move_resolving_spell`, so its
             // entry effects are registered; apply them and any external ones.
-            if let GameEventKind::ZoneChange { object, to: ZoneKind::Battlefield, .. } = &event {
+            if let GameEventKind::ZoneChange {
+                object,
+                to: ZoneKind::Battlefield,
+                ..
+            } = &event
+            {
                 let object_id = *object;
                 // CR 707.9: checked before devour and amplify as the most identity-
                 // fundamental choice. Only a resolving spell raises this pause.
@@ -187,12 +215,18 @@ impl Engine {
                 match legal_targets.first().copied() {
                     Some(Target::Object(target_id)) => {
                         commands::attach_permanent(&mut self.state, aura_id, target_id);
-                        events.push(GameEventKind::Attached { object: aura_id, attached_to: target_id });
+                        events.push(GameEventKind::Attached {
+                            object: aura_id,
+                            attached_to: target_id,
+                        });
                     }
                     // CR 303.4b: an Aura can enchant a player.
                     Some(Target::Player(player)) => {
                         commands::attach_permanent_to_player(&mut self.state, aura_id, player);
-                        events.push(GameEventKind::AttachedToPlayer { object: aura_id, player });
+                        events.push(GameEventKind::AttachedToPlayer {
+                            object: aura_id,
+                            player,
+                        });
                     }
                     // CR 303.4: an Aura's target is an object or a player.
                     Some(Target::Ability(_)) | None => {}

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state};
@@ -15,7 +15,9 @@ fn aura_enchant_player_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
         name: "Test Enchant Player".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -66,7 +68,10 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
 
 fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     let id = obj.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, obj);
 }
 
@@ -84,35 +89,68 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
 fn find_battlefield_object_named<'a>(state: &'a GameState, name: &str) -> Option<&'a GameObject> {
-    state.objects.values().find(|o| o.zone == ZoneKind::Battlefield && o.definition.name == name)
+    state
+        .objects
+        .values()
+        .find(|o| o.zone == ZoneKind::Battlefield && o.definition.name == name)
 }
 
 fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     match outcome {
         SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => panic!("fixture didn't expect a replacement ordering-choice pause"),
-        SbaOutcome::NeedsLegendRuleChoice { .. } => panic!("fixture didn't expect a legend-rule choice pause"),
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
 }
 
@@ -123,8 +161,14 @@ fn casting_an_aura_at_a_player_attaches_it_on_resolution() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, aura_enchant_player_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, aura_enchant_player_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Player(p1)]);
@@ -133,8 +177,15 @@ fn casting_an_aura_at_a_player_attaches_it_on_resolution() {
 
     let aura = find_battlefield_object_named(engine.state(), "Test Enchant Player")
         .expect("the Aura should have resolved onto the battlefield");
-    assert_eq!(aura.attached_to_player, Some(p1), "the Aura should be attached to the player it targeted");
-    assert_eq!(aura.attached_to, None, "attached_to (the object half) should stay empty");
+    assert_eq!(
+        aura.attached_to_player,
+        Some(p1),
+        "the Aura should be attached to the player it targeted"
+    );
+    assert_eq!(
+        aura.attached_to, None,
+        "attached_to (the object half) should stay empty"
+    );
     assert!(
         engine
             .state()
@@ -157,7 +208,10 @@ fn a_healthy_player_attached_aura_is_unaffected_by_sba() {
     put_on_battlefield(&mut state, obj);
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert!(events.is_empty(), "a legally player-attached Aura shouldn't be touched by SBA, got {events:?}");
+    assert!(
+        events.is_empty(),
+        "a legally player-attached Aura shouldn't be touched by SBA, got {events:?}"
+    );
 }
 
 #[test]
@@ -169,7 +223,12 @@ fn an_aura_enchanting_an_eliminated_player_dies_via_sba() {
     let mut obj = permanent(aura, aura_enchant_player_definition(), p0);
     obj.attached_to_player = Some(p1);
     put_on_battlefield(&mut state, obj);
-    state.players.iter_mut().find(|p| p.player_id == p1).unwrap().eliminated = true;
+    state
+        .players
+        .iter_mut()
+        .find(|p| p.player_id == p1)
+        .unwrap()
+        .eliminated = true;
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
@@ -186,10 +245,17 @@ fn an_aura_not_attached_to_anything_still_dies_via_sba_with_the_new_field_presen
     let p0 = PlayerId(0);
     let aura = ObjectId(0);
     // Neither attached_to nor attached_to_player set - permanent()'s own default.
-    put_on_battlefield(&mut state, permanent(aura, aura_enchant_player_definition(), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(aura, aura_enchant_player_definition(), p0),
+    );
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert_eq!(events.len(), 1, "an Aura attached to neither an object nor a player is still illegal (CR 704.5m)");
+    assert_eq!(
+        events.len(),
+        1,
+        "an Aura attached to neither an object nor a player is still illegal (CR 704.5m)"
+    );
 }
 
 #[test]
@@ -199,11 +265,20 @@ fn an_aura_enchanting_a_player_who_stops_matching_its_own_scripted_filter_falls_
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let aura = ObjectId(0);
-    let mut obj = permanent(aura, aura_enchant_low_life_player_definition(&mut runtime), p0);
+    let mut obj = permanent(
+        aura,
+        aura_enchant_low_life_player_definition(&mut runtime),
+        p0,
+    );
     obj.attached_to_player = Some(p1);
     put_on_battlefield(&mut state, obj);
     // p1 starts at 20 life - doesn't match "10 or less."
-    state.players.iter_mut().find(|p| p.player_id == p1).unwrap().life = 20;
+    state
+        .players
+        .iter_mut()
+        .find(|p| p.player_id == p1)
+        .unwrap()
+        .life = 20;
 
     let events = progressed(check_state_based_actions(&mut state, &runtime));
     assert_eq!(events.len(), 1);
@@ -220,11 +295,23 @@ fn an_aura_enchanting_a_player_who_still_matches_its_scripted_filter_is_unaffect
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let aura = ObjectId(0);
-    let mut obj = permanent(aura, aura_enchant_low_life_player_definition(&mut runtime), p0);
+    let mut obj = permanent(
+        aura,
+        aura_enchant_low_life_player_definition(&mut runtime),
+        p0,
+    );
     obj.attached_to_player = Some(p1);
     put_on_battlefield(&mut state, obj);
-    state.players.iter_mut().find(|p| p.player_id == p1).unwrap().life = 5;
+    state
+        .players
+        .iter_mut()
+        .find(|p| p.player_id == p1)
+        .unwrap()
+        .life = 5;
 
     let events = progressed(check_state_based_actions(&mut state, &runtime));
-    assert!(events.is_empty(), "the enchanted player still matches the low-life filter, so nothing should happen, got {events:?}");
+    assert!(
+        events.is_empty(),
+        "the enchanted player still matches the low-life filter, so nothing should happen, got {events:?}"
+    );
 }

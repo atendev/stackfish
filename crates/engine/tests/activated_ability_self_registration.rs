@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 const SELF_TAP_GAIN_LIFE: &str = r#"
 local s = {}
@@ -102,7 +104,9 @@ fn bear_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Bear".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -138,10 +142,15 @@ fn run_card_script_self_registers_an_activated_ability() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_TAP_GAIN_LIFE);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.abilities.len(), 1);
     let ability = &state.abilities[0];
@@ -149,7 +158,10 @@ fn run_card_script_self_registers_an_activated_ability() {
     assert_eq!(ability.kind, AbilityKind::Activated);
     let cost = ability.cost.as_ref().expect("AddCost(TapSelf) was called");
     assert!(cost.mana.is_none());
-    assert!(matches!(cost.additional.as_slice(), [AdditionalCost::TapSelf]));
+    assert!(matches!(
+        cost.additional.as_slice(),
+        [AdditionalCost::TapSelf]
+    ));
     assert!(matches!(ability.effect, Some(AbilityEffect::GainLife(1))));
 }
 
@@ -158,13 +170,22 @@ fn run_card_script_register_without_set_operation_is_an_error() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(NO_SET_OPERATION);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
 
-    assert!(result.is_err(), "Register() with no SetOperation() must fail");
-    assert!(state.abilities.is_empty(), "no partial ability should have been committed");
+    assert!(
+        result.is_err(),
+        "Register() with no SetOperation() must fail"
+    );
+    assert!(
+        state.abilities.is_empty(),
+        "no partial ability should have been committed"
+    );
 }
 
 #[test]
@@ -172,13 +193,21 @@ fn run_card_script_can_register_activated_ability_with_no_cost() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(NO_COST_AT_ALL);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("no AddCost() call is legal - cost: None");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("no AddCost() call is legal - cost: None");
 
     assert_eq!(state.abilities.len(), 1);
-    assert!(state.abilities[0].cost.is_none(), "no AddCost() calls means cost: None, not an empty CostSpec");
+    assert!(
+        state.abilities[0].cost.is_none(),
+        "no AddCost() calls means cost: None, not an empty CostSpec"
+    );
 }
 
 #[test]
@@ -186,15 +215,26 @@ fn run_card_script_accumulates_multiple_add_cost_calls() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(COMBINED_COST);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("two AddCost() calls register cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("two AddCost() calls register cleanly");
 
-    let cost = state.abilities[0].cost.as_ref().expect("both AddCost() calls set a real CostSpec");
+    let cost = state.abilities[0]
+        .cost
+        .as_ref()
+        .expect("both AddCost() calls set a real CostSpec");
     assert_eq!(cost.additional.len(), 2);
     assert!(matches!(cost.additional[0], AdditionalCost::TapSelf));
-    assert!(matches!(cost.additional[1], AdditionalCost::Sacrifice { .. }));
+    assert!(matches!(
+        cost.additional[1],
+        AdditionalCost::Sacrifice { .. }
+    ));
 }
 
 #[test]
@@ -202,13 +242,24 @@ fn run_card_script_self_registers_activated_ability_with_sacrifice_self_cost() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SACRIFICE_SELF_COST);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
-    let cost = state.abilities[0].cost.as_ref().expect("AddCost(SacrificeSelf) was called");
-    assert!(matches!(cost.additional.as_slice(), [AdditionalCost::SacrificeSelf]));
+    let cost = state.abilities[0]
+        .cost
+        .as_ref()
+        .expect("AddCost(SacrificeSelf) was called");
+    assert!(matches!(
+        cost.additional.as_slice(),
+        [AdditionalCost::SacrificeSelf]
+    ));
 }
 
 #[test]
@@ -216,13 +267,24 @@ fn run_card_script_self_registers_activated_ability_with_a_mana_cost() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MANA_COST);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
-    let cost = state.abilities[0].cost.as_ref().expect("AddCost(Mana(...)) was called");
-    let mana = cost.mana.as_ref().expect("Game.Costs.Mana(\"{1}{R}\") set cost.mana");
+    let cost = state.abilities[0]
+        .cost
+        .as_ref()
+        .expect("AddCost(Mana(...)) was called");
+    let mana = cost
+        .mana
+        .as_ref()
+        .expect("Game.Costs.Mana(\"{1}{R}\") set cost.mana");
     assert_eq!(
         mana.symbols,
         vec![
@@ -230,7 +292,10 @@ fn run_card_script_self_registers_activated_ability_with_a_mana_cost() {
             ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
         ]
     );
-    assert!(matches!(cost.additional.as_slice(), [AdditionalCost::TapSelf]));
+    assert!(matches!(
+        cost.additional.as_slice(),
+        [AdditionalCost::TapSelf]
+    ));
 }
 
 #[test]
@@ -238,13 +303,22 @@ fn run_card_script_rejects_setting_the_mana_cost_twice() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MANA_COST_SET_TWICE);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
 
-    assert!(result.is_err(), "a second Game.Costs.Mana(...) call must be rejected");
-    assert!(state.abilities.is_empty(), "no partial ability should have been committed");
+    assert!(
+        result.is_err(),
+        "a second Game.Costs.Mana(...) call must be rejected"
+    );
+    assert!(
+        state.abilities.is_empty(),
+        "no partial ability should have been committed"
+    );
 }
 
 #[test]
@@ -252,7 +326,10 @@ fn run_card_script_rejects_a_malformed_mana_cost_string() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MALFORMED_MANA_COST);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
@@ -262,7 +339,12 @@ fn run_card_script_rejects_a_malformed_mana_cost_string() {
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
 }
 
 #[test]
@@ -271,18 +353,42 @@ fn play_land_self_registered_activated_ability_can_be_activated_paid_and_resolve
     let p1 = PlayerId(1);
     let land = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(land, card_object(land, land_definition(SELF_TAP_GAIN_LIFE), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+    state.objects.insert(
+        land,
+        card_object(
+            land,
+            land_definition(SELF_TAP_GAIN_LIFE),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(land);
 
     let mut engine = Engine::new(state);
     engine
-        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: land } })
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card: land },
+        })
         .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().abilities.len(), 1, "the land's activated ability self-registered");
+    assert_eq!(
+        engine.state().abilities.len(),
+        1,
+        "the land's activated ability self-registered"
+    );
 
-    let new_land_id = *engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.front().unwrap();
+    let new_land_id = *engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .front()
+        .unwrap();
 
     engine
         .submit_action(PlayerAction {
@@ -297,11 +403,19 @@ fn play_land_self_registered_activated_ability_can_be_activated_paid_and_resolve
         })
         .expect("p0 controls the land and holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the {{T}} cost");
-    assert!(!engine.state().object(new_land_id).unwrap().tapped, "not tapped until payment commits");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the {{T}} cost"
+    );
+    assert!(
+        !engine.state().object(new_land_id).unwrap().tapped,
+        "not tapped until payment commits"
+    );
 
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Tap(new_land_id)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Tap(new_land_id)],
+        })
         .expect("Tap(new_land_id) pays the self-registered TapSelf cost");
     drain(&mut engine);
     assert!(engine.state().object(new_land_id).unwrap().tapped);
@@ -312,8 +426,15 @@ fn play_land_self_registered_activated_ability_can_be_activated_paid_and_resolve
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(engine.state().stack.is_empty(), "the activated ability resolved");
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "the self-registered GainLife(1) operation resolved");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the activated ability resolved"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "the self-registered GainLife(1) operation resolved"
+    );
 }
 
 #[test]
@@ -322,18 +443,37 @@ fn play_land_self_registered_activated_ability_with_mana_cost_can_be_activated_p
     let p1 = PlayerId(1);
     let land = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(land, card_object(land, land_definition(MANA_COST), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
-    state.player_mut(p0).unwrap().mana_pool = ManaPool { red: 1, colorless: 1, ..ManaPool::default() };
+    state.objects.insert(
+        land,
+        card_object(land, land_definition(MANA_COST), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(land);
+    state.player_mut(p0).unwrap().mana_pool = ManaPool {
+        red: 1,
+        colorless: 1,
+        ..ManaPool::default()
+    };
 
     let mut engine = Engine::new(state);
     engine
-        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: land } })
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card: land },
+        })
         .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    let new_land_id = *engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.front().unwrap();
+    let new_land_id = *engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .front()
+        .unwrap();
 
     engine
         .submit_action(PlayerAction {
@@ -348,13 +488,19 @@ fn play_land_self_registered_activated_ability_with_mana_cost_can_be_activated_p
         })
         .expect("p0 controls the land and holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for {{1}}{{R}} + {{T}}");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for {{1}}{{R}} + {{T}}"
+    );
 
     let units = vec![ManaUnit::Colored(Color::Red), ManaUnit::Colorless];
     engine
         .submit_payment(PaymentPlan {
             payments: vec![
-                CostPayment::Mana { units, phyrexian_life: 0 },
+                CostPayment::Mana {
+                    units,
+                    phyrexian_life: 0,
+                },
                 CostPayment::Tap(new_land_id),
             ],
         })
@@ -370,15 +516,24 @@ fn play_land_self_registered_activated_ability_with_mana_cost_can_be_activated_p
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(engine.state().stack.is_empty(), "the activated ability resolved");
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "the self-registered GainLife(1) operation resolved");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the activated ability resolved"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "the self-registered GainLife(1) operation resolved"
+    );
 }
 
 fn land_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Ability Land".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::LAND,

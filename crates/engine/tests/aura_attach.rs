@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state};
@@ -16,7 +16,9 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -41,7 +43,9 @@ fn aura_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
         name: "Test Aura".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: Some(ColorSet::GREEN),
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -54,9 +58,20 @@ fn aura_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_aura".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: Some(CardTypeSet::CREATURE),
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
@@ -68,7 +83,12 @@ fn aura_definition() -> CardDefinition {
 }
 
 fn plain_enchantment_definition() -> CardDefinition {
-    CardDefinition { definition_id: 31, name: "Test Plain Enchantment".to_string(), subtypes: Vec::new(), ..aura_definition() }
+    CardDefinition {
+        definition_id: 31,
+        name: "Test Plain Enchantment".to_string(),
+        subtypes: Vec::new(),
+        ..aura_definition()
+    }
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
@@ -77,7 +97,10 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
 
 fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     let id = obj.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, obj);
 }
 
@@ -85,7 +108,15 @@ fn protection_from_green(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionColor(ColorSet::GREEN)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -107,35 +138,68 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
 fn find_battlefield_object_named<'a>(state: &'a GameState, name: &str) -> Option<&'a GameObject> {
-    state.objects.values().find(|o| o.zone == ZoneKind::Battlefield && o.definition.name == name)
+    state
+        .objects
+        .values()
+        .find(|o| o.zone == ZoneKind::Battlefield && o.definition.name == name)
 }
 
 fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     match outcome {
         SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => panic!("fixture didn't expect a replacement ordering-choice pause"),
-        SbaOutcome::NeedsLegendRuleChoice { .. } => panic!("fixture didn't expect a legend-rule choice pause"),
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
 }
 
@@ -146,20 +210,40 @@ fn casting_an_aura_at_a_legal_creature_attaches_it_on_resolution() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(bear, creature_definition(1, "Bear", 2, 2), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, creature_definition(1, "Bear", 2, 2), p1),
+    );
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, aura_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, aura_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    let aura = find_battlefield_object_named(engine.state(), "Test Aura").expect("the Aura should have resolved onto the battlefield");
-    assert_eq!(aura.attached_to, Some(bear), "the Aura should be attached to its target on resolution");
-    let bear_now = engine.state().object(bear).expect("the target is still on the battlefield");
-    assert!(bear_now.attachments.contains(&aura.object_id), "the target's own attachments list should include the Aura");
+    let aura = find_battlefield_object_named(engine.state(), "Test Aura")
+        .expect("the Aura should have resolved onto the battlefield");
+    assert_eq!(
+        aura.attached_to,
+        Some(bear),
+        "the Aura should be attached to its target on resolution"
+    );
+    let bear_now = engine
+        .state()
+        .object(bear)
+        .expect("the target is still on the battlefield");
+    assert!(
+        bear_now.attachments.contains(&aura.object_id),
+        "the target's own attachments list should include the Aura"
+    );
     assert!(
         engine
             .state()
@@ -176,29 +260,48 @@ fn casting_an_aura_at_a_target_that_becomes_illegal_before_resolution_fizzles_an
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(bear, creature_definition(1, "Bear", 2, 2), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, creature_definition(1, "Bear", 2, 2), p1),
+    );
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, aura_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, aura_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]);
     pay_free_and_drain(&mut engine);
 
     // CR 608.2b: protection from the Aura's own color granted mid-stack makes the target illegal by resolution.
-    engine.state_mut().continuous_effects.push(protection_from_green(bear));
+    engine
+        .state_mut()
+        .continuous_effects
+        .push(protection_from_green(bear));
 
     pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(
-        engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
+        engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
         "CR 608.2b: the Aura's only target became illegal, so it must fizzle rather than resolve"
     );
     assert!(
         find_battlefield_object_named(engine.state(), "Test Aura").is_none(),
         "a fizzled Aura never enters the battlefield, so there's nothing to attach"
     );
-    assert!(engine.state().object(bear).unwrap().attachments.is_empty(), "the target's attachments list stays empty");
+    assert!(
+        engine.state().object(bear).unwrap().attachments.is_empty(),
+        "the target's attachments list stays empty"
+    );
 }
 
 // CR 704.5m/303.4c
@@ -235,15 +338,34 @@ fn an_auras_target_dying_makes_it_fall_off_on_the_next_sba_pass_not_this_one() {
 
     // Pass 1: the creature dies (CR 704.5g), but the Aura is checked against the pass's starting state (CR 704.3), so it waits one pass.
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert_eq!(events.len(), 1, "only the creature's death this pass, got {:?}", events.iter().map(|e| &e.kind).collect::<Vec<_>>());
-    assert!(matches!(events[0].kind, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }));
-    assert!(find_battlefield_object_named(&state, "Test Aura").is_some(), "the Aura is still on the battlefield after pass 1");
+    assert_eq!(
+        events.len(),
+        1,
+        "only the creature's death this pass, got {:?}",
+        events.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
+    assert!(matches!(
+        events[0].kind,
+        GameEventKind::ZoneChange {
+            to: ZoneKind::Graveyard,
+            ..
+        }
+    ));
+    assert!(
+        find_battlefield_object_named(&state, "Test Aura").is_some(),
+        "the Aura is still on the battlefield after pass 1"
+    );
 
     // Pass 2: the creature id no longer resolves, so the Aura is attached to an illegal target (CR 704.5m).
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].kind, GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. } if object != aura));
-    assert!(find_battlefield_object_named(&state, "Test Aura").is_none(), "the Aura has now fallen off");
+    assert!(
+        matches!(events[0].kind, GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. } if object != aura)
+    );
+    assert!(
+        find_battlefield_object_named(&state, "Test Aura").is_none(),
+        "the Aura has now fallen off"
+    );
 }
 
 #[test]
@@ -260,7 +382,11 @@ fn a_healthy_creature_with_an_attached_aura_is_unaffected() {
     put_on_battlefield(&mut state, aura_obj);
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert!(events.is_empty(), "nothing should happen to a healthy, legally-attached Aura, got {:?}", events.iter().map(|e| &e.kind).collect::<Vec<_>>());
+    assert!(
+        events.is_empty(),
+        "nothing should happen to a healthy, legally-attached Aura, got {:?}",
+        events.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -268,11 +394,17 @@ fn a_non_aura_enchantment_is_never_touched_by_the_attach_check() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let relic = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(relic, plain_enchantment_definition(), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(relic, plain_enchantment_definition(), p0),
+    );
     // Not an Aura (no Aura subtype), so CR 704.5m never applies.
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert!(events.is_empty(), "a plain enchantment with no attachment concept must never be swept up by this check");
+    assert!(
+        events.is_empty(),
+        "a plain enchantment with no attachment concept must never be swept up by this check"
+    );
 }
 
 // Protection from the Aura's own color gained after attaching drops the Aura (CR 702.16) and removes its id from the target's attachments.
@@ -294,8 +426,13 @@ fn an_auras_target_gaining_protection_from_it_after_attaching_makes_it_fall_off(
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].kind, GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. } if object != aura));
-    assert!(find_battlefield_object_named(&state, "Test Aura").is_none(), "the Aura should have fallen off");
+    assert!(
+        matches!(events[0].kind, GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. } if object != aura)
+    );
+    assert!(
+        find_battlefield_object_named(&state, "Test Aura").is_none(),
+        "the Aura should have fallen off"
+    );
     assert!(
         !state.object(bear).unwrap().attachments.contains(&aura),
         "retire_object should have cleaned the dead Aura's id out of the target's own attachments list"
@@ -339,7 +476,15 @@ fn an_aura_that_becomes_a_creature_unattaches_then_dies_in_the_same_pass() {
     state.continuous_effects.push(ContinuousEffect {
         source: aura,
         layer: Layer::TypeChanging,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddCardType(CardTypeSet::CREATURE)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -387,7 +532,9 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
         cost: None,
         target: None,
         operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)])),
+        effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(
+            Color::Green,
+        )])),
         intervening_if: None,
     });
 
@@ -397,13 +544,22 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
     let err = engine
         .submit_action(PlayerAction {
             player: p1,
-            kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source: aura,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .unwrap_err();
     assert!(
-        matches!(err, stackfish_engine::engine::ActionError::Rejected(stackfish_engine::commands::Rejected::IllegalAction(_))),
+        matches!(
+            err,
+            stackfish_engine::engine::ActionError::Rejected(
+                stackfish_engine::commands::Rejected::IllegalAction(_)
+            )
+        ),
         "the enchanted creature's controller shouldn't be able to activate the Aura's own ability"
     );
 
@@ -412,8 +568,12 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source: aura,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .unwrap();

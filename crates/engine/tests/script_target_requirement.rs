@@ -1,8 +1,8 @@
 //! CR 702.5a, 303.4a: a card declares its base target requirement ("Enchant [quality]") with the optional `s.target_requirement()`, called once per `CardDefinition` build (`ScriptRuntime::build_target_requirement`) because an Aura's Enchant text is needed before it is cast.
 //! It returns the flat filter table of `Game.SelectTargets` plus `count`, `up_to`, `at_least` and `exclude_source`, like the scenario crate's `[cards.target_requirement]` table. A `filter` key may hold a scripted predicate (or `{type="player", filter=fn}`) through `decode_target_filter_value`, for shapes the flat table cannot express.
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -16,8 +16,13 @@ fn a_card_with_no_target_requirement_function_returns_none() {
         function s.register_abilities(c) end
         return s
     "#;
-    let requirement = runtime.build_target_requirement(source).expect("script should load");
-    assert!(requirement.is_none(), "a card script with no target_requirement() function needs no targets");
+    let requirement = runtime
+        .build_target_requirement(source)
+        .expect("script should load");
+    assert!(
+        requirement.is_none(),
+        "a card script with no target_requirement() function needs no targets"
+    );
 }
 
 #[test]
@@ -30,14 +35,23 @@ fn target_requirement_function_decodes_a_subtype_filter_with_count() {
         end
         return s
     "#;
-    let requirement =
-        runtime.build_target_requirement(source).expect("script should load").expect("declares a requirement");
-    let TargetSpec::Primitive(req) = requirement else { panic!("expected Primitive") };
+    let requirement = runtime
+        .build_target_requirement(source)
+        .expect("script should load")
+        .expect("declares a requirement");
+    let TargetSpec::Primitive(req) = requirement else {
+        panic!("expected Primitive")
+    };
     assert_eq!(req.count, 1);
     assert!(!req.up_to);
     assert!(!req.at_least);
     match req.filter {
-        TargetFilter::Object { mana_value: None, subtypes: Some(subtypes), card_types: None, .. } => {
+        TargetFilter::Object {
+            mana_value: None,
+            subtypes: Some(subtypes),
+            card_types: None,
+            ..
+        } => {
             assert_eq!(subtypes, vec![Subtype("Wall".to_string())]);
         }
         other => panic!("expected an Object filter with subtypes=[Wall], got {other:?}"),
@@ -55,11 +69,19 @@ fn target_requirement_function_decodes_a_scripted_predicate_filter() {
         end
         return s
     "#;
-    let requirement =
-        runtime.build_target_requirement(source).expect("script should load").expect("declares a requirement");
-    let TargetSpec::Primitive(req) = requirement else { panic!("expected Primitive") };
+    let requirement = runtime
+        .build_target_requirement(source)
+        .expect("script should load")
+        .expect("declares a requirement");
+    let TargetSpec::Primitive(req) = requirement else {
+        panic!("expected Primitive")
+    };
     assert_eq!(req.count, 1);
-    assert!(matches!(req.filter, TargetFilter::Script(_)), "expected a scripted predicate, got {:?}", req.filter);
+    assert!(
+        matches!(req.filter, TargetFilter::Script(_)),
+        "expected a scripted predicate, got {:?}",
+        req.filter
+    );
 }
 
 #[test]
@@ -72,9 +94,13 @@ fn target_requirement_function_decodes_a_player_scripted_predicate_filter() {
         end
         return s
     "#;
-    let requirement =
-        runtime.build_target_requirement(source).expect("script should load").expect("declares a requirement");
-    let TargetSpec::Primitive(req) = requirement else { panic!("expected Primitive") };
+    let requirement = runtime
+        .build_target_requirement(source)
+        .expect("script should load")
+        .expect("declares a requirement");
+    let TargetSpec::Primitive(req) = requirement else {
+        panic!("expected Primitive")
+    };
     assert!(
         matches!(req.filter, TargetFilter::PlayerScript(_)),
         "expected a player scripted predicate, got {:?}",
@@ -93,10 +119,21 @@ fn target_requirement_function_without_a_filter_key_still_decodes_the_flat_shape
         end
         return s
     "#;
-    let requirement =
-        runtime.build_target_requirement(source).expect("script should load").expect("declares a requirement");
-    let TargetSpec::Primitive(req) = requirement else { panic!("expected Primitive") };
-    assert!(matches!(req.filter, TargetFilter::Object { mana_value: None, subtypes: Some(_), .. }));
+    let requirement = runtime
+        .build_target_requirement(source)
+        .expect("script should load")
+        .expect("declares a requirement");
+    let TargetSpec::Primitive(req) = requirement else {
+        panic!("expected Primitive")
+    };
+    assert!(matches!(
+        req.filter,
+        TargetFilter::Object {
+            mana_value: None,
+            subtypes: Some(_),
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -137,7 +174,9 @@ fn wall_definition(definition_id: u64) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: "Test Wall".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -159,7 +198,11 @@ fn wall_definition(definition_id: u64) -> CardDefinition {
 }
 
 fn bear_definition(definition_id: u64) -> CardDefinition {
-    CardDefinition { name: "Test Bear".to_string(), subtypes: Vec::new(), ..wall_definition(definition_id) }
+    CardDefinition {
+        name: "Test Bear".to_string(),
+        subtypes: Vec::new(),
+        ..wall_definition(definition_id)
+    }
 }
 
 fn enchant_wall_definition() -> CardDefinition {
@@ -171,7 +214,9 @@ fn enchant_wall_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
         name: "Test Enchant Wall".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -196,24 +241,48 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
-fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
-        })
-        
+fn try_cast_spell(
+    engine: &mut Engine,
+    player: PlayerId,
+    card: ObjectId,
+    targets: Vec<Target>,
+) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::CastSpell {
+            card,
+            modes: Vec::new(),
+            targets,
+            x_value: None,
+            alternative_cost: None,
+            pay_buyback: false,
+        },
+    })
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
@@ -223,20 +292,45 @@ fn casting_the_script_declared_aura_at_a_wall_is_legal_and_attaches() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let wall = ObjectId(0);
-    state.objects.insert(wall, card_object(wall, wall_definition(1), p1, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(wall);
+    state.objects.insert(
+        wall,
+        card_object(wall, wall_definition(1), p1, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(wall);
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, enchant_wall_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, enchant_wall_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(wall)]);
     let status = pay_free_and_drain(&mut engine);
-    assert!(!matches!(status, StepStatus::Error(_)), "casting at a Wall should be legal, got {status:?}");
+    assert!(
+        !matches!(status, StepStatus::Error(_)),
+        "casting at a Wall should be legal, got {status:?}"
+    );
 
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(&mut engine);
 
     let aura = engine
@@ -245,7 +339,11 @@ fn casting_the_script_declared_aura_at_a_wall_is_legal_and_attaches() {
         .values()
         .find(|o| o.zone == ZoneKind::Battlefield && o.definition.name == "Test Enchant Wall")
         .expect("the Aura should have resolved onto the battlefield");
-    assert_eq!(aura.attached_to, Some(wall), "the Aura should be attached to the Wall it targeted");
+    assert_eq!(
+        aura.attached_to,
+        Some(wall),
+        "the Aura should be attached to the Wall it targeted"
+    );
 }
 
 #[test]
@@ -254,17 +352,31 @@ fn casting_the_script_declared_aura_at_a_non_wall_creature_is_rejected() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
-    state.objects.insert(bear, card_object(bear, bear_definition(1), p1, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(1), p1, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, enchant_wall_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, enchant_wall_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
-        "a plain Bear (no Wall subtype) should fail the script-declared Enchant Wall restriction, got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a plain Bear (no Wall subtype) should fail the script-declared Enchant Wall restriction, got {err:?}"
+    );
 }
 
 const ENCHANT_POWER_FOUR_SCRIPT: &str = r#"
@@ -284,11 +396,18 @@ end
 return s
 "#;
 
-fn creature_definition_pt(definition_id: u64, name: &str, power: i32, toughness: i32) -> CardDefinition {
+fn creature_definition_pt(
+    definition_id: u64,
+    name: &str,
+    power: i32,
+    toughness: i32,
+) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -314,7 +433,9 @@ fn enchant_power_four_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 31,
         name: "Test Enchant Power Four".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ENCHANTMENT,
@@ -340,7 +461,12 @@ fn patch_in_power_four_target_requirement(engine: &mut Engine, card: ObjectId) {
         .build_target_requirement(ENCHANT_POWER_FOUR_SCRIPT)
         .expect("script should load")
         .expect("script declares a target_requirement");
-    engine.state_mut().object_mut(card).unwrap().definition.target_requirement = Some(target_requirement);
+    engine
+        .state_mut()
+        .object_mut(card)
+        .unwrap()
+        .definition
+        .target_requirement = Some(target_requirement);
 }
 
 #[test]
@@ -349,17 +475,37 @@ fn casting_the_scripted_predicate_aura_at_a_power_four_creature_is_legal() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let big_creature = ObjectId(0);
-    state.objects.insert(big_creature, card_object(big_creature, creature_definition_pt(1, "Big Creature", 4, 4), p1, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(big_creature);
+    state.objects.insert(
+        big_creature,
+        card_object(
+            big_creature,
+            creature_definition_pt(1, "Big Creature", 4, 4),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(big_creature);
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, enchant_power_four_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, enchant_power_four_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     patch_in_power_four_target_requirement(&mut engine, card);
     cast_spell(&mut engine, p0, card, vec![Target::Object(big_creature)]);
     let status = pay_free_and_drain(&mut engine);
-    assert!(!matches!(status, StepStatus::Error(_)), "casting at a power-4 creature should be legal, got {status:?}");
+    assert!(
+        !matches!(status, StepStatus::Error(_)),
+        "casting at a power-4 creature should be legal, got {status:?}"
+    );
 }
 
 #[test]
@@ -368,16 +514,36 @@ fn casting_the_scripted_predicate_aura_at_a_small_creature_is_rejected() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let small_creature = ObjectId(0);
-    state.objects.insert(small_creature, card_object(small_creature, creature_definition_pt(1, "Small Creature", 2, 2), p1, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(small_creature);
+    state.objects.insert(
+        small_creature,
+        card_object(
+            small_creature,
+            creature_definition_pt(1, "Small Creature", 2, 2),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(small_creature);
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, enchant_power_four_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, enchant_power_four_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     patch_in_power_four_target_requirement(&mut engine, card);
-    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(small_creature)]).unwrap_err();
+    let err =
+        try_cast_spell(&mut engine, p0, card, vec![Target::Object(small_creature)]).unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
-        "a power-2 creature should fail the scripted power-4-or-greater predicate, got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a power-2 creature should fail the scripted power-4-or-greater predicate, got {err:?}"
+    );
 }

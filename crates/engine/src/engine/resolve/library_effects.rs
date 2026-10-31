@@ -18,7 +18,10 @@ use super::direct_effects::affected_player;
 /// Whether a target word can pick a player (a player word, a scripted player
 /// word or "any target").
 fn word_names_a_player(req: &TargetRequirement) -> bool {
-    matches!(req.filter, TargetFilter::Player { .. } | TargetFilter::PlayerScript(_) | TargetFilter::AnyTarget)
+    matches!(
+        req.filter,
+        TargetFilter::Player { .. } | TargetFilter::PlayerScript(_) | TargetFilter::AnyTarget
+    )
 }
 
 impl Engine {
@@ -36,7 +39,11 @@ impl Engine {
             Some(TargetSpec::Primitive(req)) => word_names_a_player(req),
             Some(TargetSpec::Multiple(reqs)) => reqs.iter().any(word_names_a_player),
         };
-        let player = if names_a_player { affected_player(top, legal_targets) } else { Some(top.controller) };
+        let player = if names_a_player {
+            affected_player(top, legal_targets)
+        } else {
+            Some(top.controller)
+        };
         let Some(player) = player else {
             return ControlFlow::Continue(events);
         };
@@ -61,7 +68,9 @@ impl Engine {
         self.process_state = self.continue_scripted_zone_move(
             ScriptedZoneMoveKind::Mill,
             ids,
-            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+            ScriptedZoneMoveThen::StackResolution {
+                stack_id: top.stack_id,
+            },
             events,
         );
         ControlFlow::Break(StepStatus::Progressed)
@@ -69,7 +78,11 @@ impl Engine {
 
     /// The first `n` cards of `player`'s library, top first; fewer if the
     /// library is smaller (CR 701.17b).
-    pub(in crate::engine) fn top_of_library_ids(&self, player: PlayerId, n: u32) -> VecDeque<ObjectId> {
+    pub(in crate::engine) fn top_of_library_ids(
+        &self,
+        player: PlayerId,
+        n: u32,
+    ) -> VecDeque<ObjectId> {
         self.state
             .zone(ZoneKind::Library, Some(player))
             .map(|z| z.contents.iter().take(n as usize).copied().collect())
@@ -94,7 +107,9 @@ impl Engine {
         let cards: Vec<ObjectId> = self
             .state
             .zone(ZoneKind::Library, Some(top.controller))
-            .map_or(Vec::new(), |z| z.contents.iter().take(n as usize).copied().collect());
+            .map_or(Vec::new(), |z| {
+                z.contents.iter().take(n as usize).copied().collect()
+            });
         if !cards.is_empty() {
             self.process_state = ProcessState::AwaitingScryChoice {
                 stack_id: top.stack_id,
@@ -116,7 +131,9 @@ impl Engine {
         let cards: Vec<ObjectId> = self
             .state
             .zone(ZoneKind::Library, Some(top.controller))
-            .map_or(Vec::new(), |z| z.contents.iter().take(n as usize).copied().collect());
+            .map_or(Vec::new(), |z| {
+                z.contents.iter().take(n as usize).copied().collect()
+            });
         if !cards.is_empty() {
             self.process_state = ProcessState::AwaitingSurveilChoice {
                 stack_id: top.stack_id,
@@ -146,7 +163,9 @@ impl Engine {
             .into_iter()
             .filter(|id| {
                 // CR 108.4: a library card's controller is its owner.
-                self.state.object(*id).is_some_and(|obj| filter.matches(obj, obj.controller, top.controller))
+                self.state
+                    .object(*id)
+                    .is_some_and(|obj| filter.matches(obj, obj.controller, top.controller))
             })
             .collect();
         if !candidates.is_empty() {

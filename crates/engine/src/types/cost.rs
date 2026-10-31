@@ -1,8 +1,8 @@
-use crate::{
-    AtomicManaSymbol, CardTypeSet, Color, ColorSet, GameObject, GameState, ManaCost, ManaPool, ManaSymbol,
-    ManaUnit, ObjectId, PlayerId, Subtype, SupertypeSet, ZoneKind,
-};
 use crate::script::ScriptRuntime;
+use crate::{
+    AtomicManaSymbol, CardTypeSet, Color, ColorSet, GameObject, GameState, ManaCost, ManaPool,
+    ManaSymbol, ManaUnit, ObjectId, PlayerId, Subtype, SupertypeSet, ZoneKind,
+};
 
 /// Structured stand-in for an oracle-text filter such as "sacrifice a
 /// creature" or "search your library for a basic land card". `extra` is a
@@ -30,22 +30,32 @@ impl FilterSpec {
     /// because this type never depends on `ScriptRuntime`. `random` doesn't
     /// affect matching. A filter with `extra` set never matches, since
     /// resolving it needs the script bridge.
-    pub fn matches(&self, object: &GameObject, object_controller: PlayerId, viewer: PlayerId) -> bool {
+    pub fn matches(
+        &self,
+        object: &GameObject,
+        object_controller: PlayerId,
+        viewer: PlayerId,
+    ) -> bool {
         if self.extra.is_some() {
             return false;
         }
         if let Some(types) = self.card_types
-            && !object.definition.card_types.intersects(types) {
-                return false;
-            }
+            && !object.definition.card_types.intersects(types)
+        {
+            return false;
+        }
         if let Some(supertypes) = self.supertypes
-            && !object.definition.supertypes.intersects(supertypes) {
-                return false;
-            }
+            && !object.definition.supertypes.intersects(supertypes)
+        {
+            return false;
+        }
         if let Some(subtypes) = &self.subtypes
-            && !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
-                return false;
-            }
+            && !subtypes
+                .iter()
+                .any(|s| object.definition.subtypes.contains(s))
+        {
+            return false;
+        }
         if let Some(fc) = self.controller {
             let ok = match fc {
                 FilterController::You => object_controller == viewer,
@@ -73,23 +83,37 @@ pub enum AdditionalCost {
     /// `TapPermanents`, which taps other permanents. Always the activating
     /// object (`PaymentPlan::validate`'s `source`).
     TapSelf,
-    Sacrifice { filter: FilterSpec },
+    Sacrifice {
+        filter: FilterSpec,
+    },
     /// Sacrifice the ability's own source. `Sacrifice{filter}` cannot express
     /// this, because its filter never checks identity and another matching
     /// permanent could pay.
     SacrificeSelf,
-    Discard { filter: FilterSpec },
+    Discard {
+        filter: FilterSpec,
+    },
     /// CR 702.29a Cycling's "Discard this card": always the ability's own
     /// source, unlike `Discard { filter }`, which lets the payer discard any
     /// matching hand card.
     DiscardSelf,
-    TapPermanents { filter: FilterSpec, count: u32 },
+    TapPermanents {
+        filter: FilterSpec,
+        count: u32,
+    },
     /// CR 702.138a Escape's "Exile N other cards from your graveyard", in the
     /// `TapPermanents` shape against the graveyard. The escaping card is
     /// already on the stack (CR 601.2a), so it is never a candidate.
-    ExileFromGraveyard { filter: FilterSpec, count: u32 },
-    LifePayment { amount: u32 },
-    Other { description: String },
+    ExileFromGraveyard {
+        filter: FilterSpec,
+        count: u32,
+    },
+    LifePayment {
+        amount: u32,
+    },
+    Other {
+        description: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,7 +149,11 @@ pub struct CostSpec {
 
 impl CostSpec {
     pub fn mana_only(cost: ManaCost) -> Self {
-        CostSpec { mana: Some(cost), additional: Vec::new(), alternative: Vec::new() }
+        CostSpec {
+            mana: Some(cost),
+            additional: Vec::new(),
+            alternative: Vec::new(),
+        }
     }
 }
 
@@ -185,11 +213,19 @@ pub enum CostModifierTarget {
 /// modifier's own `controller`'s perspective. Amounts are summed within each
 /// group (generic, each color, colorless) before applying, not applied one by
 /// one. See `CostModifier` for why.
-pub fn apply_cost_modifiers(base: &ManaCost, modifiers: &[CostModifier], spell: &GameObject) -> ManaCost {
+pub fn apply_cost_modifiers(
+    base: &ManaCost,
+    modifiers: &[CostModifier],
+    spell: &GameObject,
+) -> ManaCost {
     let matching = modifiers
         .iter()
         // `spell.controller` is used as is, since no control-change effect can target a spell on the stack (CR 108.4).
-        .filter(|modifier| modifier.filter.matches(spell, spell.controller, modifier.controller));
+        .filter(|modifier| {
+            modifier
+                .filter
+                .matches(spell, spell.controller, modifier.controller)
+        });
 
     let mut generic_delta = 0i32;
     let mut colored_deltas: Vec<(Color, i32)> = Vec::new();
@@ -316,7 +352,14 @@ fn mana_payment_satisfies(
     for symbol in required {
         branch_sets.push(symbol_branches(symbol)?);
     }
-    Some(assign_branches(&branch_sets, 0, spent, 0, 0, phyrexian_life))
+    Some(assign_branches(
+        &branch_sets,
+        0,
+        spent,
+        0,
+        0,
+        phyrexian_life,
+    ))
 }
 
 /// Backtracking step for `mana_payment_satisfies`. At the base case the pool
@@ -347,8 +390,14 @@ fn assign_branches(
                 if spent.colored[ci] > spent.snow_colored[ci] {
                     let mut next = spent;
                     next.colored[ci] -= 1;
-                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
-                    {
+                    if assign_branches(
+                        branch_sets,
+                        idx + 1,
+                        next,
+                        generic_needed,
+                        life_needed,
+                        phyrexian_life,
+                    ) {
                         return true;
                     }
                 }
@@ -356,8 +405,14 @@ fn assign_branches(
                     let mut next = spent;
                     next.colored[ci] -= 1;
                     next.snow_colored[ci] -= 1;
-                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
-                    {
+                    if assign_branches(
+                        branch_sets,
+                        idx + 1,
+                        next,
+                        generic_needed,
+                        life_needed,
+                        phyrexian_life,
+                    ) {
                         return true;
                     }
                 }
@@ -366,8 +421,14 @@ fn assign_branches(
                 if spent.colorless > spent.snow_colorless {
                     let mut next = spent;
                     next.colorless -= 1;
-                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
-                    {
+                    if assign_branches(
+                        branch_sets,
+                        idx + 1,
+                        next,
+                        generic_needed,
+                        life_needed,
+                        phyrexian_life,
+                    ) {
                         return true;
                     }
                 }
@@ -375,8 +436,14 @@ fn assign_branches(
                     let mut next = spent;
                     next.colorless -= 1;
                     next.snow_colorless -= 1;
-                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
-                    {
+                    if assign_branches(
+                        branch_sets,
+                        idx + 1,
+                        next,
+                        generic_needed,
+                        life_needed,
+                        phyrexian_life,
+                    ) {
                         return true;
                     }
                 }
@@ -403,21 +470,39 @@ fn assign_branches(
                     let mut next = spent;
                     next.colorless -= 1;
                     next.snow_colorless -= 1;
-                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
-                    {
+                    if assign_branches(
+                        branch_sets,
+                        idx + 1,
+                        next,
+                        generic_needed,
+                        life_needed,
+                        phyrexian_life,
+                    ) {
                         return true;
                     }
                 }
             }
             PayBranch::Generic(n) => {
-                if assign_branches(branch_sets, idx + 1, spent, generic_needed + n, life_needed, phyrexian_life)
-                {
+                if assign_branches(
+                    branch_sets,
+                    idx + 1,
+                    spent,
+                    generic_needed + n,
+                    life_needed,
+                    phyrexian_life,
+                ) {
                     return true;
                 }
             }
             PayBranch::Life(n) => {
-                if assign_branches(branch_sets, idx + 1, spent, generic_needed, life_needed + n, phyrexian_life)
-                {
+                if assign_branches(
+                    branch_sets,
+                    idx + 1,
+                    spent,
+                    generic_needed,
+                    life_needed + n,
+                    phyrexian_life,
+                ) {
                     return true;
                 }
             }
@@ -512,14 +597,19 @@ pub enum CostPayment {
     /// shape. `units` is the mana spent and `phyrexian_life` is the life
     /// declared toward Phyrexian pips (CR 107.4f), 0 when none. See
     /// `PaymentPlan` for why this is the payer's choice.
-    Mana { units: Vec<ManaUnit>, phyrexian_life: u32 },
+    Mana {
+        units: Vec<ManaUnit>,
+        phyrexian_life: u32,
+    },
     Sacrifice(ObjectId),
     Discard(ObjectId),
     /// CR 702.138a Escape's exile cost, one entry per exiled card.
     Exile(ObjectId),
     Tap(ObjectId),
     Life(u32),
-    Other { description: String },
+    Other {
+        description: String,
+    },
 }
 
 /// CR 702.44b (Sunburst): distinct colors of mana spent across every
@@ -528,17 +618,23 @@ pub enum CostPayment {
 pub fn colors_spent(payments: &[CostPayment]) -> ColorSet {
     let mut set = ColorSet::empty();
     for payment in payments {
-        let CostPayment::Mana { units, .. } = payment else { continue };
+        let CostPayment::Mana { units, .. } = payment else {
+            continue;
+        };
         for unit in units {
             let bit = match unit {
-                ManaUnit::Colored(c) | ManaUnit::SnowColored(c) | ManaUnit::RestrictedColored(c, _) => match c {
+                ManaUnit::Colored(c)
+                | ManaUnit::SnowColored(c)
+                | ManaUnit::RestrictedColored(c, _) => match c {
                     Color::White => ColorSet::WHITE,
                     Color::Blue => ColorSet::BLUE,
                     Color::Black => ColorSet::BLACK,
                     Color::Red => ColorSet::RED,
                     Color::Green => ColorSet::GREEN,
                 },
-                ManaUnit::Colorless | ManaUnit::SnowColorless | ManaUnit::RestrictedColorless(_) => continue,
+                ManaUnit::Colorless
+                | ManaUnit::SnowColorless
+                | ManaUnit::RestrictedColorless(_) => continue,
             };
             set |= bit;
         }
@@ -595,7 +691,11 @@ impl PaymentPlan {
         if let Some(mana_cost) = &spec.mana {
             let required = mana_cost.symbols.as_slice();
             if !required.is_empty() {
-                let Some(CostPayment::Mana { units, phyrexian_life }) = payments.next() else {
+                let Some(CostPayment::Mana {
+                    units,
+                    phyrexian_life,
+                }) = payments.next()
+                else {
                     return false;
                 };
                 // CR 118.13a: a restricted unit folds into its base bucket here (see `spent_tally`).
@@ -611,7 +711,9 @@ impl PaymentPlan {
                     Some(true) => {}
                     Some(false) | None => return false,
                 }
-                let Some(player) = state.player(payer) else { return false };
+                let Some(player) = state.player(payer) else {
+                    return false;
+                };
                 // CR 119.4: a player can't pay more life toward Phyrexian
                 // pips than they have.
                 if player.life < *phyrexian_life as i32 {
@@ -620,23 +722,39 @@ impl PaymentPlan {
                 let pool = &player.mana_pool;
 
                 // Pool affordability: restricted units are in `pool.restricted`, not the plain fields, so only the non-restricted declared units are checked against those.
-                let (plain_units, restricted_units): (Vec<ManaUnit>, Vec<ManaUnit>) = units
-                    .iter()
-                    .copied()
-                    .partition(|u| !matches!(u, ManaUnit::RestrictedColored(..) | ManaUnit::RestrictedColorless(..)));
+                let (plain_units, restricted_units): (Vec<ManaUnit>, Vec<ManaUnit>) =
+                    units.iter().copied().partition(|u| {
+                        !matches!(
+                            u,
+                            ManaUnit::RestrictedColored(..) | ManaUnit::RestrictedColorless(..)
+                        )
+                    });
                 let (plain_colored, plain_colorless, plain_snow_colored, plain_snow_colorless) =
                     spent_tally(&plain_units);
                 let pool_colored = [pool.white, pool.blue, pool.black, pool.red, pool.green];
-                if plain_colored.iter().zip(pool_colored).any(|(spent, have)| *spent > have) {
+                if plain_colored
+                    .iter()
+                    .zip(pool_colored)
+                    .any(|(spent, have)| *spent > have)
+                {
                     return false;
                 }
                 if plain_colorless > pool.colorless {
                     return false;
                 }
                 // Declared snow units cannot exceed the pool's snow-tagged mana (CR 107.4h). The check above bounds only totals.
-                let pool_snow_colored =
-                    [pool.snow_white, pool.snow_blue, pool.snow_black, pool.snow_red, pool.snow_green];
-                if plain_snow_colored.iter().zip(pool_snow_colored).any(|(spent, have)| *spent > have) {
+                let pool_snow_colored = [
+                    pool.snow_white,
+                    pool.snow_blue,
+                    pool.snow_black,
+                    pool.snow_red,
+                    pool.snow_green,
+                ];
+                if plain_snow_colored
+                    .iter()
+                    .zip(pool_snow_colored)
+                    .any(|(spent, have)| *spent > have)
+                {
                     return false;
                 }
                 if plain_snow_colorless > pool.snow_colorless {
@@ -646,17 +764,21 @@ impl PaymentPlan {
                 // CR 106.11: each declared restricted unit must be in `pool.restricted`, consumed as a multiset so two declared copies cannot share one entry, and be eligible for this cost. Only the "cast a [card type] spell" shape exists: `source` is on the stack (the signal `PendingPaymentRequest::source` uses for a spell) and its card types intersect the restriction.
                 let mut remaining_restricted = pool.restricted.clone();
                 for unit in &restricted_units {
-                    let Some(idx) = remaining_restricted.iter().position(|candidate| candidate == unit) else {
+                    let Some(idx) = remaining_restricted
+                        .iter()
+                        .position(|candidate| candidate == unit)
+                    else {
                         return false;
                     };
                     remaining_restricted.remove(idx);
                     let types = match unit {
-                        ManaUnit::RestrictedColored(_, types) | ManaUnit::RestrictedColorless(types) => *types,
+                        ManaUnit::RestrictedColored(_, types)
+                        | ManaUnit::RestrictedColorless(types) => *types,
                         _ => unreachable!("partitioned into restricted_units above"),
                     };
-                    let eligible = state
-                        .object(source)
-                        .is_some_and(|o| o.zone == ZoneKind::Stack && o.definition.card_types.intersects(types));
+                    let eligible = state.object(source).is_some_and(|o| {
+                        o.zone == ZoneKind::Stack && o.definition.card_types.intersects(types)
+                    });
                     if !eligible {
                         return false;
                     }
@@ -668,11 +790,15 @@ impl PaymentPlan {
         for additional in &spec.additional {
             match additional {
                 AdditionalCost::TapSelf => {
-                    let Some(CostPayment::Tap(id)) = payments.next() else { return false };
+                    let Some(CostPayment::Tap(id)) = payments.next() else {
+                        return false;
+                    };
                     if *id != source {
                         return false;
                     }
-                    let Some(obj) = state.object(*id) else { return false };
+                    let Some(obj) = state.object(*id) else {
+                        return false;
+                    };
                     if obj.tapped {
                         return false;
                     }
@@ -680,15 +806,20 @@ impl PaymentPlan {
                 AdditionalCost::TapPermanents { filter, count } => {
                     let mut used: Vec<ObjectId> = Vec::with_capacity(*count as usize);
                     for _ in 0..*count {
-                        let Some(CostPayment::Tap(id)) = payments.next() else { return false };
+                        let Some(CostPayment::Tap(id)) = payments.next() else {
+                            return false;
+                        };
                         if used.contains(id) {
                             return false;
                         }
-                        let Some(obj) = state.object(*id) else { return false };
+                        let Some(obj) = state.object(*id) else {
+                            return false;
+                        };
                         if obj.tapped || obj.zone != ZoneKind::Battlefield {
                             return false;
                         }
-                        let controller = crate::layers::effective_controller(state, script_runtime, *id);
+                        let controller =
+                            crate::layers::effective_controller(state, script_runtime, *id);
                         if !filter.matches(obj, controller, payer) {
                             return false;
                         }
@@ -698,11 +829,15 @@ impl PaymentPlan {
                 AdditionalCost::ExileFromGraveyard { filter, count } => {
                     let mut used: Vec<ObjectId> = Vec::with_capacity(*count as usize);
                     for _ in 0..*count {
-                        let Some(CostPayment::Exile(id)) = payments.next() else { return false };
+                        let Some(CostPayment::Exile(id)) = payments.next() else {
+                            return false;
+                        };
                         if used.contains(id) {
                             return false;
                         }
-                        let Some(obj) = state.object(*id) else { return false };
+                        let Some(obj) = state.object(*id) else {
+                            return false;
+                        };
                         // A graveyard card's `.controller` equals its owner (CR 108.4).
                         if obj.zone != ZoneKind::Graveyard || obj.controller != payer {
                             return false;
@@ -714,11 +849,16 @@ impl PaymentPlan {
                     }
                 }
                 AdditionalCost::Sacrifice { filter } => {
-                    let Some(CostPayment::Sacrifice(id)) = payments.next() else { return false };
-                    let Some(obj) = state.object(*id) else { return false };
+                    let Some(CostPayment::Sacrifice(id)) = payments.next() else {
+                        return false;
+                    };
+                    let Some(obj) = state.object(*id) else {
+                        return false;
+                    };
                     // CR 701.20a: you can only sacrifice a permanent you
                     // *currently* control (layers::effective_controller).
-                    let controller = crate::layers::effective_controller(state, script_runtime, *id);
+                    let controller =
+                        crate::layers::effective_controller(state, script_runtime, *id);
                     if obj.zone != ZoneKind::Battlefield || controller != payer {
                         return false;
                     }
@@ -727,20 +867,29 @@ impl PaymentPlan {
                     }
                 }
                 AdditionalCost::SacrificeSelf => {
-                    let Some(CostPayment::Sacrifice(id)) = payments.next() else { return false };
+                    let Some(CostPayment::Sacrifice(id)) = payments.next() else {
+                        return false;
+                    };
                     if *id != source {
                         return false;
                     }
-                    let Some(obj) = state.object(*id) else { return false };
+                    let Some(obj) = state.object(*id) else {
+                        return false;
+                    };
                     // CR 701.20a: the `Sacrifice{filter}` check without the filter, since the id is pinned to source.
-                    let controller = crate::layers::effective_controller(state, script_runtime, *id);
+                    let controller =
+                        crate::layers::effective_controller(state, script_runtime, *id);
                     if obj.zone != ZoneKind::Battlefield || controller != payer {
                         return false;
                     }
                 }
                 AdditionalCost::Discard { filter } => {
-                    let Some(CostPayment::Discard(id)) = payments.next() else { return false };
-                    let Some(obj) = state.object(*id) else { return false };
+                    let Some(CostPayment::Discard(id)) = payments.next() else {
+                        return false;
+                    };
+                    let Some(obj) = state.object(*id) else {
+                        return false;
+                    };
                     // A hand card's `.controller` equals its owner (CR 108.4), so the raw field is correct.
                     if obj.zone != ZoneKind::Hand || obj.controller != payer {
                         return false;
@@ -750,24 +899,32 @@ impl PaymentPlan {
                     }
                 }
                 AdditionalCost::DiscardSelf => {
-                    let Some(CostPayment::Discard(id)) = payments.next() else { return false };
+                    let Some(CostPayment::Discard(id)) = payments.next() else {
+                        return false;
+                    };
                     if *id != source {
                         return false;
                     }
-                    let Some(obj) = state.object(*id) else { return false };
+                    let Some(obj) = state.object(*id) else {
+                        return false;
+                    };
                     // CR 702.29a: the source must still be in its controller's hand.
                     if obj.zone != ZoneKind::Hand || obj.controller != payer {
                         return false;
                     }
                 }
                 AdditionalCost::LifePayment { amount } => {
-                    let Some(CostPayment::Life(paid)) = payments.next() else { return false };
+                    let Some(CostPayment::Life(paid)) = payments.next() else {
+                        return false;
+                    };
                     if paid != amount {
                         return false;
                     }
                     // CR 119.4: a player can't pay a life-payment cost that
                     // would take them below 0 life.
-                    let Some(player) = state.player(payer) else { return false };
+                    let Some(player) = state.player(payer) else {
+                        return false;
+                    };
                     if player.life < *amount as i32 {
                         return false;
                     }
@@ -783,7 +940,9 @@ impl PaymentPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::card::{CardDefinition, KeywordSet, ModeChoice, PTValue, ScriptReference, Subtype, SupertypeSet};
+    use crate::types::card::{
+        CardDefinition, KeywordSet, ModeChoice, PTValue, ScriptReference, Subtype, SupertypeSet,
+    };
     use crate::types::counter::CounterSet;
     use crate::types::ids::SequenceNo;
     use crate::types::object::VisibilityPolicy;
@@ -795,7 +954,9 @@ mod tests {
             definition: CardDefinition {
                 definition_id: 1,
                 name: "Test Object".to_string(),
-                mana_cost: ManaCost { symbols: Vec::new() },
+                mana_cost: ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator: None,
                 supertypes: SupertypeSet::empty(),
                 card_types,
@@ -826,12 +987,16 @@ mod tests {
             deathtouched: false,
             counters: CounterSet::new(),
             attachments: Vec::new(),
-            attached_to: None, attached_to_player: None,
+            attached_to: None,
+            attached_to_player: None,
             timestamp: SequenceNo(0),
             controlled_since_turn: 0,
             is_commander: false,
             is_token: false,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
@@ -907,8 +1072,14 @@ mod tests {
             random: false,
             extra: None,
         };
-        assert!(filter.matches(&basic_land, p0, p0), "a basic land card matches Some(SupertypeSet::BASIC)");
-        assert!(!filter.matches(&nonbasic_land, p0, p0), "a nonbasic land doesn't match");
+        assert!(
+            filter.matches(&basic_land, p0, p0),
+            "a basic land card matches Some(SupertypeSet::BASIC)"
+        );
+        assert!(
+            !filter.matches(&nonbasic_land, p0, p0),
+            "a nonbasic land doesn't match"
+        );
     }
 
     #[test]
@@ -926,16 +1097,37 @@ mod tests {
             random: false,
             extra: None,
         };
-        assert!(filter.matches(&forest, p0, p0), "a Forest card matches a Forest-subtype filter");
-        assert!(!filter.matches(&island, p0, p0), "an Island doesn't match a Forest-only filter");
+        assert!(
+            filter.matches(&forest, p0, p0),
+            "a Forest card matches a Forest-subtype filter"
+        );
+        assert!(
+            !filter.matches(&island, p0, p0),
+            "an Island doesn't match a Forest-only filter"
+        );
     }
 
     fn spent(colored: [u32; 5], colorless: u32) -> SpentPool {
-        SpentPool { colored, colorless, snow_colored: [0; 5], snow_colorless: 0 }
+        SpentPool {
+            colored,
+            colorless,
+            snow_colored: [0; 5],
+            snow_colorless: 0,
+        }
     }
 
-    fn spent_snow(colored: [u32; 5], colorless: u32, snow_colored: [u32; 5], snow_colorless: u32) -> SpentPool {
-        SpentPool { colored, colorless, snow_colored, snow_colorless }
+    fn spent_snow(
+        colored: [u32; 5],
+        colorless: u32,
+        snow_colored: [u32; 5],
+        snow_colorless: u32,
+    ) -> SpentPool {
+        SpentPool {
+            colored,
+            colorless,
+            snow_colored,
+            snow_colorless,
+        }
     }
 
     #[test]
@@ -944,9 +1136,18 @@ mod tests {
             AtomicManaSymbol::Colored(Color::White),
             AtomicManaSymbol::Colored(Color::Blue),
         )];
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([0, 1, 0, 0, 0], 0), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 1, 0, 0], 0), 0), Some(false));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0, 1, 0, 0, 0], 0), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0, 0, 1, 0, 0], 0), 0),
+            Some(false)
+        );
     }
 
     #[test]
@@ -955,8 +1156,14 @@ mod tests {
             AtomicManaSymbol::Generic(2),
             AtomicManaSymbol::Colored(Color::White),
         )];
-        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 0, 0], 2), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0, 0, 0, 0, 0], 2), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0),
+            Some(true)
+        );
     }
 
     #[test]
@@ -972,8 +1179,14 @@ mod tests {
             ),
         ];
         // Each symbol must claim a different unit; a plain tally cannot tell this from an unpayable case.
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 1, 0, 0, 0], 0), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([2, 0, 0, 0, 0], 0), 0), Some(true));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 1, 0, 0, 0], 0), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([2, 0, 0, 0, 0], 0), 0),
+            Some(true)
+        );
     }
 
     #[test]
@@ -985,18 +1198,39 @@ mod tests {
                 AtomicManaSymbol::Colored(Color::Blue),
             ),
         ];
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 1), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 2), 0), Some(false));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 1), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0),
+            Some(false)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 2), 0),
+            Some(false)
+        );
     }
 
     #[test]
     fn plain_phyrexian_paid_with_color_or_life() {
         let required = [ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))];
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 2), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 1, 0, 0], 0), 0), Some(false));
-        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 1), Some(false));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0; 5], 0), 2),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0, 0, 1, 0, 0], 0), 0),
+            Some(false)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0; 5], 0), 1),
+            Some(false)
+        );
     }
 
     #[test]
@@ -1006,10 +1240,22 @@ mod tests {
             AtomicManaSymbol::Phyrexian(Color::Blue),
             AtomicManaSymbol::Colored(Color::Green),
         )];
-        assert_eq!(mana_payment_satisfies(&required, spent([0, 1, 0, 0, 0], 0), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 0, 1], 0), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 2), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 1, 0], 0), 0), Some(false));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0, 1, 0, 0, 0], 0), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0, 0, 0, 0, 1], 0), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0; 5], 0), 2),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0, 0, 0, 1, 0], 0), 0),
+            Some(false)
+        );
     }
 
     #[test]
@@ -1018,47 +1264,86 @@ mod tests {
             ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
             ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White)),
         ];
-        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 2), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 1), Some(false));
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 1), 2), Some(false));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0; 5], 1), 2),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0; 5], 1), 1),
+            Some(false)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 1), 2),
+            Some(false)
+        );
     }
 
     #[test]
     fn snow_pip_paid_with_any_snow_tagged_mana() {
         let required = [ManaSymbol::Atom(AtomicManaSymbol::Snow)];
         assert_eq!(
-            mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
+            mana_payment_satisfies(
+                &required,
+                spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0),
+                0
+            ),
             Some(true)
         );
-        assert_eq!(mana_payment_satisfies(&required, spent_snow([0; 5], 1, [0; 5], 1), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent_snow([0; 5], 1, [0; 5], 1), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0),
+            Some(false)
+        );
     }
 
     #[test]
     fn colored_pip_and_snow_pip_compete_for_the_same_snow_unit() {
         // One snow white cannot cover both {W} and {S}; a plain tally would miss it.
-        let required =
-            [ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)), ManaSymbol::Atom(AtomicManaSymbol::Snow)];
+        let required = [
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+            ManaSymbol::Atom(AtomicManaSymbol::Snow),
+        ];
         assert_eq!(
-            mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
+            mana_payment_satisfies(
+                &required,
+                spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0),
+                0
+            ),
             Some(false)
         );
         assert_eq!(
-            mana_payment_satisfies(&required, spent_snow([2, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
+            mana_payment_satisfies(
+                &required,
+                spent_snow([2, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0),
+                0
+            ),
             Some(true)
         );
     }
 
     #[test]
     fn generic_pip_mixed_with_snow_leftover_must_match_exactly() {
-        let required =
-            [ManaSymbol::Atom(AtomicManaSymbol::Generic(1)), ManaSymbol::Atom(AtomicManaSymbol::Snow)];
+        let required = [
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+            ManaSymbol::Atom(AtomicManaSymbol::Snow),
+        ];
         assert_eq!(
-            mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 1, [1, 0, 0, 0, 0], 0), 0),
+            mana_payment_satisfies(
+                &required,
+                spent_snow([1, 0, 0, 0, 0], 1, [1, 0, 0, 0, 0], 0),
+                0
+            ),
             Some(true)
         );
         assert_eq!(
-            mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
+            mana_payment_satisfies(
+                &required,
+                spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0),
+                0
+            ),
             Some(false)
         );
     }
@@ -1066,17 +1351,32 @@ mod tests {
     #[test]
     fn a_bare_x_bails_with_none() {
         // `resolve_x` runs before payment, so an unresolved {X} is never payable.
-        assert_eq!(mana_payment_satisfies(&[ManaSymbol::X], spent([0; 5], 0), 0), None);
+        assert_eq!(
+            mana_payment_satisfies(&[ManaSymbol::X], spent([0; 5], 0), 0),
+            None
+        );
     }
 
     #[test]
     fn colorless_symbol_takes_only_colorless_mana() {
         let required = [ManaSymbol::Atom(AtomicManaSymbol::Colorless)];
-        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 0), Some(true));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0; 5], 1), 0),
+            Some(true)
+        );
         // CR 107.4c
-        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
-        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 0), Some(false));
-        assert_eq!(mana_payment_satisfies(&required, spent_snow([0; 5], 1, [0; 5], 1), 0), Some(true));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0),
+            Some(false)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0; 5], 0), 0),
+            Some(false)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent_snow([0; 5], 1, [0; 5], 1), 0),
+            Some(true)
+        );
     }
 
     #[test]
@@ -1086,10 +1386,19 @@ mod tests {
             ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
             ManaSymbol::Atom(AtomicManaSymbol::Colorless),
         ];
-        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 3), 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, spent([2, 0, 0, 0, 0], 1), 0), Some(true));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([0; 5], 3), 0),
+            Some(true)
+        );
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([2, 0, 0, 0, 0], 1), 0),
+            Some(true)
+        );
         // Three white has no colorless unit for the {C}.
-        assert_eq!(mana_payment_satisfies(&required, spent([3, 0, 0, 0, 0], 0), 0), Some(false));
+        assert_eq!(
+            mana_payment_satisfies(&required, spent([3, 0, 0, 0, 0], 0), 0),
+            Some(false)
+        );
     }
 
     #[test]
@@ -1136,7 +1445,10 @@ mod tests {
             amount: -3,
         };
         let adjusted = apply_cost_modifiers(&base, &[modifier], &red_creature);
-        assert_eq!(adjusted.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]);
+        assert_eq!(
+            adjusted.symbols,
+            vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]
+        );
     }
 
     #[test]
@@ -1223,14 +1535,20 @@ mod tests {
             },
         ];
         let adjusted = apply_cost_modifiers(&base, &modifiers, &red_creature);
-        assert_eq!(adjusted.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]);
+        assert_eq!(
+            adjusted.symbols,
+            vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]
+        );
     }
 
     #[test]
     fn colors_spent_collects_distinct_colors_from_mana_payments() {
         let payments = vec![
             CostPayment::Mana {
-                units: vec![ManaUnit::Colored(Color::White), ManaUnit::Colored(Color::Blue)],
+                units: vec![
+                    ManaUnit::Colored(Color::White),
+                    ManaUnit::Colored(Color::Blue),
+                ],
                 phyrexian_life: 0,
             },
             CostPayment::Mana {
@@ -1238,13 +1556,19 @@ mod tests {
                 phyrexian_life: 0,
             },
         ];
-        assert_eq!(colors_spent(&payments), ColorSet::WHITE | ColorSet::BLUE | ColorSet::RED);
+        assert_eq!(
+            colors_spent(&payments),
+            ColorSet::WHITE | ColorSet::BLUE | ColorSet::RED
+        );
     }
 
     #[test]
     fn colors_spent_ignores_non_mana_payments_and_colorless() {
         let payments = vec![
-            CostPayment::Mana { units: vec![ManaUnit::Colorless, ManaUnit::SnowColorless], phyrexian_life: 0 },
+            CostPayment::Mana {
+                units: vec![ManaUnit::Colorless, ManaUnit::SnowColorless],
+                phyrexian_life: 0,
+            },
             CostPayment::Life(2),
         ];
         assert_eq!(colors_spent(&payments), ColorSet::empty());

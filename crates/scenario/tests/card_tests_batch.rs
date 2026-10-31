@@ -96,7 +96,10 @@ fn unique_temp_path(name: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("stackfish-scenario-card-tests-{}-{n}-{name}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "stackfish-scenario-card-tests-{}-{n}-{name}",
+        std::process::id()
+    ))
 }
 
 fn open_fixture_db(path: &Path) -> Connection {
@@ -176,7 +179,11 @@ fn run_db_tests_skips_inactive_rows_and_picks_the_highest_active_version() {
     drop(conn);
 
     let outcomes = stackfish_scenario::run_db_tests(&db_path);
-    assert_eq!(outcomes.len(), 1, "only one (oracle_id, test_name) group - the winning version");
+    assert_eq!(
+        outcomes.len(),
+        1,
+        "only one (oracle_id, test_name) group - the winning version"
+    );
     assert_eq!(outcomes[0].version, 2);
     assert!(!outcomes[0].has_hard_failures());
 

@@ -33,7 +33,9 @@ fn permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
         name: "Test Permanent".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ARTIFACT,
@@ -75,12 +77,16 @@ fn cast_and_await_payment(engine: &mut Engine, player: PlayerId, card: ObjectId)
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("player holds priority, spell is in hand, main phase, empty stack");
     match drain(engine) {
-        StepStatus::AwaitingPayment { player: p, stack_id } if p == player => stack_id,
+        StepStatus::AwaitingPayment {
+            player: p,
+            stack_id,
+        } if p == player => stack_id,
         other => panic!("expected AwaitingPayment, got {other:?}"),
     }
 }
@@ -91,24 +97,49 @@ fn unwinding_a_cast_spell_returns_the_card_to_hand() {
     let card = ObjectId(0);
     let mana_cost = ManaCost::parse("{1}").unwrap();
     let mut state = base_state();
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     let stack_id = cast_and_await_payment(&mut engine, p0, card);
     assert!(engine.state().stack.iter().any(|s| s.stack_id == stack_id));
 
-    engine.unwind_payment().expect("a real AwaitingPayment pause must accept an unwind");
+    engine
+        .unwind_payment()
+        .expect("a real AwaitingPayment pause must accept an unwind");
 
     assert!(engine.state().stack.is_empty(), "the stack object is gone");
-    assert!(engine.state().object(stack_id).is_none(), "the stack-side id is retired");
+    assert!(
+        engine.state().object(stack_id).is_none(),
+        "the stack-side id is retired"
+    );
     let hand = engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap();
-    assert_eq!(hand.contents.len(), 1, "the card is back in hand under a new id");
+    assert_eq!(
+        hand.contents.len(),
+        1,
+        "the card is back in hand under a new id"
+    );
     let new_id = hand.contents[0];
-    assert_ne!(new_id, stack_id, "CR 400.7: a new object id, not the old stack id");
+    assert_ne!(
+        new_id, stack_id,
+        "CR 400.7: a new object id, not the old stack id"
+    );
     assert_eq!(engine.state().object(new_id).unwrap().zone, ZoneKind::Hand);
 
-    let tail: Vec<&GameEventKind> = engine.state().ledger.iter().rev().take(2).map(|e| &e.kind).collect();
+    let tail: Vec<&GameEventKind> = engine
+        .state()
+        .ledger
+        .iter()
+        .rev()
+        .take(2)
+        .map(|e| &e.kind)
+        .collect();
     assert!(
         matches!(tail[0], GameEventKind::CastingUnwound { stack_id: s } if *s == stack_id),
         "expected CastingUnwound last, got {:?}",
@@ -127,18 +158,33 @@ fn priority_reopens_for_the_same_player_after_unwinding() {
     let card = ObjectId(0);
     let mana_cost = ManaCost::parse("{1}").unwrap();
     let mut state = base_state();
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_and_await_payment(&mut engine, p0, card);
 
     // An invalid plan still just errors in AwaitingPayment before the caller unwinds instead.
-    let err = engine.submit_payment(PaymentPlan { payments: Vec::new() }).unwrap_err();
+    let err = engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
-    assert!(matches!(engine.step().status, StepStatus::AwaitingPayment { .. }));
+    assert!(matches!(
+        engine.step().status,
+        StepStatus::AwaitingPayment { .. }
+    ));
 
-    engine.unwind_payment().expect("must accept the unwind after a rejected plan too");
+    engine
+        .unwind_payment()
+        .expect("must accept the unwind after a rejected plan too");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
@@ -148,8 +194,14 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
     let mut state = base_state();
-    state.objects.insert(source, card_object(source, permanent_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
+    state.objects.insert(
+        source,
+        card_object(source, permanent_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(source);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -157,7 +209,11 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
         source,
         kind: AbilityKind::Activated,
         condition: None,
-        cost: Some(CostSpec { mana: ManaCost::parse("{1}").ok(), additional: Vec::new(), alternative: Vec::new() }),
+        cost: Some(CostSpec {
+            mana: ManaCost::parse("{1}").ok(),
+            additional: Vec::new(),
+            alternative: Vec::new(),
+        }),
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
@@ -182,12 +238,23 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
         other => panic!("expected AwaitingPayment, got {other:?}"),
     };
 
-    engine.unwind_payment().expect("a real AwaitingPayment pause must accept an unwind");
+    engine
+        .unwind_payment()
+        .expect("a real AwaitingPayment pause must accept an unwind");
 
-    assert!(engine.state().stack.is_empty(), "the ability's stack entry is gone");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the ability's stack entry is gone"
+    );
     // The source permanent never left the battlefield, with the same id and zone.
-    assert!(engine.state().object(source).is_some(), "the source permanent is untouched");
-    assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield);
+    assert!(
+        engine.state().object(source).is_some(),
+        "the source permanent is untouched"
+    );
+    assert_eq!(
+        engine.state().object(source).unwrap().zone,
+        ZoneKind::Battlefield
+    );
 
     let last = &engine.state().ledger.last().unwrap().kind;
     assert!(

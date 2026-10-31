@@ -43,7 +43,9 @@ pub fn parse(type_line: &str) -> Result<ParsedTypeLine, TypeLineError> {
         }
     }
     if card_types.is_empty() {
-        return Err(TypeLineError(format!("type_line {type_line:?} has no recognized card type")));
+        return Err(TypeLineError(format!(
+            "type_line {type_line:?} has no recognized card type"
+        )));
     }
 
     let subtypes = right
@@ -52,7 +54,11 @@ pub fn parse(type_line: &str) -> Result<ParsedTypeLine, TypeLineError> {
         .map(|s| Subtype(s.to_string()))
         .collect();
 
-    Ok(ParsedTypeLine { supertypes, card_types, subtypes })
+    Ok(ParsedTypeLine {
+        supertypes,
+        card_types,
+        subtypes,
+    })
 }
 
 fn parse_supertype(word: &str) -> Option<SupertypeSet> {
@@ -91,7 +97,10 @@ mod tests {
         let parsed = parse("Legendary Creature — Human Wizard").unwrap();
         assert_eq!(parsed.supertypes, SupertypeSet::LEGENDARY);
         assert_eq!(parsed.card_types, CardTypeSet::CREATURE);
-        assert_eq!(parsed.subtypes, vec![Subtype("Human".into()), Subtype("Wizard".into())]);
+        assert_eq!(
+            parsed.subtypes,
+            vec![Subtype("Human".into()), Subtype("Wizard".into())]
+        );
     }
 
     #[test]
@@ -104,14 +113,23 @@ mod tests {
     #[test]
     fn parses_multi_type_permanent() {
         let parsed = parse("Artifact Creature — Construct").unwrap();
-        assert_eq!(parsed.card_types, CardTypeSet::ARTIFACT | CardTypeSet::CREATURE);
+        assert_eq!(
+            parsed.card_types,
+            CardTypeSet::ARTIFACT | CardTypeSet::CREATURE
+        );
         assert_eq!(parsed.subtypes, vec![Subtype("Construct".into())]);
     }
 
     #[test]
     fn tribal_and_kindred_both_map_to_kindred_bit() {
-        assert_eq!(parse("Tribal Sorcery — Goblin").unwrap().card_types, CardTypeSet::SORCERY | CardTypeSet::KINDRED);
-        assert_eq!(parse("Kindred Sorcery — Goblin").unwrap().card_types, CardTypeSet::SORCERY | CardTypeSet::KINDRED);
+        assert_eq!(
+            parse("Tribal Sorcery — Goblin").unwrap().card_types,
+            CardTypeSet::SORCERY | CardTypeSet::KINDRED
+        );
+        assert_eq!(
+            parse("Kindred Sorcery — Goblin").unwrap().card_types,
+            CardTypeSet::SORCERY | CardTypeSet::KINDRED
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Scenario keywords list accepts Hexproof and Shroud; unknown names panic.
 
-use stackfish_scenario::{parse, run, AssertionOutcome, EntryOutcome, StepOutcome};
+use stackfish_scenario::{AssertionOutcome, EntryOutcome, StepOutcome, parse, run};
 
 fn scenario_with_keywords(keywords: &str) -> String {
     format!(
@@ -38,9 +38,14 @@ fn hexproof_and_shroud_are_accepted_scenario_keywords() {
     for entry in &report.entries {
         match &entry.outcome {
             EntryOutcome::Assertion(AssertionOutcome::Failed { expected, actual }) => {
-                panic!("assertion failed: {} (expected {expected}, got {actual})", entry.description)
+                panic!(
+                    "assertion failed: {} (expected {expected}, got {actual})",
+                    entry.description
+                )
             }
-            EntryOutcome::Action(StepOutcome::Errored(msg)) => panic!("action errored: {} ({msg})", entry.description),
+            EntryOutcome::Action(StepOutcome::Errored(msg)) => {
+                panic!("action errored: {} ({msg})", entry.description)
+            }
             _ => {}
         }
     }

@@ -22,9 +22,19 @@ use super::legality::effective_keywords;
 /// their doc comments for the pipeline. `to` is a parameter because
 /// `AdditionalCost::ExileFromGraveyard` proposes Graveyard to Exile through the
 /// same path.
-pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind, to: ZoneKind) -> Option<GameEventKind> {
+pub(crate) fn propose_zone_move(
+    state: &GameState,
+    id: ObjectId,
+    from: ZoneKind,
+    to: ZoneKind,
+) -> Option<GameEventKind> {
     let last_known_info = state.object(id)?.clone();
-    Some(GameEventKind::ZoneChange { object: id, from, to, last_known_info: Some(last_known_info) })
+    Some(GameEventKind::ZoneChange {
+        object: id,
+        from,
+        to,
+        last_known_info: Some(last_known_info),
+    })
 }
 
 /// CR 504.1/616.1: drawing a card is a replaceable zone-change proposal (Library
@@ -43,19 +53,31 @@ pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind,
 /// its per-card loop on it, which CR 121.2b allows (multi-card draws may be
 /// partly carried out).
 pub(crate) fn propose_draw(state: &mut GameState, player: PlayerId) -> Option<GameEventKind> {
-    if let Some(limit) = crate::types::player::effective_draw_limit(&state.draw_limit_modifiers, player)
-        && crate::types::player::cards_drawn_this_turn(state, player) >= limit {
-            return None;
-        }
-    let card = state.zone(ZoneKind::Library, Some(player)).and_then(|library| library.contents.front().copied());
+    if let Some(limit) =
+        crate::types::player::effective_draw_limit(&state.draw_limit_modifiers, player)
+        && crate::types::player::cards_drawn_this_turn(state, player) >= limit
+    {
+        return None;
+    }
+    let card = state
+        .zone(ZoneKind::Library, Some(player))
+        .and_then(|library| library.contents.front().copied());
     let Some(card) = card else {
         if let Some(p) = state.player_mut(player) {
             p.drew_from_empty_library = true;
         }
         return None;
     };
-    let last_known_info = state.object(card).expect("card id came from the library zone's own contents").clone();
-    Some(GameEventKind::ZoneChange { object: card, from: ZoneKind::Library, to: ZoneKind::Hand, last_known_info: Some(last_known_info) })
+    let last_known_info = state
+        .object(card)
+        .expect("card id came from the library zone's own contents")
+        .clone();
+    Some(GameEventKind::ZoneChange {
+        object: card,
+        from: ZoneKind::Library,
+        to: ZoneKind::Hand,
+        last_known_info: Some(last_known_info),
+    })
 }
 
 /// Commits `event`, a `propose_zone_move` proposal already replacement-checked
@@ -73,8 +95,17 @@ pub(crate) fn propose_draw(state: &mut GameState, player: PlayerId) -> Option<Ga
 /// (CR 603.10), so `Dies` and `LeavesBattlefield` fire for a `Sacrifice` as for
 /// an SBA death, and `DiscardsCard`, `EachDiscardsCard` and `Discarded` fire for
 /// a `Discard`.
-pub(crate) fn commit_zone_move(state: &mut GameState, event: GameEventKind) -> (GameEvent, Vec<RegisteredAbility>) {
-    let GameEventKind::ZoneChange { object: old_id, from, to, last_known_info } = event else {
+pub(crate) fn commit_zone_move(
+    state: &mut GameState,
+    event: GameEventKind,
+) -> (GameEvent, Vec<RegisteredAbility>) {
+    let GameEventKind::ZoneChange {
+        object: old_id,
+        from,
+        to,
+        last_known_info,
+    } = event
+    else {
         unreachable!("propose_zone_move only ever proposes a ZoneChange");
     };
     let last_known_info = last_known_info.expect("propose_zone_move always sets last_known_info");
@@ -83,7 +114,9 @@ pub(crate) fn commit_zone_move(state: &mut GameState, event: GameEventKind) -> (
     let new_id = state.allocate_object_id();
     let mut new_object = last_known_info.clone();
     new_object.object_id = new_id;
-    new_object.lineage = ObjectLineage { previous: Some(old_id) };
+    new_object.lineage = ObjectLineage {
+        previous: Some(old_id),
+    };
     new_object.zone = to;
     new_object.timestamp = state.allocate_sequence_no();
     if from == ZoneKind::Battlefield {
@@ -112,7 +145,12 @@ pub(crate) fn commit_zone_move(state: &mut GameState, event: GameEventKind) -> (
     let committed = GameEvent {
         event_id,
         sequence_no,
-        kind: GameEventKind::ZoneChange { object: new_id, from, to, last_known_info: Some(last_known_info) },
+        kind: GameEventKind::ZoneChange {
+            object: new_id,
+            from,
+            to,
+            last_known_info: Some(last_known_info),
+        },
         caused_by_command: None,
         parent_event: None,
     };
@@ -128,11 +166,18 @@ pub(crate) fn commit_zone_move(state: &mut GameState, event: GameEventKind) -> (
 ///
 /// Returns the `GameEventKind`s for `Engine::submit_payment` to append to the
 /// ledger.
-pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &[CostPayment]) -> Vec<GameEventKind> {
+pub(crate) fn commit_payment(
+    state: &mut GameState,
+    payer: PlayerId,
+    payments: &[CostPayment],
+) -> Vec<GameEventKind> {
     let mut events = Vec::new();
     for payment in payments {
         match payment {
-            CostPayment::Mana { units, phyrexian_life } => {
+            CostPayment::Mana {
+                units,
+                phyrexian_life,
+            } => {
                 if let Some(player) = state.player_mut(payer) {
                     cost::spend(units, &mut player.mana_pool);
                     if *phyrexian_life > 0 {
@@ -159,7 +204,10 @@ pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &
                 if let Some(player) = state.player_mut(payer) {
                     player.lose_life(*amount as i32);
                 }
-                events.push(GameEventKind::LifeChanged { player: payer, delta: -(*amount as i32) });
+                events.push(GameEventKind::LifeChanged {
+                    player: payer,
+                    delta: -(*amount as i32),
+                });
             }
             CostPayment::Other { .. } => {
                 // PaymentPlan::validate never accepts a plan with this variant (see
@@ -177,7 +225,9 @@ pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &
 /// separate pass from `commit_payment` because it must run before any
 /// replacement-checked commit; `PaymentPlan::validate` already confirmed each id
 /// is in the zone it claims.
-pub(crate) fn collect_cost_zone_moves(payments: &[CostPayment]) -> Vec<(ObjectId, ZoneKind, ZoneKind)> {
+pub(crate) fn collect_cost_zone_moves(
+    payments: &[CostPayment],
+) -> Vec<(ObjectId, ZoneKind, ZoneKind)> {
     payments
         .iter()
         .filter_map(|payment| match payment {
@@ -211,7 +261,8 @@ pub(crate) fn apply_damage_event(
     // Looked up once up front so the borrow ends before the target mutations below.
     let source_keywords = effective_keywords(state, script_runtime, source);
     let has_lifelink = source_keywords.contains(KeywordSet::LIFELINK);
-    let replaces_with_counters = source_keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT);
+    let replaces_with_counters =
+        source_keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT);
     let is_infect = source_keywords.contains(KeywordSet::INFECT);
     let has_deathtouch = source_keywords.contains(KeywordSet::DEATHTOUCH);
     // CR 702.15b
@@ -221,7 +272,10 @@ pub(crate) fn apply_damage_event(
     let source_controller = state
         .object(source)
         .map(|_| crate::layers::effective_controller(state, script_runtime, source));
-    let source_is_commander = state.object(source).map(|o| o.is_commander).unwrap_or(false);
+    let source_is_commander = state
+        .object(source)
+        .map(|o| o.is_commander)
+        .unwrap_or(false);
 
     match target {
         Target::Player(pid) => {
@@ -231,19 +285,28 @@ pub(crate) fn apply_damage_event(
             // Keyed by name and not ObjectId (see PlayerState::commander_damage_taken). The
             // name is read before source_is_commander's borrow of `state` ends, so it
             // survives into the `player_mut` borrow below.
-            if is_combat_damage && source_is_commander && amount > 0
+            if is_combat_damage
+                && source_is_commander
+                && amount > 0
                 && let Some(name) = state.object(source).map(|o| o.definition.name.clone())
-                    && let Some(player) = state.player_mut(pid) {
-                        match player.commander_damage_taken.iter_mut().find(|(s, _)| *s == name) {
-                            Some((_, total)) => *total += amount,
-                            None => player.commander_damage_taken.push((name, amount)),
-                        }
-                    }
+                && let Some(player) = state.player_mut(pid)
+            {
+                match player
+                    .commander_damage_taken
+                    .iter_mut()
+                    .find(|(s, _)| *s == name)
+                {
+                    Some((_, total)) => *total += amount,
+                    None => player.commander_damage_taken.push((name, amount)),
+                }
+            }
             // CR 702.90b
             if is_infect {
                 let timestamp = state.allocate_sequence_no();
                 if let Some(player) = state.player_mut(pid) {
-                    player.counters.add(CounterKind::Poison, amount as i32, timestamp);
+                    player
+                        .counters
+                        .add(CounterKind::Poison, amount as i32, timestamp);
                 }
             } else if let Some(player) = state.player_mut(pid) {
                 player.lose_life(amount as i32);
@@ -253,17 +316,20 @@ pub(crate) fn apply_damage_event(
             // TODO: damage to planeswalkers and battles marks loyalty or defense loss and not damage_marked, and GameObject has no loyalty or defense damage path, so only creature targets work (CR 120.3c/d)
             let timestamp = state.allocate_sequence_no();
             if let Some(object) = state.object_mut(id)
-                && object.definition.card_types.contains(CardTypeSet::CREATURE) {
-                    // CR 702.80a/702.90c
-                    if replaces_with_counters {
-                        object.counters.add(CounterKind::MinusOneMinusOne, amount as i32, timestamp);
-                    } else {
-                        object.damage_marked += amount;
-                        if has_deathtouch && amount > 0 {
-                            object.deathtouched = true;
-                        }
+                && object.definition.card_types.contains(CardTypeSet::CREATURE)
+            {
+                // CR 702.80a/702.90c
+                if replaces_with_counters {
+                    object
+                        .counters
+                        .add(CounterKind::MinusOneMinusOne, amount as i32, timestamp);
+                } else {
+                    object.damage_marked += amount;
+                    if has_deathtouch && amount > 0 {
+                        object.deathtouched = true;
                     }
                 }
+            }
         }
         // CR 702/119: damage is dealt to a permanent or a player, never to an ability.
         Target::Ability(_) => unreachable!("damage is never dealt to an ability"),
@@ -272,9 +338,11 @@ pub(crate) fn apply_damage_event(
     // CR 702.15b
     // Lifelink's gain is in addition to any other result of the damage, to a player
     // or an object alike.
-    if has_lifelink && amount > 0
+    if has_lifelink
+        && amount > 0
         && let Some(controller) = source_controller
-            && let Some(player) = state.player_mut(controller) {
-                player.lose_life(-(amount as i32));
-            }
+        && let Some(player) = state.player_mut(controller)
+    {
+        player.lose_life(-(amount as i32));
+    }
 }

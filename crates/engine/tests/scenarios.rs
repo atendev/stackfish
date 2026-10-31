@@ -4,7 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn collect_toml_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display())) {
+    for entry in
+        fs::read_dir(dir).unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()))
+    {
         let path = entry.expect("readable directory entry").path();
         if path.is_dir() {
             collect_toml_files(&path, out);
@@ -20,7 +22,11 @@ fn all_scenarios_have_no_hard_failures() {
     let mut scenario_files = Vec::new();
     collect_toml_files(&dir, &mut scenario_files);
 
-    assert!(!scenario_files.is_empty(), "expected at least one scenario file under {}", dir.display());
+    assert!(
+        !scenario_files.is_empty(),
+        "expected at least one scenario file under {}",
+        dir.display()
+    );
 
     for path in scenario_files {
         let report = stackfish_scenario::run_path(&path);

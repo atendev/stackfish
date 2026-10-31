@@ -16,7 +16,11 @@ use crate::types::turn::Phase;
 use crate::types::zone::ZoneKind;
 
 mod action;
+#[cfg(test)]
+mod atomicity_tests;
 mod choice_answers;
+#[cfg(test)]
+mod decision_tests;
 mod event_pipeline;
 mod library_choices;
 mod payment;
@@ -24,14 +28,10 @@ mod pregame;
 mod process_state;
 mod replacement_resume;
 mod resolve;
-mod triggers_pipeline;
-mod turn;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod decision_tests;
-#[cfg(test)]
-mod atomicity_tests;
+mod triggers_pipeline;
+mod turn;
 
 pub use process_state::*;
 
@@ -494,7 +494,9 @@ impl Engine {
         if let Some(definition) = self.state.object(object_id).map(|o| o.definition.clone()) {
             // Marks the run done so `sync_off_battlefield_scripts` won't register it twice.
             self.state.off_battlefield_scripts_run.insert(object_id);
-            let result = self.script_runtime.run_card_script(&mut self.state, &definition, object_id);
+            let result =
+                self.script_runtime
+                    .run_card_script(&mut self.state, &definition, object_id);
             self.record_script_error(object_id, &definition.script_ref, result);
         }
     }
@@ -511,7 +513,10 @@ impl Engine {
             .filter(|o| {
                 matches!(
                     o.zone,
-                    crate::ZoneKind::Hand | crate::ZoneKind::Library | crate::ZoneKind::Graveyard | crate::ZoneKind::Exile
+                    crate::ZoneKind::Hand
+                        | crate::ZoneKind::Library
+                        | crate::ZoneKind::Graveyard
+                        | crate::ZoneKind::Exile
                 )
             })
             .map(|o| o.object_id)
@@ -527,14 +532,17 @@ impl Engine {
     /// stack zone. CR 601.2a: a spell's abilities (Cascade's cast trigger) exist from
     /// the moment it is on the stack. The one funnel for all `CastSpell` producers;
     /// the stack entry's kind gates it since abilities share `PaymentResolution::StackObject`.
-    pub(in crate::engine) fn set_pending_payment(&mut self, request: Option<PendingPaymentRequest>) {
+    pub(in crate::engine) fn set_pending_payment(
+        &mut self,
+        request: Option<PendingPaymentRequest>,
+    ) {
         if let Some(request) = &request {
-            let is_spell = matches!(request.on_paid, crate::commands::PaymentResolution::StackObject)
-                && self
-                    .state
-                    .stack
-                    .iter()
-                    .any(|s| s.stack_id == request.stack_id && matches!(s.kind, crate::StackEntryKind::Spell));
+            let is_spell = matches!(
+                request.on_paid,
+                crate::commands::PaymentResolution::StackObject
+            ) && self.state.stack.iter().any(|s| {
+                s.stack_id == request.stack_id && matches!(s.kind, crate::StackEntryKind::Spell)
+            });
             if is_spell {
                 self.run_card_script_for(request.stack_id);
             }
@@ -553,12 +561,11 @@ impl Engine {
         result: Result<T, ScriptError>,
     ) {
         let has_real_script = matches!(script_ref, ScriptReference::Inline(s) if !s.is_empty());
-        if has_real_script
-            && let Err(e) = result {
-                self.log_events(vec![GameEventKind::ScriptError {
-                    message: format!("card script error on source {source:?}: {e:?}"),
-                }]);
-            }
+        if has_real_script && let Err(e) = result {
+            self.log_events(vec![GameEventKind::ScriptError {
+                message: format!("card script error on source {source:?}: {e:?}"),
+            }]);
+        }
     }
 
     /// Loads a standalone Lua callback and returns a handle for hand-built
@@ -607,7 +614,10 @@ impl Engine {
     }
 
     /// A card's buyback cost (CR 702.27a) from its script's `buyback_cost()`.
-    pub fn build_buyback_cost(&self, source: &str) -> Result<Option<crate::types::mana::ManaCost>, ScriptError> {
+    pub fn build_buyback_cost(
+        &self,
+        source: &str,
+    ) -> Result<Option<crate::types::mana::ManaCost>, ScriptError> {
         self.script_runtime.build_buyback_cost(source)
     }
 
@@ -624,10 +634,16 @@ impl Engine {
     pub fn step(&mut self) -> StepResult {
         let events_start = self.state.ledger.len();
         if let Some(internal) = &self.fatal {
-            return StepResult { events_added: events_start..events_start, status: StepStatus::Error(internal.clone()) };
+            return StepResult {
+                events_added: events_start..events_start,
+                status: StepStatus::Error(internal.clone()),
+            };
         }
         let status = self.advance();
-        StepResult { events_added: events_start..self.state.ledger.len(), status }
+        StepResult {
+            events_added: events_start..self.state.ledger.len(),
+            status,
+        }
     }
 
     /// Wraps each kind in a `GameEvent`, allocating its ids, and pushes it to the ledger.
@@ -655,13 +671,22 @@ impl Engine {
         let mut seen: Vec<ObjectId> = Vec::new();
         for target in &stack_object.targets {
             let Target::Object(id) = target else { continue };
-            let on_battlefield = self.state.object(*id).is_some_and(|o| o.zone == ZoneKind::Battlefield);
+            let on_battlefield = self
+                .state
+                .object(*id)
+                .is_some_and(|o| o.zone == ZoneKind::Battlefield);
             if on_battlefield && !seen.contains(id) {
                 seen.push(*id);
             }
         }
-        let events =
-            seen.into_iter().map(|object| GameEventKind::BecameTarget { object, by: stack_id, by_controller }).collect();
+        let events = seen
+            .into_iter()
+            .map(|object| GameEventKind::BecameTarget {
+                object,
+                by: stack_id,
+                by_controller,
+            })
+            .collect();
         self.log_events(events);
     }
 
@@ -674,7 +699,9 @@ impl Engine {
                     self.run_pregame_setup();
                     return StepStatus::Progressed;
                 }
-                StepStatus::AwaitingAction { player: self.state.priority_player }
+                StepStatus::AwaitingAction {
+                    player: self.state.priority_player,
+                }
             }
 
             ProcessState::PendingAction(action) => self.handle_pending_action(action),
@@ -685,7 +712,13 @@ impl Engine {
                 self.resolve_replacement_check_state(remaining, checked)
             }
 
-            ProcessState::AwaitingReplacementChoice { affected_player, pending_event, candidates, excluded, resume } => {
+            ProcessState::AwaitingReplacementChoice {
+                affected_player,
+                pending_event,
+                candidates,
+                excluded,
+                resume,
+            } => {
                 // Re-presents the pause, leaving the state in place until the answer arrives.
                 let status = StepStatus::AwaitingReplacementChoice {
                     player: affected_player,
@@ -701,27 +734,64 @@ impl Engine {
                 status
             }
 
-            ProcessState::AwaitingLegendRuleChoice { player, candidates, then } => {
-                let status = StepStatus::AwaitingLegendRuleChoice { player, candidates: candidates.clone() };
-                self.process_state = ProcessState::AwaitingLegendRuleChoice { player, candidates, then };
+            ProcessState::AwaitingLegendRuleChoice {
+                player,
+                candidates,
+                then,
+            } => {
+                let status = StepStatus::AwaitingLegendRuleChoice {
+                    player,
+                    candidates: candidates.clone(),
+                };
+                self.process_state = ProcessState::AwaitingLegendRuleChoice {
+                    player,
+                    candidates,
+                    then,
+                };
                 status
             }
 
-            ProcessState::AwaitingCommanderReturnChoice { player, commander, then } => {
+            ProcessState::AwaitingCommanderReturnChoice {
+                player,
+                commander,
+                then,
+            } => {
                 let status = StepStatus::AwaitingCommanderReturnChoice { player, commander };
-                self.process_state = ProcessState::AwaitingCommanderReturnChoice { player, commander, then };
+                self.process_state = ProcessState::AwaitingCommanderReturnChoice {
+                    player,
+                    commander,
+                    then,
+                };
                 status
             }
 
-            ProcessState::AwaitingAttachChoice { aura, controller, candidates } => {
-                let status =
-                    StepStatus::AwaitingAttachChoice { player: controller, aura, candidates: candidates.clone() };
-                self.process_state = ProcessState::AwaitingAttachChoice { aura, controller, candidates };
+            ProcessState::AwaitingAttachChoice {
+                aura,
+                controller,
+                candidates,
+            } => {
+                let status = StepStatus::AwaitingAttachChoice {
+                    player: controller,
+                    aura,
+                    candidates: candidates.clone(),
+                };
+                self.process_state = ProcessState::AwaitingAttachChoice {
+                    aura,
+                    controller,
+                    candidates,
+                };
                 status
             }
 
             ProcessState::AwaitingEntryAttachChoice {
-                attaching, controller, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                attaching,
+                controller,
+                candidates,
+                stack_id,
+                events_so_far,
+                remaining,
+                destination,
+                shuffle_after,
             } => {
                 let status = StepStatus::AwaitingEntryAttachChoice {
                     player: controller,
@@ -729,13 +799,27 @@ impl Engine {
                     candidates: candidates.clone(),
                 };
                 self.process_state = ProcessState::AwaitingEntryAttachChoice {
-                    attaching, controller, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                    attaching,
+                    controller,
+                    candidates,
+                    stack_id,
+                    events_so_far,
+                    remaining,
+                    destination,
+                    shuffle_after,
                 };
                 status
             }
 
             ProcessState::AwaitingTokenAttachChoice {
-                attaching, controller, candidates, stack_id, events_so_far, remaining_count, spec, copy_snapshot,
+                attaching,
+                controller,
+                candidates,
+                stack_id,
+                events_so_far,
+                remaining_count,
+                spec,
+                copy_snapshot,
             } => {
                 let status = StepStatus::AwaitingTokenAttachChoice {
                     player: controller,
@@ -743,52 +827,120 @@ impl Engine {
                     candidates: candidates.clone(),
                 };
                 self.process_state = ProcessState::AwaitingTokenAttachChoice {
-                    attaching, controller, candidates, stack_id, events_so_far, remaining_count, spec, copy_snapshot,
+                    attaching,
+                    controller,
+                    candidates,
+                    stack_id,
+                    events_so_far,
+                    remaining_count,
+                    spec,
+                    copy_snapshot,
                 };
                 status
             }
 
-            ProcessState::AwaitingDevourChoice { object, controller, per_creature, candidates, stack_id, events_so_far } => {
+            ProcessState::AwaitingDevourChoice {
+                object,
+                controller,
+                per_creature,
+                candidates,
+                stack_id,
+                events_so_far,
+            } => {
                 let status = StepStatus::AwaitingDevourChoice {
                     player: controller,
                     object,
                     per_creature,
                     candidates: candidates.clone(),
                 };
-                self.process_state =
-                    ProcessState::AwaitingDevourChoice { object, controller, per_creature, candidates, stack_id, events_so_far };
+                self.process_state = ProcessState::AwaitingDevourChoice {
+                    object,
+                    controller,
+                    per_creature,
+                    candidates,
+                    stack_id,
+                    events_so_far,
+                };
                 status
             }
 
-            ProcessState::AwaitingAmplifyChoice { object, controller, per_card, candidates, stack_id, events_so_far } => {
+            ProcessState::AwaitingAmplifyChoice {
+                object,
+                controller,
+                per_card,
+                candidates,
+                stack_id,
+                events_so_far,
+            } => {
                 let status = StepStatus::AwaitingAmplifyChoice {
                     player: controller,
                     object,
                     per_card,
                     candidates: candidates.clone(),
                 };
-                self.process_state =
-                    ProcessState::AwaitingAmplifyChoice { object, controller, per_card, candidates, stack_id, events_so_far };
+                self.process_state = ProcessState::AwaitingAmplifyChoice {
+                    object,
+                    controller,
+                    per_card,
+                    candidates,
+                    stack_id,
+                    events_so_far,
+                };
                 status
             }
 
-            ProcessState::AwaitingMadnessChoice { player, card, stack_id, events_so_far } => {
+            ProcessState::AwaitingMadnessChoice {
+                player,
+                card,
+                stack_id,
+                events_so_far,
+            } => {
                 let status = StepStatus::AwaitingMadnessChoice { player, card };
-                self.process_state = ProcessState::AwaitingMadnessChoice { player, card, stack_id, events_so_far };
+                self.process_state = ProcessState::AwaitingMadnessChoice {
+                    player,
+                    card,
+                    stack_id,
+                    events_so_far,
+                };
                 status
             }
 
-            ProcessState::AwaitingCascadeChoice { player, candidate, exiled, stack_id, events_so_far } => {
+            ProcessState::AwaitingCascadeChoice {
+                player,
+                candidate,
+                exiled,
+                stack_id,
+                events_so_far,
+            } => {
                 let status = StepStatus::AwaitingCascadeChoice { player, candidate };
-                self.process_state =
-                    ProcessState::AwaitingCascadeChoice { player, candidate, exiled, stack_id, events_so_far };
+                self.process_state = ProcessState::AwaitingCascadeChoice {
+                    player,
+                    candidate,
+                    exiled,
+                    stack_id,
+                    events_so_far,
+                };
                 status
             }
 
-            ProcessState::AwaitingUnlessPaidChoice { payer_queue, cost, otherwise, target_id, source, stack_id, events_so_far } => {
+            ProcessState::AwaitingUnlessPaidChoice {
+                payer_queue,
+                cost,
+                otherwise,
+                target_id,
+                source,
+                stack_id,
+                events_so_far,
+            } => {
                 // `payer_queue` is never empty while paused; `decline_unless_paid` leaves the state before it would be.
-                let payer = *payer_queue.front().expect("payer_queue is never empty while paused");
-                let status = StepStatus::AwaitingUnlessPaidChoice { payer, cost: cost.clone(), otherwise: otherwise.clone() };
+                let payer = *payer_queue
+                    .front()
+                    .expect("payer_queue is never empty while paused");
+                let status = StepStatus::AwaitingUnlessPaidChoice {
+                    payer,
+                    cost: cost.clone(),
+                    otherwise: otherwise.clone(),
+                };
                 self.process_state = ProcessState::AwaitingUnlessPaidChoice {
                     payer_queue,
                     cost,
@@ -801,15 +953,38 @@ impl Engine {
                 status
             }
 
-            ProcessState::AwaitingDiscardChoice { player, candidates, remaining_count, stack_id, events_so_far } => {
-                let status = StepStatus::AwaitingDiscardChoice { player, candidates: candidates.clone(), remaining_count };
-                self.process_state =
-                    ProcessState::AwaitingDiscardChoice { player, candidates, remaining_count, stack_id, events_so_far };
+            ProcessState::AwaitingDiscardChoice {
+                player,
+                candidates,
+                remaining_count,
+                stack_id,
+                events_so_far,
+            } => {
+                let status = StepStatus::AwaitingDiscardChoice {
+                    player,
+                    candidates: candidates.clone(),
+                    remaining_count,
+                };
+                self.process_state = ProcessState::AwaitingDiscardChoice {
+                    player,
+                    candidates,
+                    remaining_count,
+                    stack_id,
+                    events_so_far,
+                };
                 status
             }
 
             ProcessState::AwaitingSearchDevourChoice {
-                object, controller, per_creature, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                object,
+                controller,
+                per_creature,
+                candidates,
+                stack_id,
+                events_so_far,
+                remaining,
+                destination,
+                shuffle_after,
             } => {
                 let status = StepStatus::AwaitingSearchDevourChoice {
                     player: controller,
@@ -818,13 +993,29 @@ impl Engine {
                     candidates: candidates.clone(),
                 };
                 self.process_state = ProcessState::AwaitingSearchDevourChoice {
-                    object, controller, per_creature, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                    object,
+                    controller,
+                    per_creature,
+                    candidates,
+                    stack_id,
+                    events_so_far,
+                    remaining,
+                    destination,
+                    shuffle_after,
                 };
                 status
             }
 
             ProcessState::AwaitingSearchAmplifyChoice {
-                object, controller, per_card, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                object,
+                controller,
+                per_card,
+                candidates,
+                stack_id,
+                events_so_far,
+                remaining,
+                destination,
+                shuffle_after,
             } => {
                 let status = StepStatus::AwaitingSearchAmplifyChoice {
                     player: controller,
@@ -833,44 +1024,126 @@ impl Engine {
                     candidates: candidates.clone(),
                 };
                 self.process_state = ProcessState::AwaitingSearchAmplifyChoice {
-                    object, controller, per_card, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                    object,
+                    controller,
+                    per_card,
+                    candidates,
+                    stack_id,
+                    events_so_far,
+                    remaining,
+                    destination,
+                    shuffle_after,
                 };
                 status
             }
 
-            ProcessState::AwaitingCopyChoice { object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent, carry_forward_if_declined, x_value } => {
-                let status = StepStatus::AwaitingCopyChoice { player: controller, object, candidates: candidates.clone() };
+            ProcessState::AwaitingCopyChoice {
+                object,
+                controller,
+                exceptions,
+                candidates,
+                stack_id,
+                events_so_far,
+                colors_spent,
+                carry_forward_if_declined,
+                x_value,
+            } => {
+                let status = StepStatus::AwaitingCopyChoice {
+                    player: controller,
+                    object,
+                    candidates: candidates.clone(),
+                };
                 self.process_state = ProcessState::AwaitingCopyChoice {
-                    object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent, carry_forward_if_declined, x_value,
+                    object,
+                    controller,
+                    exceptions,
+                    candidates,
+                    stack_id,
+                    events_so_far,
+                    colors_spent,
+                    carry_forward_if_declined,
+                    x_value,
                 };
                 status
             }
 
-            ProcessState::AwaitingScriptChoice { thread, request, stack_id, source, controller, events_so_far, each_player } => {
-                let status = StepStatus::AwaitingScriptChoice { player: controller, request: request.clone() };
+            ProcessState::AwaitingScriptChoice {
+                thread,
+                request,
+                stack_id,
+                source,
+                controller,
+                events_so_far,
+                each_player,
+            } => {
+                let status = StepStatus::AwaitingScriptChoice {
+                    player: controller,
+                    request: request.clone(),
+                };
                 self.process_state = ProcessState::AwaitingScriptChoice {
-                    thread, request, stack_id, source, controller, events_so_far, each_player,
+                    thread,
+                    request,
+                    stack_id,
+                    source,
+                    controller,
+                    events_so_far,
+                    each_player,
                 };
                 status
             }
 
-            ProcessState::AwaitingScryChoice { stack_id, controller, events_so_far, cards } => {
-                let status = StepStatus::AwaitingScryChoice { player: controller, cards: cards.clone() };
-                self.process_state =
-                    ProcessState::AwaitingScryChoice { stack_id, controller, events_so_far, cards };
+            ProcessState::AwaitingScryChoice {
+                stack_id,
+                controller,
+                events_so_far,
+                cards,
+            } => {
+                let status = StepStatus::AwaitingScryChoice {
+                    player: controller,
+                    cards: cards.clone(),
+                };
+                self.process_state = ProcessState::AwaitingScryChoice {
+                    stack_id,
+                    controller,
+                    events_so_far,
+                    cards,
+                };
                 status
             }
 
-            ProcessState::AwaitingSurveilChoice { stack_id, controller, events_so_far, cards } => {
-                let status = StepStatus::AwaitingSurveilChoice { player: controller, cards: cards.clone() };
-                self.process_state =
-                    ProcessState::AwaitingSurveilChoice { stack_id, controller, events_so_far, cards };
+            ProcessState::AwaitingSurveilChoice {
+                stack_id,
+                controller,
+                events_so_far,
+                cards,
+            } => {
+                let status = StepStatus::AwaitingSurveilChoice {
+                    player: controller,
+                    cards: cards.clone(),
+                };
+                self.process_state = ProcessState::AwaitingSurveilChoice {
+                    stack_id,
+                    controller,
+                    events_so_far,
+                    cards,
+                };
                 status
             }
 
-            ProcessState::AwaitingSearchChoice { stack_id, controller, events_so_far, candidates, count, destination, shuffle_after } => {
-                let status =
-                    StepStatus::AwaitingSearchChoice { player: controller, candidates: candidates.clone(), count };
+            ProcessState::AwaitingSearchChoice {
+                stack_id,
+                controller,
+                events_so_far,
+                candidates,
+                count,
+                destination,
+                shuffle_after,
+            } => {
+                let status = StepStatus::AwaitingSearchChoice {
+                    player: controller,
+                    candidates: candidates.clone(),
+                    count,
+                };
                 self.process_state = ProcessState::AwaitingSearchChoice {
                     stack_id,
                     controller,
@@ -885,15 +1158,45 @@ impl Engine {
 
             ProcessState::CommitEvents { checked } => self.resolve_commit_events_state(checked),
 
-            ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid } => {
-                let status = StepStatus::AwaitingPayment { player: payer, stack_id };
-                self.process_state = ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid };
+            ProcessState::AwaitingPayment {
+                stack_id,
+                payer,
+                cost,
+                source,
+                on_paid,
+            } => {
+                let status = StepStatus::AwaitingPayment {
+                    player: payer,
+                    stack_id,
+                };
+                self.process_state = ProcessState::AwaitingPayment {
+                    stack_id,
+                    payer,
+                    cost,
+                    source,
+                    on_paid,
+                };
                 status
             }
 
-            ProcessState::AwaitingModeChoice { stack_id, chooser, min, max } => {
-                let status = StepStatus::AwaitingModeChoice { player: chooser, stack_id, min, max };
-                self.process_state = ProcessState::AwaitingModeChoice { stack_id, chooser, min, max };
+            ProcessState::AwaitingModeChoice {
+                stack_id,
+                chooser,
+                min,
+                max,
+            } => {
+                let status = StepStatus::AwaitingModeChoice {
+                    player: chooser,
+                    stack_id,
+                    min,
+                    max,
+                };
+                self.process_state = ProcessState::AwaitingModeChoice {
+                    stack_id,
+                    chooser,
+                    min,
+                    max,
+                };
                 status
             }
 
@@ -901,30 +1204,59 @@ impl Engine {
 
             ProcessState::CollectTriggers { since } => self.resolve_collect_triggers_state(since),
 
-            ProcessState::PutTriggersApnap { ordered, pending_groups } => {
-                self.resolve_put_triggers_apnap_state(ordered, pending_groups)
-            }
+            ProcessState::PutTriggersApnap {
+                ordered,
+                pending_groups,
+            } => self.resolve_put_triggers_apnap_state(ordered, pending_groups),
 
-            ProcessState::AwaitTriggerOrderChoice { player, group, ordered, pending_groups } => {
-                let status =
-                    StepStatus::AwaitingTriggerOrderChoice { player, group: group.clone() };
-                self.process_state =
-                    ProcessState::AwaitTriggerOrderChoice { player, group, ordered, pending_groups };
+            ProcessState::AwaitTriggerOrderChoice {
+                player,
+                group,
+                ordered,
+                pending_groups,
+            } => {
+                let status = StepStatus::AwaitingTriggerOrderChoice {
+                    player,
+                    group: group.clone(),
+                };
+                self.process_state = ProcessState::AwaitTriggerOrderChoice {
+                    player,
+                    group,
+                    ordered,
+                    pending_groups,
+                };
                 status
             }
 
-            ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining, modal_effect } => {
+            ProcessState::AwaitingTriggerTargets {
+                trigger,
+                spec,
+                candidates,
+                remaining,
+                modal_effect,
+            } => {
                 let status = StepStatus::AwaitingTriggerTargets {
                     player: trigger.controller,
                     spec: spec.clone(),
                     candidates: candidates.clone(),
                 };
-                self.process_state =
-                    ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining, modal_effect };
+                self.process_state = ProcessState::AwaitingTriggerTargets {
+                    trigger,
+                    spec,
+                    candidates,
+                    remaining,
+                    modal_effect,
+                };
                 status
             }
 
-            ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining, chooser } => {
+            ProcessState::AwaitingTriggerModeChoice {
+                trigger,
+                modes,
+                mode_choice,
+                remaining,
+                chooser,
+            } => {
                 // `chooser`, not the controller, is prompted; CR 700.2e was resolved before the pause.
                 let (min, max, _repeatable) = mode_choice.bounds();
                 let status = StepStatus::AwaitingTriggerModeChoice {
@@ -934,14 +1266,21 @@ impl Engine {
                     min,
                     max,
                 };
-                self.process_state =
-                    ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining, chooser };
+                self.process_state = ProcessState::AwaitingTriggerModeChoice {
+                    trigger,
+                    modes,
+                    mode_choice,
+                    remaining,
+                    chooser,
+                };
                 status
             }
 
             ProcessState::AdvanceTurnStep => self.resolve_advance_turn_step_state(),
 
-            ProcessState::AwaitingDiscard { player, excess } => self.resolve_awaiting_discard_state(player, excess),
+            ProcessState::AwaitingDiscard { player, excess } => {
+                self.resolve_awaiting_discard_state(player, excess)
+            }
 
             ProcessState::CleanupSbaCheck => self.resolve_cleanup_sba_check_state(),
 
@@ -949,8 +1288,16 @@ impl Engine {
                 self.process_state = ProcessState::AwaitingMulliganDecision { player };
                 StepStatus::AwaitingMulliganDecision { player }
             }
-            ProcessState::AwaitingBottomCardChoice { player, count, remaining } => {
-                self.process_state = ProcessState::AwaitingBottomCardChoice { player, count, remaining };
+            ProcessState::AwaitingBottomCardChoice {
+                player,
+                count,
+                remaining,
+            } => {
+                self.process_state = ProcessState::AwaitingBottomCardChoice {
+                    player,
+                    count,
+                    remaining,
+                };
                 StepStatus::AwaitingBottomCardChoice { player, count }
             }
             ProcessState::GameOver { winner } => {

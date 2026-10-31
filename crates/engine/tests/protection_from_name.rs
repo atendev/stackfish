@@ -3,13 +3,16 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object as permanent, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object as permanent, drain, hand_battlefield_graveyard_zones,
+    two_player_state as base_two_player_state,
+};
 
 const STATIC_PROTECTION_FROM_PROGENITUS: &str = r#"
 local s = {}
@@ -23,11 +26,19 @@ end
 return s
 "#;
 
-fn creature_definition(definition_id: u64, name: &str, power: i32, toughness: i32, script: ScriptReference) -> CardDefinition {
+fn creature_definition(
+    definition_id: u64,
+    name: &str,
+    power: i32,
+    toughness: i32,
+    script: ScriptReference,
+) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -49,14 +60,22 @@ fn creature_definition(definition_id: u64, name: &str, power: i32, toughness: i3
 }
 
 fn vanilla_creature(id: u64, name: &str, power: i32, toughness: i32) -> CardDefinition {
-    creature_definition(id, name, power, toughness, ScriptReference::ByKey(name.to_string()))
+    creature_definition(
+        id,
+        name,
+        power,
+        toughness,
+        ScriptReference::ByKey(name.to_string()),
+    )
 }
 
 fn progenitus_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
         name: "Progenitus".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -69,9 +88,20 @@ fn progenitus_bolt_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_progenitus_bolt".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: Some(CardTypeSet::CREATURE),
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
             count: 1,
-            up_to: false, at_least: false,
+            up_to: false,
+            at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
@@ -83,12 +113,19 @@ fn progenitus_bolt_definition() -> CardDefinition {
 }
 
 fn plain_bolt_definition() -> CardDefinition {
-    CardDefinition { definition_id: 21, name: "Test Plain Bolt".to_string(), ..progenitus_bolt_definition() }
+    CardDefinition {
+        definition_id: 21,
+        name: "Test Plain Bolt".to_string(),
+        ..progenitus_bolt_definition()
+    }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -96,8 +133,18 @@ fn protection_from_progenitus(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionName("Progenitus".to_string())),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionName(
+            "Progenitus".to_string(),
+        )),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -133,31 +180,69 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets,
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand");
 }
 
-fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
-        })
-        
+fn try_cast_spell(
+    engine: &mut Engine,
+    player: PlayerId,
+    card: ObjectId,
+    targets: Vec<Target>,
+) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::CastSpell {
+            card,
+            modes: Vec::new(),
+            targets,
+            x_value: None,
+            alternative_cost: None,
+            pay_buyback: false,
+        },
+    })
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> Result<StepStatus, ActionError> {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+fn pass_both_and_drain(
+    engine: &mut Engine,
+    p0: PlayerId,
+    p1: PlayerId,
+) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     Ok(drain(engine))
 }
 
@@ -166,23 +251,34 @@ fn assign_combat_damage(
     player: PlayerId,
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
 ) -> Result<StepStatus, ActionError> {
-    engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
-        ?;
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::AssignCombatDamage { assignments },
+    })?;
     Ok(drain(engine))
 }
 
-fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> Result<StepStatus, ActionError> {
-    engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
-        ?;
+fn declare_attackers(
+    engine: &mut Engine,
+    player: PlayerId,
+    attackers: Vec<(ObjectId, Target)>,
+) -> Result<StepStatus, ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::DeclareAttackers { attackers },
+    })?;
     Ok(drain(engine))
 }
 
-fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
-    engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
-        ?;
+fn declare_blockers(
+    engine: &mut Engine,
+    player: PlayerId,
+    blocks: Vec<(ObjectId, ObjectId)>,
+) -> Result<StepStatus, ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::DeclareBlockers { blocks },
+    })?;
     Ok(drain(engine))
 }
 
@@ -192,21 +288,40 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
             return;
         }
         let active = engine.state().priority_player;
-        engine.submit_action(PlayerAction { player: active, kind: PlayerActionKind::PassPriority }).expect("priority window");
+        engine
+            .submit_action(PlayerAction {
+                player: active,
+                kind: PlayerActionKind::PassPriority,
+            })
+            .expect("priority window");
         drain(engine);
     }
-    panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
+    panic!(
+        "never reached DeclareBlockers - state.step = {:?}",
+        engine.state().step
+    );
 }
 
 #[test]
 fn game_effects_add_protection_name_self_registers_and_applies() {
     let mut state = base_state();
     let bear = ObjectId(0);
-    let definition = creature_definition(1, "Bear", 2, 2, ScriptReference::Inline(STATIC_PROTECTION_FROM_PROGENITUS.to_string()));
-    put_on_battlefield(&mut state, permanent(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    let definition = creature_definition(
+        1,
+        "Bear",
+        2,
+        2,
+        ScriptReference::Inline(STATIC_PROTECTION_FROM_PROGENITUS.to_string()),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.continuous_effects.len(), 1);
     assert!(matches!(
@@ -229,17 +344,41 @@ fn combat_damage_from_a_matching_name_is_prevented_by_protection() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Progenitus", 3, 3), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Ward", 0, 5), p1, ZoneKind::Battlefield));
-    state.continuous_effects.push(protection_from_progenitus(blocker));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            vanilla_creature(1, "Progenitus", 3, 3),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            vanilla_creature(2, "Ward", 0, 5),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .continuous_effects
+        .push(protection_from_progenitus(blocker));
 
     let mut engine = Engine::new(state);
     assign_combat_damage(&mut engine, p0, Vec::new()).unwrap();
 
     let ward = engine.state().object(blocker).unwrap();
-    assert_eq!(ward.damage_marked, 0, "protection from Progenitus prevents the same-named attacker's combat damage");
+    assert_eq!(
+        ward.damage_marked, 0,
+        "protection from Progenitus prevents the same-named attacker's combat damage"
+    );
 }
 
 #[test]
@@ -252,17 +391,41 @@ fn combat_damage_from_a_non_matching_name_still_lands() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Bear", 3, 3), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Ward", 0, 5), p1, ZoneKind::Battlefield));
-    state.continuous_effects.push(protection_from_progenitus(blocker));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            vanilla_creature(1, "Bear", 3, 3),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            vanilla_creature(2, "Ward", 0, 5),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .continuous_effects
+        .push(protection_from_progenitus(blocker));
 
     let mut engine = Engine::new(state);
     assign_combat_damage(&mut engine, p0, Vec::new()).unwrap();
 
     let ward = engine.state().object(blocker).unwrap();
-    assert_eq!(ward.damage_marked, 3, "protection from Progenitus doesn't stop a differently-named creature's damage");
+    assert_eq!(
+        ward.damage_marked, 3,
+        "protection from Progenitus doesn't stop a differently-named creature's damage"
+    );
 }
 
 // CR 702.16c
@@ -271,17 +434,35 @@ fn casting_a_matching_name_spell_at_a_protected_target_is_rejected() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let target = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(target, vanilla_creature(1, "Bear", 2, 2), PlayerId(1), ZoneKind::Battlefield));
-    state.continuous_effects.push(protection_from_progenitus(target));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            target,
+            vanilla_creature(1, "Bear", 2, 2),
+            PlayerId(1),
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .continuous_effects
+        .push(protection_from_progenitus(target));
     let card = ObjectId(2);
-    state.objects.insert(card, permanent(card, progenitus_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        permanent(card, progenitus_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(target)]).unwrap_err();
 
-    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
-        "a spell named Progenitus can't target a creature with protection from Progenitus, got {err:?}");
+    assert!(
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a spell named Progenitus can't target a creature with protection from Progenitus, got {err:?}"
+    );
 }
 
 #[test]
@@ -289,18 +470,38 @@ fn casting_a_non_matching_name_spell_at_a_protected_target_still_works() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let target = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(target, vanilla_creature(1, "Bear", 2, 5), PlayerId(1), ZoneKind::Battlefield));
-    state.continuous_effects.push(protection_from_progenitus(target));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            target,
+            vanilla_creature(1, "Bear", 2, 5),
+            PlayerId(1),
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .continuous_effects
+        .push(protection_from_progenitus(target));
     let card = ObjectId(2);
-    state.objects.insert(card, permanent(card, plain_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        permanent(card, plain_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     let p1 = PlayerId(1);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1).unwrap();
-    assert_eq!(engine.state().object(target).unwrap().damage_marked, 2, "the differently-named spell's damage still lands");
+    assert_eq!(
+        engine.state().object(target).unwrap().damage_marked,
+        2,
+        "the differently-named spell's damage still lands"
+    );
 }
 
 #[test]
@@ -309,25 +510,50 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(target, vanilla_creature(1, "Bear", 2, 2), p1, ZoneKind::Battlefield));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            target,
+            vanilla_creature(1, "Bear", 2, 2),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
     let card = ObjectId(2);
-    state.objects.insert(card, permanent(card, progenitus_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        permanent(card, progenitus_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
     // CR 702.16c: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
-    engine.state_mut().continuous_effects.push(protection_from_progenitus(target));
+    engine
+        .state_mut()
+        .continuous_effects
+        .push(protection_from_progenitus(target));
 
     pass_both_and_drain(&mut engine, p0, p1).unwrap();
 
     assert!(
-        engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
+        engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
         "CR 608.2b: the spell's only target became illegal, so it must fizzle rather than resolve"
     );
-    assert_eq!(engine.state().object(target).unwrap().damage_marked, 0, "a fizzled spell deals no damage");
+    assert_eq!(
+        engine.state().object(target).unwrap().damage_marked,
+        0,
+        "a fizzled spell deals no damage"
+    );
 }
 
 // CR 702.16d
@@ -338,9 +564,27 @@ fn an_attacker_with_protection_cannot_be_blocked_by_a_matching_name_creature() {
     let attacker = ObjectId(0);
     let blocker = ObjectId(1);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Bear", 2, 2), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Progenitus", 2, 2), p1, ZoneKind::Battlefield));
-    state.continuous_effects.push(protection_from_progenitus(attacker));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            vanilla_creature(1, "Bear", 2, 2),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            vanilla_creature(2, "Progenitus", 2, 2),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .continuous_effects
+        .push(protection_from_progenitus(attacker));
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
@@ -360,9 +604,27 @@ fn an_attacker_with_protection_can_still_be_blocked_by_a_non_matching_name_creat
     let attacker = ObjectId(0);
     let blocker = ObjectId(1);
     let mut state = combat_state();
-    put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Bear", 2, 2), p0, ZoneKind::Battlefield));
-    put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Plain Blocker", 2, 2), p1, ZoneKind::Battlefield));
-    state.continuous_effects.push(protection_from_progenitus(attacker));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            attacker,
+            vanilla_creature(1, "Bear", 2, 2),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            blocker,
+            vanilla_creature(2, "Plain Blocker", 2, 2),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .continuous_effects
+        .push(protection_from_progenitus(attacker));
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
@@ -380,12 +642,30 @@ fn remove_all_abilities_also_strips_a_granted_protection_name() {
     let mut state = combat_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(bear, vanilla_creature(1, "Bear", 2, 2), p0, ZoneKind::Battlefield));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            bear,
+            vanilla_creature(1, "Bear", 2, 2),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionName("Progenitus".to_string())),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionName(
+            "Progenitus".to_string(),
+        )),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -393,7 +673,15 @@ fn remove_all_abilities_also_strips_a_granted_protection_name() {
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
         effect: EffectPayload::Primitive(EffectPrimitive::RemoveAllAbilities),
         timestamp: SequenceNo(1),
         duration: EffectDuration::Permanent,
@@ -402,5 +690,9 @@ fn remove_all_abilities_also_strips_a_granted_protection_name() {
 
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
 
-    assert_eq!(effective.protection_names, Vec::<String>::new(), "the earlier-granted protection should be stripped too");
+    assert_eq!(
+        effective.protection_names,
+        Vec::<String>::new(),
+        "the earlier-granted protection should be stripped too"
+    );
 }

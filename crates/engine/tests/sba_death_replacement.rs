@@ -2,16 +2,18 @@
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -33,7 +35,15 @@ fn creature_definition(toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -> GameObject {
-    GameObject { damage_marked, ..card_object(id, creature_definition(toughness), owner, ZoneKind::Battlefield) }
+    GameObject {
+        damage_marked,
+        ..card_object(
+            id,
+            creature_definition(toughness),
+            owner,
+            ZoneKind::Battlefield,
+        )
+    }
 }
 
 fn would_die_exile_effect(source: ObjectId, consumption: ConsumptionPolicy) -> ReplacementEffect {
@@ -41,7 +51,15 @@ fn would_die_exile_effect(source: ObjectId, consumption: ConsumptionPolicy) -> R
         source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: Some(CardTypeSet::CREATURE),
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         },
@@ -54,7 +72,15 @@ fn would_die_command_zone_effect(source: ObjectId) -> ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    card_types: Some(CardTypeSet::CREATURE),
+                    controller: None,
+                    self_only: false,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Command),
         },
@@ -75,7 +101,10 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -83,7 +112,9 @@ fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: 2,
         name: "Test Shield".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::ARTIFACT,
@@ -111,27 +142,51 @@ fn would_die_replacement_exiles_instead_of_dying_to_the_graveyard() {
     let bear = ObjectId(0);
     let mut state = base_state();
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
-    state.replacement_effects.push(would_die_exile_effect(bear, ConsumptionPolicy::Repeatable));
+    state
+        .replacement_effects
+        .push(would_die_exile_effect(bear, ConsumptionPolicy::Repeatable));
 
     let outcome = check_state_based_actions(&mut state, &ScriptRuntime::new());
     let SbaOutcome::Progressed(events, _) = outcome else {
         panic!("a single matching replacement must resolve synchronously, not pause");
     };
     assert_eq!(events.len(), 1);
-    let GameEventKind::ZoneChange { object: new_id, from, to, .. } = events[0].kind else {
+    let GameEventKind::ZoneChange {
+        object: new_id,
+        from,
+        to,
+        ..
+    } = events[0].kind
+    else {
         panic!("expected a ZoneChange event");
     };
     assert_eq!(from, ZoneKind::Battlefield);
-    assert_eq!(to, ZoneKind::Exile, "the ReplaceZoneDestination(Exile) effect must have fired");
+    assert_eq!(
+        to,
+        ZoneKind::Exile,
+        "the ReplaceZoneDestination(Exile) effect must have fired"
+    );
 
     assert!(state.object(bear).is_none(), "the old id is retired");
-    let moved = state.object(new_id).expect("the creature now exists under its new id");
+    let moved = state
+        .object(new_id)
+        .expect("the creature now exists under its new id");
     assert_eq!(moved.zone, ZoneKind::Exile);
     assert!(
-        state.zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty(),
+        state
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .is_empty(),
         "it must never have touched the graveyard at all"
     );
-    assert!(state.zone(ZoneKind::Exile, None).unwrap().contents.contains(&new_id));
+    assert!(
+        state
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .contains(&new_id)
+    );
 }
 
 #[test]
@@ -141,19 +196,39 @@ fn two_would_die_replacements_on_the_same_creature_pause_for_an_ordering_choice(
     put_on_battlefield(&mut state, creature(bear, PlayerId(0), 2, 2));
     put_on_battlefield(&mut state, shield(ObjectId(1), PlayerId(0)));
     put_on_battlefield(&mut state, shield(ObjectId(2), PlayerId(0)));
-    state.replacement_effects.push(would_die_exile_effect(ObjectId(1), ConsumptionPolicy::Repeatable));
-    state.replacement_effects.push(would_die_command_zone_effect(ObjectId(2)));
+    state.replacement_effects.push(would_die_exile_effect(
+        ObjectId(1),
+        ConsumptionPolicy::Repeatable,
+    ));
+    state
+        .replacement_effects
+        .push(would_die_command_zone_effect(ObjectId(2)));
 
     let outcome = check_state_based_actions(&mut state, &ScriptRuntime::new());
-    let SbaOutcome::NeedsOrderingChoice { candidates, pending_deaths, resolved_so_far, affected_player, .. } =
-        outcome
+    let SbaOutcome::NeedsOrderingChoice {
+        candidates,
+        pending_deaths,
+        resolved_so_far,
+        affected_player,
+        ..
+    } = outcome
     else {
         panic!("two matching replacements on the same event must pause, not guess an order");
     };
     assert_eq!(candidates.len(), 2);
-    assert_eq!(affected_player, PlayerId(0), "the dying creature's controller is the affected player");
-    assert!(pending_deaths.is_empty(), "no other dying creature was queued behind this one");
-    assert!(resolved_so_far.is_empty(), "nothing else resolved before hitting this pause");
+    assert_eq!(
+        affected_player,
+        PlayerId(0),
+        "the dying creature's controller is the affected player"
+    );
+    assert!(
+        pending_deaths.is_empty(),
+        "no other dying creature was queued behind this one"
+    );
+    assert!(
+        resolved_so_far.is_empty(),
+        "nothing else resolved before hitting this pause"
+    );
     // Nothing applied yet - the creature is still exactly where it was.
     assert!(state.object(bear).is_some());
     assert_eq!(state.object(bear).unwrap().zone, ZoneKind::Battlefield);
@@ -168,11 +243,21 @@ fn engine_pauses_mid_sba_and_resumes_correctly_after_a_replacement_choice() {
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
     put_on_battlefield(&mut state, shield(ObjectId(1), p0));
     put_on_battlefield(&mut state, shield(ObjectId(2), p0));
-    state.replacement_effects.push(would_die_exile_effect(ObjectId(1), ConsumptionPolicy::Repeatable));
-    state.replacement_effects.push(would_die_command_zone_effect(ObjectId(2)));
+    state.replacement_effects.push(would_die_exile_effect(
+        ObjectId(1),
+        ConsumptionPolicy::Repeatable,
+    ));
+    state
+        .replacement_effects
+        .push(would_die_command_zone_effect(ObjectId(2)));
 
     let mut engine = Engine::new(state);
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(&mut engine);
     let StepStatus::AwaitingReplacementChoice { player, candidates } = status else {
         panic!("expected the SBA pass to pause on the CR 616.1 ordering choice, got {status:?}");
@@ -185,21 +270,47 @@ fn engine_pauses_mid_sba_and_resumes_correctly_after_a_replacement_choice() {
         .into_iter()
         .find(|&c| c == ReplacementCandidate::Registered(ObjectId(2)))
         .expect("ObjectId(2) is one of the two candidates");
-    engine.submit_replacement_choice(command_zone_candidate).expect("a real candidate must be accepted");
+    engine
+        .submit_replacement_choice(command_zone_candidate)
+        .expect("a real candidate must be accepted");
 
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "SBA settles, priority reopens for p1: {status:?}");
-
-    assert!(engine.state().object(bear).is_none(), "the old id is retired");
-    let new_id = *engine.state().zone(ZoneKind::Command, Some(p0)).unwrap().contents.front().unwrap();
-    assert_eq!(engine.state().object(new_id).unwrap().zone, ZoneKind::Command);
     assert!(
-        engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(),
+        matches!(status, StepStatus::AwaitingAction { player } if player == p1),
+        "SBA settles, priority reopens for p1: {status:?}"
+    );
+
+    assert!(
+        engine.state().object(bear).is_none(),
+        "the old id is retired"
+    );
+    let new_id = *engine
+        .state()
+        .zone(ZoneKind::Command, Some(p0))
+        .unwrap()
+        .contents
+        .front()
+        .unwrap();
+    assert_eq!(
+        engine.state().object(new_id).unwrap().zone,
+        ZoneKind::Command
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .is_empty(),
         "the Exile effect must not have also applied - only the chosen one wins"
     );
 
     // Exactly one ZoneChange for this death, not re-processed on a later SbaLoop re-entry.
-    let zone_changes =
-        engine.state().ledger.iter().filter(|e| matches!(e.kind, GameEventKind::ZoneChange { .. })).count();
+    let zone_changes = engine
+        .state()
+        .ledger
+        .iter()
+        .filter(|e| matches!(e.kind, GameEventKind::ZoneChange { .. }))
+        .count();
     assert_eq!(zone_changes, 1);
 }

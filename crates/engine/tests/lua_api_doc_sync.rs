@@ -21,8 +21,19 @@ fn lua_api_doc_covers_all_bound_names() {
 
     // Add the table names themselves: Game.Ops, Game.Conditions, etc.
     let tables = [
-        "Conditions", "Counter", "Affected", "Filter", "Ops", "Costs", "Layers", "Durations",
-        "Effects", "EventFilters", "ReplacementPayloads", "Consumption", "Tokens",
+        "Conditions",
+        "Counter",
+        "Affected",
+        "Filter",
+        "Ops",
+        "Costs",
+        "Layers",
+        "Durations",
+        "Effects",
+        "EventFilters",
+        "ReplacementPayloads",
+        "Consumption",
+        "Tokens",
     ];
     for t in tables {
         bound.insert(t.to_string());
@@ -54,7 +65,11 @@ fn lua_api_doc_covers_all_bound_names() {
     // Filter out names that are intentionally internal or documented only as a table family.
     let skip: BTreeSet<String> = [
         // Lua-only helper functions not meant for authors.
-        "select_targets", "may_choose", "choose_n", "register_keyword", "register_ward",
+        "select_targets",
+        "may_choose",
+        "choose_n",
+        "register_keyword",
+        "register_ward",
     ]
     .iter()
     .map(|s| s.to_string())

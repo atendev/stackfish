@@ -3,8 +3,8 @@
 //! The `AwaitingAttachChoice` pause is tested in the engine's own unit tests, since `process_state` is private.
 // TODO: no effect yet produces several attach candidates for one Aura, so `propose_attach` is never reached with more than one
 
-use stackfish_engine::commands::{propose_attach, AttachProposal};
 use stackfish_engine::ObjectId;
+use stackfish_engine::commands::{AttachProposal, propose_attach};
 
 #[test]
 fn zero_candidates_proposes_nothing() {
@@ -22,6 +22,12 @@ fn two_or_more_candidates_needs_a_choice() {
     let a = ObjectId(1);
     let b = ObjectId(2);
     let c = ObjectId(3);
-    assert_eq!(propose_attach(&[a, b]), AttachProposal::NeedsChoice(vec![a, b]));
-    assert_eq!(propose_attach(&[a, b, c]), AttachProposal::NeedsChoice(vec![a, b, c]));
+    assert_eq!(
+        propose_attach(&[a, b]),
+        AttachProposal::NeedsChoice(vec![a, b])
+    );
+    assert_eq!(
+        propose_attach(&[a, b, c]),
+        AttachProposal::NeedsChoice(vec![a, b, c])
+    );
 }

@@ -6,7 +6,10 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones,
+    two_player_state as base_two_player_state, zones,
+};
 
 const REDIRECT_DAMAGE_TO_SELF: &str = r#"
 local s = {}
@@ -35,7 +38,9 @@ fn creature_definition(name: &str, power: i32, toughness: i32, script: &str) -> 
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -57,7 +62,10 @@ fn creature_definition(name: &str, power: i32, toughness: i32, script: &str) -> 
 }
 
 fn vanilla_creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
-    CardDefinition { script_ref: ScriptReference::ByKey(name.to_string()), ..creature_definition(name, power, toughness, "") }
+    CardDefinition {
+        script_ref: ScriptReference::ByKey(name.to_string()),
+        ..creature_definition(name, power, toughness, "")
+    }
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
@@ -66,7 +74,10 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -101,10 +112,14 @@ fn set_payload_redirect_damage_to_source_registers_with_own_source_as_target() {
     let mut state = base_state();
     let source = ObjectId(0);
     let definition = creature_definition("Pariah", 0, 4, REDIRECT_DAMAGE_TO_SELF);
-    state.objects.insert(source, permanent(source, definition.clone(), PlayerId(0)));
+    state
+        .objects
+        .insert(source, permanent(source, definition.clone(), PlayerId(0)));
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, source).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, source)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.replacement_effects.len(), 1);
     match &state.replacement_effects[0].spec {
@@ -112,10 +127,15 @@ fn set_payload_redirect_damage_to_source_registers_with_own_source_as_target() {
             filter: EventFilter::DamageDealt { affected },
             payload: ReplacementPayload::RedirectDamage(Target::Object(target)),
         } => {
-            assert_eq!(*target, source, "RedirectDamageToSource must resolve to the registering permanent's own id");
+            assert_eq!(
+                *target, source,
+                "RedirectDamageToSource must resolve to the registering permanent's own id"
+            );
             assert_eq!(affected.controller, Some(FilterController::You));
         }
-        other => panic!("expected a DamageDealt/RedirectDamage(Object(source)) primitive spec, got {other:?}"),
+        other => panic!(
+            "expected a DamageDealt/RedirectDamage(Object(source)) primitive spec, got {other:?}"
+        ),
     }
 }
 
@@ -124,13 +144,21 @@ fn mismatched_would_die_filter_and_redirect_damage_payload_is_a_real_register_ti
     let mut state = base_state();
     let source = ObjectId(0);
     let definition = creature_definition("Broken", 2, 2, MISMATCHED_WOULD_DIE_REDIRECT);
-    state.objects.insert(source, permanent(source, definition.clone(), PlayerId(0)));
+    state
+        .objects
+        .insert(source, permanent(source, definition.clone(), PlayerId(0)));
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, source);
 
-    assert!(result.is_err(), "WouldDie + RedirectDamage is a real mismatch, must be rejected");
-    assert!(state.replacement_effects.is_empty(), "no partial effect should have been committed");
+    assert!(
+        result.is_err(),
+        "WouldDie + RedirectDamage is a real mismatch, must be rejected"
+    );
+    assert!(
+        state.replacement_effects.is_empty(),
+        "no partial effect should have been committed"
+    );
 }
 
 fn assign_combat_damage(
@@ -139,7 +167,10 @@ fn assign_combat_damage(
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
 ) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::AssignCombatDamage { assignments },
+        })
         .expect("turn-based action, no priority required");
     drain(engine)
 }
@@ -154,11 +185,20 @@ fn lua_registered_redirect_damage_sends_combat_damage_to_shield_instead_of_playe
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, vanilla_creature_definition("Bear", 3, 3), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, vanilla_creature_definition("Bear", 3, 3), p0),
+    );
     let shield_definition = creature_definition("Pariah", 0, 4, REDIRECT_DAMAGE_TO_SELF);
-    put_on_battlefield(&mut state, permanent(shield_source, shield_definition.clone(), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(shield_source, shield_definition.clone(), p1),
+    );
 
     ScriptRuntime::new()
         .run_card_script(&mut state, &shield_definition, shield_source)
@@ -174,7 +214,10 @@ fn lua_registered_redirect_damage_sends_combat_damage_to_shield_instead_of_playe
         "the Lua-registered redirect must have kept the damage off the player entirely"
     );
     assert_eq!(
-        engine.state().object(shield_source).map(|o| o.damage_marked),
+        engine
+            .state()
+            .object(shield_source)
+            .map(|o| o.damage_marked),
         Some(3),
         "the redirected damage must have actually landed on the shield instead"
     );

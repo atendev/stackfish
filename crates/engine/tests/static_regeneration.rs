@@ -3,10 +3,12 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+};
 
 const STATIC_REGENERATE_SELF: &str = r#"
 local s = {}
@@ -22,7 +24,9 @@ fn creature_definition(toughness: i32, keywords: KeywordSet, script: &str) -> Ca
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -58,18 +62,34 @@ fn run_card_script_self_registers_a_repeatable_regeneration_shield() {
     let mut state = two_player_state();
     let creature = ObjectId(0);
     let definition = creature_definition(2, KeywordSet::empty(), STATIC_REGENERATE_SELF);
-    state.objects.insert(creature, card_object(creature, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        creature,
+        card_object(
+            creature,
+            definition.clone(),
+            PlayerId(0),
+            ZoneKind::Battlefield,
+        ),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, creature).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, creature)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.replacement_effects.len(), 1);
     let shield = &state.replacement_effects[0];
     assert_eq!(shield.source, creature);
     assert_eq!(shield.consumption, ConsumptionPolicy::Repeatable);
     match &shield.spec {
-        ReplacementSpec::Primitive { filter: EventFilter::WouldDie { affected }, payload: ReplacementPayload::Regenerate } => {
-            assert!(affected.self_only, "SetAffected(Game.Affected.Self) should carry through");
+        ReplacementSpec::Primitive {
+            filter: EventFilter::WouldDie { affected },
+            payload: ReplacementPayload::Regenerate,
+        } => {
+            assert!(
+                affected.self_only,
+                "SetAffected(Game.Affected.Self) should carry through"
+            );
         }
         other => panic!("expected a WouldDie/Regenerate primitive spec, got {other:?}"),
     }
@@ -79,15 +99,31 @@ fn run_card_script_self_registers_a_repeatable_regeneration_shield() {
 fn static_regeneration_shield_survives_being_used_and_saves_target_twice() {
     let mut state = two_player_state();
     let creature = ObjectId(0);
-    let object = card_object(creature, creature_definition(2, KeywordSet::empty(), STATIC_REGENERATE_SELF), PlayerId(0), ZoneKind::Battlefield);
+    let object = card_object(
+        creature,
+        creature_definition(2, KeywordSet::empty(), STATIC_REGENERATE_SELF),
+        PlayerId(0),
+        ZoneKind::Battlefield,
+    );
     state.objects.insert(creature, object);
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
     // Simulates the shield the creature would have self-registered on an earlier battlefield entry.
     state.replacement_effects.push(ReplacementEffect {
         source: creature,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    controller: None,
+                    card_types: None,
+                    self_only: true,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::Regenerate,
         },
@@ -104,11 +140,21 @@ fn static_regeneration_shield_survives_being_used_and_saves_target_twice() {
                 "expected a Regenerated event on the first lethal hit, got {events:?}"
             );
         }
-        SbaOutcome::NeedsOrderingChoice { .. } => panic!("fixture didn't expect a replacement ordering-choice pause"),
-        SbaOutcome::NeedsLegendRuleChoice { .. } => panic!("fixture didn't expect a legend-rule choice pause"),
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
-    assert_eq!(state.replacement_effects.len(), 1, "a Repeatable shield is never consumed");
+    assert_eq!(
+        state.replacement_effects.len(),
+        1,
+        "a Repeatable shield is never consumed"
+    );
     let saved = state.object(creature).expect("regenerated, not destroyed");
     assert_eq!(saved.damage_marked, 0, "regeneration clears marked damage");
     assert!(saved.tapped, "regeneration taps the permanent");
@@ -122,26 +168,55 @@ fn static_regeneration_shield_survives_being_used_and_saves_target_twice() {
                 "expected a second Regenerated event, got {events:?}"
             );
         }
-        SbaOutcome::NeedsOrderingChoice { .. } => panic!("fixture didn't expect a replacement ordering-choice pause"),
-        SbaOutcome::NeedsLegendRuleChoice { .. } => panic!("fixture didn't expect a legend-rule choice pause"),
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
-    assert_eq!(state.replacement_effects.len(), 1, "still not consumed after the second use");
-    assert!(state.object(creature).is_some(), "the creature survived a second lethal hit");
+    assert_eq!(
+        state.replacement_effects.len(),
+        1,
+        "still not consumed after the second use"
+    );
+    assert!(
+        state.object(creature).is_some(),
+        "the creature survived a second lethal hit"
+    );
 }
 
 #[test]
 fn static_regeneration_shield_does_not_save_a_target_that_later_cant_be_regenerated() {
     let mut state = two_player_state();
     let creature = ObjectId(0);
-    let object = card_object(creature, creature_definition(2, KeywordSet::empty(), STATIC_REGENERATE_SELF), PlayerId(0), ZoneKind::Battlefield);
+    let object = card_object(
+        creature,
+        creature_definition(2, KeywordSet::empty(), STATIC_REGENERATE_SELF),
+        PlayerId(0),
+        ZoneKind::Battlefield,
+    );
     state.objects.insert(creature, object);
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(creature);
     state.replacement_effects.push(ReplacementEffect {
         source: creature,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    controller: None,
+                    card_types: None,
+                    self_only: true,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::Regenerate,
         },
@@ -152,8 +227,18 @@ fn static_regeneration_shield_does_not_save_a_target_that_later_cant_be_regenera
     state.continuous_effects.push(ContinuousEffect {
         source: creature,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::AddKeyword(KeywordSet::CANT_BE_REGENERATED)),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::AddKeyword(
+            KeywordSet::CANT_BE_REGENERATED,
+        )),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -167,17 +252,29 @@ fn static_regeneration_shield_does_not_save_a_target_that_later_cant_be_regenera
             assert!(
                 events.iter().any(|e| matches!(
                     e.kind,
-                    GameEventKind::ZoneChange { from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, .. }
+                    GameEventKind::ZoneChange {
+                        from: ZoneKind::Battlefield,
+                        to: ZoneKind::Graveyard,
+                        ..
+                    }
                 )),
                 "expected the creature to die for real (shield gated off), got {events:?}"
             );
             assert!(
-                !events.iter().any(|e| matches!(e.kind, GameEventKind::Regenerated { .. })),
+                !events
+                    .iter()
+                    .any(|e| matches!(e.kind, GameEventKind::Regenerated { .. })),
                 "no Regenerated event should have fired, got {events:?}"
             );
         }
-        SbaOutcome::NeedsOrderingChoice { .. } => panic!("fixture didn't expect a replacement ordering-choice pause"),
-        SbaOutcome::NeedsLegendRuleChoice { .. } => panic!("fixture didn't expect a legend-rule choice pause"),
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
 }

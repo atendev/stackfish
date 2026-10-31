@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object as base_card_object, player_state, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object as base_card_object, player_state, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(name: &str, mana_cost: ManaCost) -> CardDefinition {
     CardDefinition {
@@ -39,7 +41,10 @@ fn card_object(
     zone: ZoneKind,
     is_commander: bool,
 ) -> GameObject {
-    GameObject { is_commander, ..base_card_object(id, definition, owner, zone) }
+    GameObject {
+        is_commander,
+        ..base_card_object(id, definition, owner, zone)
+    }
 }
 
 // p0's pool is seeded with 10 colorless, and tests set it directly.
@@ -47,10 +52,30 @@ fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![PlayerState { mana_pool: ManaPool { colorless: 10, ..ManaPool::default() }, ..player_state(p0) }, player_state(p1)],
+        players: vec![
+            PlayerState {
+                mana_pool: ManaPool {
+                    colorless: 10,
+                    ..ManaPool::default()
+                },
+                ..player_state(p0)
+            },
+            player_state(p1),
+        ],
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Command, ZoneKind::Battlefield, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Library,
+                ZoneKind::Hand,
+                ZoneKind::Graveyard,
+                ZoneKind::Command,
+                ZoneKind::Battlefield,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
@@ -81,15 +106,24 @@ fn cast_and_pay(engine: &mut Engine, card: ObjectId, n: u32) -> u32 {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("player holds priority");
     let status = drain(engine);
-    assert!(matches!(status, engine::StepStatus::AwaitingPayment { .. }), "got {status:?}");
+    assert!(
+        matches!(status, engine::StepStatus::AwaitingPayment { .. }),
+        "got {status:?}"
+    );
     let units = vec![ManaUnit::Colorless; n as usize];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units,
+                phyrexian_life: 0,
+            }],
+        })
         .expect("pool covers the resolved cost");
     drain(engine);
     engine.state().player(p0).unwrap().mana_pool.colorless
@@ -106,10 +140,15 @@ fn manually_return_to_command_zone(state: &mut GameState, card: ObjectId) -> Obj
     let new_id = state.allocate_object_id();
     let mut new_object = object;
     new_object.object_id = new_id;
-    new_object.lineage = ObjectLineage { previous: Some(card) };
+    new_object.lineage = ObjectLineage {
+        previous: Some(card),
+    };
     new_object.zone = ZoneKind::Command;
     new_object.timestamp = state.allocate_sequence_no();
-    state.zone_mut(ZoneKind::Command, Some(owner)).unwrap().push_bottom(new_id);
+    state
+        .zone_mut(ZoneKind::Command, Some(owner))
+        .unwrap()
+        .push_bottom(new_id);
     state.objects.insert(new_id, new_object);
     new_id
 }
@@ -124,7 +163,12 @@ fn x_cost_commander_first_cast_still_needs_an_explicit_empty_mana_entry() {
         &mut state,
         card_object(
             commander,
-            creature_definition("General", ManaCost { symbols: vec![ManaSymbol::X] }),
+            creature_definition(
+                "General",
+                ManaCost {
+                    symbols: vec![ManaSymbol::X],
+                },
+            ),
             p0,
             ZoneKind::Command,
             true,
@@ -141,7 +185,8 @@ fn x_cost_commander_first_cast_still_needs_an_explicit_empty_mana_entry() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: Some(0),
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("X=0 is a legal announced value, first cast, no tax yet");
@@ -202,12 +247,19 @@ fn second_cast_after_returning_costs_two_more() {
     let mut obj = engine.state().objects.get(&on_stack).unwrap().clone();
     obj.zone = ZoneKind::Graveyard;
     engine.state_mut().objects.insert(on_stack, obj);
-    engine.state_mut().zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(on_stack);
+    engine
+        .state_mut()
+        .zone_mut(ZoneKind::Graveyard, Some(p0))
+        .unwrap()
+        .push_bottom(on_stack);
 
     let recast_id = manually_return_to_command_zone(engine.state_mut(), on_stack);
 
     let remaining = cast_and_pay(&mut engine, recast_id, 3);
-    assert_eq!(remaining, 6, "base {{1}} + {{2}} tax for the one prior cast");
+    assert_eq!(
+        remaining, 6,
+        "base {{1}} + {{2}} tax for the one prior cast"
+    );
 }
 
 #[test]
@@ -234,7 +286,14 @@ fn third_cast_costs_four_more() {
             cast_and_pay(&mut engine, current, 1)
         } else {
             // n covers {1} base + {2} per prior cast so far.
-            let prior = engine.state().player(p0).unwrap().commander_casts.get("General").copied().unwrap_or(0);
+            let prior = engine
+                .state()
+                .player(p0)
+                .unwrap()
+                .commander_casts
+                .get("General")
+                .copied()
+                .unwrap_or(0);
             cast_and_pay(&mut engine, current, 1 + 2 * prior)
         };
         assert_eq!(remaining, expected_remaining);
@@ -244,10 +303,22 @@ fn third_cast_costs_four_more() {
         let mut obj = engine.state().objects.get(&on_stack).unwrap().clone();
         obj.zone = ZoneKind::Graveyard;
         engine.state_mut().objects.insert(on_stack, obj);
-        engine.state_mut().zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(on_stack);
+        engine
+            .state_mut()
+            .zone_mut(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .push_bottom(on_stack);
         current = manually_return_to_command_zone(engine.state_mut(), on_stack);
     }
-    assert_eq!(engine.state().player(p0).unwrap().commander_casts.get("General"), Some(&3));
+    assert_eq!(
+        engine
+            .state()
+            .player(p0)
+            .unwrap()
+            .commander_casts
+            .get("General"),
+        Some(&3)
+    );
 }
 
 #[test]
@@ -287,7 +358,11 @@ fn partner_commanders_have_independent_tax_counters() {
     let mut obj = engine.state().objects.get(&on_stack).unwrap().clone();
     obj.zone = ZoneKind::Graveyard;
     engine.state_mut().objects.insert(on_stack, obj);
-    engine.state_mut().zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(on_stack);
+    engine
+        .state_mut()
+        .zone_mut(ZoneKind::Graveyard, Some(p0))
+        .unwrap()
+        .push_bottom(on_stack);
     let general_recast = manually_return_to_command_zone(engine.state_mut(), on_stack);
     cast_and_pay(&mut engine, general_recast, 3);
 
@@ -298,7 +373,10 @@ fn partner_commanders_have_independent_tax_counters() {
     // Admiral, never cast before, costs only its base {1}.
     let remaining = cast_and_pay(&mut engine, admiral, 1);
     // Pool: started 10, spent 1 (General #1) + 3 (General #2) + 1 (Admiral #1) = 5, 5 left.
-    assert_eq!(remaining, 5, "Admiral's first cast is untaxed regardless of General's cast count");
+    assert_eq!(
+        remaining, 5,
+        "Admiral's first cast is untaxed regardless of General's cast count"
+    );
 }
 
 #[test]
@@ -309,13 +387,22 @@ fn casting_from_hand_is_never_taxed() {
     let card = ObjectId(0);
     put_in_zone(
         &mut state,
-        card_object(card, creature_definition("General", ManaCost::parse("{1}").unwrap()), p0, ZoneKind::Hand, false),
+        card_object(
+            card,
+            creature_definition("General", ManaCost::parse("{1}").unwrap()),
+            p0,
+            ZoneKind::Hand,
+            false,
+        ),
         Some(p0),
     );
 
     let mut engine = Engine::new(state);
     let remaining = cast_and_pay(&mut engine, card, 1);
-    assert_eq!(remaining, 9, "hand cast: base {{1}} only, tax never applies");
+    assert_eq!(
+        remaining, 9,
+        "hand cast: base {{1}} only, tax never applies"
+    );
 }
 
 #[test]
@@ -345,12 +432,16 @@ fn tax_stacks_additively_onto_a_real_printed_cost() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("player holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, engine::StepStatus::AwaitingPayment { .. }), "got {status:?}");
+    assert!(
+        matches!(status, engine::StepStatus::AwaitingPayment { .. }),
+        "got {status:?}"
+    );
     // First cast has no tax: {2}{G}, with 2 colorless for the generic and 1 green for the pip. This is the untaxed baseline.
     engine
         .submit_payment(PaymentPlan {

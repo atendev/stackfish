@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+};
 
 fn madness_bolt_definition() -> CardDefinition {
     CardDefinition {
@@ -31,7 +33,9 @@ fn madness_bolt_definition() -> CardDefinition {
         target_requirement: None,
         alternative_costs: vec![AlternativeCost::Replacement {
             description: "Madness {R}".to_string(),
-            cost: CostSpec::mana_only(ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] }),
+            cost: CostSpec::mana_only(ManaCost {
+                symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+            }),
             from_zone: ZoneKind::Exile,
             exile_on_leaving_stack: false,
             escape: false,
@@ -47,7 +51,9 @@ fn filler_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -72,7 +78,9 @@ fn discard_outlet_definition(definition_id: u64) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: "Test Discard Outlet".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -104,7 +112,14 @@ fn discard_outlet_ability(source: ObjectId) -> RegisteredAbility {
         cost: Some(CostSpec {
             mana: None,
             additional: vec![AdditionalCost::Discard {
-                filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+                filter: FilterSpec {
+                    card_types: None,
+                    supertypes: None,
+                    subtypes: None,
+                    controller: None,
+                    random: false,
+                    extra: None,
+                },
             }],
             alternative: Vec::new(),
         }),
@@ -164,36 +179,89 @@ fn two_player_state(pool: ManaPool) -> GameState {
         phase: Phase::Ending,
         step: Step::End,
         last_active_turn_number: HashMap::from([(p0, 2), (p1, 1)]),
-        players: vec![PlayerState { mana_pool: pool, ..player_state(p0) }, player_state(p1)],
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Battlefield, ZoneKind::Exile]))
+        players: vec![
+            PlayerState {
+                mana_pool: pool,
+                ..player_state(p0)
+            },
+            player_state(p1),
+        ],
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Library,
+                ZoneKind::Hand,
+                ZoneKind::Graveyard,
+                ZoneKind::Battlefield,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
 fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange { object, from, to, .. } = event.kind {
+        if let GameEventKind::ZoneChange {
+            object, from, to, ..
+        } = event.kind
+        {
             return (object, from, to);
         }
     }
     panic!("expected a ZoneChange event in the ledger");
 }
 
-fn discard_to_cleanup(engine: &mut Engine, p0: PlayerId, p1: PlayerId, card: ObjectId) -> StepStatus {
+fn discard_to_cleanup(
+    engine: &mut Engine,
+    p0: PlayerId,
+    p1: PlayerId,
+    card: ObjectId,
+) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected p0 end-step priority, got {status:?}");
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "expected p0 end-step priority, got {status:?}"
+    );
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "expected p1 end-step priority, got {status:?}");
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p1),
+        "expected p1 end-step priority, got {status:?}"
+    );
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0),
+        "got {status:?}"
+    );
     engine.submit_discard(vec![card]).expect("valid discard");
     drain(engine)
 }
@@ -201,8 +269,19 @@ fn discard_to_cleanup(engine: &mut Engine, p0: PlayerId, p1: PlayerId, card: Obj
 fn setup_hand_with_seven_filler(state: &mut GameState, p0: PlayerId) {
     for i in 0..7 {
         let id = ObjectId(100 + i);
-        state.objects.insert(id, card_object(id, filler_definition(100 + i, "Vanilla"), p0, ZoneKind::Hand));
-        state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(id);
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                filler_definition(100 + i, "Vanilla"),
+                p0,
+                ZoneKind::Hand,
+            ),
+        );
+        state
+            .zone_mut(ZoneKind::Hand, Some(p0))
+            .unwrap()
+            .push_bottom(id);
     }
 }
 
@@ -212,8 +291,14 @@ fn cleanup_discard_redirects_to_exile_and_the_madness_trigger_fires_exactly_once
     let p1 = PlayerId(1);
     let card = ObjectId(0);
     let mut state = two_player_state(ManaPool::default());
-    state.objects.insert(card, card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
     state.replacement_effects.push(madness_redirect(card));
     state.abilities.push(madness_trigger(card));
     setup_hand_with_seven_filler(&mut state, p0);
@@ -222,15 +307,45 @@ fn cleanup_discard_redirects_to_exile_and_the_madness_trigger_fires_exactly_once
     let status = discard_to_cleanup(&mut engine, p0, p1, card);
 
     let (new_id, from, to) = last_zone_change(&engine);
-    assert_eq!((from, to), (ZoneKind::Hand, ZoneKind::Exile), "madness redirect must have exiled instead of discarding");
-    assert!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.contains(&new_id));
-    assert!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty(), "never touched the graveyard");
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Hand, ZoneKind::Exile),
+        "madness redirect must have exiled instead of discarding"
+    );
     assert!(
-        engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::MadnessExiled { .. })),
+        engine
+            .state()
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .contains(&new_id)
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .is_empty(),
+        "never touched the graveyard"
+    );
+    assert!(
+        engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::MadnessExiled { .. })),
         "expected a MadnessExiled marker event"
     );
-    assert_eq!(engine.state().stack.len(), 1, "exactly one trigger, not one per hand card");
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "CR 514.3: a new trigger reopens priority, got {status:?}");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "exactly one trigger, not one per hand card"
+    );
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "CR 514.3: a new trigger reopens priority, got {status:?}"
+    );
 }
 
 #[test]
@@ -239,8 +354,14 @@ fn declining_puts_the_exiled_card_into_the_graveyard() {
     let p1 = PlayerId(1);
     let card = ObjectId(0);
     let mut state = two_player_state(ManaPool::default());
-    state.objects.insert(card, card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
     state.replacement_effects.push(madness_redirect(card));
     state.abilities.push(madness_trigger(card));
     setup_hand_with_seven_filler(&mut state, p0);
@@ -257,13 +378,33 @@ fn declining_puts_the_exiled_card_into_the_graveyard() {
     engine.decline_madness_cast().expect("valid decline");
     let status = drain(&mut engine);
 
-    assert!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(), "must have left exile");
     assert!(
-        engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.iter().any(|&id| id != exiled_id),
+        engine
+            .state()
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .is_empty(),
+        "must have left exile"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p0))
+            .unwrap()
+            .contents
+            .iter()
+            .any(|&id| id != exiled_id),
         "the declined card landed in the graveyard under a fresh id"
     );
-    assert!(engine.state().stack.is_empty(), "the trigger itself finished resolving");
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the trigger itself finished resolving"
+    );
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
 }
 
 // A madness cast happens as the triggered ability resolves (CR 702.35a), so a sorcery cast during the End step is legal. Once cast it resolves into the graveyard and not exile.
@@ -273,8 +414,14 @@ fn casting_via_madness_bypasses_sorcery_speed_timing_and_resolves_to_the_graveya
     let p1 = PlayerId(1);
     let card = ObjectId(0);
     let mut state = two_player_state(ManaPool::default());
-    state.objects.insert(card, card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
     state.replacement_effects.push(madness_redirect(card));
     state.abilities.push(madness_trigger(card));
     setup_hand_with_seven_filler(&mut state, p0);
@@ -292,23 +439,56 @@ fn casting_via_madness_bypasses_sorcery_speed_timing_and_resolves_to_the_graveya
         .submit_madness_cast(Vec::new(), Vec::new(), None)
         .expect("madness cast bypasses sorcery-speed timing");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "the madness {{R}} cost still needs paying, got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "the madness {{R}} cost still needs paying, got {status:?}"
+    );
 
     // Floated inside the cleanup priority window, since CR 500.5 empties the pool as End ends.
-    engine.state_mut().player_mut(p0).unwrap().mana_pool.add_unit(ManaUnit::Colored(Color::Red));
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::Red)], phyrexian_life: 0 }] })
+        .state_mut()
+        .player_mut(p0)
+        .unwrap()
+        .mana_pool
+        .add_unit(ManaUnit::Colored(Color::Red));
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units: vec![ManaUnit::Colored(Color::Red)],
+                phyrexian_life: 0,
+            }],
+        })
         .expect("madness's {R} paid with the floated red mana");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
-    assert!(engine.state().object(exiled_card).is_none(), "the exiled card left exile to become the spell on the stack");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "got {status:?}"
+    );
+    assert!(
+        engine.state().object(exiled_card).is_none(),
+        "the exiled card left exile to become the spell on the stack"
+    );
 
     let status = pass_both_and_drain(&mut engine, p0, p1);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
 
     let (_, from, to) = last_zone_change(&engine);
-    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard), "resolves straight to the graveyard, not back into exile");
-    assert!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty());
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Stack, ZoneKind::Graveyard),
+        "resolves straight to the graveyard, not back into exile"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .is_empty()
+    );
 }
 
 // While AwaitingMadnessChoice is pending, an ordinary priority action must be rejected.
@@ -318,8 +498,14 @@ fn ordinary_priority_actions_are_rejected_while_awaiting_the_madness_choice() {
     let p1 = PlayerId(1);
     let card = ObjectId(0);
     let mut state = two_player_state(ManaPool::default());
-    state.objects.insert(card, card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
     state.replacement_effects.push(madness_redirect(card));
     state.abilities.push(madness_trigger(card));
     setup_hand_with_seven_filler(&mut state, p0);
@@ -327,10 +513,19 @@ fn ordinary_priority_actions_are_rejected_while_awaiting_the_madness_choice() {
     let mut engine = Engine::new(state);
     discard_to_cleanup(&mut engine, p0, p1, card);
     let status = pass_both_and_drain(&mut engine, p0, p1);
-    assert!(matches!(status, StepStatus::AwaitingMadnessChoice { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingMadnessChoice { .. }),
+        "got {status:?}"
+    );
 
-    let result = engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority });
-    assert!(matches!(result, Err(ActionError::IllegalAction(_))), "expected rejection while mid-pipeline, got {result:?}");
+    let result = engine.submit_action(PlayerAction {
+        player: p0,
+        kind: PlayerActionKind::PassPriority,
+    });
+    assert!(
+        matches!(result, Err(ActionError::IllegalAction(_))),
+        "expected rejection while mid-pipeline, got {result:?}"
+    );
 }
 
 // CR 702.35a
@@ -342,38 +537,79 @@ fn a_cost_payment_discard_also_triggers_madness() {
     let card = ObjectId(0);
     let outlet = ObjectId(1);
     let mut state = two_player_state(ManaPool::default());
-    state.objects.insert(card, card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
     state.replacement_effects.push(madness_redirect(card));
     state.abilities.push(madness_trigger(card));
     state.objects.insert(
         outlet,
-        GameObject { controlled_since_turn: 1, ..card_object(outlet, discard_outlet_definition(2), p0, ZoneKind::Battlefield) },
+        GameObject {
+            controlled_since_turn: 1,
+            ..card_object(
+                outlet,
+                discard_outlet_definition(2),
+                p0,
+                ZoneKind::Battlefield,
+            )
+        },
     );
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(outlet);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(outlet);
     state.abilities.push(discard_outlet_ability(outlet));
 
     let mut engine = Engine::new(state);
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: outlet, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
-            x_value: None,
+            kind: PlayerActionKind::ActivateAbility {
+                source: outlet,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("p0 controls the outlet and holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "got {status:?}"
+    );
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Discard(card)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Discard(card)],
+        })
         .expect("discarding the madness card pays the outlet's Discard cost");
     drain(&mut engine);
 
     let (new_id, from, to) = last_zone_change(&engine);
-    assert_eq!((from, to), (ZoneKind::Hand, ZoneKind::Exile), "madness redirect must fire off a cost-payment discard too");
-    assert!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.contains(&new_id));
+    assert_eq!(
+        (from, to),
+        (ZoneKind::Hand, ZoneKind::Exile),
+        "madness redirect must fire off a cost-payment discard too"
+    );
     assert!(
-        engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::MadnessExiled { .. })),
+        engine
+            .state()
+            .zone(ZoneKind::Exile, None)
+            .unwrap()
+            .contents
+            .contains(&new_id)
+    );
+    assert!(
+        engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::MadnessExiled { .. })),
         "expected a MadnessExiled marker event off the cost-payment discard"
     );
     // Outlet ability plus the MadnessExiled trigger it raised.

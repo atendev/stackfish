@@ -1,7 +1,7 @@
 //! `template = "..."` on a `[[cards]]` entry works end to end through the engine. These tests
 //! use `parse`, which expands the template, and not `toml::from_str`.
 
-use stackfish_scenario::{parse, run, AssertionOutcome, EntryOutcome};
+use stackfish_scenario::{AssertionOutcome, EntryOutcome, parse, run};
 
 #[test]
 fn template_land_taps_for_the_right_color() {
@@ -46,7 +46,10 @@ fn template_land_taps_for_the_right_color() {
     for entry in &report.entries {
         match &entry.outcome {
             EntryOutcome::Assertion(AssertionOutcome::Failed { expected, actual }) => {
-                panic!("assertion failed: {} (expected {expected}, got {actual})", entry.description)
+                panic!(
+                    "assertion failed: {} (expected {expected}, got {actual})",
+                    entry.description
+                )
             }
             EntryOutcome::Action(stackfish_scenario::StepOutcome::Errored(msg)) => {
                 panic!("action errored: {} ({msg})", entry.description)

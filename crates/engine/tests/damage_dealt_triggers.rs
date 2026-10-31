@@ -5,23 +5,39 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, minimal_card_definition, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, drain, minimal_card_definition, two_player_state as base_two_player_state,
+};
 
 fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         power: Some(PTValue::Fixed(power)),
         toughness: Some(PTValue::Fixed(toughness)),
-        ..minimal_card_definition(1, name, name, ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            1,
+            name,
+            name,
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject { tapped: true, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
+    GameObject {
+        tapped: true,
+        ..card_object(id, definition, owner, ZoneKind::Battlefield)
+    }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -43,13 +59,21 @@ fn assign_combat_damage(
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
 ) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::AssignCombatDamage { assignments },
+        })
         .expect("turn-based action, no priority required");
     drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
 }
 
 #[test]
@@ -61,9 +85,15 @@ fn deals_damage_trigger_fires_when_the_attacker_connects() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear", 3, 3), p0),
+    );
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -81,7 +111,11 @@ fn deals_damage_trigger_fires_when_the_attacker_connects() {
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().stack.len(), 1, "the DealsDamage trigger was collected and pushed");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the DealsDamage trigger was collected and pushed"
+    );
 
     pass(&mut engine, p0);
     drain(&mut engine);
@@ -89,8 +123,15 @@ fn deals_damage_trigger_fires_when_the_attacker_connects() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(engine.state().stack.is_empty(), "the triggered ability resolved");
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the triggered ability resolved"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "GainLife(1) applied"
+    );
 }
 
 #[test]
@@ -103,11 +144,20 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear", 3, 3), p0),
+    );
     // Registered on a bystander that is not attacking or blocking, so it is never a source of a DamageDealt event.
-    put_on_battlefield(&mut state, permanent(bystander, creature_definition("Sprout", 0, 1), p0));
+    put_on_battlefield(
+        &mut state,
+        permanent(bystander, creature_definition("Sprout", 0, 1), p0),
+    );
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -125,7 +175,10 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert!(engine.state().stack.is_empty(), "the bystander's ability never matched a DamageDealt event");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the bystander's ability never matched a DamageDealt event"
+    );
 }
 
 #[test]
@@ -138,10 +191,19 @@ fn is_dealt_damage_trigger_fires_on_the_creature_taking_damage() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 5), p0));
-    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Bear", 3, 5), p0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(blocker, creature_definition("Wall", 2, 5), p1),
+    );
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -159,13 +221,24 @@ fn is_dealt_damage_trigger_fires_on_the_creature_taking_damage() {
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
-    assert_eq!(engine.state().stack.len(), 1, "the IsDealtDamage trigger was collected and pushed");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the IsDealtDamage trigger was collected and pushed"
+    );
 
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);
     drain(&mut engine);
 
-    assert!(engine.state().stack.is_empty(), "the triggered ability resolved");
-    assert_eq!(engine.state().player(p1).unwrap().life, 21, "blocker's controller (p1) gained 1 life");
+    assert!(
+        engine.state().stack.is_empty(),
+        "the triggered ability resolved"
+    );
+    assert_eq!(
+        engine.state().player(p1).unwrap().life,
+        21,
+        "blocker's controller (p1) gained 1 life"
+    );
 }

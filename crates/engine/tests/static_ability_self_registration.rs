@@ -5,7 +5,8 @@ use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
+    two_player_state as base_two_player_state,
 };
 
 const SELF_BUFF: &str = r#"
@@ -141,7 +142,15 @@ fn bear_definition(script: &str) -> CardDefinition {
         toughness: Some(PTValue::Fixed(2)),
         oracle_text: "Static ability self-registration test fixture.".to_string(),
         script_ref: ScriptReference::Inline(script.to_string()),
-        ..minimal_card_definition(1, "Test Bear", "test_bear", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            1,
+            "Test Bear",
+            "test_bear",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -149,7 +158,15 @@ fn vanilla_bear_definition() -> CardDefinition {
     CardDefinition {
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
-        ..minimal_card_definition(2, "Vanilla Bear", "vanilla_bear", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            2,
+            "Vanilla Bear",
+            "vanilla_bear",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -162,17 +179,34 @@ fn run_card_script_self_registers_a_static_ability() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_BUFF);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.continuous_effects.len(), 1);
     let effect = &state.continuous_effects[0];
     assert_eq!(effect.source, bear);
     assert_eq!(effect.layer, Layer::PowerToughnessModifying);
-    assert!(matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 })));
-    assert!(matches!(effect.affected, AffectedFilter::Primitive(EffectFilter { self_only: true, .. })));
+    assert!(matches!(
+        effect.effect,
+        EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1
+        })
+    ));
+    assert!(matches!(
+        effect.affected,
+        AffectedFilter::Primitive(EffectFilter {
+            self_only: true,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -180,13 +214,19 @@ fn run_card_script_register_without_set_layer_is_an_error() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(NO_SET_LAYER);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
 
     assert!(result.is_err(), "Register() with no SetLayer() must fail");
-    assert!(state.continuous_effects.is_empty(), "no partial effect should have been committed");
+    assert!(
+        state.continuous_effects.is_empty(),
+        "no partial effect should have been committed"
+    );
 }
 
 #[test]
@@ -194,7 +234,10 @@ fn run_card_script_register_without_set_effect_is_an_error() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(NO_SET_EFFECT);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
@@ -208,7 +251,10 @@ fn run_card_script_rejects_mismatched_layer_and_effect() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MISMATCHED_LAYER_EFFECT);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
@@ -225,15 +271,22 @@ fn run_card_script_self_registers_a_remove_keyword_static_ability() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(REMOVE_DEFENDER);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.continuous_effects.len(), 1);
     let effect = &state.continuous_effects[0];
     assert_eq!(effect.layer, Layer::AbilityAdding);
-    assert!(matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::RemoveKeyword(set)) if set == KeywordSet::DEFENDER));
+    assert!(
+        matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::RemoveKeyword(set)) if set == KeywordSet::DEFENDER)
+    );
 }
 
 #[test]
@@ -241,15 +294,22 @@ fn run_card_script_self_registers_an_ignore_keyword_static_ability() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(IGNORE_DEFENDER_RESTRICTION);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.continuous_effects.len(), 1);
     let effect = &state.continuous_effects[0];
     assert_eq!(effect.layer, Layer::AbilityAdding);
-    assert!(matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::IgnoreKeyword(set)) if set == KeywordSet::DEFENDER));
+    assert!(
+        matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::IgnoreKeyword(set)) if set == KeywordSet::DEFENDER)
+    );
 }
 
 #[test]
@@ -257,7 +317,10 @@ fn run_card_script_rejects_mismatched_layer_and_ignore_keyword() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MISMATCHED_IGNORE_KEYWORD_RESTRICTION);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
@@ -274,17 +337,30 @@ fn run_card_script_register_keyword_helper_grants_flying() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(REGISTER_KEYWORD_FLYING);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("Game.RegisterKeyword self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("Game.RegisterKeyword self-registers cleanly");
 
     assert_eq!(state.continuous_effects.len(), 1);
     let effect = &state.continuous_effects[0];
     assert_eq!(effect.source, bear);
     assert_eq!(effect.layer, Layer::AbilityAdding);
-    assert!(matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::AddKeyword(set)) if set == KeywordSet::FLYING));
-    assert!(matches!(effect.affected, AffectedFilter::Primitive(EffectFilter { self_only: true, .. })));
+    assert!(
+        matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::AddKeyword(set)) if set == KeywordSet::FLYING)
+    );
+    assert!(matches!(
+        effect.affected,
+        AffectedFilter::Primitive(EffectFilter {
+            self_only: true,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -292,7 +368,10 @@ fn run_card_script_rejects_mismatched_layer_and_remove_keyword() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MISMATCHED_REMOVE_KEYWORD);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
@@ -309,10 +388,15 @@ fn run_card_script_can_register_multiple_static_abilities_from_one_script_call()
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(TWO_STATIC_ABILITIES);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("both static abilities register cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("both static abilities register cleanly");
 
     assert_eq!(state.continuous_effects.len(), 2);
     assert!(state.continuous_effects.iter().all(|e| e.source == bear));
@@ -322,17 +406,36 @@ fn run_card_script_can_register_multiple_static_abilities_from_one_script_call()
 fn dying_creatures_registered_static_ability_is_purged_by_sba() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
-    let mut object = card_object(bear, bear_definition(SELF_BUFF), PlayerId(0), ZoneKind::Battlefield);
+    let mut object = card_object(
+        bear,
+        bear_definition(SELF_BUFF),
+        PlayerId(0),
+        ZoneKind::Battlefield,
+    );
     // Base 2/2 plus self ModifyPT(1,1) is toughness 3, so 3 damage is lethal and forces death without combat.
     object.damage_marked = 3;
     state.objects.insert(bear, object);
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     // Simulates the effect the creature would have self-registered on an earlier battlefield entry.
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -358,12 +461,21 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
         matches!(status, StepStatus::AwaitingPayment { .. }),
         "expected a pause for the cast's (free) cost, got {status:?}"
     );
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
 }
 
 #[test]
@@ -372,19 +484,35 @@ fn cast_self_buffing_creature_resolves_with_effective_pt_boosted() {
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(SELF_BUFF), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(SELF_BUFF), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(bear);
 
     let mut engine = Engine::new(state);
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card: bear,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
 
-    assert!(engine.state().continuous_effects.is_empty(), "self-registration hasn't run yet - still on the stack");
+    assert!(
+        engine.state().continuous_effects.is_empty(),
+        "self-registration hasn't run yet - still on the stack"
+    );
 
     pass(&mut engine, p0);
     drain(&mut engine);
@@ -392,10 +520,23 @@ fn cast_self_buffing_creature_resolves_with_effective_pt_boosted() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(engine.state().stack.is_empty(), "no triggered ability this time - only the static effect registered");
-    assert_eq!(engine.state().continuous_effects.len(), 1, "self-registration ran exactly once");
+    assert!(
+        engine.state().stack.is_empty(),
+        "no triggered ability this time - only the static effect registered"
+    );
+    assert_eq!(
+        engine.state().continuous_effects.len(),
+        1,
+        "self-registration ran exactly once"
+    );
 
-    let new_id = *engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.front().unwrap();
+    let new_id = *engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .front()
+        .unwrap();
     let script_runtime = ScriptRuntime::new();
     let effective = effective_characteristics(engine.state(), &script_runtime, new_id);
     assert_eq!(effective.power, Some(3), "base 2 + self ModifyPT(1,1) = 3");
@@ -408,23 +549,51 @@ fn play_land_self_registering_anthem_buffs_other_creatures_you_control() {
     let anthem_land = ObjectId(0);
     let other_bear = ObjectId(1);
     let mut state = two_player_state();
-    state.objects.insert(anthem_land, card_object(anthem_land, bear_definition_as_land(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(anthem_land);
-    state.objects.insert(other_bear, card_object(other_bear, vanilla_bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(other_bear);
+    state.objects.insert(
+        anthem_land,
+        card_object(anthem_land, bear_definition_as_land(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(anthem_land);
+    state.objects.insert(
+        other_bear,
+        card_object(
+            other_bear,
+            vanilla_bear_definition(),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(other_bear);
 
     let mut engine = Engine::new(state);
     engine
-        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: anthem_land } })
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card: anthem_land },
+        })
         .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert_eq!(engine.state().continuous_effects.len(), 1, "the anthem land's static ability self-registered");
+    assert_eq!(
+        engine.state().continuous_effects.len(),
+        1,
+        "the anthem land's static ability self-registered"
+    );
 
     let script_runtime = ScriptRuntime::new();
     let effective = effective_characteristics(engine.state(), &script_runtime, other_bear);
-    assert_eq!(effective.power, Some(3), "vanilla 2/2 + anthem's ModifyPT(1,1) = 3/3");
+    assert_eq!(
+        effective.power,
+        Some(3),
+        "vanilla 2/2 + anthem's ModifyPT(1,1) = 3/3"
+    );
     assert_eq!(effective.toughness, Some(3));
 }
 
@@ -433,6 +602,14 @@ fn bear_definition_as_land() -> CardDefinition {
     CardDefinition {
         oracle_text: "Creatures you control get +1/+1.".to_string(),
         script_ref: ScriptReference::Inline(ANTHEM_YOUR_CREATURES.to_string()),
-        ..minimal_card_definition(3, "Test Anthem Land", "test_anthem_land", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            3,
+            "Test Anthem Land",
+            "test_anthem_land",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     }
 }

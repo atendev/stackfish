@@ -12,7 +12,9 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -34,7 +36,12 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    card_object(id, creature_definition(power, toughness), owner, ZoneKind::Battlefield)
+    card_object(
+        id,
+        creature_definition(power, toughness),
+        owner,
+        ZoneKind::Battlefield,
+    )
 }
 
 fn base_state() -> GameState {
@@ -50,15 +57,31 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
+    EffectFilter {
+        controller: None,
+        card_types: None,
+        self_only: false,
+        subtypes: None,
+        excluded_subtypes: None,
+        supertypes: None,
+        excluded_supertypes: None,
+    }
 }
 
-fn gain_control(source: ObjectId, new_controller: PlayerId, filter: EffectFilter, timestamp: u64) -> ContinuousEffect {
+fn gain_control(
+    source: ObjectId,
+    new_controller: PlayerId,
+    filter: EffectFilter,
+    timestamp: u64,
+) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::ControlChangingEffects,
@@ -77,7 +100,10 @@ fn no_effect_returns_the_plain_controller_field() {
     let bear = ObjectId(0);
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
 
-    assert_eq!(effective_controller(&state, &ScriptRuntime::new(), bear), p0);
+    assert_eq!(
+        effective_controller(&state, &ScriptRuntime::new(), bear),
+        p0
+    );
 }
 
 #[test]
@@ -87,9 +113,14 @@ fn a_gain_control_effect_overrides_the_base_controller() {
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
-    state.continuous_effects.push(gain_control(bear, p1, no_filter(), 0));
+    state
+        .continuous_effects
+        .push(gain_control(bear, p1, no_filter(), 0));
 
-    assert_eq!(effective_controller(&state, &ScriptRuntime::new(), bear), p1);
+    assert_eq!(
+        effective_controller(&state, &ScriptRuntime::new(), bear),
+        p1
+    );
 }
 
 // CR 613.7
@@ -101,8 +132,12 @@ fn later_timestamp_gain_control_wins_outright() {
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
-    state.continuous_effects.push(gain_control(bear, p1, no_filter(), 0));
-    state.continuous_effects.push(gain_control(bear, p0, no_filter(), 1));
+    state
+        .continuous_effects
+        .push(gain_control(bear, p1, no_filter(), 0));
+    state
+        .continuous_effects
+        .push(gain_control(bear, p0, no_filter(), 1));
 
     assert_eq!(
         effective_controller(&state, &ScriptRuntime::new(), bear),
@@ -125,7 +160,15 @@ fn effect_filter_still_scopes_a_gain_control_effect() {
     state.continuous_effects.push(gain_control(
         source,
         p0,
-        EffectFilter {  controller: Some(FilterController::Opponent), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+        EffectFilter {
+            controller: Some(FilterController::Opponent),
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        },
         0,
     ));
 

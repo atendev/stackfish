@@ -7,11 +7,13 @@
 use std::collections::HashMap;
 
 use stackfish_engine::decision::{Candidate, Decision};
-use stackfish_engine::{GameEvent, GameEventKind, GameObject, GameState, ObjectId, PlayerId, Target, ZoneKind};
+use stackfish_engine::{
+    GameEvent, GameEventKind, GameObject, GameState, ObjectId, PlayerId, Target, ZoneKind,
+};
 
 use crate::wire::{
-    U64, WireCardIdentity, WireDecision, WireEventKind, WireIdentity, WireObjectSummary, WireRevealedCard, WireZone,
-    offered_objects,
+    U64, WireCardIdentity, WireDecision, WireEventKind, WireIdentity, WireObjectSummary,
+    WireRevealedCard, WireZone, offered_objects,
 };
 
 /// One Seat's point of view.
@@ -50,7 +52,12 @@ fn sees_object(viewer: Viewer, place: Place) -> bool {
 }
 
 // Only the controller sees a face-down object's identity.
-fn sees_identity(viewer: Viewer, place: Place, face_down: bool, controller: Option<PlayerId>) -> bool {
+fn sees_identity(
+    viewer: Viewer,
+    place: Place,
+    face_down: bool,
+    controller: Option<PlayerId>,
+) -> bool {
     sees_object(viewer, place) && (!face_down || viewer.omniscient() || viewer.is(controller))
 }
 
@@ -86,7 +93,9 @@ impl Move {
         let owner = lki.map(|o| o.owner).or(now.map(|o| o.owner));
         Move {
             object,
-            previous: lki.map(|o| o.object_id).or(now.and_then(|o| o.lineage.previous)),
+            previous: lki
+                .map(|o| o.object_id)
+                .or(now.and_then(|o| o.lineage.previous)),
             from: Side {
                 place: Place { zone: from, owner },
                 face_down: lki.is_some_and(|o| o.face_down),
@@ -106,8 +115,14 @@ impl Move {
     fn kind_for(&self, viewer: Viewer) -> WireEventKind {
         let sees_old = sees_object(viewer, self.from.place);
         let sees_new = sees_object(viewer, self.to.place);
-        let identity_old = sees_identity(viewer, self.from.place, self.from.face_down, self.from.controller);
-        let identity_new = sees_identity(viewer, self.to.place, self.to.face_down, self.to.controller);
+        let identity_old = sees_identity(
+            viewer,
+            self.from.place,
+            self.from.face_down,
+            self.from.controller,
+        );
+        let identity_new =
+            sees_identity(viewer, self.to.place, self.to.face_down, self.to.controller);
         let hidden_move = is_hidden(self.from.place.zone) || is_hidden(self.to.place.zone);
         WireEventKind::ZoneChange {
             object: sees_new.then_some(U64::from(self.object)),
@@ -115,7 +130,10 @@ impl Move {
             from: self.from.place.zone.into(),
             to: self.to.place.zone.into(),
             owner: self.from.place.owner.filter(|_| hidden_move).map(|p| p.0),
-            identity: self.identity.clone().filter(|_| identity_old || identity_new),
+            identity: self
+                .identity
+                .clone()
+                .filter(|_| identity_old || identity_new),
             last_known_info: self.last_known_info.clone().filter(|_| identity_old),
         }
     }
@@ -138,9 +156,17 @@ impl Marker {
         let last_known_info = sees.then(|| self.last_known_info.clone());
         let (object, identity) = (self.object.into(), self.identity.clone());
         if self.cycled {
-            WireEventKind::Cycled { object, identity, last_known_info }
+            WireEventKind::Cycled {
+                object,
+                identity,
+                last_known_info,
+            }
         } else {
-            WireEventKind::MadnessExiled { object, identity, last_known_info }
+            WireEventKind::MadnessExiled {
+                object,
+                identity,
+                last_known_info,
+            }
         }
     }
 }
@@ -151,21 +177,37 @@ pub enum Observed {
     /// Identical for every viewer; its ids lie in public zones.
     Public(WireEventKind),
     /// Names a source that may sit in a hidden zone, such as a card in hand with a cycling trigger.
-    Located { kind: WireEventKind, source: Option<Place> },
+    Located {
+        kind: WireEventKind,
+        source: Option<Place>,
+    },
     /// Only the named player and omniscient Seats receive it.
-    Controller { player: PlayerId, kind: WireEventKind },
+    Controller {
+        player: PlayerId,
+        kind: WireEventKind,
+    },
     /// Only omniscient Seats receive it.
     Omniscient(WireEventKind),
     Move(Move),
     Marker(Marker),
-    Revealed { player: PlayerId, zone: ZoneKind, cards: Vec<(ObjectId, PlayerId, WireIdentity)> },
+    Revealed {
+        player: PlayerId,
+        zone: ZoneKind,
+        cards: Vec<(ObjectId, PlayerId, WireIdentity)>,
+    },
 }
 
 fn without_source(kind: &WireEventKind) -> WireEventKind {
     match kind.clone() {
-        WireEventKind::TriggerQueued { controller, .. } => WireEventKind::TriggerQueued { source: None, controller },
+        WireEventKind::TriggerQueued { controller, .. } => WireEventKind::TriggerQueued {
+            source: None,
+            controller,
+        },
         WireEventKind::ReplacementApplied { original_event, .. } => {
-            WireEventKind::ReplacementApplied { source: None, original_event }
+            WireEventKind::ReplacementApplied {
+                source: None,
+                original_event,
+            }
         }
         other => other,
     }
@@ -186,15 +228,25 @@ impl Observed {
             Observed::Omniscient(kind) => viewer.omniscient().then(|| kind.clone()),
             Observed::Move(mv) => Some(mv.kind_for(viewer)),
             Observed::Marker(marker) => Some(marker.kind_for(viewer)),
-            Observed::Revealed { player, zone, cards } => Some(WireEventKind::Revealed {
+            Observed::Revealed {
+                player,
+                zone,
+                cards,
+            } => Some(WireEventKind::Revealed {
                 player: player.0,
                 zone: WireZone::from(*zone),
                 // The identity goes to everyone; the id only to a Seat that could see the card where it lies.
                 cards: cards
                     .iter()
                     .map(|(id, owner, identity)| WireRevealedCard {
-                        object: sees_object(viewer, Place { zone: *zone, owner: Some(*owner) })
-                            .then_some(U64::from(*id)),
+                        object: sees_object(
+                            viewer,
+                            Place {
+                                zone: *zone,
+                                owner: Some(*owner),
+                            },
+                        )
+                        .then_some(U64::from(*id)),
                         identity: identity.clone(),
                     })
                     .collect(),
@@ -214,7 +266,10 @@ pub struct Observer {
 impl Observer {
     fn hidden_place(&self, state: &GameState, id: ObjectId) -> Option<Place> {
         match state.object(id) {
-            Some(object) => Some(Place { zone: object.zone, owner: Some(object.owner) }),
+            Some(object) => Some(Place {
+                zone: object.zone,
+                owner: Some(object.owner),
+            }),
             None => self.retired.get(&id).copied(),
         }
         .filter(|place| is_hidden(place.zone))
@@ -224,9 +279,17 @@ impl Observer {
     /// after the step that wrote it.
     pub fn observe(&mut self, state: &GameState, event: &GameEvent) -> Observed {
         use GameEventKind as K;
-        let plain = || WireEventKind::plain(&event.kind).expect("every event not built in the match below has a plain form");
+        let plain = || {
+            WireEventKind::plain(&event.kind)
+                .expect("every event not built in the match below has a plain form")
+        };
         match &event.kind {
-            K::ZoneChange { object, from, to, last_known_info } => {
+            K::ZoneChange {
+                object,
+                from,
+                to,
+                last_known_info,
+            } => {
                 let mv = Move::new(state, *object, *from, *to, last_known_info);
                 if is_hidden(*from)
                     && let Some(previous) = mv.previous
@@ -242,35 +305,61 @@ impl Observer {
             }
             // CR 111.7
             K::TokenCeased { object } => match self.hidden_place(state, *object) {
-                Some(Place { owner: Some(owner), .. }) => Observed::Controller { player: owner, kind: plain() },
+                Some(Place {
+                    owner: Some(owner), ..
+                }) => Observed::Controller {
+                    player: owner,
+                    kind: plain(),
+                },
                 _ => Observed::Public(plain()),
             },
-            K::Cycled { object, last_known_info } | K::MadnessExiled { object, last_known_info } => {
-                Observed::Marker(Marker {
-                    cycled: matches!(event.kind, K::Cycled { .. }),
-                    object: *object,
-                    in_hand: Side {
-                        place: Place { zone: last_known_info.zone, owner: Some(last_known_info.owner) },
-                        face_down: last_known_info.face_down,
-                        controller: Some(last_known_info.controller),
-                    },
-                    identity: last_known_info.into(),
-                    last_known_info: last_known_info.into(),
-                })
+            K::Cycled {
+                object,
+                last_known_info,
             }
-            K::Revealed { player, zone, cards } => Observed::Revealed {
+            | K::MadnessExiled {
+                object,
+                last_known_info,
+            } => Observed::Marker(Marker {
+                cycled: matches!(event.kind, K::Cycled { .. }),
+                object: *object,
+                in_hand: Side {
+                    place: Place {
+                        zone: last_known_info.zone,
+                        owner: Some(last_known_info.owner),
+                    },
+                    face_down: last_known_info.face_down,
+                    controller: Some(last_known_info.controller),
+                },
+                identity: last_known_info.into(),
+                last_known_info: last_known_info.into(),
+            }),
+            K::Revealed {
+                player,
+                zone,
+                cards,
+            } => Observed::Revealed {
                 player: *player,
                 zone: *zone,
-                cards: cards.iter().map(|c| (c.object, c.snapshot.owner, WireIdentity::from(&c.snapshot))).collect(),
+                cards: cards
+                    .iter()
+                    .map(|c| (c.object, c.snapshot.owner, WireIdentity::from(&c.snapshot)))
+                    .collect(),
             },
             // CR 701.22, CR 701.25
             K::CardsScried { player, .. } | K::CardsSurveiled { player, .. } => {
-                Observed::Controller { player: *player, kind: plain() }
+                Observed::Controller {
+                    player: *player,
+                    kind: plain(),
+                }
             }
             // Only replay needs a draw from the seeded stream.
             K::RngDrawn { .. } => Observed::Omniscient(plain()),
             K::TriggerQueued { source, .. } | K::ReplacementApplied { source, .. } => {
-                Observed::Located { kind: plain(), source: self.hidden_place(state, *source) }
+                Observed::Located {
+                    kind: plain(),
+                    source: self.hidden_place(state, *source),
+                }
             }
             // These events happen in public zones, and their free text never names a hidden card.
             K::LifeChanged { .. }
@@ -317,16 +406,25 @@ pub fn decision_for(viewer: Viewer, state: &GameState, decision: &Decision) -> W
             .into_iter()
             .filter_map(|id| {
                 let object = state.object(id)?;
-                let place = Place { zone: object.zone, owner: Some(object.owner) };
+                let place = Place {
+                    zone: object.zone,
+                    owner: Some(object.owner),
+                };
                 // Events already told the viewer about its own hand and the public zones.
-                let known = !is_hidden(place.zone) || (place.zone == ZoneKind::Hand && viewer.is(place.owner));
-                (!known).then(|| WireCardIdentity { object: id.into(), identity: object.into() })
+                let known = !is_hidden(place.zone)
+                    || (place.zone == ZoneKind::Hand && viewer.is(place.owner));
+                (!known).then(|| WireCardIdentity {
+                    object: id.into(),
+                    identity: object.into(),
+                })
             })
             .collect();
         WireDecision::full(decision, identities)
     } else {
         WireDecision::opaque(decision, |candidate| match candidate {
-            Candidate::Target(Target::Object(id)) => state.object(*id).is_none_or(|o| !is_hidden(o.zone)),
+            Candidate::Target(Target::Object(id)) => {
+                state.object(*id).is_none_or(|o| !is_hidden(o.zone))
+            }
             _ => true,
         })
     }

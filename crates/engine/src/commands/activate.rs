@@ -1,31 +1,43 @@
 //! The `ActivateAbility` command body. See `DESIGN.md` for the rest.
 
+use crate::layers::effective_characteristics;
 use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
-use crate::layers::effective_characteristics;
 use crate::types::card::{CardTypeSet, SupertypeSet};
 use crate::types::cost::{AdditionalCost, CostSpec};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
+use crate::types::ids::ScriptHandle;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::mana::{Color, ManaUnit};
 use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::target::TargetSpec;
-use crate::types::ids::ScriptHandle;
 use crate::types::zone::ZoneKind;
 
 use super::attach::find_ability;
 use super::legality::{has_summoning_sickness, is_sorcery_speed, validate_targets};
-use super::{CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected, Validated};
+use super::{
+    CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
+    Validated,
+};
 
 /// What `apply_activate_ability` needs, all settled by `validate_activate_ability`.
 #[derive(Debug)]
 pub(crate) enum ActivatePlan {
     /// CR 605.3b: a mana ability with no cost resolves at once.
-    FreeMana { actor: PlayerId, source: ObjectId, units: Vec<ManaUnit> },
+    FreeMana {
+        actor: PlayerId,
+        source: ObjectId,
+        units: Vec<ManaUnit>,
+    },
     /// A mana ability with a real cost still pauses for payment (CR 605.3b).
-    PaidMana { actor: PlayerId, source: ObjectId, cost: CostSpec, units: Vec<ManaUnit> },
+    PaidMana {
+        actor: PlayerId,
+        source: ObjectId,
+        cost: CostSpec,
+        units: Vec<ManaUnit>,
+    },
     /// CR 602.2: any other activated ability goes on the stack.
     Stack {
         actor: PlayerId,
@@ -73,9 +85,8 @@ pub(super) fn validate_activate_ability(
             "actor does not control the ability's source".to_string(),
         ));
     }
-    let ability = find_ability(state, source, ability_index).ok_or_else(|| {
-        Rejected::IllegalAction("no such ability on source".to_string())
-    })?;
+    let ability = find_ability(state, source, ability_index)
+        .ok_or_else(|| Rejected::IllegalAction("no such ability on source".to_string()))?;
     if ability.kind != AbilityKind::Activated {
         return Err(Rejected::IllegalAction(
             "ability is not an activated ability".to_string(),
@@ -91,14 +102,19 @@ pub(super) fn validate_activate_ability(
     // (CR 702.29a), which works from the hand. Matched on the cost shape
     // (DiscardSelf) so RegisteredAbility needs no zone field, as with the Equip
     // check below.
-    let requires_hand = cost
-        .as_ref()
-        .is_some_and(|c| c.additional.iter().any(|a| matches!(a, AdditionalCost::DiscardSelf)));
+    let requires_hand = cost.as_ref().is_some_and(|c| {
+        c.additional
+            .iter()
+            .any(|a| matches!(a, AdditionalCost::DiscardSelf))
+    });
     // CR 113.6: a script-declared `:SetFunctionsFrom(zone)` ability overrides
     // both (`GameState::ability_function_zones`).
     let declared_zone = state.ability_function_zones.get(&ability.id).copied();
-    let required_zone = declared_zone
-        .unwrap_or(if requires_hand { ZoneKind::Hand } else { ZoneKind::Battlefield });
+    let required_zone = declared_zone.unwrap_or(if requires_hand {
+        ZoneKind::Hand
+    } else {
+        ZoneKind::Battlefield
+    });
     if source_object.zone != required_zone {
         return Err(Rejected::IllegalAction(match required_zone {
             ZoneKind::Hand => "source is not in hand".to_string(),
@@ -129,7 +145,10 @@ pub(super) fn validate_activate_ability(
     // An announced x_value and an {X} in this ability's own cost must both be
     // present or both absent. Checked up front, as CastSpell does (cast.rs). CR
     // 107.3k limits this to the ability's own cost.
-    let cost_has_x = cost.as_ref().and_then(|c| c.mana.as_ref()).is_some_and(|m| m.has_x());
+    let cost_has_x = cost
+        .as_ref()
+        .and_then(|c| c.mana.as_ref())
+        .is_some_and(|m| m.has_x());
     match (cost_has_x, x_value) {
         (true, None) => {
             return Err(Rejected::IllegalAction(
@@ -397,9 +416,16 @@ pub(super) fn validate_activate_ability(
     }
 }
 
-pub(super) fn apply_activate_ability(state: &mut GameState, plan: ActivatePlan) -> Result<CommandOutcome, Internal> {
+pub(super) fn apply_activate_ability(
+    state: &mut GameState,
+    plan: ActivatePlan,
+) -> Result<CommandOutcome, Internal> {
     match plan {
-        ActivatePlan::FreeMana { actor, source, units } => {
+        ActivatePlan::FreeMana {
+            actor,
+            source,
+            units,
+        } => {
             state
                 .object_mut(source)
                 .ok_or_else(|| Internal::new("activate: the validated mana source is gone"))?
@@ -415,14 +441,25 @@ pub(super) fn apply_activate_ability(state: &mut GameState, plan: ActivatePlan) 
             // CR 605.3b
             // A mana ability resolves as part of activation and never uses the stack.
             Ok(CommandOutcome {
-                events: vec![GameEventKind::Tapped { object: source }, GameEventKind::ManaAdded { player: actor, units }],
+                events: vec![
+                    GameEventKind::Tapped { object: source },
+                    GameEventKind::ManaAdded {
+                        player: actor,
+                        units,
+                    },
+                ],
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
                 requires_payment: None,
                 battlefield_entries: Vec::new(),
             })
         }
-        ActivatePlan::PaidMana { actor, source, cost, units } => {
+        ActivatePlan::PaidMana {
+            actor,
+            source,
+            cost,
+            units,
+        } => {
             // CR 605.1a/605.3b
             // No StackObject is pushed for a mana ability. `stack_id` is only a handle that
             // identifies this payment pause; Engine::unwind_payment tolerates one that
@@ -438,12 +475,25 @@ pub(super) fn apply_activate_ability(state: &mut GameState, plan: ActivatePlan) 
                     payer: actor,
                     cost,
                     source,
-                    on_paid: PaymentResolution::ManaAbility { controller: actor, units },
+                    on_paid: PaymentResolution::ManaAbility {
+                        controller: actor,
+                        units,
+                    },
                 }),
                 battlefield_entries: Vec::new(),
             })
         }
-        ActivatePlan::Stack { actor, source, source_owner, targets, target_requirement, x_value, operation, effect, cost } => {
+        ActivatePlan::Stack {
+            actor,
+            source,
+            source_owner,
+            targets,
+            target_requirement,
+            x_value,
+            operation,
+            effect,
+            cost,
+        } => {
             let stack_id = state.allocate_object_id();
             state.stack.push(StackObject::new(
                 stack_id,

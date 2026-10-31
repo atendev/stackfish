@@ -9,7 +9,9 @@ use crate::replacement;
 use crate::sba;
 use crate::script::ScriptChoiceRequest;
 use crate::triggers::PendingTrigger;
-use crate::types::ability::{AbilityEffect, CopyExceptions, SearchDestination, TokenSpec, UnlessPaidConsequence};
+use crate::types::ability::{
+    AbilityEffect, CopyExceptions, SearchDestination, TokenSpec, UnlessPaidConsequence,
+};
 use crate::types::card::{CardDefinition, ModeChoice, SpellMode};
 use crate::types::command::PlayerAction;
 use crate::types::cost::CostSpec;
@@ -26,93 +28,199 @@ pub enum StepStatus {
     /// Made progress; safe to call `step()` again immediately.
     Progressed,
     /// Needs a `PlayerAction` from `player`; `submit_action`, then `step()`.
-    AwaitingAction { player: PlayerId },
+    AwaitingAction {
+        player: PlayerId,
+    },
     /// CR 616.1: several replacement effects matched one event; `player` picks one
     /// of `candidates` via `submit_replacement_choice`. This is a sub-decision, so
     /// `submit_action` keeps rejecting while it is pending.
-    AwaitingReplacementChoice { player: PlayerId, candidates: Vec<replacement::ReplacementCandidate> },
+    AwaitingReplacementChoice {
+        player: PlayerId,
+        candidates: Vec<replacement::ReplacementCandidate>,
+    },
     /// CR 704.5j: `player` keeps one of the same-named legendary `candidates` via
     /// `submit_legend_rule_choice`.
-    AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId> },
+    AwaitingLegendRuleChoice {
+        player: PlayerId,
+        candidates: Vec<ObjectId>,
+    },
     /// CR 903.9a: `player` may return `commander` to the command zone via
     /// `submit_commander_return_choice`.
-    AwaitingCommanderReturnChoice { player: PlayerId, commander: ObjectId },
+    AwaitingCommanderReturnChoice {
+        player: PlayerId,
+        commander: ObjectId,
+    },
     /// CR 303.4d: several attach candidates for one Aura; `player` picks via
     /// `submit_attach_choice`. Only reachable by constructing the state directly,
     /// since no effect produces simultaneous candidates.
-    AwaitingAttachChoice { player: PlayerId, aura: ObjectId, candidates: Vec<ObjectId> },
+    AwaitingAttachChoice {
+        player: PlayerId,
+        aura: ObjectId,
+        candidates: Vec<ObjectId>,
+    },
     /// CR 303.4f: 2+ legal attach targets for an Aura, Equipment or Fortification
     /// entering through a search; `player` picks via `submit_entry_attach_choice`.
     /// Candidates are `Target`s since an Aura can enchant a player (CR 303.4b).
-    AwaitingEntryAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<Target> },
+    AwaitingEntryAttachChoice {
+        player: PlayerId,
+        attaching: ObjectId,
+        candidates: Vec<Target>,
+    },
     /// CR 303.4f: the token-creation counterpart, answered by
     /// `submit_token_attach_choice`. Separate from `AwaitingEntryAttachChoice`
     /// because token creation resumes a count, not the search's library loop.
-    AwaitingTokenAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<Target> },
+    AwaitingTokenAttachChoice {
+        player: PlayerId,
+        attaching: ObjectId,
+        candidates: Vec<Target>,
+    },
     /// CR 702.82a: `player` sacrifices any subset of `candidates` for `object`'s
     /// devour (`per_creature` counters each) via `submit_devour_choice`.
-    AwaitingDevourChoice { player: PlayerId, object: ObjectId, per_creature: i32, candidates: Vec<ObjectId> },
+    AwaitingDevourChoice {
+        player: PlayerId,
+        object: ObjectId,
+        per_creature: i32,
+        candidates: Vec<ObjectId>,
+    },
     /// CR 702.38a: `player` reveals any subset of `candidates` for `object`'s
     /// amplify (`per_card` counters each) via `submit_amplify_choice`.
-    AwaitingAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
+    AwaitingAmplifyChoice {
+        player: PlayerId,
+        object: ObjectId,
+        per_card: i32,
+        candidates: Vec<ObjectId>,
+    },
     /// `AwaitingDevourChoice` raised by a search, answered by `submit_search_devour_choice`.
-    AwaitingSearchDevourChoice { player: PlayerId, object: ObjectId, per_creature: i32, candidates: Vec<ObjectId> },
+    AwaitingSearchDevourChoice {
+        player: PlayerId,
+        object: ObjectId,
+        per_creature: i32,
+        candidates: Vec<ObjectId>,
+    },
     /// `AwaitingAmplifyChoice` raised by a search, answered by `submit_search_amplify_choice`.
-    AwaitingSearchAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
+    AwaitingSearchAmplifyChoice {
+        player: PlayerId,
+        object: ObjectId,
+        per_card: i32,
+        candidates: Vec<ObjectId>,
+    },
     /// CR 702.35a: `player` casts `card` from exile via `submit_madness_cast` or
     /// declines via `decline_madness_cast`. A cast is a nested cast, not a candidate pick.
-    AwaitingMadnessChoice { player: PlayerId, card: ObjectId },
+    AwaitingMadnessChoice {
+        player: PlayerId,
+        card: ObjectId,
+    },
     /// CR 702.85a: `player` casts `candidate` for free via `submit_cascade_cast`
     /// (only if it is `Some`) or declines via `decline_cascade_cast`.
-    AwaitingCascadeChoice { player: PlayerId, candidate: Option<ObjectId> },
+    AwaitingCascadeChoice {
+        player: PlayerId,
+        candidate: Option<ObjectId>,
+    },
     /// CR 118.12: `payer` may pay `cost` via `submit_unless_paid_payment` to stop
     /// `otherwise`, or decline via `decline_unless_paid`.
-    AwaitingUnlessPaidChoice { payer: PlayerId, cost: CostSpec, otherwise: UnlessPaidConsequence },
+    AwaitingUnlessPaidChoice {
+        payer: PlayerId,
+        cost: CostSpec,
+        otherwise: UnlessPaidConsequence,
+    },
     /// CR 701.9: the targeted `player` discards one of `candidates` via
     /// `submit_discard_choice`; `remaining_count` more picks are owed after it.
-    AwaitingDiscardChoice { player: PlayerId, candidates: Vec<ObjectId>, remaining_count: u32 },
+    AwaitingDiscardChoice {
+        player: PlayerId,
+        candidates: Vec<ObjectId>,
+        remaining_count: u32,
+    },
     /// CR 707.9: `player` picks one of `candidates` for `object` to copy, or none,
     /// via `submit_copy_choice`.
-    AwaitingCopyChoice { player: PlayerId, object: ObjectId, candidates: Vec<ObjectId> },
+    AwaitingCopyChoice {
+        player: PlayerId,
+        object: ObjectId,
+        candidates: Vec<ObjectId>,
+    },
     /// A card script yielded mid-resolution asking `player` for a choice matching
     /// `request`; answered by `submit_script_choice`.
-    AwaitingScriptChoice { player: PlayerId, request: ScriptChoiceRequest },
+    AwaitingScriptChoice {
+        player: PlayerId,
+        request: ScriptChoiceRequest,
+    },
     /// CR 701.22: `player` orders the top `cards` between top and bottom via
     /// `submit_scry_choice`.
-    AwaitingScryChoice { player: PlayerId, cards: Vec<ObjectId> },
+    AwaitingScryChoice {
+        player: PlayerId,
+        cards: Vec<ObjectId>,
+    },
     /// CR 701.25: like `AwaitingScryChoice`, but the other pile goes to the graveyard.
-    AwaitingSurveilChoice { player: PlayerId, cards: Vec<ObjectId> },
+    AwaitingSurveilChoice {
+        player: PlayerId,
+        cards: Vec<ObjectId>,
+    },
     /// CR 701.23: `player` chooses up to `count` of `candidates` via
     /// `submit_search_choice`; fewer, including none, is legal (CR 701.23b).
-    AwaitingSearchChoice { player: PlayerId, candidates: Vec<ObjectId>, count: u32 },
+    AwaitingSearchChoice {
+        player: PlayerId,
+        candidates: Vec<ObjectId>,
+        count: u32,
+    },
     /// CR 603.3b: `player` orders their simultaneous triggers via `submit_trigger_order`.
-    AwaitingTriggerOrderChoice { player: PlayerId, group: Vec<PendingTrigger> },
+    AwaitingTriggerOrderChoice {
+        player: PlayerId,
+        group: Vec<PendingTrigger>,
+    },
     /// CR 603.3d: a trigger needs targets; `candidates` has one legal list per word
     /// of `spec`. `player` answers with one flat list via `submit_trigger_targets`.
-    AwaitingTriggerTargets { player: PlayerId, spec: TargetSpec, candidates: Vec<Vec<Target>> },
+    AwaitingTriggerTargets {
+        player: PlayerId,
+        spec: TargetSpec,
+        candidates: Vec<Vec<Target>>,
+    },
     /// CR 603.3c: a modal trigger needs its mode choice, raised before the target
     /// choice. `player` is the chooser, which is another player under CR 700.2e.
     /// Answered by `submit_trigger_mode_choice`.
-    AwaitingTriggerModeChoice { player: PlayerId, modes: Vec<SpellMode>, mode_choice: ModeChoice, min: u32, max: u32 },
+    AwaitingTriggerModeChoice {
+        player: PlayerId,
+        modes: Vec<SpellMode>,
+        mode_choice: ModeChoice,
+        min: u32,
+        max: u32,
+    },
     /// CR 601.2f: `player` cast a spell (`stack_id`) and must pay via
     /// `submit_payment`. A sub-decision with its own entry point.
-    AwaitingPayment { player: PlayerId, stack_id: ObjectId },
+    AwaitingPayment {
+        player: PlayerId,
+        stack_id: ObjectId,
+    },
     /// CR 700.2e: a modal spell (`stack_id`) reached resolution with its mode choice
     /// deferred to `player`, who picks between `min` and `max` modes via
     /// `submit_mode_choice`.
-    AwaitingModeChoice { player: PlayerId, stack_id: ObjectId, min: u32, max: u32 },
+    AwaitingModeChoice {
+        player: PlayerId,
+        stack_id: ObjectId,
+        min: u32,
+        max: u32,
+    },
     /// CR 514.1: `player`'s hand exceeds `max_hand_size`; they discard the excess via
     /// `submit_discard`.
-    AwaitingDiscard { player: PlayerId, hand_size: usize, max_hand_size: usize },
+    AwaitingDiscard {
+        player: PlayerId,
+        hand_size: usize,
+        max_hand_size: usize,
+    },
     /// A broken engine invariant. Fatal: the state may be half-changed and the host
     /// must stop using the engine. A bad input is rejected up front and never lands
     /// here. A script error during resolution is logged as a `ScriptError` event instead.
     Error(Internal),
-    GameOver { winner: Option<PlayerId> },
+    GameOver {
+        winner: Option<PlayerId>,
+    },
     /// CR 103.5: `player` keeps or mulligans via `submit_mulligan_decision`.
-    AwaitingMulliganDecision { player: PlayerId },
+    AwaitingMulliganDecision {
+        player: PlayerId,
+    },
     /// CR 103.5: `player` bottoms `count` cards via `submit_bottom_cards`.
-    AwaitingBottomCardChoice { player: PlayerId, count: usize },
+    AwaitingBottomCardChoice {
+        player: PlayerId,
+        count: usize,
+    },
 }
 
 /// Result of one `step()`. `events_added` indexes into the ledger rather than
@@ -140,11 +248,16 @@ pub enum ScriptedZoneMoveKind {
     Mill,
     /// CR 110.2a, 400.7: graveyard or exile to battlefield. `controller` is who it
     /// enters under (`None` is the owner); `tapped` enters it tapped.
-    Reanimate { controller: Option<PlayerId>, tapped: bool },
+    Reanimate {
+        controller: Option<PlayerId>,
+        tapped: bool,
+    },
     /// CR 610.3: `Exile` that also links each card landing in exile to
     /// `source`, so it returns once `source` leaves the battlefield
     /// (`GameState::linked_exiles`). Battlefield sources only.
-    ExileUntilLeaves { source: ObjectId },
+    ExileUntilLeaves {
+        source: ObjectId,
+    },
 }
 
 impl ScriptedZoneMoveKind {
@@ -152,11 +265,18 @@ impl ScriptedZoneMoveKind {
     /// take the zone the target actually sits in.
     pub(in crate::engine) fn accepts_source_zone(self, zone: ZoneKind) -> bool {
         match self {
-            ScriptedZoneMoveKind::Exile => matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard),
-            ScriptedZoneMoveKind::Bounce => {
-                matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard | ZoneKind::Exile)
+            ScriptedZoneMoveKind::Exile => {
+                matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard)
             }
-            ScriptedZoneMoveKind::Reanimate { .. } => matches!(zone, ZoneKind::Graveyard | ZoneKind::Exile),
+            ScriptedZoneMoveKind::Bounce => {
+                matches!(
+                    zone,
+                    ZoneKind::Battlefield | ZoneKind::Graveyard | ZoneKind::Exile
+                )
+            }
+            ScriptedZoneMoveKind::Reanimate { .. } => {
+                matches!(zone, ZoneKind::Graveyard | ZoneKind::Exile)
+            }
             other => zone == other.source_zone(),
         }
     }
@@ -171,9 +291,7 @@ impl ScriptedZoneMoveKind {
             | ScriptedZoneMoveKind::Sacrifice
             | ScriptedZoneMoveKind::Exile
             | ScriptedZoneMoveKind::ExileUntilLeaves { .. }
-            | ScriptedZoneMoveKind::Bounce => {
-                ZoneKind::Battlefield
-            }
+            | ScriptedZoneMoveKind::Bounce => ZoneKind::Battlefield,
         }
     }
 }
@@ -196,7 +314,11 @@ pub enum ScriptedZoneMoveThen {
     },
     /// Chains a second batch of a different kind after the first fully settles,
     /// since `continue_scripted_zone_move` drains one kind per call.
-    ThenScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, then: Box<ScriptedZoneMoveThen> },
+    ThenScriptedZoneMove {
+        kind: ScriptedZoneMoveKind,
+        remaining: VecDeque<ObjectId>,
+        then: Box<ScriptedZoneMoveThen>,
+    },
     /// CR 610.3: linked-exile returns end an `SbaLoop` pass, so the loop starts
     /// again afterwards. `trailing` events are logged first.
     // TODO: the cleanup-step SBA check (`finish_cleanup_sba_check`) doesn't return linked exiles
@@ -219,16 +341,28 @@ pub struct PendingZoneMove {
 #[allow(clippy::large_enum_variant)]
 pub enum ReplacementResumeTarget {
     /// A command's proposed events; `remaining` and `checked` carry the run.
-    ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
+    ReplacementCheck {
+        remaining: VecDeque<GameEventKind>,
+        checked: Vec<GameEventKind>,
+    },
     /// Inside an SBA pass (CR 614.13). `pending_deaths` is the rest of the list and
     /// `then` names the pass that started it. `is_destroy` is the paused event's
     /// destroy tag (CR 614.8), already popped so it can't be re-derived.
-    SbaDeath { pending_deaths: VecDeque<sba::DyingCandidate>, is_destroy: bool, then: SbaResumeThen },
+    SbaDeath {
+        pending_deaths: VecDeque<sba::DyingCandidate>,
+        is_destroy: bool,
+        then: SbaResumeThen,
+    },
     /// A scripted zone-move op inside `ResolveStackTop`, or a devour sacrifice raised
     /// mid-search. Each target proposes and commits independently, so `remaining` is
     /// the targets not yet proposed. `then` says what follows. `trailing` holds events
     /// still owed once every target is processed (CR 702.82a).
-    ScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, then: ScriptedZoneMoveThen, trailing: Vec<GameEventKind> },
+    ScriptedZoneMove {
+        kind: ScriptedZoneMoveKind,
+        remaining: VecDeque<ObjectId>,
+        then: ScriptedZoneMoveThen,
+        trailing: Vec<GameEventKind>,
+    },
     /// A sacrifice or discard cost payment. `remaining` is the rest of the queue,
     /// `payer` is for the final `CostPaid`, and `on_paid` rides through so a
     /// self-sacrificing mana ability still adds its mana afterwards.
@@ -242,14 +376,24 @@ pub enum ReplacementResumeTarget {
     },
     /// The cleanup hand-size discard. `since_ledger` predates the first committed
     /// card so the trigger window still sees the whole discard.
-    CleanupDiscard { remaining: VecDeque<PendingZoneMove>, since_ledger: usize },
+    CleanupDiscard {
+        remaining: VecDeque<PendingZoneMove>,
+        since_ledger: usize,
+    },
     /// The decline branch of madness (CR 702.35a): one proposal, not a queue.
     /// `stack_id` and `events_so_far` fold into the normal tail once it resolves.
-    MadnessDecline { card: ObjectId, stack_id: ObjectId, events_so_far: Vec<GameEventKind> },
+    MadnessDecline {
+        card: ObjectId,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+    },
     /// The draw step's turn-based draw (CR 504.1): one proposal. `tail_events` are
     /// the step markers still unlogged. `since_ledger` predates the draw so the
     /// trigger window covers both.
-    Draw { tail_events: Vec<GameEventKind>, since_ledger: usize },
+    Draw {
+        tail_events: Vec<GameEventKind>,
+        since_ledger: usize,
+    },
     /// A scripted `DrawCards(n)` (CR 121): `remaining` draws are left after the
     /// paused one. The draws commit inline so they aren't re-checked; `events_so_far`
     /// reaches the normal pipeline afterwards.
@@ -272,7 +416,11 @@ pub enum ReplacementResumeTarget {
     /// entering permanent. Nothing has moved yet, so the whole popped `top` is
     /// carried. `legal_targets` is its rechecked list (CR 608.2b), for the Aura
     /// attach step. Resumed by `continue_permanent_entry`.
-    PermanentEntry { top: StackObject, legal_targets: Vec<Target>, events: Vec<GameEventKind> },
+    PermanentEntry {
+        top: StackObject,
+        legal_targets: Vec<Target>,
+        events: Vec<GameEventKind>,
+    },
 }
 
 /// CR 101.4: the rest of a `ForEachPlayer` loop once the current player's choice is
@@ -310,7 +458,10 @@ pub enum ProcessState {
     ResolveStackTop,
     /// Proposed events awaiting replacement checks (CR 614-616). `checked` holds
     /// those already resolved; `remaining` is a queue so processing keeps its order.
-    ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
+    ReplacementCheck {
+        remaining: VecDeque<GameEventKind>,
+        checked: Vec<GameEventKind>,
+    },
     /// CR 616.1: `pending_event` matched several effects and `affected_player` picks
     /// which applies first. `excluded` carries the effects already applied to this
     /// event. `resume` says what follows the answer, the only difference between the
@@ -324,13 +475,25 @@ pub enum ProcessState {
     },
     /// CR 704.5j: `player` keeps one of `candidates`. `then` names the SBA pass that
     /// raised it; the losers resolve through `resume_sba_death`.
-    AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId>, then: SbaResumeThen },
+    AwaitingLegendRuleChoice {
+        player: PlayerId,
+        candidates: Vec<ObjectId>,
+        then: SbaResumeThen,
+    },
     /// CR 903.9a: `commander` sits in a graveyard or exile and `player` hasn't been
     /// offered the return. `then` is as above.
-    AwaitingCommanderReturnChoice { player: PlayerId, commander: ObjectId, then: SbaResumeThen },
+    AwaitingCommanderReturnChoice {
+        player: PlayerId,
+        commander: ObjectId,
+        then: SbaResumeThen,
+    },
     /// CR 303.4d: several candidates for one Aura. It has no `then` because no
     /// producer dictates a pipeline, so the answer resumes `PriorityWindow`.
-    AwaitingAttachChoice { aura: ObjectId, controller: PlayerId, candidates: Vec<ObjectId> },
+    AwaitingAttachChoice {
+        aura: ObjectId,
+        controller: PlayerId,
+        candidates: Vec<ObjectId>,
+    },
     /// CR 303.4f: a found Aura, Equipment or Fortification entering through a
     /// search has 2+ legal attach candidates; `controller` picks. The search's loop
     /// state rides along for the resume, and `attaching` is already on the
@@ -513,10 +676,14 @@ pub enum ProcessState {
         destination: SearchDestination,
         shuffle_after: bool,
     },
-    CommitEvents { checked: Vec<GameEventKind> },
+    CommitEvents {
+        checked: Vec<GameEventKind>,
+    },
     /// CR 704.3
     SbaLoop,
-    CollectTriggers { since: usize },
+    CollectTriggers {
+        since: usize,
+    },
     /// Triggers grouped in APNAP order (`group_apnap`), waiting for the stack.
     /// `ordered` holds finalized groups; `pending_groups` is a queue so APNAP order holds.
     PutTriggersApnap {
@@ -560,12 +727,21 @@ pub enum ProcessState {
     /// CR 500-514: all players passed with an empty stack; advance the turn position.
     AdvanceTurnStep,
     /// CR 103.5: pregame mulligan round. Players are polled in turn order.
-    AwaitingMulliganDecision { player: PlayerId },
+    AwaitingMulliganDecision {
+        player: PlayerId,
+    },
     /// CR 103.5: `player` bottoms `count` cards (paid mulligans beyond
     /// `free_mulligans`). `remaining` is the rest of the queue.
-    AwaitingBottomCardChoice { player: PlayerId, count: usize, remaining: VecDeque<(PlayerId, usize)> },
+    AwaitingBottomCardChoice {
+        player: PlayerId,
+        count: usize,
+        remaining: VecDeque<(PlayerId, usize)>,
+    },
     /// CR 514.1: awaiting `submit_discard` for `excess` cards.
-    AwaitingDiscard { player: PlayerId, excess: usize },
+    AwaitingDiscard {
+        player: PlayerId,
+        excess: usize,
+    },
     /// CR 514.3: cleanup's turn-based actions are done. Runs one SBA pass, then
     /// routes through trigger collection (via `CleanupCheck`) to decide whether
     /// priority opens or the turn advances silently.
@@ -582,9 +758,16 @@ pub enum ProcessState {
     },
     /// CR 700.2e: the top stack object's `pending_mode_choice` is still set;
     /// `chooser` submits between `min` and `max` modes via `submit_mode_choice`.
-    AwaitingModeChoice { stack_id: ObjectId, chooser: PlayerId, min: u32, max: u32 },
+    AwaitingModeChoice {
+        stack_id: ObjectId,
+        chooser: PlayerId,
+        min: u32,
+        max: u32,
+    },
     /// CR 104.2a: at most one player remains; `winner` is `None` if the last
     /// players were eliminated together (CR 104.4a). Terminal: `step()` returns
     /// `GameOver` without mutating anything.
-    GameOver { winner: Option<PlayerId> },
+    GameOver {
+        winner: Option<PlayerId>,
+    },
 }

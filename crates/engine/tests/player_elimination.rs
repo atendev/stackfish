@@ -3,7 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
@@ -28,7 +28,9 @@ fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -71,7 +73,17 @@ fn two_player_state() -> GameState {
     GameState {
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Library,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+                ZoneKind::Exile,
+            ],
+        ))
     }
 }
 
@@ -82,9 +94,21 @@ fn three_player_state() -> GameState {
     state.players.push(player_state(p2, 20));
     state.turn_order.push(p2);
     state.last_active_turn_number.insert(p2, 1);
-    state.zones.push(Zone { kind: ZoneKind::Library, owner: Some(p2), contents: VecDeque::new() });
-    state.zones.push(Zone { kind: ZoneKind::Hand, owner: Some(p2), contents: VecDeque::new() });
-    state.zones.push(Zone { kind: ZoneKind::Graveyard, owner: Some(p2), contents: VecDeque::new() });
+    state.zones.push(Zone {
+        kind: ZoneKind::Library,
+        owner: Some(p2),
+        contents: VecDeque::new(),
+    });
+    state.zones.push(Zone {
+        kind: ZoneKind::Hand,
+        owner: Some(p2),
+        contents: VecDeque::new(),
+    });
+    state.zones.push(Zone {
+        kind: ZoneKind::Graveyard,
+        owner: Some(p2),
+        contents: VecDeque::new(),
+    });
     state
 }
 
@@ -97,7 +121,10 @@ fn put_in_zone(state: &mut GameState, object: GameObject, owner: Option<PlayerId
 
 fn pass(engine: &mut Engine, player: PlayerId) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
         .expect("player holds priority");
     drain(engine)
 }
@@ -122,7 +149,12 @@ fn two_player_zero_life_ends_the_game_and_then_stays_ended() {
     let status_again = engine.step().status;
     assert!(matches!(status_again, StepStatus::GameOver { winner: Some(w) } if w == p0));
     assert!(
-        engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).is_err(),
+        engine
+            .submit_action(PlayerAction {
+                player: p0,
+                kind: PlayerActionKind::PassPriority
+            })
+            .is_err(),
         "a finished game shouldn't accept further actions"
     );
 }
@@ -156,8 +188,14 @@ fn single_player_fixture_never_triggers_game_over() {
     let mut engine = Engine::new(state);
     let status = pass(&mut engine, p0);
 
-    assert!(!matches!(status, StepStatus::GameOver { .. }), "got {status:?}");
-    assert!(engine.state().player(p0).unwrap().eliminated, "the SBA itself is unrelated, still fires");
+    assert!(
+        !matches!(status, StepStatus::GameOver { .. }),
+        "got {status:?}"
+    );
+    assert!(
+        engine.state().player(p0).unwrap().eliminated,
+        "the SBA itself is unrelated, still fires"
+    );
 }
 
 #[test]
@@ -189,7 +227,10 @@ fn end_of_turn_rotation_skips_an_already_eliminated_player() {
 
     let mut engine = Engine::new(state);
     let status = pass(&mut engine, p0);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p2), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p2),
+        "got {status:?}"
+    );
     let status = pass(&mut engine, p2);
 
     assert!(
@@ -207,7 +248,11 @@ fn eliminated_players_battlefield_permanent_leaves_the_game_without_a_dies_trigg
     let mut state = two_player_state();
     let p1 = PlayerId(1);
     let creature = ObjectId(0);
-    put_in_zone(&mut state, card_object(creature, creature_definition(), p1, ZoneKind::Battlefield), None);
+    put_in_zone(
+        &mut state,
+        card_object(creature, creature_definition(), p1, ZoneKind::Battlefield),
+        None,
+    );
     state.abilities.push(dies_ability(creature));
     state.player_mut(p1).unwrap().life = 0;
 
@@ -216,9 +261,21 @@ fn eliminated_players_battlefield_permanent_leaves_the_game_without_a_dies_trigg
         panic!("fixture didn't expect a choice pause");
     };
 
-    assert!(state.object(creature).is_none(), "800.4a: the object itself is gone, not just relocated");
-    assert!(!state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&creature));
-    assert!(state.abilities.is_empty(), "its Triggered ability is purged along with it");
+    assert!(
+        state.object(creature).is_none(),
+        "800.4a: the object itself is gone, not just relocated"
+    );
+    assert!(
+        !state
+            .zone(ZoneKind::Battlefield, None)
+            .unwrap()
+            .contents
+            .contains(&creature)
+    );
+    assert!(
+        state.abilities.is_empty(),
+        "its Triggered ability is purged along with it"
+    );
     // CR 800.4d: a trigger controlled by a player who left never goes on the stack, so no Dies trigger fires for it.
     assert!(departed.is_empty());
 }
@@ -230,16 +287,36 @@ fn eliminated_players_hand_and_library_are_emptied() {
     let p1 = PlayerId(1);
     let in_hand = ObjectId(0);
     let in_library = ObjectId(1);
-    put_in_zone(&mut state, card_object(in_hand, creature_definition(), p1, ZoneKind::Hand), Some(p1));
-    put_in_zone(&mut state, card_object(in_library, creature_definition(), p1, ZoneKind::Library), Some(p1));
+    put_in_zone(
+        &mut state,
+        card_object(in_hand, creature_definition(), p1, ZoneKind::Hand),
+        Some(p1),
+    );
+    put_in_zone(
+        &mut state,
+        card_object(in_library, creature_definition(), p1, ZoneKind::Library),
+        Some(p1),
+    );
     state.player_mut(p1).unwrap().life = 0;
 
     let _ = check_state_based_actions(&mut state, &ScriptRuntime::new());
 
     assert!(state.object(in_hand).is_none());
     assert!(state.object(in_library).is_none());
-    assert!(state.zone(ZoneKind::Hand, Some(p1)).unwrap().contents.is_empty());
-    assert!(state.zone(ZoneKind::Library, Some(p1)).unwrap().contents.is_empty());
+    assert!(
+        state
+            .zone(ZoneKind::Hand, Some(p1))
+            .unwrap()
+            .contents
+            .is_empty()
+    );
+    assert!(
+        state
+            .zone(ZoneKind::Library, Some(p1))
+            .unwrap()
+            .contents
+            .is_empty()
+    );
     // p0's own zones are untouched - this isn't a blanket wipe.
     assert!(state.player(p0).is_some());
 }
@@ -250,13 +327,26 @@ fn a_non_eliminated_players_objects_are_untouched() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let survivor = ObjectId(0);
-    put_in_zone(&mut state, card_object(survivor, creature_definition(), p0, ZoneKind::Battlefield), None);
+    put_in_zone(
+        &mut state,
+        card_object(survivor, creature_definition(), p0, ZoneKind::Battlefield),
+        None,
+    );
     state.player_mut(p1).unwrap().life = 0;
 
     let _ = check_state_based_actions(&mut state, &ScriptRuntime::new());
 
-    assert!(state.object(survivor).is_some(), "p0 wasn't eliminated - their permanent must stay");
-    assert!(state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&survivor));
+    assert!(
+        state.object(survivor).is_some(),
+        "p0 wasn't eliminated - their permanent must stay"
+    );
+    assert!(
+        state
+            .zone(ZoneKind::Battlefield, None)
+            .unwrap()
+            .contents
+            .contains(&survivor)
+    );
 }
 
 // CR 800.4a
@@ -290,7 +380,10 @@ fn an_eliminated_players_owned_spell_leaves_the_stack_even_if_controlled_by_some
 
     let _ = check_state_based_actions(&mut state, &ScriptRuntime::new());
 
-    assert!(state.stack.is_empty(), "p0 owns the spell, so it leaves the game with them even though p1 controls it");
+    assert!(
+        state.stack.is_empty(),
+        "p0 owns the spell, so it leaves the game with them even though p1 controls it"
+    );
 }
 
 #[test]
@@ -323,7 +416,10 @@ fn a_spell_merely_controlled_not_owned_by_an_eliminated_player_stays_on_the_stac
 
     let _ = check_state_based_actions(&mut state, &ScriptRuntime::new());
 
-    assert!(!state.stack.is_empty(), "p1 (still in the game) owns the spell - it must stay regardless of who controls it");
+    assert!(
+        !state.stack.is_empty(),
+        "p1 (still in the game) owns the spell - it must stay regardless of who controls it"
+    );
 }
 
 #[test]
@@ -357,5 +453,8 @@ fn an_eliminated_players_controlled_ability_leaves_the_stack_even_if_owned_by_so
 
     let _ = check_state_based_actions(&mut state, &ScriptRuntime::new());
 
-    assert!(state.stack.is_empty(), "p0 controls the ability, so it ceases to exist with them even though p1 owns its source");
+    assert!(
+        state.stack.is_empty(),
+        "p0 controls the ability, so it ceases to exist with them even though p1 owns its source"
+    );
 }

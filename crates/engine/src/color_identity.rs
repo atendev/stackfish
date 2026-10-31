@@ -18,7 +18,9 @@ pub fn color_identity(card: &CardDefinition) -> ColorSet {
 
 /// CR 702.124c: the union of every commander's color identity.
 pub fn commander_color_identity(commanders: &[CardDefinition]) -> ColorSet {
-    commanders.iter().fold(ColorSet::empty(), |acc, c| acc | color_identity(c))
+    commanders
+        .iter()
+        .fold(ColorSet::empty(), |acc, c| acc | color_identity(c))
 }
 
 /// CR 903.5c: every card whose color identity is not a subset of `commander_identity`.
@@ -27,7 +29,10 @@ pub fn illegal_cards_for_color_identity(
     commander_identity: ColorSet,
     cards: &[CardDefinition],
 ) -> Vec<&CardDefinition> {
-    cards.iter().filter(|c| !commander_identity.contains(color_identity(c))).collect()
+    cards
+        .iter()
+        .filter(|c| !commander_identity.contains(color_identity(c)))
+        .collect()
 }
 
 /// CR 903.4c: strips every `(...)` span. Reminder text never nests, so a flat depth counter works.
@@ -63,10 +68,9 @@ fn mana_symbol_groups(text: &str) -> Vec<ColorSet> {
             }
             inner.push(c);
         }
-        if closed
-            && let Ok(cost) = ManaCost::parse(&format!("{{{inner}}}")) {
-                groups.push(cost.colors());
-            }
+        if closed && let Ok(cost) = ManaCost::parse(&format!("{{{inner}}}")) {
+            groups.push(cost.colors());
+        }
     }
     groups
 }
@@ -81,7 +85,9 @@ mod tests {
         CardDefinition {
             definition_id: 1,
             name: name.to_string(),
-            mana_cost: ManaCost { symbols: Vec::new() },
+            mana_cost: ManaCost {
+                symbols: Vec::new(),
+            },
             color_indicator: None,
             supertypes: SupertypeSet::empty(),
             card_types: crate::types::card::CardTypeSet::CREATURE,
@@ -126,14 +132,20 @@ mod tests {
     #[test]
     fn color_identity_uses_color_indicator_when_present() {
         // CR 105.2a: a color indicator overrides the mana-cost color.
-        let card = with_indicator(with_mana_cost(card_named("Blue-ish"), "{1}{R}"), ColorSet::BLUE);
+        let card = with_indicator(
+            with_mana_cost(card_named("Blue-ish"), "{1}{R}"),
+            ColorSet::BLUE,
+        );
         assert_eq!(color_identity(&card), ColorSet::BLUE);
     }
 
     #[test]
     fn color_identity_includes_rules_text_symbols() {
         // "Flying" carries no mana symbols; "{T}: Add {G}" does.
-        let card = with_text(with_mana_cost(card_named("Birds of Paradise-ish"), "{G}"), "{T}: Add {W}.");
+        let card = with_text(
+            with_mana_cost(card_named("Birds of Paradise-ish"), "{G}"),
+            "{T}: Add {W}.",
+        );
         assert_eq!(color_identity(&card), ColorSet::GREEN | ColorSet::WHITE);
     }
 
@@ -145,7 +157,10 @@ mod tests {
             "(This spell costs {U} more to cast.) {T}: Add {R}.",
         );
         // Mana cost gives W|B; rules text gives only {R} after stripping parentheses.
-        assert_eq!(color_identity(&card), ColorSet::WHITE | ColorSet::BLACK | ColorSet::RED);
+        assert_eq!(
+            color_identity(&card),
+            ColorSet::WHITE | ColorSet::BLACK | ColorSet::RED
+        );
     }
 
     #[test]
@@ -159,7 +174,10 @@ mod tests {
 
     #[test]
     fn color_identity_ignores_malformed_groups() {
-        let card = with_text(with_mana_cost(card_named("Malformed"), "{1}"), "{T}: Add {Q}.");
+        let card = with_text(
+            with_mana_cost(card_named("Malformed"), "{1}"),
+            "{T}: Add {Q}.",
+        );
         // {Q} is not a known symbol, so it is skipped.
         assert_eq!(color_identity(&card), ColorSet::empty());
     }
@@ -168,7 +186,10 @@ mod tests {
     fn commander_color_identity_unions_commanders() {
         let red = with_mana_cost(card_named("Red"), "{R}");
         let blue = with_mana_cost(card_named("Blue"), "{U}");
-        assert_eq!(commander_color_identity(&[red, blue]), ColorSet::RED | ColorSet::BLUE);
+        assert_eq!(
+            commander_color_identity(&[red, blue]),
+            ColorSet::RED | ColorSet::BLUE
+        );
     }
 
     #[test]

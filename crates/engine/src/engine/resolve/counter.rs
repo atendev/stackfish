@@ -32,18 +32,33 @@ impl Engine {
     /// A target already gone is a silent no-op. That is reachable from the decline
     /// path, since the target can resolve while the engine sits paused.
     // TODO: re-check legality on resume from `AwaitingUnlessPaidChoice`
-    pub(in crate::engine) fn counter_stack_object(&mut self, target_id: ObjectId, events: &mut Vec<GameEventKind>) {
-        let Some(pos) = self.state.stack.iter().position(|so| so.stack_id == target_id) else {
+    pub(in crate::engine) fn counter_stack_object(
+        &mut self,
+        target_id: ObjectId,
+        events: &mut Vec<GameEventKind>,
+    ) {
+        let Some(pos) = self
+            .state
+            .stack
+            .iter()
+            .position(|so| so.stack_id == target_id)
+        else {
             return;
         };
         let countered: StackObject = self.state.stack.remove(pos);
         if matches!(countered.kind, StackEntryKind::Spell) {
-            let destination = if countered.exile_on_leaving_stack { ZoneKind::Exile } else { ZoneKind::Graveyard };
+            let destination = if countered.exile_on_leaving_stack {
+                ZoneKind::Exile
+            } else {
+                ZoneKind::Graveyard
+            };
             if let Some(event) = self.move_resolving_spell(target_id, destination, false, false) {
                 events.push(event);
             }
         }
-        events.push(GameEventKind::Countered { stack_id: target_id });
+        events.push(GameEventKind::Countered {
+            stack_id: target_id,
+        });
     }
 
     /// CR 701.6a: unconditionally counters the target.
@@ -75,8 +90,12 @@ impl Engine {
                     return ControlFlow::Continue(events);
                 };
                 // Defensive: the target left the stack after `target_is_legal` rechecked it.
-                let Some(payer) =
-                    self.state.stack.iter().find(|so| so.stack_id == target_id).map(|so| so.controller)
+                let Some(payer) = self
+                    .state
+                    .stack
+                    .iter()
+                    .find(|so| so.stack_id == target_id)
+                    .map(|so| so.controller)
                 else {
                     return ControlFlow::Continue(events);
                 };
@@ -94,6 +113,10 @@ impl Engine {
             stack_id: top.stack_id,
             events_so_far: events,
         };
-        ControlFlow::Break(StepStatus::AwaitingUnlessPaidChoice { payer, cost: cost.clone(), otherwise: otherwise.clone() })
+        ControlFlow::Break(StepStatus::AwaitingUnlessPaidChoice {
+            payer,
+            cost: cost.clone(),
+            otherwise: otherwise.clone(),
+        })
     }
 }

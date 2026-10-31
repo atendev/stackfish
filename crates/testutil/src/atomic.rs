@@ -55,13 +55,22 @@ pub fn snapshot_diff(before: &EngineSnapshot, after: &EngineSnapshot) -> Vec<Str
         parts.push("state (a field missing from snapshot_diff)".to_string());
     }
     if before.next_command_id != after.next_command_id {
-        parts.push(format!("next_command_id {} -> {}", before.next_command_id, after.next_command_id));
+        parts.push(format!(
+            "next_command_id {} -> {}",
+            before.next_command_id, after.next_command_id
+        ));
     }
     if before.script_handles != after.script_handles {
-        parts.push(format!("script_handles {} -> {}", before.script_handles, after.script_handles));
+        parts.push(format!(
+            "script_handles {} -> {}",
+            before.script_handles, after.script_handles
+        ));
     }
     if before.transient != after.transient {
-        parts.push(format!("engine fields:\n  before: {}\n  after:  {}", before.transient, after.transient));
+        parts.push(format!(
+            "engine fields:\n  before: {}\n  after:  {}",
+            before.transient, after.transient
+        ));
     }
     parts
 }
@@ -69,12 +78,20 @@ pub fn snapshot_diff(before: &EngineSnapshot, after: &EngineSnapshot) -> Vec<Str
 /// Panics, naming what changed, unless `engine` matches `before` exactly.
 pub fn assert_unchanged(before: &EngineSnapshot, engine: &Engine, context: &str) {
     let diff = snapshot_diff(before, &engine.snapshot());
-    assert!(diff.is_empty(), "{context}: a rejected input changed the engine: {}", diff.join(", "));
+    assert!(
+        diff.is_empty(),
+        "{context}: a rejected input changed the engine: {}",
+        diff.join(", ")
+    );
 }
 
 /// Runs `f`, then asserts the engine is exactly as it was before. Returns
 /// what `f` returned so the caller can also check the rejection itself.
-pub fn assert_unchanged_after<R>(engine: &mut Engine, context: &str, f: impl FnOnce(&mut Engine) -> R) -> R {
+pub fn assert_unchanged_after<R>(
+    engine: &mut Engine,
+    context: &str,
+    f: impl FnOnce(&mut Engine) -> R,
+) -> R {
     let before = engine.snapshot();
     let result = f(engine);
     assert_unchanged(&before, engine, context);
@@ -83,11 +100,17 @@ pub fn assert_unchanged_after<R>(engine: &mut Engine, context: &str, f: impl FnO
 
 /// Submits `action` and asserts `submit_action` refuses it and changes nothing.
 /// Rejection must happen at submit time, so an action that gets queued fails the assertion.
-pub fn assert_action_rejected(engine: &mut Engine, context: &str, action: PlayerAction) -> ActionError {
+pub fn assert_action_rejected(
+    engine: &mut Engine,
+    context: &str,
+    action: PlayerAction,
+) -> ActionError {
     let before = engine.snapshot();
     let rejected = match engine.submit_action(action) {
         Err(err) => err,
-        Ok(()) => panic!("{context}: expected submit_action to reject the action, but it was queued"),
+        Ok(()) => {
+            panic!("{context}: expected submit_action to reject the action, but it was queued")
+        }
     };
     assert_unchanged(&before, engine, context);
     rejected

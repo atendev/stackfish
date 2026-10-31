@@ -5,13 +5,15 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -32,13 +34,24 @@ fn creature_definition(name: &str) -> CardDefinition {
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId, controlled_since_turn: u32) -> GameObject {
-    GameObject { controlled_since_turn, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
+fn permanent(
+    id: ObjectId,
+    definition: CardDefinition,
+    owner: PlayerId,
+    controlled_since_turn: u32,
+) -> GameObject {
+    GameObject {
+        controlled_since_turn,
+        ..card_object(id, definition, owner, ZoneKind::Battlefield)
+    }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -46,7 +59,15 @@ fn gain_control(source: ObjectId, new_controller: PlayerId) -> ContinuousEffect 
     ContinuousEffect {
         source,
         layer: Layer::ControlChangingEffects,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
         effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -54,8 +75,10 @@ fn gain_control(source: ObjectId, new_controller: PlayerId) -> ContinuousEffect 
     }
 }
 
-
-fn control_changed_combat_state(p0_last_active_turn: u32, creature_controlled_since_turn: u32) -> (GameState, PlayerId, PlayerId, ObjectId) {
+fn control_changed_combat_state(
+    p0_last_active_turn: u32,
+    creature_controlled_since_turn: u32,
+) -> (GameState, PlayerId, PlayerId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let creature = ObjectId(0);
@@ -67,7 +90,15 @@ fn control_changed_combat_state(p0_last_active_turn: u32, creature_controlled_si
         last_active_turn_number: HashMap::from([(p0, p0_last_active_turn), (p1, 10)]),
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
     };
-    put_on_battlefield(&mut state, permanent(creature, creature_definition("Bear"), p1, creature_controlled_since_turn));
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            creature,
+            creature_definition("Bear"),
+            p1,
+            creature_controlled_since_turn,
+        ),
+    );
     state.continuous_effects.push(gain_control(creature, p0));
     (state, p0, p1, creature)
 }
@@ -80,7 +111,9 @@ fn only_the_new_controller_can_declare_a_gain_controlled_creature_as_an_attacker
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::DeclareAttackers { attackers: vec![(creature, Target::Player(PlayerId(1)))] },
+            kind: PlayerActionKind::DeclareAttackers {
+                attackers: vec![(creature, Target::Player(PlayerId(1)))],
+            },
         })
         .expect("player holds priority");
     let status = drain(&mut engine);
@@ -88,7 +121,10 @@ fn only_the_new_controller_can_declare_a_gain_controlled_creature_as_an_attacker
         matches!(status, StepStatus::AwaitingAction { .. }),
         "p0 (the GainControl'd effective controller) should be allowed to attack with it, got {status:?}"
     );
-    assert!(engine.state().object(creature).unwrap().tapped, "attacking taps it");
+    assert!(
+        engine.state().object(creature).unwrap().tapped,
+        "attacking taps it"
+    );
 }
 
 #[test]
@@ -101,14 +137,19 @@ fn the_original_owner_can_no_longer_attack_with_a_gain_controlled_creature() {
     let mut engine = Engine::new(state);
 
     let result = engine.submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::DeclareAttackers { attackers: vec![(creature, Target::Player(PlayerId(0)))] },
-        });
+        player: p1,
+        kind: PlayerActionKind::DeclareAttackers {
+            attackers: vec![(creature, Target::Player(PlayerId(0)))],
+        },
+    });
     assert!(
         matches!(result, Err(ActionError::Rejected(_))),
         "p1 (the original owner, no longer the effective controller) must not be able to attack with it"
     );
-    assert!(!engine.state().object(creature).unwrap().tapped, "rejected declaration must not tap it");
+    assert!(
+        !engine.state().object(creature).unwrap().tapped,
+        "rejected declaration must not tap it"
+    );
 }
 
 #[test]
@@ -116,21 +157,29 @@ fn only_the_new_controller_can_declare_it_as_a_blocker() {
     let (mut state, p0, p1, creature) = control_changed_combat_state(1, 0);
     // An unrelated p0 creature attacks so p1 has something to block with. Blocking legality is not under test.
     let attacker = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Attacker"), p0, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(attacker, creature_definition("Attacker"), p0, 0),
+    );
     state.combat = Some(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: Vec::new(),
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
     state.step = Step::DeclareBlockers;
     let mut engine = Engine::new(state);
 
     // GainControl gave the creature to p0, so p1 cannot block with it even though p1 owns it.
     let result = engine.submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::DeclareBlockers { blocks: vec![(creature, attacker)] },
-        });
+        player: p1,
+        kind: PlayerActionKind::DeclareBlockers {
+            blocks: vec![(creature, attacker)],
+        },
+    });
     assert!(
         matches!(result, Err(ActionError::Rejected(_))),
         "p1 no longer effectively controls the creature and must not be able to block with it"
@@ -144,9 +193,11 @@ fn summoning_sickness_is_checked_against_the_new_controllers_last_active_turn() 
     let mut engine = Engine::new(state);
 
     let result = engine.submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::DeclareAttackers { attackers: vec![(creature, Target::Player(PlayerId(1)))] },
-        });
+        player: p0,
+        kind: PlayerActionKind::DeclareAttackers {
+            attackers: vec![(creature, Target::Player(PlayerId(1)))],
+        },
+    });
     assert!(
         matches!(result, Err(ActionError::Rejected(_))),
         "the creature should read as summoning sick under its new controller p0 (5 >= p0's own \
@@ -163,11 +214,16 @@ fn summoning_sickness_is_bypassed_when_controlled_before_the_new_controllers_own
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::DeclareAttackers { attackers: vec![(creature, Target::Player(PlayerId(1)))] },
+            kind: PlayerActionKind::DeclareAttackers {
+                attackers: vec![(creature, Target::Player(PlayerId(1)))],
+            },
         })
         .expect("player holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "got {status:?}"
+    );
 }
 
 fn control_changed_activation_state() -> (GameState, PlayerId, PlayerId, ObjectId) {
@@ -184,7 +240,11 @@ fn control_changed_activation_state() -> (GameState, PlayerId, PlayerId, ObjectI
             source,
             kind: AbilityKind::Activated,
             condition: None,
-            cost: Some(CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() }),
+            cost: Some(CostSpec {
+                mana: None,
+                additional: Vec::new(),
+                alternative: Vec::new(),
+            }),
             target: None,
             operation: ScriptHandle(0),
             effect: Some(AbilityEffect::GainLife(1)),
@@ -192,7 +252,10 @@ fn control_changed_activation_state() -> (GameState, PlayerId, PlayerId, ObjectI
         }],
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
     };
-    put_on_battlefield(&mut state, permanent(source, creature_definition("Source"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(source, creature_definition("Source"), p1, 0),
+    );
     state.continuous_effects.push(gain_control(source, p0));
     (state, p0, p1, source)
 }
@@ -215,7 +278,10 @@ fn the_new_controller_can_activate_a_gain_controlled_sources_ability() {
         })
         .expect("p0 (the effective controller) should be able to activate it");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }) || matches!(status, StepStatus::AwaitingPayment { .. }));
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. })
+            || matches!(status, StepStatus::AwaitingPayment { .. })
+    );
 }
 
 #[test]
@@ -282,8 +348,14 @@ fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
     };
     // The ability's source is p0's ordinary permanent, and only fodder (owned by p1, GainControl'd to p0) is under test.
-    put_on_battlefield(&mut state, permanent(source, creature_definition("Source"), p0, 0));
-    put_on_battlefield(&mut state, permanent(fodder, creature_definition("Fodder"), p1, 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(source, creature_definition("Source"), p0, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(fodder, creature_definition("Fodder"), p1, 0),
+    );
     state.continuous_effects.push(gain_control(fodder, p0));
 
     let mut engine = Engine::new(state);
@@ -300,10 +372,15 @@ fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
         })
         .expect("player holds priority");
     let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "got {status:?}");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "got {status:?}"
+    );
 
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(fodder)],
+        })
         .expect(
             "p0 (fodder's effective controller via GainControl, even though p1 owns it) should be \
              able to sacrifice it to pay a 'sacrifice a creature you control' cost",

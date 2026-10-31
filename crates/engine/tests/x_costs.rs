@@ -1,7 +1,7 @@
 //! CR 107.3, 601.2b: {X} costs on `CastSpell`. The announced `x_value` must agree with whether the mana cost has an `{X}`, then `ManaCost::resolve_x` substitutes it as generic before `PaymentPlan::validate`.
 
-use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, single_player_state};
@@ -35,7 +35,10 @@ fn state_with_pool(pool: ManaPool) -> GameState {
     let p0 = PlayerId(0);
     GameState {
         step: Step::Untap,
-        players: vec![PlayerState { mana_pool: pool, ..stackfish_testutil::player_state(p0) }],
+        players: vec![PlayerState {
+            mana_pool: pool,
+            ..stackfish_testutil::player_state(p0)
+        }],
         ..single_player_state(
             p0,
             vec![
@@ -52,12 +55,24 @@ fn x_spell_cast_with_announced_value_is_payable() {
     let p0 = PlayerId(0);
     let card = ObjectId(0);
     let mana_cost = ManaCost {
-        symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+        symbols: vec![
+            ManaSymbol::X,
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+        ],
     };
-    let mut state =
-        state_with_pool(ManaPool { red: 1, colorless: 3, ..ManaPool::default() });
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mut state = state_with_pool(ManaPool {
+        red: 1,
+        colorless: 3,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        card,
+        card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     engine
@@ -68,7 +83,8 @@ fn x_spell_cast_with_announced_value_is_payable() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: Some(3),
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("X announced matches the cost's {X}");
@@ -85,7 +101,12 @@ fn x_spell_cast_with_announced_value_is_payable() {
         ManaUnit::Colorless,
     ];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units,
+                phyrexian_life: 0,
+            }],
+        })
         .expect("3 generic (for X=3) + 1 red covers {X}{R} exactly");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
@@ -101,21 +122,48 @@ fn x_spell_cast_without_announcing_x_is_rejected() {
     let p0 = PlayerId(0);
     let card = ObjectId(0);
     let mana_cost = ManaCost {
-        symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+        symbols: vec![
+            ManaSymbol::X,
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+        ],
     };
-    let mut state = state_with_pool(ManaPool { red: 1, colorless: 3, ..ManaPool::default() });
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mut state = state_with_pool(ManaPool {
+        red: 1,
+        colorless: 3,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        card,
+        card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     let err = engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
-    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "card never left hand");
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
+    assert_eq!(
+        engine.state().object(card).unwrap().zone,
+        ZoneKind::Hand,
+        "card never left hand"
+    );
 }
 
 // Announcing X for a spell whose cost has no {X} is rejected.
@@ -123,10 +171,21 @@ fn x_spell_cast_without_announcing_x_is_rejected() {
 fn announcing_x_for_a_non_x_spell_is_rejected() {
     let p0 = PlayerId(0);
     let card = ObjectId(0);
-    let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
-    let mut state = state_with_pool(ManaPool { red: 1, ..ManaPool::default() });
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    let mana_cost = ManaCost {
+        symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+    };
+    let mut state = state_with_pool(ManaPool {
+        red: 1,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        card,
+        card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     let err = engine
@@ -137,11 +196,15 @@ fn announcing_x_for_a_non_x_spell_is_rejected() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: Some(1),
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .unwrap_err();
-    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
+    assert!(matches!(
+        err,
+        ActionError::Rejected(Rejected::IllegalAction(_))
+    ));
 }
 
 // CR 107.3, 118.5a
@@ -150,10 +213,18 @@ fn announcing_x_for_a_non_x_spell_is_rejected() {
 fn x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry() {
     let p0 = PlayerId(0);
     let card = ObjectId(0);
-    let mana_cost = ManaCost { symbols: vec![ManaSymbol::X] };
+    let mana_cost = ManaCost {
+        symbols: vec![ManaSymbol::X],
+    };
     let mut state = state_with_pool(ManaPool::default());
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     engine
@@ -164,7 +235,8 @@ fn x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: Some(0),
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("X=0 is a legal announced value");
@@ -172,7 +244,10 @@ fn x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry() {
 
     engine
         .submit_payment(PaymentPlan {
-            payments: vec![CostPayment::Mana { units: Vec::new(), phyrexian_life: 0 }],
+            payments: vec![CostPayment::Mana {
+                units: Vec::new(),
+                phyrexian_life: 0,
+            }],
         })
         .expect("X resolved to {0}, paid with an explicit empty Mana entry");
     let status = drain(&mut engine);

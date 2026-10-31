@@ -21,20 +21,36 @@ pub enum WirePayment {
         #[serde(default)]
         phyrexian_life: u32,
     },
-    Sacrifice { object: U64 },
-    Discard { object: U64 },
-    Exile { object: U64 },
-    Tap { object: U64 },
-    Life { amount: u32 },
-    Other { description: String },
+    Sacrifice {
+        object: U64,
+    },
+    Discard {
+        object: U64,
+    },
+    Exile {
+        object: U64,
+    },
+    Tap {
+        object: U64,
+    },
+    Life {
+        amount: u32,
+    },
+    Other {
+        description: String,
+    },
 }
 
 impl From<WirePayment> for CostPayment {
     fn from(payment: WirePayment) -> Self {
         match payment {
-            WirePayment::Mana { units, phyrexian_life } => {
-                CostPayment::Mana { units: units.into_iter().map(Into::into).collect(), phyrexian_life }
-            }
+            WirePayment::Mana {
+                units,
+                phyrexian_life,
+            } => CostPayment::Mana {
+                units: units.into_iter().map(Into::into).collect(),
+                phyrexian_life,
+            },
             WirePayment::Sacrifice { object } => CostPayment::Sacrifice(object.into()),
             WirePayment::Discard { object } => CostPayment::Discard(object.into()),
             WirePayment::Exile { object } => CostPayment::Exile(object.into()),
@@ -53,7 +69,9 @@ pub struct WirePlan {
 
 impl From<WirePlan> for PaymentPlan {
     fn from(plan: WirePlan) -> Self {
-        PaymentPlan { payments: plan.payments.into_iter().map(Into::into).collect() }
+        PaymentPlan {
+            payments: plan.payments.into_iter().map(Into::into).collect(),
+        }
     }
 }
 
@@ -103,7 +121,9 @@ pub enum WireAction {
         chosen_colors: Vec<WireColor>,
         x_value: Option<u32>,
     },
-    PlayLand { card: U64 },
+    PlayLand {
+        card: U64,
+    },
     PassPriority,
 }
 
@@ -111,7 +131,14 @@ impl WireAction {
     fn into_action(self, player: stackfish_engine::PlayerId) -> stackfish_engine::PlayerAction {
         use stackfish_engine::PlayerActionKind as Kind;
         let kind = match self {
-            WireAction::CastSpell { card, modes, targets, x_value, alternative_cost, pay_buyback } => Kind::CastSpell {
+            WireAction::CastSpell {
+                card,
+                modes,
+                targets,
+                x_value,
+                alternative_cost,
+                pay_buyback,
+            } => Kind::CastSpell {
                 card: card.into(),
                 modes,
                 targets: targets.into_iter().map(Into::into).collect(),
@@ -119,15 +146,19 @@ impl WireAction {
                 alternative_cost,
                 pay_buyback,
             },
-            WireAction::ActivateAbility { source, ability_index, targets, chosen_colors, x_value } => {
-                Kind::ActivateAbility {
-                    source: source.into(),
-                    ability_index,
-                    targets: targets.into_iter().map(Into::into).collect(),
-                    chosen_colors: chosen_colors.into_iter().map(Into::into).collect(),
-                    x_value,
-                }
-            }
+            WireAction::ActivateAbility {
+                source,
+                ability_index,
+                targets,
+                chosen_colors,
+                x_value,
+            } => Kind::ActivateAbility {
+                source: source.into(),
+                ability_index,
+                targets: targets.into_iter().map(Into::into).collect(),
+                chosen_colors: chosen_colors.into_iter().map(Into::into).collect(),
+                x_value,
+            },
             WireAction::PlayLand { card } => Kind::PlayLand { card: card.into() },
             WireAction::PassPriority => Kind::PassPriority,
         };
@@ -168,20 +199,45 @@ pub struct WireAssignment {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WireReply {
-    Pick { picks: Vec<WireCandidate> },
-    YesNo { value: bool },
-    Order { order: Vec<usize> },
-    Modes { modes: Vec<u32> },
-    Partition { top: Vec<U64>, rest: Vec<U64> },
+    Pick {
+        picks: Vec<WireCandidate>,
+    },
+    YesNo {
+        value: bool,
+    },
+    Order {
+        order: Vec<usize>,
+    },
+    Modes {
+        modes: Vec<u32>,
+    },
+    Partition {
+        top: Vec<U64>,
+        rest: Vec<U64>,
+    },
     /// A missing or null `plan` means the player cannot pay or declines.
-    Payment { plan: Option<WirePlan> },
-    Targets { targets: Vec<Vec<WireTarget>> },
+    Payment {
+        plan: Option<WirePlan>,
+    },
+    Targets {
+        targets: Vec<Vec<WireTarget>>,
+    },
     /// A missing or null `cast` declines.
-    MayCast { cast: Option<WireCast> },
-    Action { action: WireAction },
-    DeclareAttackers { attackers: Vec<WireAttack> },
-    DeclareBlockers { blocks: Vec<WireBlock> },
-    AssignDamage { assignments: Vec<WireAssignment> },
+    MayCast {
+        cast: Option<WireCast>,
+    },
+    Action {
+        action: WireAction,
+    },
+    DeclareAttackers {
+        attackers: Vec<WireAttack>,
+    },
+    DeclareBlockers {
+        blocks: Vec<WireBlock>,
+    },
+    AssignDamage {
+        assignments: Vec<WireAssignment>,
+    },
 }
 
 fn objects(ids: Vec<U64>) -> Vec<ObjectId> {
@@ -197,24 +253,42 @@ impl WireReply {
             WireReply::YesNo { value } => Reply::YesNo(value),
             WireReply::Order { order } => Reply::Order(order),
             WireReply::Modes { modes } => Reply::Modes(modes),
-            WireReply::Partition { top, rest } => Reply::Partition { top: objects(top), rest: objects(rest) },
+            WireReply::Partition { top, rest } => Reply::Partition {
+                top: objects(top),
+                rest: objects(rest),
+            },
             WireReply::Payment { plan } => Reply::Payment(plan.map(Into::into)),
-            WireReply::Targets { targets } => {
-                Reply::Targets(targets.into_iter().map(|word| word.into_iter().map(Into::into).collect()).collect())
-            }
+            WireReply::Targets { targets } => Reply::Targets(
+                targets
+                    .into_iter()
+                    .map(|word| word.into_iter().map(Into::into).collect())
+                    .collect(),
+            ),
             WireReply::MayCast { cast } => Reply::MayCast(cast.map(Into::into)),
             WireReply::Action { action } => Reply::Action(action.into_action(player)),
             WireReply::DeclareAttackers { attackers } => Reply::DeclareAttackers(
-                attackers.into_iter().map(|a| (a.attacker.into(), a.defender.into())).collect(),
+                attackers
+                    .into_iter()
+                    .map(|a| (a.attacker.into(), a.defender.into()))
+                    .collect(),
             ),
-            WireReply::DeclareBlockers { blocks } => {
-                Reply::DeclareBlockers(blocks.into_iter().map(|b| (b.blocker.into(), b.attacker.into())).collect())
-            }
+            WireReply::DeclareBlockers { blocks } => Reply::DeclareBlockers(
+                blocks
+                    .into_iter()
+                    .map(|b| (b.blocker.into(), b.attacker.into()))
+                    .collect(),
+            ),
             WireReply::AssignDamage { assignments } => Reply::AssignDamage(
                 assignments
                     .into_iter()
                     .map(|a| {
-                        (a.source.into(), a.splits.into_iter().map(|s| (s.recipient.into(), s.amount)).collect())
+                        (
+                            a.source.into(),
+                            a.splits
+                                .into_iter()
+                                .map(|s| (s.recipient.into(), s.amount))
+                                .collect(),
+                        )
                     })
                     .collect(),
             ),

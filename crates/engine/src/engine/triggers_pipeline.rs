@@ -13,7 +13,10 @@ use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::target::{TargetFilter, TargetSpec};
 
-use super::{Engine, ProcessState, StepStatus, TriggerModeChoiceError, TriggerOrderError, TriggerTargetsError};
+use super::{
+    Engine, ProcessState, StepStatus, TriggerModeChoiceError, TriggerOrderError,
+    TriggerTargetsError,
+};
 
 /// Whether `chosen` is a reordering of `group`: the same triggers, each used
 /// once. Exposed to `tests.rs`.
@@ -67,13 +70,19 @@ impl Engine {
         if !is_permutation(&chosen_order, group) {
             return Err(TriggerOrderError::NotAPermutation);
         }
-        let ProcessState::AwaitTriggerOrderChoice { mut ordered, pending_groups, .. } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitTriggerOrderChoice {
+            mut ordered,
+            pending_groups,
+            ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
         ordered.extend(chosen_order);
-        self.process_state = ProcessState::PutTriggersApnap { ordered, pending_groups };
+        self.process_state = ProcessState::PutTriggersApnap {
+            ordered,
+            pending_groups,
+        };
         Ok(())
     }
 
@@ -85,7 +94,9 @@ impl Engine {
         match std::mem::replace(&mut self.pipeline_exit, PipelineExit::BackToPriority) {
             // CR 605.3a: a nested mana ability resumes the payment it interrupted
             // instead of opening a priority window.
-            PipelineExit::BackToPriority => self.resume_suspended_payment_or(ProcessState::PriorityWindow),
+            PipelineExit::BackToPriority => {
+                self.resume_suspended_payment_or(ProcessState::PriorityWindow)
+            }
             PipelineExit::ResolveStackTop => ProcessState::ResolveStackTop,
             PipelineExit::AdvanceTurnStep => ProcessState::AdvanceTurnStep,
             PipelineExit::CleanupCheck { since_ledger } => {
@@ -129,12 +140,17 @@ impl Engine {
         // Logged after the loop releases its borrow of the ledger.
         if !script_errors.is_empty() {
             self.log_events(
-                script_errors.into_iter().map(|message| GameEventKind::ScriptError { message }).collect(),
+                script_errors
+                    .into_iter()
+                    .map(|message| GameEventKind::ScriptError { message })
+                    .collect(),
             );
         }
         let groups = triggers::group_apnap(&self.state, pending);
-        self.process_state =
-            ProcessState::PutTriggersApnap { ordered: Vec::new(), pending_groups: groups.into() };
+        self.process_state = ProcessState::PutTriggersApnap {
+            ordered: Vec::new(),
+            pending_groups: groups.into(),
+        };
         StepStatus::Progressed
     }
 
@@ -151,10 +167,17 @@ impl Engine {
         };
         if group.len() <= 1 {
             ordered.extend(group);
-            self.process_state = ProcessState::PutTriggersApnap { ordered, pending_groups };
+            self.process_state = ProcessState::PutTriggersApnap {
+                ordered,
+                pending_groups,
+            };
         } else {
-            self.process_state =
-                ProcessState::AwaitTriggerOrderChoice { player, group, ordered, pending_groups };
+            self.process_state = ProcessState::AwaitTriggerOrderChoice {
+                player,
+                group,
+                ordered,
+                pending_groups,
+            };
         }
         StepStatus::Progressed
     }
@@ -162,12 +185,19 @@ impl Engine {
     /// Pushes each trigger onto the stack, pausing on `AwaitingTriggerTargets` for
     /// the first that needs a target choice (CR 603.3d). Shared by the initial push
     /// and the resume after a target answer, so the queue survives the pause.
-    pub(super) fn push_ordered_triggers(&mut self, mut remaining: VecDeque<PendingTrigger>) -> StepStatus {
+    pub(super) fn push_ordered_triggers(
+        &mut self,
+        mut remaining: VecDeque<PendingTrigger>,
+    ) -> StepStatus {
         while let Some(trigger) = remaining.pop_front() {
             // CR 603.10: a dies or leaves trigger's source is gone from `abilities`, so
             // fall back to the departed stash.
-            let ability = commands::find_ability_by_id(&self.state, trigger.ability)
-                .or_else(|| self.departed_triggered_abilities.iter().find(|a| a.id == trigger.ability));
+            let ability =
+                commands::find_ability_by_id(&self.state, trigger.ability).or_else(|| {
+                    self.departed_triggered_abilities
+                        .iter()
+                        .find(|a| a.id == trigger.ability)
+                });
             let Some(ability) = ability else {
                 // TODO: sacrifice, discard-as-cost and other departures don't feed the departed stash, so their dies-triggers are dropped here (CR 603.3d)
                 continue;
@@ -182,9 +212,11 @@ impl Engine {
                 // trigger is skipped, since a trigger can't be rejected like a cast.
                 // TODO: three or more players, where the controller picks the chooser (CR 700.2e)
                 let chooser = match mode_choice {
-                    ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) => {
-                        let modes_ok =
-                            modes.iter().all(|m| m.target_requirement.is_none() && m.additional_cost.is_none());
+                    ModeChoice::ExactlyChosenByOpponent(_)
+                    | ModeChoice::UpToChosenByOpponent(_) => {
+                        let modes_ok = modes
+                            .iter()
+                            .all(|m| m.target_requirement.is_none() && m.additional_cost.is_none());
                         let others: Vec<PlayerId> = commands::non_eliminated_players(&self.state)
                             .into_iter()
                             .filter(|&p| p != trigger.controller)
@@ -196,8 +228,13 @@ impl Engine {
                     }
                     _ => trigger.controller,
                 };
-                self.process_state =
-                    ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining, chooser };
+                self.process_state = ProcessState::AwaitingTriggerModeChoice {
+                    trigger,
+                    modes,
+                    mode_choice,
+                    remaining,
+                    chooser,
+                };
                 return StepStatus::Progressed;
             }
             // CR 603.3d: targets are chosen before the trigger goes on the stack
@@ -205,29 +242,47 @@ impl Engine {
             // CR 702.21a: Ward targets the spell or ability that caused it, so it is
             // filled in here. If that object left the stack the trigger is removed.
             if let Some(TargetSpec::Primitive(req)) = &ability.target
-                && req.filter == TargetFilter::TriggeringStackObject {
-                    let target = trigger.triggering_stack.and_then(|id| {
-                        let so = self.state.stack.iter().find(|so| so.stack_id == id)?;
-                        Some(if commands::is_ability_stack_entry(&so.kind) { Target::Ability(id) } else { Target::Object(id) })
-                    });
-                    if let Some(target) = target {
-                        self.push_trigger_stack_object(&trigger, vec![target], None);
-                    }
-                    continue;
+                && req.filter == TargetFilter::TriggeringStackObject
+            {
+                let target = trigger.triggering_stack.and_then(|id| {
+                    let so = self.state.stack.iter().find(|so| so.stack_id == id)?;
+                    Some(if commands::is_ability_stack_entry(&so.kind) {
+                        Target::Ability(id)
+                    } else {
+                        Target::Object(id)
+                    })
+                });
+                if let Some(target) = target {
+                    self.push_trigger_stack_object(&trigger, vec![target], None);
                 }
+                continue;
+            }
             if let Some(spec) = &ability.target {
                 let spec = spec.clone();
-                let candidates =
-                    commands::legal_target_candidates_for_spec(&self.state, &self.script_runtime, &spec, trigger.controller, trigger.source);
+                let candidates = commands::legal_target_candidates_for_spec(
+                    &self.state,
+                    &self.script_runtime,
+                    &spec,
+                    trigger.controller,
+                    trigger.source,
+                );
                 let minimums = commands::target_spec_minimums(&spec);
-                let satisfiable = candidates.iter().zip(&minimums).all(|(c, &min)| c.len() as u32 >= min);
+                let satisfiable = candidates
+                    .iter()
+                    .zip(&minimums)
+                    .all(|(c, &min)| c.len() as u32 >= min);
                 if !satisfiable {
                     // CR 603.3d: no legal choice removes the ability. One empty target
                     // word voids the whole trigger (CR 601.2c).
                     continue;
                 }
-                self.process_state =
-                    ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining, modal_effect: None };
+                self.process_state = ProcessState::AwaitingTriggerTargets {
+                    trigger,
+                    spec,
+                    candidates,
+                    remaining,
+                    modal_effect: None,
+                };
                 return StepStatus::Progressed;
             }
             self.push_trigger_stack_object(&trigger, Vec::new(), None);
@@ -249,8 +304,11 @@ impl Engine {
         targets: Vec<Target>,
         modal_override: Option<(Option<TargetSpec>, Option<AbilityEffect>)>,
     ) {
-        let ability = commands::find_ability_by_id(&self.state, trigger.ability)
-            .or_else(|| self.departed_triggered_abilities.iter().find(|a| a.id == trigger.ability));
+        let ability = commands::find_ability_by_id(&self.state, trigger.ability).or_else(|| {
+            self.departed_triggered_abilities
+                .iter()
+                .find(|a| a.id == trigger.ability)
+        });
         let Some(ability) = ability else { return };
         let operation = ability.operation;
         let (target_requirement, effect) = match modal_override {
@@ -261,8 +319,11 @@ impl Engine {
         let stack_id = self.state.allocate_object_id();
         // CR 800.4a: a departed source has no live owner, so fall back to `controller`.
         let source_is_live = self.state.object(trigger.source).is_some();
-        let source_owner =
-            self.state.object(trigger.source).map(|o| o.owner).unwrap_or(trigger.controller);
+        let source_owner = self
+            .state
+            .object(trigger.source)
+            .map(|o| o.owner)
+            .unwrap_or(trigger.controller);
         // CR 603.4: only a departed source with an intervening-if needs the ledger scan.
         let source_lki = if !source_is_live && intervening_if.is_some() {
             triggers::find_departed_lki(&self.state, trigger.source)
@@ -313,18 +374,34 @@ impl Engine {
     /// Answers a trigger target pause (CR 603.3d). `chosen` is validated as a whole
     /// against the spec, like `CastSpell`. A separate entry point from
     /// `submit_action` because it answers a sub-decision.
-    pub fn submit_trigger_targets(&mut self, chosen: Vec<Target>) -> Result<(), TriggerTargetsError> {
+    pub fn submit_trigger_targets(
+        &mut self,
+        chosen: Vec<Target>,
+    ) -> Result<(), TriggerTargetsError> {
         let ProcessState::AwaitingTriggerTargets { trigger, spec, .. } = &self.process_state else {
             return Err(TriggerTargetsError::NotAwaitingChoice);
         };
         // CR 202.3: a triggered ability has no announced X, so an X bound is 0.
-        if commands::validate_targets(&self.state, &self.script_runtime, Some(spec), &chosen, trigger.controller, trigger.source, None)
-            .is_err()
+        if commands::validate_targets(
+            &self.state,
+            &self.script_runtime,
+            Some(spec),
+            &chosen,
+            trigger.controller,
+            trigger.source,
+            None,
+        )
+        .is_err()
         {
             return Err(TriggerTargetsError::InvalidTargets);
         }
-        let ProcessState::AwaitingTriggerTargets { trigger, spec, remaining, modal_effect, .. } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingTriggerTargets {
+            trigger,
+            spec,
+            remaining,
+            modal_effect,
+            ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
@@ -334,15 +411,24 @@ impl Engine {
         self.push_trigger_stack_object(&trigger, chosen, modal_override);
         // Defers `remaining` to the next `step()` through the empty-groups branch of
         // `PutTriggersApnap` instead of a third copy of the push loop.
-        self.process_state = ProcessState::PutTriggersApnap { ordered: remaining.into(), pending_groups: VecDeque::new() };
+        self.process_state = ProcessState::PutTriggersApnap {
+            ordered: remaining.into(),
+            pending_groups: VecDeque::new(),
+        };
         Ok(())
     }
 
     /// Answers a modal trigger's mode choice (CR 603.3c). Validates `chosen`
     /// against the offered bounds, combines the modes, then chains into the target
     /// pause (CR 603.3d) or pushes the ability. No legal target removes it.
-    pub fn submit_trigger_mode_choice(&mut self, chosen: Vec<u32>) -> Result<(), TriggerModeChoiceError> {
-        let ProcessState::AwaitingTriggerModeChoice { modes, mode_choice, .. } = &self.process_state else {
+    pub fn submit_trigger_mode_choice(
+        &mut self,
+        chosen: Vec<u32>,
+    ) -> Result<(), TriggerModeChoiceError> {
+        let ProcessState::AwaitingTriggerModeChoice {
+            modes, mode_choice, ..
+        } = &self.process_state
+        else {
             return Err(TriggerModeChoiceError::NotAwaitingChoice);
         };
         if let ModeChoice::PawprintBudget(budget) = mode_choice {
@@ -353,7 +439,9 @@ impl Engine {
             }
             let mut total_weight: u32 = 0;
             for &idx in &chosen {
-                let mode = modes.get(idx as usize).ok_or(TriggerModeChoiceError::NoSuchMode)?;
+                let mode = modes
+                    .get(idx as usize)
+                    .ok_or(TriggerModeChoiceError::NoSuchMode)?;
                 total_weight += mode.pawprint_weight;
             }
             if total_weight > *budget {
@@ -375,14 +463,19 @@ impl Engine {
         // CR 700.2: modes happen in printed order, not the order chosen.
         let mut chosen_indices = chosen;
         chosen_indices.sort_unstable();
-        if chosen_indices.iter().any(|&idx| modes.get(idx as usize).is_none()) {
+        if chosen_indices
+            .iter()
+            .any(|&idx| modes.get(idx as usize).is_none())
+        {
             return Err(TriggerModeChoiceError::NoSuchMode);
         }
-        let (target_requirement, effect) = commands::combine_chosen_modes(modes, &chosen_indices)
-            .map_err(|_| TriggerModeChoiceError::UnsupportedModeCombination)?;
+        let (target_requirement, effect) =
+            commands::combine_chosen_modes(modes, &chosen_indices)
+                .map_err(|_| TriggerModeChoiceError::UnsupportedModeCombination)?;
 
-        let ProcessState::AwaitingTriggerModeChoice { trigger, remaining, .. } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingTriggerModeChoice {
+            trigger, remaining, ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
@@ -396,7 +489,10 @@ impl Engine {
                 trigger.source,
             );
             let minimums = commands::target_spec_minimums(&spec);
-            let satisfiable = candidates.iter().zip(&minimums).all(|(c, &min)| c.len() as u32 >= min);
+            let satisfiable = candidates
+                .iter()
+                .zip(&minimums)
+                .all(|(c, &min)| c.len() as u32 >= min);
             if satisfiable {
                 self.process_state = ProcessState::AwaitingTriggerTargets {
                     trigger,
@@ -407,15 +503,20 @@ impl Engine {
                 };
             } else {
                 // CR 603.3d
-                self.process_state =
-                    ProcessState::PutTriggersApnap { ordered: remaining.into(), pending_groups: VecDeque::new() };
+                self.process_state = ProcessState::PutTriggersApnap {
+                    ordered: remaining.into(),
+                    pending_groups: VecDeque::new(),
+                };
             }
             return Ok(());
         }
 
         // Every chosen mode is targetless, so push immediately.
         self.push_trigger_stack_object(&trigger, Vec::new(), Some((None, effect)));
-        self.process_state = ProcessState::PutTriggersApnap { ordered: remaining.into(), pending_groups: VecDeque::new() };
+        self.process_state = ProcessState::PutTriggersApnap {
+            ordered: remaining.into(),
+            pending_groups: VecDeque::new(),
+        };
         Ok(())
     }
 }

@@ -35,7 +35,9 @@ impl Engine {
         let new_id = self.state.allocate_object_id();
         let mut new_object = graveyard_object;
         new_object.object_id = new_id;
-        new_object.lineage = ObjectLineage { previous: Some(graveyard_id) };
+        new_object.lineage = ObjectLineage {
+            previous: Some(graveyard_id),
+        };
         new_object.zone = ZoneKind::Battlefield;
         // CR 400.7: no memory of the old object; CR 800.4a: returns under its owner's control.
         new_object.reset_for_new_object();
@@ -72,7 +74,11 @@ impl Engine {
 
         // CR 702.79a: the counter is an event through the pipeline, not a direct mutation, to avoid applying it twice.
         let mut events = events;
-        events.push(GameEventKind::CounterAdded { object: new_id, kind, amount: 1 });
+        events.push(GameEventKind::CounterAdded {
+            object: new_id,
+            kind,
+            amount: 1,
+        });
         ControlFlow::Continue(events)
     }
 }

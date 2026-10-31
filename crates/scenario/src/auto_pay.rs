@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use stackfish_engine::*;
 use stackfish_engine::engine::Engine;
+use stackfish_engine::*;
 
-use crate::schema::*;
 use crate::actions::build_payment_plan;
 use crate::run::{StepOutcome, run_action, run_payment};
+use crate::schema::*;
 
 // Reduces `cost` to generic mana plus exact colored pips, the only shape a `[[cards]]` entry
 // can build. `None` for hybrid, Phyrexian, `{C}` or any non-mana component, so the caller
@@ -30,7 +30,14 @@ fn simple_mana_requirement(cost: &CostSpec) -> Option<(u32, Vec<Color>)> {
 // Counts as `[W, U, B, R, G, Colorless]`. Snow and restricted mana is ignored because a
 // fixture pool never holds it.
 fn mana_tally(pool: &ManaPool) -> [u32; 6] {
-    [pool.white, pool.blue, pool.black, pool.red, pool.green, pool.colorless]
+    [
+        pool.white,
+        pool.blue,
+        pool.black,
+        pool.red,
+        pool.green,
+        pool.colorless,
+    ]
 }
 
 fn color_slot(color: Color) -> usize {
@@ -116,8 +123,12 @@ fn pick_mana_source(
         if ability.kind != AbilityKind::Activated || ability.cost.is_some() {
             continue;
         }
-        let Some(AbilityEffect::AddMana(units)) = &ability.effect else { continue };
-        let Some(source_object) = state.object(ability.source) else { continue };
+        let Some(AbilityEffect::AddMana(units)) = &ability.effect else {
+            continue;
+        };
+        let Some(source_object) = state.object(ability.source) else {
+            continue;
+        };
         if source_object.zone != ZoneKind::Battlefield
             || source_object.tapped
             || source_object.controller != payer
@@ -127,18 +138,25 @@ fn pick_mana_source(
         candidates.push((ability.source, index, units));
     }
     if let Some(&color) = missing.first()
-        && let Some((source, index, _)) =
-            candidates.iter().find(|(_, _, units)| units.contains(&ManaUnit::Colored(color)))
-        {
-            return Some((*source, *index));
-        }
-    candidates.first().map(|(source, index, _)| (*source, *index))
+        && let Some((source, index, _)) = candidates
+            .iter()
+            .find(|(_, _, units)| units.contains(&ManaUnit::Colored(color)))
+    {
+        return Some((*source, *index));
+    }
+    candidates
+        .first()
+        .map(|(source, index, _)| (*source, *index))
 }
 
 /// Taps `payer`'s untapped no-cost mana sources until the pool covers `cost`, then returns
 /// the `PaymentPlan` to submit. It never guesses at a cost shape it does not recognize.
 // TODO: tap a mana ability that has its own cost (Treasure, Lotus Petal); `pick_mana_source` skips them
-pub(crate) fn resolve_auto_pay(engine: &mut Engine, payer: PlayerId, cost: &CostSpec) -> Result<PaymentPlan, String> {
+pub(crate) fn resolve_auto_pay(
+    engine: &mut Engine,
+    payer: PlayerId,
+    cost: &CostSpec,
+) -> Result<PaymentPlan, String> {
     let (generic, pip_colors) = simple_mana_requirement(cost).ok_or_else(|| {
         "auto_pay can't handle this cost shape (hybrid/Phyrexian/snow mana, or a non-mana \
          additional/alternative cost) - build the payment plan by hand instead"
@@ -146,15 +164,19 @@ pub(crate) fn resolve_auto_pay(engine: &mut Engine, payer: PlayerId, cost: &Cost
     })?;
 
     loop {
-        let tally = mana_tally(&engine
-            .state()
-            .player(payer)
-            .unwrap_or_else(|| panic!("auto_pay: payer {payer:?} has no player state"))
-            .mana_pool);
+        let tally = mana_tally(
+            &engine
+                .state()
+                .player(payer)
+                .unwrap_or_else(|| panic!("auto_pay: payer {payer:?} has no player state"))
+                .mana_pool,
+        );
         if tally_covers(&tally, generic, &pip_colors) {
             break;
         }
-        let Some((source, ability_index)) = pick_mana_source(engine.state(), payer, &tally, &pip_colors) else {
+        let Some((source, ability_index)) =
+            pick_mana_source(engine.state(), payer, &tally, &pip_colors)
+        else {
             let have: u32 = tally.iter().sum();
             let need = generic + pip_colors.len() as u32;
             return Err(format!(
@@ -176,18 +198,24 @@ pub(crate) fn resolve_auto_pay(engine: &mut Engine, payer: PlayerId, cost: &Cost
         }
     }
 
-    let tally = mana_tally(&engine
-        .state()
-        .player(payer)
-        .unwrap_or_else(|| panic!("auto_pay: payer {payer:?} has no player state"))
-        .mana_pool);
+    let tally = mana_tally(
+        &engine
+            .state()
+            .player(payer)
+            .unwrap_or_else(|| panic!("auto_pay: payer {payer:?} has no player state"))
+            .mana_pool,
+    );
     let units = units_from_tally(tally, generic, &pip_colors);
     Ok(build_payment_plan(&ManaPaymentSpec { units }))
 }
 
 /// Pays an open payment pause after a `CastSpell` or `ActivateAbility` with `auto_pay`. It
 /// returns `outcome` unchanged if the action failed or opened no pause.
-pub(crate) fn chain_auto_pay(engine: &mut Engine, payer: PlayerId, outcome: StepOutcome) -> StepOutcome {
+pub(crate) fn chain_auto_pay(
+    engine: &mut Engine,
+    payer: PlayerId,
+    outcome: StepOutcome,
+) -> StepOutcome {
     if !matches!(outcome, StepOutcome::Ran) {
         return outcome;
     }
@@ -200,4 +228,3 @@ pub(crate) fn chain_auto_pay(engine: &mut Engine, payer: PlayerId, outcome: Step
         Err(message) => StepOutcome::Errored(message),
     }
 }
-

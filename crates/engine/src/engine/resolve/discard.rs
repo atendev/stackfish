@@ -6,14 +6,17 @@ use std::ops::ControlFlow;
 
 use crate::commands;
 use crate::replacement::{self, ReplacementOutcome};
+use crate::types::effect::{EffectFilter, matches_effect_filter};
 use crate::types::event::{GameEvent, GameEventKind};
-use crate::types::effect::{matches_effect_filter, EffectFilter};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
-use super::super::{Engine, ProcessState, ReplacementResumeTarget, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatus};
+use super::super::{
+    Engine, ProcessState, ReplacementResumeTarget, ScriptedZoneMoveKind, ScriptedZoneMoveThen,
+    StepStatus,
+};
 
 impl Engine {
     /// CR 701.9b: draws via `pick_discard_random_ids`, then hands the result to
@@ -29,7 +32,9 @@ impl Engine {
         self.process_state = self.continue_scripted_zone_move(
             ScriptedZoneMoveKind::Discard,
             chosen,
-            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+            ScriptedZoneMoveThen::StackResolution {
+                stack_id: top.stack_id,
+            },
             events,
         );
         ControlFlow::Break(StepStatus::Progressed)
@@ -53,7 +58,9 @@ impl Engine {
                     .iter()
                     .copied()
                     .filter(|id| {
-                        self.state.object(*id).is_some_and(|object| matches_effect_filter(filter, object, source, controller))
+                        self.state.object(*id).is_some_and(|object| {
+                            matches_effect_filter(filter, object, source, controller)
+                        })
                     })
                     .collect()
             })
@@ -71,7 +78,10 @@ impl Engine {
             self.state.ledger.push(GameEvent {
                 event_id,
                 sequence_no: seq,
-                kind: GameEventKind::RngDrawn { purpose: "discard_random".to_string(), value: rng_val },
+                kind: GameEventKind::RngDrawn {
+                    purpose: "discard_random".to_string(),
+                    value: rng_val,
+                },
                 caused_by_command: None,
                 parent_event: None,
             });
@@ -111,20 +121,35 @@ impl Engine {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     ) -> ProcessState {
-        let candidates: Vec<ObjectId> =
-            state.zone(ZoneKind::Hand, Some(player)).map(|z| Vec::from(z.contents.clone())).unwrap_or_default();
+        let candidates: Vec<ObjectId> = state
+            .zone(ZoneKind::Hand, Some(player))
+            .map(|z| Vec::from(z.contents.clone()))
+            .unwrap_or_default();
         if candidates.is_empty() {
             return Self::finish_discard(stack_id, events_so_far);
         }
-        ProcessState::AwaitingDiscardChoice { player, candidates, remaining_count, stack_id, events_so_far }
+        ProcessState::AwaitingDiscardChoice {
+            player,
+            candidates,
+            remaining_count,
+            stack_id,
+            events_so_far,
+        }
     }
 
     /// `StepStatus` mirror of `next_discard_state`, needed only by the `ControlFlow` path.
     fn status_for(process_state: &ProcessState) -> StepStatus {
         match process_state {
-            ProcessState::AwaitingDiscardChoice { player, candidates, remaining_count, .. } => {
-                StepStatus::AwaitingDiscardChoice { player: *player, candidates: candidates.clone(), remaining_count: *remaining_count }
-            }
+            ProcessState::AwaitingDiscardChoice {
+                player,
+                candidates,
+                remaining_count,
+                ..
+            } => StepStatus::AwaitingDiscardChoice {
+                player: *player,
+                candidates: candidates.clone(),
+                remaining_count: *remaining_count,
+            },
             _ => StepStatus::Progressed,
         }
     }
@@ -132,7 +157,10 @@ impl Engine {
     /// The shared tail: pushes `StackObjectResolved` and hands off to `ReplacementCheck`.
     fn finish_discard(stack_id: ObjectId, mut events_so_far: Vec<GameEventKind>) -> ProcessState {
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
-        ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
+        ProcessState::ReplacementCheck {
+            remaining: events_so_far.into(),
+            checked: Vec::new(),
+        }
     }
 
     /// Answers `submit_discard_choice`: proposes, replacement-checks and commits one
@@ -146,12 +174,24 @@ impl Engine {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     ) -> ProcessState {
-        let Some(proposed) = commands::propose_zone_move(&self.state, chosen, ZoneKind::Hand, ZoneKind::Graveyard) else {
+        let Some(proposed) =
+            commands::propose_zone_move(&self.state, chosen, ZoneKind::Hand, ZoneKind::Graveyard)
+        else {
             // Vanished since being offered; skip rather than guess.
-            return self.finish_or_continue_discard(player, remaining_count, stack_id, events_so_far);
+            return self.finish_or_continue_discard(
+                player,
+                remaining_count,
+                stack_id,
+                events_so_far,
+            );
         };
         // CR 614.8
-        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+        match replacement::apply_replacements(
+            &mut self.state,
+            &self.script_runtime,
+            proposed,
+            false,
+        ) {
             ReplacementOutcome::Resolved(event) => {
                 let madness = replacement::madness_marker_event(&self.state, &event);
                 let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
@@ -162,15 +202,24 @@ impl Engine {
                 self.state.ledger.push(committed);
                 self.finish_or_continue_discard(player, remaining_count, stack_id, events_so_far)
             }
-            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
-                ProcessState::AwaitingReplacementChoice {
-                    affected_player,
-                    pending_event: event,
-                    candidates,
-                    excluded,
-                    resume: ReplacementResumeTarget::TargetedDiscard { player, remaining_count, stack_id, events_so_far },
-                }
-            }
+            ReplacementOutcome::NeedsOrderingChoice {
+                affected_player,
+                event,
+                candidates,
+                excluded,
+                ..
+            } => ProcessState::AwaitingReplacementChoice {
+                affected_player,
+                pending_event: event,
+                candidates,
+                excluded,
+                resume: ReplacementResumeTarget::TargetedDiscard {
+                    player,
+                    remaining_count,
+                    stack_id,
+                    events_so_far,
+                },
+            },
         }
     }
 
@@ -186,6 +235,12 @@ impl Engine {
         if remaining_count == 0 {
             return Self::finish_discard(stack_id, events_so_far);
         }
-        Self::next_discard_state(&self.state, player, remaining_count - 1, stack_id, events_so_far)
+        Self::next_discard_state(
+            &self.state,
+            player,
+            remaining_count - 1,
+            stack_id,
+            events_so_far,
+        )
     }
 }

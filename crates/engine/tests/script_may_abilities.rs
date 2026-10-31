@@ -37,7 +37,9 @@ fn land_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test May-Choose Land".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::LAND,
@@ -70,15 +72,35 @@ fn base_state() -> GameState {
     )
 }
 
-fn play_activate_and_drain(engine: &mut Engine, player: PlayerId, land_in_hand: ObjectId) -> StepStatus {
+fn play_activate_and_drain(
+    engine: &mut Engine,
+    player: PlayerId,
+    land_in_hand: ObjectId,
+) -> StepStatus {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::PlayLand { card: land_in_hand } })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PlayLand { card: land_in_hand },
+        })
         .expect("player holds priority, land is in hand");
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected priority to reopen after playing the land");
-    assert_eq!(engine.state().abilities.len(), 1, "the land's activated ability self-registered");
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "expected priority to reopen after playing the land"
+    );
+    assert_eq!(
+        engine.state().abilities.len(),
+        1,
+        "the land's activated ability self-registered"
+    );
 
-    let land = *engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.back().unwrap();
+    let land = *engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .back()
+        .unwrap();
     engine
         .submit_action(PlayerAction {
             player,
@@ -92,17 +114,35 @@ fn play_activate_and_drain(engine: &mut Engine, player: PlayerId, land_in_hand: 
         })
         .expect("player controls the land and holds priority");
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the {{0}} cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the {{0}} cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine);
 
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
 fn seed_land(state: &mut GameState, land: ObjectId, script: &str, p0: PlayerId) {
-    state.objects.insert(land, card_object(land, land_definition(script), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+    state.objects.insert(
+        land,
+        card_object(land, land_definition(script), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(land);
 }
 
 #[test]
@@ -118,7 +158,10 @@ fn a_script_calling_may_choose_pauses_with_a_may_choose_request() {
         panic!("expected the operation to pause on Game.MayChoose, got {status:?}")
     };
     assert_eq!(player, p0);
-    assert!(matches!(request, ScriptChoiceRequest::MayChoose), "expected a MayChoose request, got {request:?}");
+    assert!(
+        matches!(request, ScriptChoiceRequest::MayChoose),
+        "expected a MayChoose request, got {request:?}"
+    );
 }
 
 #[test]
@@ -132,12 +175,21 @@ fn answering_true_resumes_into_the_yes_branch() {
     let status = play_activate_and_drain(&mut engine, p0, land);
     assert!(matches!(status, StepStatus::AwaitingScriptChoice { .. }));
 
-    engine.submit_script_may_choice(true).expect("any bool is a legal MayChoose answer");
+    engine
+        .submit_script_may_choice(true)
+        .expect("any bool is a legal MayChoose answer");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert_eq!(engine.state().player(p0).unwrap().life, 20 + 4, "answering true must take the yes branch");
-    assert!(engine.state().stack.is_empty(), "the ability resolved off the stack for good");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20 + 4,
+        "answering true must take the yes branch"
+    );
+    assert!(
+        engine.state().stack.is_empty(),
+        "the ability resolved off the stack for good"
+    );
 }
 
 #[test]
@@ -151,10 +203,16 @@ fn answering_false_resumes_into_the_no_branch() {
     let status = play_activate_and_drain(&mut engine, p0, land);
     assert!(matches!(status, StepStatus::AwaitingScriptChoice { .. }));
 
-    engine.submit_script_may_choice(false).expect("any bool is a legal MayChoose answer");
+    engine
+        .submit_script_may_choice(false)
+        .expect("any bool is a legal MayChoose answer");
     drain(&mut engine);
 
-    assert_eq!(engine.state().player(p0).unwrap().life, 20 + 1, "answering false must take the no branch");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20 + 1,
+        "answering false must take the no branch"
+    );
 }
 
 #[test]
@@ -168,8 +226,17 @@ fn submit_script_choice_rejects_a_pending_may_choose_request() {
     play_activate_and_drain(&mut engine, p0, land);
 
     let err = engine.submit_script_choice(Target::Player(p0)).unwrap_err();
-    assert!(matches!(err, ScriptChoiceError::WrongRequestKind), "a target answer can't satisfy a MayChoose pause");
-    assert!(matches!(engine.step().status, StepStatus::AwaitingScriptChoice { .. }), "the pause must stay open");
+    assert!(
+        matches!(err, ScriptChoiceError::WrongRequestKind),
+        "a target answer can't satisfy a MayChoose pause"
+    );
+    assert!(
+        matches!(
+            engine.step().status,
+            StepStatus::AwaitingScriptChoice { .. }
+        ),
+        "the pause must stay open"
+    );
 }
 
 #[test]
@@ -195,10 +262,16 @@ return s
 
     let mut engine = Engine::new(state);
     play_activate_and_drain(&mut engine, p0, land);
-    assert!(matches!(engine.step().status, StepStatus::AwaitingScriptChoice { .. }));
+    assert!(matches!(
+        engine.step().status,
+        StepStatus::AwaitingScriptChoice { .. }
+    ));
 
     let err = engine.submit_script_may_choice(true).unwrap_err();
-    assert!(matches!(err, ScriptChoiceError::WrongRequestKind), "a bool answer can't satisfy a SelectTarget pause");
+    assert!(
+        matches!(err, ScriptChoiceError::WrongRequestKind),
+        "a bool answer can't satisfy a SelectTarget pause"
+    );
 }
 
 #[test]

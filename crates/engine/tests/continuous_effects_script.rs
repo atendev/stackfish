@@ -5,13 +5,15 @@
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 fn creature_definition(power: i32, toughness: i32, script_ref: ScriptReference) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Creature".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -33,7 +35,11 @@ fn creature_definition(power: i32, toughness: i32, script_ref: ScriptReference) 
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    let definition = creature_definition(power, toughness, ScriptReference::ByKey("vanilla".to_string()));
+    let definition = creature_definition(
+        power,
+        toughness,
+        ScriptReference::ByKey("vanilla".to_string()),
+    );
     card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
@@ -45,17 +51,36 @@ fn scripted_creature(id: ObjectId, owner: PlayerId, source: &str) -> GameObject 
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    GameState { step: Step::PreCombatMain, ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard])) }
+    GameState {
+        step: Step::PreCombatMain,
+        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
+    }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
-fn script_effect(source: ObjectId, layer: Layer, affected: AffectedFilter, effect: EffectPayload) -> ContinuousEffect {
-    ContinuousEffect { source, layer, affected, effect, timestamp: SequenceNo(0), duration: EffectDuration::Permanent, condition: None }
+fn script_effect(
+    source: ObjectId,
+    layer: Layer,
+    affected: AffectedFilter,
+    effect: EffectPayload,
+) -> ContinuousEffect {
+    ContinuousEffect {
+        source,
+        layer,
+        affected,
+        effect,
+        timestamp: SequenceNo(0),
+        duration: EffectDuration::Permanent,
+        condition: None,
+    }
 }
 
 #[test]
@@ -68,18 +93,38 @@ fn affects_predicate_matches_only_the_identical_object() {
     let state = base_state();
     let source = ObjectId(1);
     let controller = PlayerId(0);
-    assert!(runtime.invoke_continuous_affects(handle, &state, source, source, controller, None).unwrap());
-    assert!(!runtime.invoke_continuous_affects(handle, &state, ObjectId(2), source, controller, None).unwrap());
+    assert!(
+        runtime
+            .invoke_continuous_affects(handle, &state, source, source, controller, None)
+            .unwrap()
+    );
+    assert!(
+        !runtime
+            .invoke_continuous_affects(handle, &state, ObjectId(2), source, controller, None)
+            .unwrap()
+    );
 }
 
 #[test]
 fn affects_predicate_erroring_script_is_an_error_not_a_panic() {
     let mut runtime = ScriptRuntime::new();
-    let handle = runtime.load_function("return function(object, source, controller) error(\"boom\") end").unwrap();
+    let handle = runtime
+        .load_function("return function(object, source, controller) error(\"boom\") end")
+        .unwrap();
 
     let state = base_state();
-    let result = runtime.invoke_continuous_affects(handle, &state, ObjectId(1), ObjectId(1), PlayerId(0), None);
-    assert!(result.is_err(), "a script error must not panic - caller treats Err as \"doesn't match\"");
+    let result = runtime.invoke_continuous_affects(
+        handle,
+        &state,
+        ObjectId(1),
+        ObjectId(1),
+        PlayerId(0),
+        None,
+    );
+    assert!(
+        result.is_err(),
+        "a script error must not panic - caller treats Err as \"doesn't match\""
+    );
 }
 
 #[test]
@@ -90,8 +135,16 @@ fn effect_decodes_modify_pt() {
         .unwrap();
 
     let state = base_state();
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
-    assert!(matches!(decoded, Some(EffectPrimitive::ModifyPT { power: 2, toughness: 3 })));
+    let decoded = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .unwrap();
+    assert!(matches!(
+        decoded,
+        Some(EffectPrimitive::ModifyPT {
+            power: 2,
+            toughness: 3
+        })
+    ));
 }
 
 #[test]
@@ -102,8 +155,15 @@ fn effect_decodes_add_keyword() {
         .unwrap();
 
     let state = base_state();
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
-    assert_eq!(decoded, Some(EffectPrimitive::AddKeyword(KeywordSet::FLYING | KeywordSet::VIGILANCE)));
+    let decoded = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .unwrap();
+    assert_eq!(
+        decoded,
+        Some(EffectPrimitive::AddKeyword(
+            KeywordSet::FLYING | KeywordSet::VIGILANCE
+        ))
+    );
 }
 
 #[test]
@@ -114,8 +174,13 @@ fn effect_decodes_remove_keyword() {
         .unwrap();
 
     let state = base_state();
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
-    assert_eq!(decoded, Some(EffectPrimitive::RemoveKeyword(KeywordSet::DEFENDER)));
+    let decoded = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .unwrap();
+    assert_eq!(
+        decoded,
+        Some(EffectPrimitive::RemoveKeyword(KeywordSet::DEFENDER))
+    );
 }
 
 #[test]
@@ -126,18 +191,26 @@ fn effect_decodes_ignore_keyword() {
         .unwrap();
 
     let state = base_state();
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
-    assert_eq!(decoded, Some(EffectPrimitive::IgnoreKeyword(KeywordSet::DEFENDER)));
+    let decoded = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .unwrap();
+    assert_eq!(
+        decoded,
+        Some(EffectPrimitive::IgnoreKeyword(KeywordSet::DEFENDER))
+    );
 }
 
 #[test]
 fn effect_decodes_switch_pt() {
     let mut runtime = ScriptRuntime::new();
-    let handle =
-        runtime.load_function("return function(source, controller) return Game.Effects.SwitchPT end").unwrap();
+    let handle = runtime
+        .load_function("return function(source, controller) return Game.Effects.SwitchPT end")
+        .unwrap();
 
     let state = base_state();
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
+    let decoded = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .unwrap();
     assert!(matches!(decoded, Some(EffectPrimitive::SwitchPT)));
 }
 
@@ -145,21 +218,35 @@ fn effect_decodes_switch_pt() {
 fn effect_decodes_double_pt() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime
-        .load_function("return function(source, controller) return Game.Effects.DoublePT(true, false) end")
+        .load_function(
+            "return function(source, controller) return Game.Effects.DoublePT(true, false) end",
+        )
         .unwrap();
 
     let state = base_state();
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
-    assert_eq!(decoded, Some(EffectPrimitive::DoublePT { power: true, toughness: false }));
+    let decoded = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .unwrap();
+    assert_eq!(
+        decoded,
+        Some(EffectPrimitive::DoublePT {
+            power: true,
+            toughness: false
+        })
+    );
 }
 
 #[test]
 fn effect_returning_nil_resolves_to_none() {
     let mut runtime = ScriptRuntime::new();
-    let handle = runtime.load_function("return function(source, controller) return nil end").unwrap();
+    let handle = runtime
+        .load_function("return function(source, controller) return nil end")
+        .unwrap();
 
     let state = base_state();
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
+    let decoded = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .unwrap();
     assert_eq!(decoded, None, "nil means no effect this call");
 }
 
@@ -171,18 +258,30 @@ fn effect_returning_a_raw_table_is_an_error() {
         .unwrap();
 
     let state = base_state();
-    let error = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).expect_err("raw table");
-    assert!(format!("{error:?}").contains("Game.Effects"), "error: {error:?}");
+    let error = runtime
+        .invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None)
+        .expect_err("raw table");
+    assert!(
+        format!("{error:?}").contains("Game.Effects"),
+        "error: {error:?}"
+    );
 }
 
 #[test]
 fn add_keyword_takes_a_string_or_a_list_and_rejects_other_types() {
     let mut runtime = ScriptRuntime::new();
     let state = base_state();
-    for (body, ok) in [("\"Flying\"", true), ("{ \"Flying\", \"Vigilance\" }", true), ("7", false)] {
-        let source = format!("return function(source, controller) return Game.Effects.AddKeyword({body}) end");
+    for (body, ok) in [
+        ("\"Flying\"", true),
+        ("{ \"Flying\", \"Vigilance\" }", true),
+        ("7", false),
+    ] {
+        let source = format!(
+            "return function(source, controller) return Game.Effects.AddKeyword({body}) end"
+        );
         let handle = runtime.load_function(&source).unwrap();
-        let result = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None);
+        let result =
+            runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None);
         assert_eq!(result.is_ok(), ok, "{body}: {result:?}");
     }
 }
@@ -190,11 +289,16 @@ fn add_keyword_takes_a_string_or_a_list_and_rejects_other_types() {
 #[test]
 fn effect_erroring_script_is_an_error_not_a_panic() {
     let mut runtime = ScriptRuntime::new();
-    let handle = runtime.load_function("return function(source, controller) error(\"boom\") end").unwrap();
+    let handle = runtime
+        .load_function("return function(source, controller) error(\"boom\") end")
+        .unwrap();
 
     let state = base_state();
     let result = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None);
-    assert!(result.is_err(), "a script error must not panic - caller (resolve_primitive) treats Err as None");
+    assert!(
+        result.is_err(),
+        "a script error must not panic - caller (resolve_primitive) treats Err as None"
+    );
 }
 
 const SCRIPT_AFFECTS_SELF_ONLY: &str = r#"
@@ -225,23 +329,45 @@ return s
 fn run_card_script_self_registers_a_script_backed_affects_predicate() {
     let mut state = base_state();
     let bear = ObjectId(0);
-    let definition = creature_definition(2, 2, ScriptReference::Inline(SCRIPT_AFFECTS_SELF_ONLY.to_string()));
-    put_on_battlefield(&mut state, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    let definition = creature_definition(
+        2,
+        2,
+        ScriptReference::Inline(SCRIPT_AFFECTS_SELF_ONLY.to_string()),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("Register() succeeds with a function :SetAffected");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("Register() succeeds with a function :SetAffected");
 
     assert_eq!(state.continuous_effects.len(), 1);
-    assert!(matches!(state.continuous_effects[0].affected, AffectedFilter::Script(_)));
-    assert!(matches!(state.continuous_effects[0].effect, EffectPayload::Primitive(EffectPrimitive::ModifyPT { .. })));
+    assert!(matches!(
+        state.continuous_effects[0].affected,
+        AffectedFilter::Script(_)
+    ));
+    assert!(matches!(
+        state.continuous_effects[0].effect,
+        EffectPayload::Primitive(EffectPrimitive::ModifyPT { .. })
+    ));
 }
 
 #[test]
 fn run_card_script_self_registers_a_script_backed_effect_payload() {
     let mut state = base_state();
     let bear = ObjectId(0);
-    let definition = creature_definition(2, 2, ScriptReference::Inline(SCRIPT_EFFECT_MODIFY_PT.to_string()));
-    put_on_battlefield(&mut state, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    let definition = creature_definition(
+        2,
+        2,
+        ScriptReference::Inline(SCRIPT_EFFECT_MODIFY_PT.to_string()),
+    );
+    put_on_battlefield(
+        &mut state,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     runtime.run_card_script(&mut state, &definition, bear).expect(
@@ -250,7 +376,10 @@ fn run_card_script_self_registers_a_script_backed_effect_payload() {
     );
 
     assert_eq!(state.continuous_effects.len(), 1);
-    assert!(matches!(state.continuous_effects[0].effect, EffectPayload::Script(_)));
+    assert!(matches!(
+        state.continuous_effects[0].effect,
+        EffectPayload::Script(_)
+    ));
 }
 
 #[test]
@@ -270,14 +399,25 @@ fn script_backed_affects_predicate_applies_only_to_the_matching_object() {
         anthem,
         Layer::PowerToughnessModifying,
         AffectedFilter::Script(handle),
-        EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
+        EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        }),
     ));
 
     let anthem_effective = effective_characteristics(&state, &script_runtime, anthem);
     let other_effective = effective_characteristics(&state, &script_runtime, other);
 
-    assert_eq!(anthem_effective.power, Some(3), "self_only-equivalent predicate should affect its own source");
-    assert_eq!(other_effective.power, Some(2), "a different object must not match the identity predicate");
+    assert_eq!(
+        anthem_effective.power,
+        Some(3),
+        "self_only-equivalent predicate should affect its own source"
+    );
+    assert_eq!(
+        other_effective.power,
+        Some(2),
+        "a different object must not match the identity predicate"
+    );
 }
 
 #[test]
@@ -289,17 +429,30 @@ fn script_backed_effect_payload_applies_through_effective_characteristics() {
 
     let mut script_runtime = ScriptRuntime::new();
     let handle = script_runtime
-        .load_function("return function(source, controller) return Game.Effects.AddKeyword(\"Flying\") end")
+        .load_function(
+            "return function(source, controller) return Game.Effects.AddKeyword(\"Flying\") end",
+        )
         .unwrap();
     state.continuous_effects.push(script_effect(
         source,
         Layer::AbilityAdding,
-        AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
+        AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
         EffectPayload::Script(handle),
     ));
 
     let effective = effective_characteristics(&state, &script_runtime, source);
-    assert!(effective.keywords.contains(KeywordSet::FLYING), "script-decoded add_keyword must actually apply");
+    assert!(
+        effective.keywords.contains(KeywordSet::FLYING),
+        "script-decoded add_keyword must actually apply"
+    );
 }
 
 #[test]
@@ -312,17 +465,34 @@ fn mismatched_layer_and_decoded_shape_is_skipped_not_applied() {
     let mut script_runtime = ScriptRuntime::new();
     // The declared layer is PowerToughnessModifying but the script decodes to AddKeyword. validate_layer_effect_pairing can catch that only for a Primitive effect at :Register() time.
     let handle = script_runtime
-        .load_function("return function(source, controller) return Game.Effects.AddKeyword(\"Flying\") end")
+        .load_function(
+            "return function(source, controller) return Game.Effects.AddKeyword(\"Flying\") end",
+        )
         .unwrap();
     state.continuous_effects.push(script_effect(
         source,
         Layer::PowerToughnessModifying,
-        AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
+        AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
         EffectPayload::Script(handle),
     ));
 
     let effective = effective_characteristics(&state, &script_runtime, source);
-    assert_eq!(effective.power, Some(2), "a mismatched decoded shape must be skipped, not applied as garbage");
+    assert_eq!(
+        effective.power,
+        Some(2),
+        "a mismatched decoded shape must be skipped, not applied as garbage"
+    );
     assert_eq!(effective.toughness, Some(2));
-    assert!(!effective.keywords.contains(KeywordSet::FLYING), "AddKeyword decoded in the wrong layer's loop never runs");
+    assert!(
+        !effective.keywords.contains(KeywordSet::FLYING),
+        "AddKeyword decoded in the wrong layer's loop never runs"
+    );
 }

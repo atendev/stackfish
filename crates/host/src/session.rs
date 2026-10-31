@@ -6,9 +6,9 @@ use std::mem;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use serde::Deserialize;
+use stackfish_engine::PlayerId;
 use stackfish_engine::decision::{Answer, DecisionId, Rejection, RejectionCode};
 use stackfish_engine::engine::{Engine, EngineSnapshot, StepStatus};
-use stackfish_engine::PlayerId;
 
 use crate::card_source::CardSource;
 use crate::envelope::{ErrorCode, PROTOCOL_VERSION, Request, Response};
@@ -78,12 +78,19 @@ fn refuse_start(code: ErrorCode, message: impl Into<String>) -> Vec<u8> {
 
 #[allow(clippy::result_large_err)]
 fn parse_request(bytes: &[u8]) -> Result<Request, Response> {
-    let request: Request = serde_json::from_slice(bytes)
-        .map_err(|e| Response::error(ErrorCode::MalformedMessage, format!("not a valid request: {e}")))?;
+    let request: Request = serde_json::from_slice(bytes).map_err(|e| {
+        Response::error(
+            ErrorCode::MalformedMessage,
+            format!("not a valid request: {e}"),
+        )
+    })?;
     if request.v != PROTOCOL_VERSION {
         return Err(Response::error(
             ErrorCode::UnsupportedVersion,
-            format!("protocol version {} is not supported, this Session speaks {PROTOCOL_VERSION}", request.v),
+            format!(
+                "protocol version {} is not supported, this Session speaks {PROTOCOL_VERSION}",
+                request.v
+            ),
         ));
     }
     Ok(request)
@@ -92,7 +99,10 @@ fn parse_request(bytes: &[u8]) -> Result<Request, Response> {
 #[allow(clippy::result_large_err)]
 fn parse_body<T: for<'de> Deserialize<'de>>(request: &Request) -> Result<T, Response> {
     serde_json::from_value(request.body.clone()).map_err(|e| {
-        Response::error(ErrorCode::MalformedMessage, format!("bad {} body: {e}", request.kind))
+        Response::error(
+            ErrorCode::MalformedMessage,
+            format!("bad {} body: {e}", request.kind),
+        )
     })
 }
 
@@ -125,24 +135,39 @@ impl Session {
         }
     }
 
-    fn build_session(request: &[u8], cards: &dyn CardSource) -> Result<(Session, Vec<u8>), Vec<u8>> {
+    fn build_session(
+        request: &[u8],
+        cards: &dyn CardSource,
+    ) -> Result<(Session, Vec<u8>), Vec<u8>> {
         let request = parse_request(request).map_err(|r| r.to_bytes())?;
         if request.kind != "setup" {
             return Err(refuse_start(
                 ErrorCode::MalformedMessage,
-                format!("expected a setup request to create the Session, got {:?}", request.kind),
+                format!(
+                    "expected a setup request to create the Session, got {:?}",
+                    request.kind
+                ),
             ));
         }
         if request.seat.is_some() {
-            return Err(refuse_start(ErrorCode::MalformedMessage, "setup comes from the host, so it has no seat"));
+            return Err(refuse_start(
+                ErrorCode::MalformedMessage,
+                "setup comes from the host, so it has no seat",
+            ));
         }
         let body: SetupBody = parse_body(&request).map_err(|r| r.to_bytes())?;
-        let built = setup::build(&body, cards).map_err(|e| refuse_start(ErrorCode::SetupInvalid, e.0))?;
+        let built =
+            setup::build(&body, cards).map_err(|e| refuse_start(ErrorCode::SetupInvalid, e.0))?;
         let players = built.config.players.len() as u32;
         let seats: Vec<Seat> = (0..players)
             .map(|i| Viewer::Player(PlayerId(i)))
-            .chain(body.spectators.iter().map(|s| Viewer::Spectator { omniscient: s.omniscient }))
-            .map(|viewer| Seat { viewer, outbox: Vec::new() })
+            .chain(body.spectators.iter().map(|s| Viewer::Spectator {
+                omniscient: s.omniscient,
+            }))
+            .map(|viewer| Seat {
+                viewer,
+                outbox: Vec::new(),
+            })
             .collect();
         let ids = (0..seats.len() as u32).collect();
         let mut session = Session {
@@ -200,22 +225,35 @@ impl Session {
         if let Some(seat) = request.seat
             && seat as usize >= self.seats.len()
         {
-            return self.refuse_with(None, ErrorCode::UnknownSeat, format!("seat {seat} does not exist"));
+            return self.refuse_with(
+                None,
+                ErrorCode::UnknownSeat,
+                format!("seat {seat} does not exist"),
+            );
         }
         // A halted Session still lets a Seat collect its last events.
         if request.kind == "poll" {
             return self.poll(&request);
         }
         if matches!(self.phase, Phase::Halted) {
-            return Response::error(ErrorCode::PipelineError, "the Session stopped after a pipeline error");
+            return Response::error(
+                ErrorCode::PipelineError,
+                "the Session stopped after a pipeline error",
+            );
         }
         match request.kind.as_str() {
             "advance" => self.advance(&request),
             "answer" => self.answer(&request),
-            "setup" => self.refuse_with(request.seat, ErrorCode::MalformedMessage, "setup only creates a Session"),
-            other => {
-                self.refuse_with(request.seat, ErrorCode::MalformedMessage, format!("unknown request kind {other:?}"))
-            }
+            "setup" => self.refuse_with(
+                request.seat,
+                ErrorCode::MalformedMessage,
+                "setup only creates a Session",
+            ),
+            other => self.refuse_with(
+                request.seat,
+                ErrorCode::MalformedMessage,
+                format!("unknown request kind {other:?}"),
+            ),
         }
     }
 
@@ -228,13 +266,21 @@ impl Session {
             Err(response) => return self.refuse(seat, response),
         };
         if body.budget == Some(0) {
-            return self.refuse_with(seat, ErrorCode::MalformedMessage, "budget must be at least 1");
+            return self.refuse_with(
+                seat,
+                ErrorCode::MalformedMessage,
+                "budget must be at least 1",
+            );
         }
         if matches!(self.phase, Phase::Over(_)) {
             return self.refuse_with(seat, ErrorCode::GameOver, "the game is over");
         }
         if self.engine.open_decision().is_some() {
-            return self.refuse_with(seat, ErrorCode::DecisionPending, "a Decision is open, so send an answer");
+            return self.refuse_with(
+                seat,
+                ErrorCode::DecisionPending,
+                "a Decision is open, so send an answer",
+            );
         }
         let outcome = self.run(body.budget.unwrap_or(self.step_cap));
         self.finish(seat, outcome)
@@ -252,10 +298,17 @@ impl Session {
             return self.refuse_with(Some(seat), ErrorCode::GameOver, "the game is over");
         }
         if seat >= self.players {
-            return self.refuse_with(Some(seat), ErrorCode::NotYourDecision, "a spectator Seat cannot answer");
+            return self.refuse_with(
+                Some(seat),
+                ErrorCode::NotYourDecision,
+                "a spectator Seat cannot answer",
+            );
         }
         let player = PlayerId(seat);
-        let answer = Answer { decision: DecisionId(body.decision.0), reply: body.reply.into_reply(player) };
+        let answer = Answer {
+            decision: DecisionId(body.decision.0),
+            reply: body.reply.into_reply(player),
+        };
         if let Err(Rejection { code, message }) = self.engine.answer(player, answer) {
             // An `Internal` rejection means the engine broke, which ends the game.
             if code == RejectionCode::Internal {
@@ -315,7 +368,8 @@ impl Session {
             Outcome::Decision => match self.open_decision_for(seat) {
                 Some(decision) => Response::decision_open(events, decision),
                 None => {
-                    self.internal = Some("the engine paused without opening a Decision".to_string());
+                    self.internal =
+                        Some("the engine paused without opening a Decision".to_string());
                     self.halt(events)
                 }
             },
@@ -347,22 +401,32 @@ impl Session {
     }
 
     fn take_events(&mut self, seat: Option<u32>) -> Vec<WireEvent> {
-        seat.map(|s| mem::take(&mut self.seats[s as usize].outbox)).unwrap_or_default()
+        seat.map(|s| mem::take(&mut self.seats[s as usize].outbox))
+            .unwrap_or_default()
     }
 
     // Without a seat the Decision is shown as a non-choosing spectator sees it.
     fn open_decision_for(&mut self, seat: Option<u32>) -> Option<WireDecision> {
-        let viewer = seat.map_or(Viewer::Spectator { omniscient: false }, |s| self.seats[s as usize].viewer);
+        let viewer = seat.map_or(Viewer::Spectator { omniscient: false }, |s| {
+            self.seats[s as usize].viewer
+        });
         let decision = self.engine.open_decision()?;
         Some(view::decision_for(viewer, self.engine.state(), &decision))
     }
 
     fn refuse(&mut self, seat: Option<u32>, response: Response) -> Response {
-        let Some(error) = response.error else { return response };
+        let Some(error) = response.error else {
+            return response;
+        };
         self.refuse_with(seat, error.code, error.message)
     }
 
-    fn refuse_with(&mut self, seat: Option<u32>, code: ErrorCode, message: impl Into<String>) -> Response {
+    fn refuse_with(
+        &mut self,
+        seat: Option<u32>,
+        code: ErrorCode,
+        message: impl Into<String>,
+    ) -> Response {
         let open = match self.phase {
             Phase::Playing => self.open_decision_for(seat),
             Phase::Over(_) | Phase::Halted | Phase::Dead => None,
@@ -377,29 +441,48 @@ mod tests {
     use crate::card_source::FixtureCardSource;
     use serde_json::{Value, json};
     use stackfish_engine::{
-        CardTypeSet, EventId, GameEvent, GameEventKind, ManaCost, ObjectId, RevealedCard, SequenceNo, ZoneKind,
+        CardTypeSet, EventId, GameEvent, GameEventKind, ManaCost, ObjectId, RevealedCard,
+        SequenceNo, ZoneKind,
     };
     use stackfish_testutil::minimal_card_definition;
 
     #[test]
     fn a_pipeline_error_is_fatal_and_every_later_message_is_refused() {
-        let card = minimal_card_definition(1, "A", "a", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE);
+        let card = minimal_card_definition(
+            1,
+            "A",
+            "a",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        );
         let cards = FixtureCardSource::new().with("a", card);
         let setup = json!({
             "v": 1, "kind": "setup",
             "body": { "players": [{ "deck": [{ "card": "a", "count": 3 }] }, { "deck": [{ "card": "a", "count": 3 }] }],
                       "format": "standard", "seed": "1" },
         });
-        let (mut session, _) = Session::create(&serde_json::to_vec(&setup).unwrap(), &cards).unwrap();
+        let (mut session, _) =
+            Session::create(&serde_json::to_vec(&setup).unwrap(), &cards).unwrap();
 
-        session.engine.poison(stackfish_engine::commands::Internal::new("boom names the card Black Lotus"));
-        let advance = serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "seat": 0, "body": {} })).unwrap();
+        session
+            .engine
+            .poison(stackfish_engine::commands::Internal::new(
+                "boom names the card Black Lotus",
+            ));
+        let advance =
+            serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "seat": 0, "body": {} }))
+                .unwrap();
         let first: Value = serde_json::from_slice(&session.handle(&advance)).unwrap();
         assert_eq!(first["body"]["status"], "error");
         assert_eq!(first["body"]["error"]["code"], "pipeline_error");
         // A Seat must get only the generic text.
         assert!(!first.to_string().contains("Black Lotus"), "{first}");
-        assert_eq!(session.internal_error(), Some("boom names the card Black Lotus"));
+        assert_eq!(
+            session.internal_error(),
+            Some("boom names the card Black Lotus")
+        );
 
         let later: Value = serde_json::from_slice(&session.handle(&advance)).unwrap();
         assert_eq!(later["body"]["error"]["code"], "pipeline_error");
@@ -409,15 +492,26 @@ mod tests {
     #[test]
     fn a_panic_in_the_engine_kills_the_session_with_a_stable_code_and_no_detail() {
         let mut session = started();
-        let poll = serde_json::to_vec(&json!({ "v": 1, "kind": "poll", "seat": 0, "body": {} })).unwrap();
-        let advance = serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "body": {} })).unwrap();
+        let poll =
+            serde_json::to_vec(&json!({ "v": 1, "kind": "poll", "seat": 0, "body": {} })).unwrap();
+        let advance =
+            serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "body": {} })).unwrap();
 
         // The engine is hard to break from outside, so a closure stands in for a panic in a step.
-        let first: Value = serde_json::from_slice(&session.guarded(|_| panic!("seat 1 holds Black Lotus"))).unwrap();
+        let first: Value =
+            serde_json::from_slice(&session.guarded(|_| panic!("seat 1 holds Black Lotus")))
+                .unwrap();
         assert_eq!(first["body"]["status"], "error");
         assert_eq!(first["body"]["error"]["code"], "engine_panic");
-        assert_eq!(session.internal_error(), Some("seat 1 holds Black Lotus"), "the text is kept for the host's log");
-        assert!(!first.to_string().contains("Black Lotus"), "a Seat never sees the panic text: {first}");
+        assert_eq!(
+            session.internal_error(),
+            Some("seat 1 holds Black Lotus"),
+            "the text is kept for the host's log"
+        );
+        assert!(
+            !first.to_string().contains("Black Lotus"),
+            "a Seat never sees the panic text: {first}"
+        );
 
         // A dead Session refuses even a poll.
         for request in [&advance, &poll] {
@@ -430,7 +524,11 @@ mod tests {
     fn a_panic_while_building_the_game_is_an_error_response() {
         struct Panicking;
         impl CardSource for Panicking {
-            fn load(&self, _key: &str) -> Result<stackfish_engine::CardDefinition, crate::card_source::CardSourceError> {
+            fn load(
+                &self,
+                _key: &str,
+            ) -> Result<stackfish_engine::CardDefinition, crate::card_source::CardSourceError>
+            {
                 panic!("the card source broke");
             }
         }
@@ -439,20 +537,32 @@ mod tests {
             "body": { "players": [{ "deck": [{ "card": "a", "count": 3 }] }, { "deck": [{ "card": "a", "count": 3 }] }],
                       "format": "standard", "seed": "1" },
         });
-        let refused = Session::create(&serde_json::to_vec(&setup).unwrap(), &Panicking).err().expect("create fails");
+        let refused = Session::create(&serde_json::to_vec(&setup).unwrap(), &Panicking)
+            .err()
+            .expect("create fails");
         let refused: Value = serde_json::from_slice(&refused).unwrap();
         assert_eq!(refused["body"]["error"]["code"], "engine_panic");
     }
     fn started() -> Session {
-        let card = minimal_card_definition(1, "A", "a", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE);
+        let card = minimal_card_definition(
+            1,
+            "A",
+            "a",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        );
         let cards = FixtureCardSource::new().with("a", card);
         let setup = json!({
             "v": 1, "kind": "setup",
             "body": { "players": [{ "deck": [{ "card": "a", "count": 20 }] }, { "deck": [{ "card": "a", "count": 20 }] }],
                       "format": "standard", "seed": "1", "overrides": { "skip_mulligan": true } },
         });
-        let (mut session, _) = Session::create(&serde_json::to_vec(&setup).unwrap(), &cards).unwrap();
-        let advance = serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "body": {} })).unwrap();
+        let (mut session, _) =
+            Session::create(&serde_json::to_vec(&setup).unwrap(), &cards).unwrap();
+        let advance =
+            serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "body": {} })).unwrap();
         session.handle(&advance);
         session
     }
@@ -466,12 +576,19 @@ mod tests {
 
     fn a_card_in_player_zero_s_hand(session: &Session) -> stackfish_engine::GameObject {
         let state = session.engine.state();
-        let id = *state.zone(ZoneKind::Hand, Some(PlayerId(0))).unwrap().contents.front().unwrap();
+        let id = *state
+            .zone(ZoneKind::Hand, Some(PlayerId(0)))
+            .unwrap()
+            .contents
+            .front()
+            .unwrap();
         state.object(id).unwrap().clone()
     }
 
     fn kind_json(observed: &view::Observed, viewer: Viewer) -> Option<Value> {
-        observed.kind_for(viewer).map(|kind| serde_json::to_value(kind).unwrap())
+        observed
+            .kind_for(viewer)
+            .map(|kind| serde_json::to_value(kind).unwrap())
     }
 
     fn observe(session: &mut Session, kind: GameEventKind) -> view::Observed {
@@ -483,15 +600,26 @@ mod tests {
     fn a_revealed_card_shows_its_identity_to_everyone_and_its_id_only_where_the_card_is_visible() {
         let mut session = started();
         let card = a_card_in_player_zero_s_hand(&session);
-        let revealed = RevealedCard { object: card.object_id, snapshot: card.clone() };
+        let revealed = RevealedCard {
+            object: card.object_id,
+            snapshot: card.clone(),
+        };
         let observed = observe(
             &mut session,
-            GameEventKind::Revealed { player: PlayerId(0), zone: ZoneKind::Hand, cards: vec![revealed] },
+            GameEventKind::Revealed {
+                player: PlayerId(0),
+                zone: ZoneKind::Hand,
+                cards: vec![revealed],
+            },
         );
         for (viewer, sees_id) in VIEWERS.into_iter().zip([true, false, false, true]) {
             let event = kind_json(&observed, viewer).expect("a reveal reaches every Seat");
             assert_eq!(event["cards"][0]["identity"]["name"], "A", "{viewer:?}");
-            assert_eq!(event["cards"][0].get("object").is_some(), sees_id, "{viewer:?}");
+            assert_eq!(
+                event["cards"][0].get("object").is_some(),
+                sees_id,
+                "{viewer:?}"
+            );
         }
     }
 
@@ -500,20 +628,46 @@ mod tests {
         let mut session = started();
         let scried = observe(
             &mut session,
-            GameEventKind::CardsScried { player: PlayerId(0), kept_on_top: Vec::new(), put_bottom: Vec::new() },
+            GameEventKind::CardsScried {
+                player: PlayerId(0),
+                kept_on_top: Vec::new(),
+                put_bottom: Vec::new(),
+            },
         );
         let surveiled = observe(
             &mut session,
-            GameEventKind::CardsSurveiled { player: PlayerId(0), kept_on_top: Vec::new(), put_graveyard: Vec::new() },
+            GameEventKind::CardsSurveiled {
+                player: PlayerId(0),
+                kept_on_top: Vec::new(),
+                put_graveyard: Vec::new(),
+            },
         );
-        let rng = observe(&mut session, GameEventKind::RngDrawn { purpose: "test".to_string(), value: 5 });
+        let rng = observe(
+            &mut session,
+            GameEventKind::RngDrawn {
+                purpose: "test".to_string(),
+                value: 5,
+            },
+        );
         // Indexes follow VIEWERS.
         let gets_scry = [true, false, false, true];
         let gets_rng = [false, false, false, true];
         for (i, viewer) in VIEWERS.into_iter().enumerate() {
-            assert_eq!(scried.kind_for(viewer).is_some(), gets_scry[i], "scry, {viewer:?}");
-            assert_eq!(surveiled.kind_for(viewer).is_some(), gets_scry[i], "surveil, {viewer:?}");
-            assert_eq!(rng.kind_for(viewer).is_some(), gets_rng[i], "rng, {viewer:?}");
+            assert_eq!(
+                scried.kind_for(viewer).is_some(),
+                gets_scry[i],
+                "scry, {viewer:?}"
+            );
+            assert_eq!(
+                surveiled.kind_for(viewer).is_some(),
+                gets_scry[i],
+                "surveil, {viewer:?}"
+            );
+            assert_eq!(
+                rng.kind_for(viewer).is_some(),
+                gets_rng[i],
+                "rng, {viewer:?}"
+            );
         }
     }
 
@@ -523,13 +677,22 @@ mod tests {
         let card = a_card_in_player_zero_s_hand(&session);
         let observed = observe(
             &mut session,
-            GameEventKind::Cycled { object: ObjectId(9001), last_known_info: card },
+            GameEventKind::Cycled {
+                object: ObjectId(9001),
+                last_known_info: card,
+            },
         );
         let owner = kind_json(&observed, VIEWERS[0]).unwrap();
         let opponent = kind_json(&observed, VIEWERS[1]).unwrap();
         assert!(owner.get("last_known_info").is_some());
-        assert!(opponent.get("last_known_info").is_none(), "the snapshot names the old hand id");
-        assert_eq!(opponent["identity"]["name"], "A", "the card now lies in the graveyard");
+        assert!(
+            opponent.get("last_known_info").is_none(),
+            "the snapshot names the old hand id"
+        );
+        assert_eq!(
+            opponent["identity"]["name"], "A",
+            "the card now lies in the graveyard"
+        );
         assert_eq!(opponent["object"], "9001");
     }
 
@@ -539,7 +702,11 @@ mod tests {
     fn a_token_that_ceases_in_a_hand_is_reported_only_to_its_owner() {
         let mut session = started();
         let card = a_card_in_player_zero_s_hand(&session);
-        let token = stackfish_engine::GameObject { is_token: true, zone: ZoneKind::Battlefield, ..card.clone() };
+        let token = stackfish_engine::GameObject {
+            is_token: true,
+            zone: ZoneKind::Battlefield,
+            ..card.clone()
+        };
         observe(
             &mut session,
             GameEventKind::ZoneChange {
@@ -551,10 +718,18 @@ mod tests {
         );
         // The token is already gone from the state when the event is read.
         let state = session.engine.state_mut();
-        state.zone_mut(ZoneKind::Hand, Some(PlayerId(0))).unwrap().remove(card.object_id);
+        state
+            .zone_mut(ZoneKind::Hand, Some(PlayerId(0)))
+            .unwrap()
+            .remove(card.object_id);
         state.objects.remove(&card.object_id);
 
-        let ceased = observe(&mut session, GameEventKind::TokenCeased { object: card.object_id });
+        let ceased = observe(
+            &mut session,
+            GameEventKind::TokenCeased {
+                object: card.object_id,
+            },
+        );
         for (viewer, receives) in VIEWERS.into_iter().zip([true, false, false, true]) {
             assert_eq!(ceased.kind_for(viewer).is_some(), receives, "{viewer:?}");
         }
@@ -563,7 +738,12 @@ mod tests {
     #[test]
     fn a_token_that_ceases_in_a_public_zone_is_reported_to_everyone() {
         let mut session = started();
-        let ceased = observe(&mut session, GameEventKind::TokenCeased { object: ObjectId(9002) });
+        let ceased = observe(
+            &mut session,
+            GameEventKind::TokenCeased {
+                object: ObjectId(9002),
+            },
+        );
         for viewer in VIEWERS {
             assert!(ceased.kind_for(viewer).is_some(), "{viewer:?}");
         }
@@ -575,11 +755,34 @@ mod tests {
         let card = a_card_in_player_zero_s_hand(&session);
         let observed = observe(
             &mut session,
-            GameEventKind::TriggerQueued { source: card.object_id, controller: PlayerId(0) },
+            GameEventKind::TriggerQueued {
+                source: card.object_id,
+                controller: PlayerId(0),
+            },
         );
-        assert!(kind_json(&observed, VIEWERS[0]).unwrap().get("source").is_some());
-        assert!(kind_json(&observed, VIEWERS[1]).unwrap().get("source").is_none());
-        assert!(kind_json(&observed, VIEWERS[2]).unwrap().get("source").is_none());
-        assert!(kind_json(&observed, VIEWERS[3]).unwrap().get("source").is_some());
+        assert!(
+            kind_json(&observed, VIEWERS[0])
+                .unwrap()
+                .get("source")
+                .is_some()
+        );
+        assert!(
+            kind_json(&observed, VIEWERS[1])
+                .unwrap()
+                .get("source")
+                .is_none()
+        );
+        assert!(
+            kind_json(&observed, VIEWERS[2])
+                .unwrap()
+                .get("source")
+                .is_none()
+        );
+        assert!(
+            kind_json(&observed, VIEWERS[3])
+                .unwrap()
+                .get("source")
+                .is_some()
+        );
     }
 }

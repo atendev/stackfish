@@ -38,9 +38,7 @@ impl Engine {
 
         for player_cfg in &config.players {
             let pid = player_cfg.player_id;
-            let life = player_cfg
-                .life_override
-                .unwrap_or(settings.starting_life) as i32;
+            let life = player_cfg.life_override.unwrap_or(settings.starting_life) as i32;
 
             players.push(PlayerState {
                 player_id: pid,
@@ -78,12 +76,16 @@ impl Engine {
                     deathtouched: false,
                     counters: CounterSet::new(),
                     attachments: Vec::new(),
-                    attached_to: None, attached_to_player: None,
+                    attached_to: None,
+                    attached_to_player: None,
                     timestamp: ts,
                     controlled_since_turn: 1,
                     is_token: false,
                     is_commander: false,
-                    visibility: VisibilityPolicy { public: false, visible_to: Vec::new() },
+                    visibility: VisibilityPolicy {
+                        public: false,
+                        visible_to: Vec::new(),
+                    },
                     copy_generation: 0,
                     entered_via_escape: false,
                 };
@@ -117,13 +119,17 @@ impl Engine {
                     deathtouched: false,
                     counters: CounterSet::new(),
                     attachments: Vec::new(),
-                    attached_to: None, attached_to_player: None,
+                    attached_to: None,
+                    attached_to_player: None,
                     timestamp: ts,
                     controlled_since_turn: 1,
                     is_token: false,
                     is_commander: true,
                     // CR 408: command zone contents are public.
-                    visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+                    visibility: VisibilityPolicy {
+                        public: true,
+                        visible_to: Vec::new(),
+                    },
                     copy_generation: 0,
                     entered_via_escape: false,
                 };
@@ -160,7 +166,10 @@ impl Engine {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: RngState { seed: config.rng_seed, draws_consumed: 0 },
+            rng: RngState {
+                seed: config.rng_seed,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no,
             next_object_id,
@@ -206,11 +215,16 @@ impl Engine {
         // Sorted: `objects` is a `HashMap`, and a failing script logs an event.
         let mut ids: Vec<ObjectId> = self.state.objects.keys().copied().collect();
         ids.sort();
-        let mut loaded: HashMap<String, (Option<AbilityEffect>, Option<TargetSpec>)> = HashMap::new();
+        let mut loaded: HashMap<String, (Option<AbilityEffect>, Option<TargetSpec>)> =
+            HashMap::new();
         for id in ids {
             let definition = &self.state.objects[&id].definition;
-            let ScriptReference::Inline(source) = &definition.script_ref else { continue };
-            if source.trim().is_empty() || (definition.effect.is_some() && definition.target_requirement.is_some()) {
+            let ScriptReference::Inline(source) = &definition.script_ref else {
+                continue;
+            };
+            if source.trim().is_empty()
+                || (definition.effect.is_some() && definition.target_requirement.is_some())
+            {
                 continue;
             }
             let (script_ref, source) = (definition.script_ref.clone(), source.clone());
@@ -230,7 +244,9 @@ impl Engine {
                     let effect = match &operation {
                         // A chain whose word counts don't match resolves nothing.
                         _ if words_check.is_err() => None,
-                        Ok(Some((primitive, handle))) => primitive.clone().or(Some(AbilityEffect::Script(*handle))),
+                        Ok(Some((primitive, handle))) => {
+                            primitive.clone().or(Some(AbilityEffect::Script(*handle)))
+                        }
                         _ => None,
                     };
                     let requirement_ok = requirement.as_ref().ok().cloned().flatten();
@@ -244,7 +260,12 @@ impl Engine {
                     (effect, requirement_ok)
                 }
             };
-            let definition = &mut self.state.objects.get_mut(&id).expect("id came from the map").definition;
+            let definition = &mut self
+                .state
+                .objects
+                .get_mut(&id)
+                .expect("id came from the map")
+                .definition;
             if definition.effect.is_none() {
                 definition.effect = effect;
             }
@@ -265,29 +286,42 @@ impl Engine {
         }
         match action.kind {
             PlayerActionKind::KeepHand => {
-                self.state.player_mut(player).expect("valid player").hand_kept = true;
+                self.state
+                    .player_mut(player)
+                    .expect("valid player")
+                    .hand_kept = true;
                 match self.next_mulligan_player() {
                     Some(next) => {
-                        self.process_state = ProcessState::AwaitingMulliganDecision { player: next };
+                        self.process_state =
+                            ProcessState::AwaitingMulliganDecision { player: next };
                     }
                     None => self.transition_to_bottoming(),
                 }
             }
             PlayerActionKind::TakeMulligan => {
-                let taken = self.state.player(player).expect("valid player").mulligans_taken;
+                let taken = self
+                    .state
+                    .player(player)
+                    .expect("valid player")
+                    .mulligans_taken;
                 if let Some(max) = self.settings.max_mulligans
-                    && taken >= max {
-                        return Err(MulliganError::MaxMulligansReached);
-                    }
-                self.state.player_mut(player).expect("valid player").mulligans_taken += 1;
+                    && taken >= max
+                {
+                    return Err(MulliganError::MaxMulligansReached);
+                }
+                self.state
+                    .player_mut(player)
+                    .expect("valid player")
+                    .mulligans_taken += 1;
                 self.return_hand_to_library(player);
                 self.shuffle_library(player);
                 self.draw_opening_hand(player);
                 // The mulliganing player is still undecided, so `next_mulligan_player`
                 // would return them again.
                 let next = self.next_mulligan_player_after(player);
-                self.process_state =
-                    ProcessState::AwaitingMulliganDecision { player: next.expect("player must be in turn_order") };
+                self.process_state = ProcessState::AwaitingMulliganDecision {
+                    player: next.expect("player must be in turn_order"),
+                };
             }
             _ => return Err(MulliganError::InvalidAction),
         }
@@ -297,17 +331,24 @@ impl Engine {
     /// Accepts the cards a player puts on the bottom after keeping a paid mulligan.
     /// Validates count and membership, then advances to the next bottoming player.
     pub fn submit_bottom_cards(&mut self, action: PlayerAction) -> Result<(), BottomCardsError> {
-        let ProcessState::AwaitingBottomCardChoice { player, count, .. } = self.process_state else {
+        let ProcessState::AwaitingBottomCardChoice { player, count, .. } = self.process_state
+        else {
             return Err(BottomCardsError::NotAwaitingChoice);
         };
         if action.player != player {
             return Err(BottomCardsError::WrongPlayer);
         }
         let PlayerActionKind::BottomCards { cards } = action.kind else {
-            return Err(BottomCardsError::WrongCount { expected: count, got: 0 });
+            return Err(BottomCardsError::WrongCount {
+                expected: count,
+                got: 0,
+            });
         };
         if cards.len() != count {
-            return Err(BottomCardsError::WrongCount { expected: count, got: cards.len() });
+            return Err(BottomCardsError::WrongCount {
+                expected: count,
+                got: cards.len(),
+            });
         }
         let mut seen: Vec<ObjectId> = Vec::with_capacity(cards.len());
         for &card in &cards {
@@ -317,7 +358,10 @@ impl Engine {
             seen.push(card);
         }
         for &card in &cards {
-            let obj = self.state.object(card).ok_or(BottomCardsError::CardNotInHand)?;
+            let obj = self
+                .state
+                .object(card)
+                .ok_or(BottomCardsError::CardNotInHand)?;
             if obj.zone != ZoneKind::Hand || obj.owner != player {
                 return Err(BottomCardsError::CardNotInHand);
             }
@@ -330,12 +374,20 @@ impl Engine {
             let new_id = self.state.allocate_object_id();
             let mut new_obj = last_known.clone();
             new_obj.object_id = new_id;
-            new_obj.lineage = ObjectLineage { previous: Some(card) };
+            new_obj.lineage = ObjectLineage {
+                previous: Some(card),
+            };
             new_obj.zone = ZoneKind::Library;
             new_obj.timestamp = self.state.allocate_sequence_no();
-            self.state.zone_mut(ZoneKind::Hand, Some(player)).expect("hand zone").remove(card);
+            self.state
+                .zone_mut(ZoneKind::Hand, Some(player))
+                .expect("hand zone")
+                .remove(card);
             self.state.objects.remove(&card);
-            self.state.zone_mut(ZoneKind::Library, Some(owner)).expect("library zone").push_bottom(new_id);
+            self.state
+                .zone_mut(ZoneKind::Library, Some(owner))
+                .expect("library zone")
+                .push_bottom(new_id);
             self.state.objects.insert(new_id, new_obj);
             commands::remap_abilities(&mut self.state, card, new_id);
             let event_id = self.state.allocate_event_id();
@@ -399,7 +451,10 @@ impl Engine {
     /// Fisher-Yates shuffle of `player`'s library from `state.rng`, logging an
     /// `RngDrawn` per draw so a replay is deterministic (CR 701.24a).
     pub(in crate::engine) fn shuffle_library(&mut self, player: PlayerId) {
-        let len = self.state.zone(ZoneKind::Library, Some(player)).map_or(0, |z| z.contents.len());
+        let len = self
+            .state
+            .zone(ZoneKind::Library, Some(player))
+            .map_or(0, |z| z.contents.len());
         // Swaps are drawn first because `next_rng` can't run while the zone is borrowed.
         let mut swaps: Vec<(usize, usize)> = Vec::with_capacity(len);
         for i in (1..len).rev() {
@@ -411,12 +466,18 @@ impl Engine {
             self.state.ledger.push(GameEvent {
                 event_id,
                 sequence_no: seq,
-                kind: GameEventKind::RngDrawn { purpose: "shuffle".to_string(), value: rng_val },
+                kind: GameEventKind::RngDrawn {
+                    purpose: "shuffle".to_string(),
+                    value: rng_val,
+                },
                 caused_by_command: None,
                 parent_event: None,
             });
         }
-        let lib = self.state.zone_mut(ZoneKind::Library, Some(player)).expect("library zone");
+        let lib = self
+            .state
+            .zone_mut(ZoneKind::Library, Some(player))
+            .expect("library zone");
         for (i, j) in swaps {
             lib.contents.swap(i, j);
         }
@@ -444,13 +505,18 @@ impl Engine {
             self.state.ledger.push(GameEvent {
                 event_id,
                 sequence_no: seq,
-                kind: GameEventKind::RngDrawn { purpose: "cascade-bottom".to_string(), value: rng_val },
+                kind: GameEventKind::RngDrawn {
+                    purpose: "cascade-bottom".to_string(),
+                    value: rng_val,
+                },
                 caused_by_command: None,
                 parent_event: None,
             });
         }
         for card in cards {
-            if let Some(proposed) = commands::propose_zone_move(&self.state, card, ZoneKind::Exile, ZoneKind::Library) {
+            if let Some(proposed) =
+                commands::propose_zone_move(&self.state, card, ZoneKind::Exile, ZoneKind::Library)
+            {
                 let (committed, departed) = commands::commit_zone_move(&mut self.state, proposed);
                 self.departed_triggered_abilities.extend(departed);
                 self.state.ledger.push(committed);
@@ -461,21 +527,34 @@ impl Engine {
     /// Puts the hand back on top of the library before a mulligan redraw; CR 103.5
     /// doesn't constrain the order.
     fn return_hand_to_library(&mut self, player: PlayerId) {
-        let hand_ids: Vec<ObjectId> = self.state
+        let hand_ids: Vec<ObjectId> = self
+            .state
             .zone(ZoneKind::Hand, Some(player))
             .map_or(Vec::new(), |z| z.contents.iter().copied().collect());
         for card in hand_ids {
-            let last_known = self.state.object(card).expect("hand card must exist").clone();
+            let last_known = self
+                .state
+                .object(card)
+                .expect("hand card must exist")
+                .clone();
             let owner = last_known.owner;
             let new_id = self.state.allocate_object_id();
             let mut new_obj = last_known.clone();
             new_obj.object_id = new_id;
-            new_obj.lineage = ObjectLineage { previous: Some(card) };
+            new_obj.lineage = ObjectLineage {
+                previous: Some(card),
+            };
             new_obj.zone = ZoneKind::Library;
             new_obj.timestamp = self.state.allocate_sequence_no();
-            self.state.zone_mut(ZoneKind::Hand, Some(player)).expect("hand zone").remove(card);
+            self.state
+                .zone_mut(ZoneKind::Hand, Some(player))
+                .expect("hand zone")
+                .remove(card);
             self.state.objects.remove(&card);
-            self.state.zone_mut(ZoneKind::Library, Some(owner)).expect("library zone").push_top(new_id);
+            self.state
+                .zone_mut(ZoneKind::Library, Some(owner))
+                .expect("library zone")
+                .push_top(new_id);
             self.state.objects.insert(new_id, new_obj);
             commands::remap_abilities(&mut self.state, card, new_id);
             let event_id = self.state.allocate_event_id();
@@ -497,21 +576,35 @@ impl Engine {
 
     fn draw_opening_hand(&mut self, player: PlayerId) {
         for _ in 0..self.settings.starting_hand_size {
-            let Some(card) = self.state.zone(ZoneKind::Library, Some(player))
+            let Some(card) = self
+                .state
+                .zone(ZoneKind::Library, Some(player))
                 .and_then(|z| z.contents.front().copied())
             else {
                 break;
             };
-            let last_known = self.state.object(card).expect("library card must exist").clone();
+            let last_known = self
+                .state
+                .object(card)
+                .expect("library card must exist")
+                .clone();
             let new_id = self.state.allocate_object_id();
             let mut new_obj = last_known.clone();
             new_obj.object_id = new_id;
-            new_obj.lineage = ObjectLineage { previous: Some(card) };
+            new_obj.lineage = ObjectLineage {
+                previous: Some(card),
+            };
             new_obj.zone = ZoneKind::Hand;
             new_obj.timestamp = self.state.allocate_sequence_no();
-            self.state.zone_mut(ZoneKind::Library, Some(player)).expect("library zone").remove(card);
+            self.state
+                .zone_mut(ZoneKind::Library, Some(player))
+                .expect("library zone")
+                .remove(card);
             self.state.objects.remove(&card);
-            self.state.zone_mut(ZoneKind::Hand, Some(player)).expect("hand zone").push_bottom(new_id);
+            self.state
+                .zone_mut(ZoneKind::Hand, Some(player))
+                .expect("hand zone")
+                .push_bottom(new_id);
             self.state.objects.insert(new_id, new_obj);
             commands::remap_abilities(&mut self.state, card, new_id);
             // CR 702.29b: a hand-only ability registers when the card reaches hand.
@@ -534,7 +627,10 @@ impl Engine {
     }
 
     fn next_mulligan_player(&self) -> Option<PlayerId> {
-        self.state.turn_order.iter().copied()
+        self.state
+            .turn_order
+            .iter()
+            .copied()
             .find(|&pid| !self.state.player(pid).is_some_and(|p| p.hand_kept))
     }
 
@@ -557,9 +653,11 @@ impl Engine {
     /// through here so the sequence stays deterministic from the seed.
     pub(in crate::engine) fn next_rng(&mut self) -> u64 {
         self.state.rng.draws_consumed += 1;
-        let mut z = self.state.rng.seed.wrapping_add(
-            0x9e3779b97f4a7c15u64.wrapping_mul(self.state.rng.draws_consumed),
-        );
+        let mut z = self
+            .state
+            .rng
+            .seed
+            .wrapping_add(0x9e3779b97f4a7c15u64.wrapping_mul(self.state.rng.draws_consumed));
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
         z ^ (z >> 31)
@@ -569,7 +667,11 @@ impl Engine {
     /// or goes straight to the first turn when nobody owes any.
     fn transition_to_bottoming(&mut self) {
         let free = self.settings.free_mulligans;
-        let mut queue: VecDeque<(PlayerId, usize)> = self.state.turn_order.iter().copied()
+        let mut queue: VecDeque<(PlayerId, usize)> = self
+            .state
+            .turn_order
+            .iter()
+            .copied()
             .filter_map(|pid| {
                 let taken = self.state.player(pid).map_or(0, |p| p.mulligans_taken);
                 let paid = taken.saturating_sub(free) as usize;

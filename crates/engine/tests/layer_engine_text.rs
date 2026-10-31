@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
+use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
@@ -23,22 +23,39 @@ fn base_state() -> GameState {
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
-fn permanent_definition(name: &str, supertypes: SupertypeSet, card_types: CardTypeSet) -> CardDefinition {
+fn permanent_definition(
+    name: &str,
+    supertypes: SupertypeSet,
+    card_types: CardTypeSet,
+) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes,
         card_types,
         subtypes: Vec::new(),
         oracle_text: String::new(),
-        power: if card_types.contains(CardTypeSet::CREATURE) { Some(PTValue::Fixed(2)) } else { None },
-        toughness: if card_types.contains(CardTypeSet::CREATURE) { Some(PTValue::Fixed(2)) } else { None },
+        power: if card_types.contains(CardTypeSet::CREATURE) {
+            Some(PTValue::Fixed(2))
+        } else {
+            None
+        },
+        toughness: if card_types.contains(CardTypeSet::CREATURE) {
+            Some(PTValue::Fixed(2))
+        } else {
+            None
+        },
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("test_layer_engine_text".to_string()),
@@ -52,18 +69,42 @@ fn permanent_definition(name: &str, supertypes: SupertypeSet, card_types: CardTy
     }
 }
 
-fn permanent(id: ObjectId, owner: PlayerId, name: &str, supertypes: SupertypeSet, timestamp: u64) -> GameObject {
+fn permanent(
+    id: ObjectId,
+    owner: PlayerId,
+    name: &str,
+    supertypes: SupertypeSet,
+    timestamp: u64,
+) -> GameObject {
     GameObject {
         timestamp: SequenceNo(timestamp),
-        ..card_object(id, permanent_definition(name, supertypes, CardTypeSet::CREATURE), owner, ZoneKind::Battlefield)
+        ..card_object(
+            id,
+            permanent_definition(name, supertypes, CardTypeSet::CREATURE),
+            owner,
+            ZoneKind::Battlefield,
+        )
     }
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
+    EffectFilter {
+        controller: None,
+        card_types: None,
+        self_only: false,
+        subtypes: None,
+        excluded_subtypes: None,
+        supertypes: None,
+        excluded_supertypes: None,
+    }
 }
 
-fn set_name(source: ObjectId, new_name: &str, filter: EffectFilter, timestamp: u64) -> ContinuousEffect {
+fn set_name(
+    source: ObjectId,
+    new_name: &str,
+    filter: EffectFilter,
+    timestamp: u64,
+) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::TextChanging,
@@ -80,9 +121,15 @@ fn no_effect_returns_the_plain_name() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(bear, p0, "Test Bear", SupertypeSet::empty(), 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, p0, "Test Bear", SupertypeSet::empty(), 0),
+    );
 
-    assert_eq!(effective_characteristics(&state, &ScriptRuntime::new(), bear).name, "Test Bear");
+    assert_eq!(
+        effective_characteristics(&state, &ScriptRuntime::new(), bear).name,
+        "Test Bear"
+    );
 }
 
 #[test]
@@ -90,10 +137,18 @@ fn a_set_name_effect_overrides_the_base_name() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(bear, p0, "Test Bear", SupertypeSet::empty(), 0));
-    state.continuous_effects.push(set_name(bear, "Renamed Bear", no_filter(), 1));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, p0, "Test Bear", SupertypeSet::empty(), 0),
+    );
+    state
+        .continuous_effects
+        .push(set_name(bear, "Renamed Bear", no_filter(), 1));
 
-    assert_eq!(effective_characteristics(&state, &ScriptRuntime::new(), bear).name, "Renamed Bear");
+    assert_eq!(
+        effective_characteristics(&state, &ScriptRuntime::new(), bear).name,
+        "Renamed Bear"
+    );
 }
 
 // CR 612.8, 613.7
@@ -103,9 +158,16 @@ fn later_timestamp_set_name_wins_outright() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
-    put_on_battlefield(&mut state, permanent(bear, p0, "Test Bear", SupertypeSet::empty(), 0));
-    state.continuous_effects.push(set_name(bear, "First Rename", no_filter(), 1));
-    state.continuous_effects.push(set_name(bear, "Second Rename", no_filter(), 2));
+    put_on_battlefield(
+        &mut state,
+        permanent(bear, p0, "Test Bear", SupertypeSet::empty(), 0),
+    );
+    state
+        .continuous_effects
+        .push(set_name(bear, "First Rename", no_filter(), 1));
+    state
+        .continuous_effects
+        .push(set_name(bear, "Second Rename", no_filter(), 2));
 
     assert_eq!(
         effective_characteristics(&state, &ScriptRuntime::new(), bear).name,
@@ -120,12 +182,26 @@ fn effect_filter_still_scopes_a_set_name_effect() {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
     let other = ObjectId(1);
-    put_on_battlefield(&mut state, permanent(source, p0, "Source", SupertypeSet::empty(), 0));
-    put_on_battlefield(&mut state, permanent(other, p0, "Test Bear", SupertypeSet::empty(), 0));
+    put_on_battlefield(
+        &mut state,
+        permanent(source, p0, "Source", SupertypeSet::empty(), 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(other, p0, "Test Bear", SupertypeSet::empty(), 0),
+    );
     state.continuous_effects.push(set_name(
         source,
         "Renamed",
-        EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+        EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        },
         1,
     ));
 
@@ -148,8 +224,14 @@ fn renaming_a_legendary_to_match_another_triggers_the_legend_rule() {
     let a = ObjectId(0);
     let b = ObjectId(1);
     // Two differently named legendaries under one controller are not yet a legend rule violation.
-    put_on_battlefield(&mut state, permanent(a, p0, "Legend A", SupertypeSet::LEGENDARY, 0));
-    put_on_battlefield(&mut state, permanent(b, p0, "Legend B", SupertypeSet::LEGENDARY, 1));
+    put_on_battlefield(
+        &mut state,
+        permanent(a, p0, "Legend A", SupertypeSet::LEGENDARY, 0),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(b, p0, "Legend B", SupertypeSet::LEGENDARY, 1),
+    );
 
     assert!(
         matches!(
@@ -160,10 +242,15 @@ fn renaming_a_legendary_to_match_another_triggers_the_legend_rule() {
     );
 
     // A SetName effect makes `a`'s effective name match `b`'s printed name.
-    state.continuous_effects.push(set_name(a, "Legend B", no_filter(), 2));
+    state
+        .continuous_effects
+        .push(set_name(a, "Legend B", no_filter(), 2));
 
     let outcome = check_state_based_actions(&mut state, &ScriptRuntime::new());
-    let SbaOutcome::NeedsLegendRuleChoice { player, candidates, .. } = outcome else {
+    let SbaOutcome::NeedsLegendRuleChoice {
+        player, candidates, ..
+    } = outcome
+    else {
         panic!("renaming one legendary to match another's name must trigger CR 704.5j")
     };
     assert_eq!(player, p0);

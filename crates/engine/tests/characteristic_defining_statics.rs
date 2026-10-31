@@ -5,7 +5,9 @@ use stackfish_engine::engine::Engine;
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones,
+};
 
 fn cda_script(extra: &str, layer_and_effect: &str) -> String {
     format!(
@@ -23,20 +25,36 @@ return s
     )
 }
 
-const ALL_COLORS: &str = r#"e:SetLayer(Game.Layers.ColorChanging) e:SetEffect(Game.Effects.SetColors("WUBRG"))"#;
-const ADD_CHANGELING_SUBTYPE: &str = r#"e:SetLayer(Game.Layers.TypeChanging) e:SetEffect(Game.Effects.AddSubtype("Shapeshifter"))"#;
+const ALL_COLORS: &str =
+    r#"e:SetLayer(Game.Layers.ColorChanging) e:SetEffect(Game.Effects.SetColors("WUBRG"))"#;
+const ADD_CHANGELING_SUBTYPE: &str =
+    r#"e:SetLayer(Game.Layers.TypeChanging) e:SetEffect(Game.Effects.AddSubtype("Shapeshifter"))"#;
 
 fn scripted(script: &str) -> CardDefinition {
     CardDefinition {
         script_ref: ScriptReference::Inline(script.to_string()),
-        ..minimal_card_definition(1, "Scripted", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            1,
+            "Scripted",
+            "unused",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
 const SOURCE: ObjectId = ObjectId(0);
 
 fn all_zones() -> Vec<ZoneKind> {
-    vec![ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile]
+    vec![
+        ZoneKind::Hand,
+        ZoneKind::Library,
+        ZoneKind::Battlefield,
+        ZoneKind::Graveyard,
+        ZoneKind::Exile,
+    ]
 }
 
 fn state_with_source(zone: ZoneKind, script: &str) -> GameState {
@@ -45,7 +63,9 @@ fn state_with_source(zone: ZoneKind, script: &str) -> GameState {
         step: Step::PreCombatMain,
         ..base_two_player_state(zones(p0, PlayerId(1), &all_zones()))
     };
-    state.objects.insert(SOURCE, card_object(SOURCE, scripted(script), p0, zone));
+    state
+        .objects
+        .insert(SOURCE, card_object(SOURCE, scripted(script), p0, zone));
     // The stack has no zone container; every other zone does.
     if zone != ZoneKind::Stack {
         match zone {
@@ -69,17 +89,38 @@ fn colors(state: &GameState) -> ColorSet {
 
 #[test]
 fn a_cda_color_static_registers_and_applies_in_every_zone() {
-    for zone in [ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile, ZoneKind::Stack] {
-        let mut state = state_with_source(zone, &cda_script("e:SetCharacteristicDefining()", ALL_COLORS));
+    for zone in [
+        ZoneKind::Hand,
+        ZoneKind::Library,
+        ZoneKind::Battlefield,
+        ZoneKind::Graveyard,
+        ZoneKind::Exile,
+        ZoneKind::Stack,
+    ] {
+        let mut state = state_with_source(
+            zone,
+            &cda_script("e:SetCharacteristicDefining()", ALL_COLORS),
+        );
         run_script(&mut state).unwrap();
-        assert_eq!(state.continuous_effects.len(), 1, "CDA must register in {zone:?}");
-        assert_eq!(colors(&state), ColorSet::all(), "CDA must apply in {zone:?}");
+        assert_eq!(
+            state.continuous_effects.len(),
+            1,
+            "CDA must register in {zone:?}"
+        );
+        assert_eq!(
+            colors(&state),
+            ColorSet::all(),
+            "CDA must apply in {zone:?}"
+        );
     }
 }
 
 #[test]
 fn a_cda_subtype_static_applies_off_the_battlefield() {
-    let mut state = state_with_source(ZoneKind::Graveyard, &cda_script("e:SetCharacteristicDefining()", ADD_CHANGELING_SUBTYPE));
+    let mut state = state_with_source(
+        ZoneKind::Graveyard,
+        &cda_script("e:SetCharacteristicDefining()", ADD_CHANGELING_SUBTYPE),
+    );
     run_script(&mut state).unwrap();
     let subtypes = effective_characteristics(&state, &ScriptRuntime::new(), SOURCE).subtypes;
     assert!(subtypes.iter().any(|s| s.0 == "Shapeshifter"));
@@ -87,10 +128,18 @@ fn a_cda_subtype_static_applies_off_the_battlefield() {
 
 #[test]
 fn an_ordinary_static_is_still_discarded_off_the_battlefield() {
-    for zone in [ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Exile, ZoneKind::Stack] {
+    for zone in [
+        ZoneKind::Hand,
+        ZoneKind::Graveyard,
+        ZoneKind::Exile,
+        ZoneKind::Stack,
+    ] {
         let mut state = state_with_source(zone, &cda_script("", ALL_COLORS));
         run_script(&mut state).unwrap();
-        assert!(state.continuous_effects.is_empty(), "a plain static must not register in {zone:?}");
+        assert!(
+            state.continuous_effects.is_empty(),
+            "a plain static must not register in {zone:?}"
+        );
     }
     let mut on_battlefield = state_with_source(ZoneKind::Battlefield, &cda_script("", ALL_COLORS));
     run_script(&mut on_battlefield).unwrap();
@@ -99,10 +148,18 @@ fn an_ordinary_static_is_still_discarded_off_the_battlefield() {
 
 #[test]
 fn the_engine_sweep_registers_a_graveyard_cda_once() {
-    let mut engine = Engine::new(state_with_source(ZoneKind::Graveyard, &cda_script("e:SetCharacteristicDefining()", ALL_COLORS)));
+    let mut engine = Engine::new(state_with_source(
+        ZoneKind::Graveyard,
+        &cda_script("e:SetCharacteristicDefining()", ALL_COLORS),
+    ));
     for _ in 0..2 {
         for player in [PlayerId(0), PlayerId(1)] {
-            engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+            engine
+                .submit_action(PlayerAction {
+                    player,
+                    kind: PlayerActionKind::PassPriority,
+                })
+                .unwrap();
             drain(&mut engine);
         }
     }
@@ -113,15 +170,44 @@ fn the_engine_sweep_registers_a_graveyard_cda_once() {
 #[test]
 fn cr_604_3a_validation_rejects_non_cda_shapes() {
     let cases: [(&str, &str, &str); 5] = [
-        ("keyword grant", "e:SetLayer(Game.Layers.AbilityAdding) e:SetEffect(Game.Effects.AddKeyword(\"Flying\"))", ""),
-        ("condition", ALL_COLORS, "e:SetCondition(Game.Conditions.AtOrBelowLife(5))"),
-        ("function zone", ALL_COLORS, "e:SetFunctionsFrom(\"Graveyard\")"),
-        ("duration", ALL_COLORS, "e:SetDuration(Game.Durations.UntilEndOfTurn)"),
-        ("card type", "e:SetLayer(Game.Layers.TypeChanging) e:SetEffect(Game.Effects.AddCardType(\"Artifact\"))", ""),
+        (
+            "keyword grant",
+            "e:SetLayer(Game.Layers.AbilityAdding) e:SetEffect(Game.Effects.AddKeyword(\"Flying\"))",
+            "",
+        ),
+        (
+            "condition",
+            ALL_COLORS,
+            "e:SetCondition(Game.Conditions.AtOrBelowLife(5))",
+        ),
+        (
+            "function zone",
+            ALL_COLORS,
+            "e:SetFunctionsFrom(\"Graveyard\")",
+        ),
+        (
+            "duration",
+            ALL_COLORS,
+            "e:SetDuration(Game.Durations.UntilEndOfTurn)",
+        ),
+        (
+            "card type",
+            "e:SetLayer(Game.Layers.TypeChanging) e:SetEffect(Game.Effects.AddCardType(\"Artifact\"))",
+            "",
+        ),
     ];
     for (name, layer_and_effect, extra) in cases {
-        let mut state = state_with_source(ZoneKind::Battlefield, &cda_script(&format!("e:SetCharacteristicDefining() {extra}"), layer_and_effect));
-        assert!(run_script(&mut state).is_err(), "{name} must be rejected as a CDA");
+        let mut state = state_with_source(
+            ZoneKind::Battlefield,
+            &cda_script(
+                &format!("e:SetCharacteristicDefining() {extra}"),
+                layer_and_effect,
+            ),
+        );
+        assert!(
+            run_script(&mut state).is_err(),
+            "{name} must be rejected as a CDA"
+        );
         assert!(state.continuous_effects.is_empty(), "{name}");
     }
 }
@@ -165,7 +251,15 @@ const MOUNTAIN: ObjectId = ObjectId(12);
 fn mountain_definition() -> CardDefinition {
     CardDefinition {
         subtypes: vec![Subtype("Mountain".to_string())],
-        ..minimal_card_definition(3, "Mountain", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            3,
+            "Mountain",
+            "unused",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     }
 }
 
@@ -175,16 +269,37 @@ fn anger_state() -> GameState {
         step: Step::PreCombatMain,
         ..base_two_player_state(zones(p0, PlayerId(1), &all_zones()))
     };
-    let bear = minimal_card_definition(2, "Bear", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE);
-    state.objects.insert(ANGER, card_object(ANGER, scripted(ANGER_LIKE), p0, ZoneKind::Graveyard));
-    state.zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(ANGER);
-    state.objects.insert(BEAR, card_object(BEAR, bear, p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(BEAR);
+    let bear = minimal_card_definition(
+        2,
+        "Bear",
+        "unused",
+        ManaCost {
+            symbols: Vec::new(),
+        },
+        CardTypeSet::CREATURE,
+    );
+    state.objects.insert(
+        ANGER,
+        card_object(ANGER, scripted(ANGER_LIKE), p0, ZoneKind::Graveyard),
+    );
+    state
+        .zone_mut(ZoneKind::Graveyard, Some(p0))
+        .unwrap()
+        .push_bottom(ANGER);
+    state
+        .objects
+        .insert(BEAR, card_object(BEAR, bear, p0, ZoneKind::Battlefield));
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(BEAR);
     state
 }
 
 fn bear_has_haste(state: &GameState) -> bool {
-    effective_characteristics(state, &ScriptRuntime::new(), BEAR).keywords.contains(KeywordSet::HASTE)
+    effective_characteristics(state, &ScriptRuntime::new(), BEAR)
+        .keywords
+        .contains(KeywordSet::HASTE)
 }
 
 #[test]
@@ -192,21 +307,45 @@ fn a_graveyard_static_with_a_mountain_condition_tracks_the_board() {
     let p0 = PlayerId(0);
     let mut engine = Engine::new(anger_state());
     for player in [PlayerId(0), PlayerId(1)] {
-        engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+        engine
+            .submit_action(PlayerAction {
+                player,
+                kind: PlayerActionKind::PassPriority,
+            })
+            .unwrap();
         drain(&mut engine);
     }
-    assert_eq!(engine.state().continuous_effects.len(), 1, "registered from the graveyard");
-    assert!(!bear_has_haste(engine.state()), "no Mountain yet: the condition gate holds the effect off");
+    assert_eq!(
+        engine.state().continuous_effects.len(),
+        1,
+        "registered from the graveyard"
+    );
+    assert!(
+        !bear_has_haste(engine.state()),
+        "no Mountain yet: the condition gate holds the effect off"
+    );
 
     // A Mountain arrives: the same registered effect now applies.
     let state = engine.state_mut();
-    state.objects.insert(MOUNTAIN, card_object(MOUNTAIN, mountain_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(MOUNTAIN);
-    assert!(bear_has_haste(engine.state()), "a Mountain satisfies the condition");
+    state.objects.insert(
+        MOUNTAIN,
+        card_object(MOUNTAIN, mountain_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(MOUNTAIN);
+    assert!(
+        bear_has_haste(engine.state()),
+        "a Mountain satisfies the condition"
+    );
 
     // The Mountain leaves: the effect stops applying but stays registered.
     let state = engine.state_mut();
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().remove(MOUNTAIN);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .remove(MOUNTAIN);
     state.objects.remove(&MOUNTAIN);
     assert!(!bear_has_haste(engine.state()));
     assert_eq!(engine.state().continuous_effects.len(), 1);

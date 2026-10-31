@@ -18,13 +18,20 @@ use super::types::ScriptError;
 /// `Value::Nil`.
 ///
 /// TODO: more event shapes (damage dealt, life changed, tapped) as conditions need them
-pub(crate) fn event_to_lua<'lua>(lua: &'lua Lua, event: Option<&GameEvent>) -> Result<Value<'lua>, ScriptError> {
+pub(crate) fn event_to_lua<'lua>(
+    lua: &'lua Lua,
+    event: Option<&GameEvent>,
+) -> Result<Value<'lua>, ScriptError> {
     let Some(event) = event else {
         return Ok(Value::Nil);
     };
     match &event.kind {
-        GameEventKind::ZoneChange { object, from, to, .. } => {
-            let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        GameEventKind::ZoneChange {
+            object, from, to, ..
+        } => {
+            let table = lua
+                .create_table()
+                .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             table
                 .set("kind", "zone_change")
                 .and_then(|_| table.set("object", object.0))
@@ -62,42 +69,88 @@ pub(crate) fn event_to_lua<'lua>(lua: &'lua Lua, event: Option<&GameEvent>) -> R
 /// takes its characteristics from `source` and `source_lki` and needs its own
 /// decode.
 /// TODO: stack contents in the snapshot
-pub(crate) fn state_to_lua<'lua>(lua: &'lua Lua, state: &GameState) -> Result<Value<'lua>, ScriptError> {
-    let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let life = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let hand_count = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let library_count = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let graveyard = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let command = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+pub(crate) fn state_to_lua<'lua>(
+    lua: &'lua Lua,
+    state: &GameState,
+) -> Result<Value<'lua>, ScriptError> {
+    let table = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let life = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let hand_count = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let library_count = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let graveyard = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let command = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
 
     for player in &state.players {
         let pid = player.player_id.0;
-        life.set(pid, player.life).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        let hand_len =
-            state.zone(ZoneKind::Hand, Some(player.player_id)).map(|z| z.len()).unwrap_or(0) as u32;
-        hand_count.set(pid, hand_len).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        let library_len =
-            state.zone(ZoneKind::Library, Some(player.player_id)).map(|z| z.len()).unwrap_or(0) as u32;
-        library_count.set(pid, library_len).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        life.set(pid, player.life)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let hand_len = state
+            .zone(ZoneKind::Hand, Some(player.player_id))
+            .map(|z| z.len())
+            .unwrap_or(0) as u32;
+        hand_count
+            .set(pid, hand_len)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let library_len = state
+            .zone(ZoneKind::Library, Some(player.player_id))
+            .map(|z| z.len())
+            .unwrap_or(0) as u32;
+        library_count
+            .set(pid, library_len)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         graveyard
-            .set(pid, zone_cards_to_lua(lua, state, ZoneKind::Graveyard, Some(player.player_id))?)
+            .set(
+                pid,
+                zone_cards_to_lua(lua, state, ZoneKind::Graveyard, Some(player.player_id))?,
+            )
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         command
-            .set(pid, zone_cards_to_lua(lua, state, ZoneKind::Command, Some(player.player_id))?)
+            .set(
+                pid,
+                zone_cards_to_lua(lua, state, ZoneKind::Command, Some(player.player_id))?,
+            )
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     }
 
-    table.set("life", life).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    table.set("hand_count", hand_count).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    table.set("library_count", library_count).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     table
-        .set("battlefield", zone_cards_to_lua(lua, state, ZoneKind::Battlefield, None)?)
+        .set("life", life)
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     table
-        .set("exile", zone_cards_to_lua(lua, state, ZoneKind::Exile, None)?)
+        .set("hand_count", hand_count)
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    table.set("graveyard", graveyard).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    table.set("command", command).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("library_count", library_count)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set(
+            "battlefield",
+            zone_cards_to_lua(lua, state, ZoneKind::Battlefield, None)?,
+        )
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set(
+            "exile",
+            zone_cards_to_lua(lua, state, ZoneKind::Exile, None)?,
+        )
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("graveyard", graveyard)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("command", command)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     Ok(Value::Table(table))
 }
 
@@ -112,7 +165,9 @@ fn zone_cards_to_lua<'lua>(
     kind: ZoneKind,
     owner: Option<PlayerId>,
 ) -> Result<Value<'lua>, ScriptError> {
-    let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let table = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     if let Some(zone) = state.zone(kind, owner) {
         for (i, object_id) in zone.contents.iter().enumerate() {
             if let Some(obj) = state.object(*object_id) {
@@ -133,21 +188,47 @@ fn zone_cards_to_lua<'lua>(
 /// colors, full type set or keywords.
 /// TODO: the rest of the effective characteristics
 fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'lua>, ScriptError> {
-    let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    table.set("id", obj.object_id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    table.set("name", obj.definition.name.clone()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let power = obj.definition.power.as_ref().and_then(|p| p.net_with_counters(&obj.counters));
-    table.set("power", power).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let toughness = obj.definition.toughness.as_ref().and_then(|t| t.net_with_counters(&obj.counters));
-    table.set("toughness", toughness).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let table = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     table
-        .set("is_creature", obj.definition.card_types.contains(CardTypeSet::CREATURE))
+        .set("id", obj.object_id.0)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("name", obj.definition.name.clone())
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let power = obj
+        .definition
+        .power
+        .as_ref()
+        .and_then(|p| p.net_with_counters(&obj.counters));
+    table
+        .set("power", power)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let toughness = obj
+        .definition
+        .toughness
+        .as_ref()
+        .and_then(|t| t.net_with_counters(&obj.counters));
+    table
+        .set("toughness", toughness)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set(
+            "is_creature",
+            obj.definition.card_types.contains(CardTypeSet::CREATURE),
+        )
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     // The raw card type list (`{"Land"}`), in the same name strings a filter table's `card_types` accepts, beside `is_creature`. A `ForEachPlayer` body such as Balance's land count needs more than creature-or-not.
     table
-        .set("card_types", card_type_names_to_lua(lua, obj.definition.card_types)?)
+        .set(
+            "card_types",
+            card_type_names_to_lua(lua, obj.definition.card_types)?,
+        )
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    table.set("controller", obj.controller.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("controller", obj.controller.0)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     // CR 303.4m, 703.4b: what this object is attached to and what is attached to it, both public.
     table
         .set("attached_to", obj.attached_to.map(|id| id.0))
@@ -156,19 +237,30 @@ fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'
     table
         .set("attached_to_player", obj.attached_to_player.map(|id| id.0))
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    let attachments = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let attachments = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     for (i, id) in obj.attachments.iter().enumerate() {
-        attachments.set((i + 1) as i64, id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        attachments
+            .set((i + 1) as i64, id.0)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     }
-    table.set("attachments", attachments).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("attachments", attachments)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     Ok(Value::Table(table))
 }
 
 /// `CardTypeSet` to the name strings a filter table's `card_types` accepts (the
 /// inverse of `decode::parse_card_type_name`), as a 1-indexed array in a fixed
 /// check order.
-fn card_type_names_to_lua<'lua>(lua: &'lua Lua, types: CardTypeSet) -> Result<Value<'lua>, ScriptError> {
-    let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+fn card_type_names_to_lua<'lua>(
+    lua: &'lua Lua,
+    types: CardTypeSet,
+) -> Result<Value<'lua>, ScriptError> {
+    let table = lua
+        .create_table()
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     let mut i = 1i64;
     let named: &[(CardTypeSet, &str)] = &[
         (CardTypeSet::ARTIFACT, "Artifact"),
@@ -183,7 +275,9 @@ fn card_type_names_to_lua<'lua>(lua: &'lua Lua, types: CardTypeSet) -> Result<Va
     ];
     for (bit, name) in named {
         if types.contains(*bit) {
-            table.set(i, *name).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            table
+                .set(i, *name)
+                .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             i += 1;
         }
     }

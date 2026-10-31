@@ -11,7 +11,9 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -36,7 +38,9 @@ fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::BASIC,
         card_types: CardTypeSet::LAND,
@@ -61,7 +65,9 @@ fn drawcards_spell_definition(amount: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 20,
         name: "Test Draw".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::INSTANT,
@@ -104,7 +110,16 @@ fn two_player_state() -> GameState {
     GameState {
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Graveyard]))
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Library,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+            ],
+        ))
     }
 }
 
@@ -117,7 +132,8 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -125,15 +141,32 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
-    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine);
-    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
     drain(engine)
 }
 
@@ -144,13 +177,31 @@ fn drawcards_spell_puts_two_cards_in_casters_hand() {
     let p1 = PlayerId(1);
     let lib_a = ObjectId(0);
     let lib_b = ObjectId(1);
-    state.objects.insert(lib_a, card_object(lib_a, land_definition(1, "Forest"), p0, ZoneKind::Library));
-    state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(lib_a);
-    state.objects.insert(lib_b, card_object(lib_b, land_definition(2, "Island"), p0, ZoneKind::Library));
-    state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(lib_b);
+    state.objects.insert(
+        lib_a,
+        card_object(lib_a, land_definition(1, "Forest"), p0, ZoneKind::Library),
+    );
+    state
+        .zone_mut(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .push_bottom(lib_a);
+    state.objects.insert(
+        lib_b,
+        card_object(lib_b, land_definition(2, "Island"), p0, ZoneKind::Library),
+    );
+    state
+        .zone_mut(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .push_bottom(lib_b);
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, drawcards_spell_definition(2), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, drawcards_spell_definition(2), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -158,8 +209,24 @@ fn drawcards_spell_puts_two_cards_in_casters_hand() {
     let status = pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.len(), 2, "the spell left, two new cards arrived");
-    assert!(engine.state().zone(ZoneKind::Library, Some(p0)).unwrap().contents.is_empty());
+    assert_eq!(
+        engine
+            .state()
+            .zone(ZoneKind::Hand, Some(p0))
+            .unwrap()
+            .contents
+            .len(),
+        2,
+        "the spell left, two new cards arrived"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Library, Some(p0))
+            .unwrap()
+            .contents
+            .is_empty()
+    );
 }
 
 #[test]
@@ -168,15 +235,38 @@ fn scripted_draw_fires_an_already_existing_draws_card_trigger() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let permanent = ObjectId(0);
-    state.objects.insert(permanent, card_object(permanent, creature_definition(1, "Bear"), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
+    state.objects.insert(
+        permanent,
+        card_object(
+            permanent,
+            creature_definition(1, "Bear"),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(permanent);
     state.abilities.push(draws_card_trigger_ability(permanent));
     let lib_a = ObjectId(3);
-    state.objects.insert(lib_a, card_object(lib_a, land_definition(2, "Forest"), p0, ZoneKind::Library));
-    state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(lib_a);
+    state.objects.insert(
+        lib_a,
+        card_object(lib_a, land_definition(2, "Forest"), p0, ZoneKind::Library),
+    );
+    state
+        .zone_mut(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .push_bottom(lib_a);
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, drawcards_spell_definition(1), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, drawcards_spell_definition(1), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -184,12 +274,20 @@ fn scripted_draw_fires_an_already_existing_draws_card_trigger() {
     let status = pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().stack.len(), 1, "the DrawsCard trigger was collected off the scripted draw's own ZoneChange");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the DrawsCard trigger was collected off the scripted draw's own ZoneChange"
+    );
 
     let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty());
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied from the DrawsCard trigger");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "GainLife(1) applied from the DrawsCard trigger"
+    );
 }
 
 #[test]
@@ -198,11 +296,23 @@ fn drawing_more_than_the_library_holds_stops_without_crashing() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let lib_a = ObjectId(0);
-    state.objects.insert(lib_a, card_object(lib_a, land_definition(1, "Forest"), p0, ZoneKind::Library));
-    state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(lib_a);
+    state.objects.insert(
+        lib_a,
+        card_object(lib_a, land_definition(1, "Forest"), p0, ZoneKind::Library),
+    );
+    state
+        .zone_mut(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .push_bottom(lib_a);
     let card = ObjectId(2);
-    state.objects.insert(card, card_object(card, drawcards_spell_definition(2), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, drawcards_spell_definition(2), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
@@ -221,10 +331,27 @@ fn drawcards_ability_works_the_same_as_a_drawcards_spell() {
     let p1 = PlayerId(1);
     let source = ObjectId(0);
     let lib_a = ObjectId(1);
-    state.objects.insert(source, card_object(source, creature_definition(1, "Scribe"), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
-    state.objects.insert(lib_a, card_object(lib_a, land_definition(2, "Forest"), p0, ZoneKind::Library));
-    state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(lib_a);
+    state.objects.insert(
+        source,
+        card_object(
+            source,
+            creature_definition(1, "Scribe"),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(source);
+    state.objects.insert(
+        lib_a,
+        card_object(lib_a, land_definition(2, "Forest"), p0, ZoneKind::Library),
+    );
+    state
+        .zone_mut(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .push_bottom(lib_a);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -232,7 +359,11 @@ fn drawcards_ability_works_the_same_as_a_drawcards_spell() {
         source,
         kind: AbilityKind::Activated,
         condition: None,
-        cost: Some(CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() }),
+        cost: Some(CostSpec {
+            mana: None,
+            additional: vec![AdditionalCost::TapSelf],
+            alternative: Vec::new(),
+        }),
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::DrawCards(1)),
@@ -254,12 +385,31 @@ fn drawcards_ability_works_the_same_as_a_drawcards_spell() {
         .expect("player holds priority");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }));
-    engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Tap(source)] }).expect("Tap pays TapSelf");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Tap(source)],
+        })
+        .expect("Tap pays TapSelf");
     drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    assert_eq!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.len(), 1);
-    assert!(engine.state().zone(ZoneKind::Library, Some(p0)).unwrap().contents.is_empty());
+    assert_eq!(
+        engine
+            .state()
+            .zone(ZoneKind::Hand, Some(p0))
+            .unwrap()
+            .contents
+            .len(),
+        1
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Library, Some(p0))
+            .unwrap()
+            .contents
+            .is_empty()
+    );
 }
 
 #[test]
@@ -270,28 +420,72 @@ fn drawing_two_preserves_library_order() {
     let first = ObjectId(0);
     let second = ObjectId(1);
     let third = ObjectId(2);
-    state.objects.insert(first, card_object(first, land_definition(1, "First"), p0, ZoneKind::Library));
-    state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(first);
-    state.objects.insert(second, card_object(second, land_definition(2, "Second"), p0, ZoneKind::Library));
-    state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(second);
-    state.objects.insert(third, card_object(third, land_definition(3, "Third"), p0, ZoneKind::Library));
-    state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(third);
+    state.objects.insert(
+        first,
+        card_object(first, land_definition(1, "First"), p0, ZoneKind::Library),
+    );
+    state
+        .zone_mut(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .push_bottom(first);
+    state.objects.insert(
+        second,
+        card_object(second, land_definition(2, "Second"), p0, ZoneKind::Library),
+    );
+    state
+        .zone_mut(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .push_bottom(second);
+    state.objects.insert(
+        third,
+        card_object(third, land_definition(3, "Third"), p0, ZoneKind::Library),
+    );
+    state
+        .zone_mut(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .push_bottom(third);
     let card = ObjectId(3);
-    state.objects.insert(card, card_object(card, drawcards_spell_definition(2), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.objects.insert(
+        card,
+        card_object(card, drawcards_spell_definition(2), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    let hand = &engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents;
-    let hand_names: Vec<&str> =
-        hand.iter().map(|id| engine.state().object(*id).unwrap().definition.name.as_str()).collect();
-    assert_eq!(hand_names, vec!["First", "Second"], "top two library cards drawn in order");
+    let hand = &engine
+        .state()
+        .zone(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .contents;
+    let hand_names: Vec<&str> = hand
+        .iter()
+        .map(|id| engine.state().object(*id).unwrap().definition.name.as_str())
+        .collect();
+    assert_eq!(
+        hand_names,
+        vec!["First", "Second"],
+        "top two library cards drawn in order"
+    );
 
-    let library = &engine.state().zone(ZoneKind::Library, Some(p0)).unwrap().contents;
-    let library_names: Vec<&str> =
-        library.iter().map(|id| engine.state().object(*id).unwrap().definition.name.as_str()).collect();
-    assert_eq!(library_names, vec!["Third"], "third card remains on top of the library");
+    let library = &engine
+        .state()
+        .zone(ZoneKind::Library, Some(p0))
+        .unwrap()
+        .contents;
+    let library_names: Vec<&str> = library
+        .iter()
+        .map(|id| engine.state().object(*id).unwrap().definition.name.as_str())
+        .collect();
+    assert_eq!(
+        library_names,
+        vec!["Third"],
+        "third card remains on top of the library"
+    );
 }

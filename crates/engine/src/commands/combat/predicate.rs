@@ -16,10 +16,10 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::turn::{Phase, Step};
 
+use super::super::Rejected;
 use super::super::attach::non_eliminated_players;
 use super::super::entries::target_order;
 use super::super::legality::effective_keywords;
-use super::super::Rejected;
 use super::declare::{attack_target_is_legal, attacker_can_attack, block_is_legal};
 
 /// Every object id in the game, ascending. The entries list in this order.
@@ -31,25 +31,41 @@ fn sorted_ids(state: &GameState) -> Vec<ObjectId> {
 
 /// What `actor` may attack: opponents first, then the planeswalkers and
 /// battles they control (CR 506.4, 508.1b).
-pub(crate) fn legal_defenders(state: &GameState, script_runtime: &ScriptRuntime, actor: PlayerId) -> Vec<Target> {
-    let mut possible: Vec<Target> =
-        non_eliminated_players(state).into_iter().filter(|&p| p != actor).map(Target::Player).collect();
+pub(crate) fn legal_defenders(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+) -> Vec<Target> {
+    let mut possible: Vec<Target> = non_eliminated_players(state)
+        .into_iter()
+        .filter(|&p| p != actor)
+        .map(Target::Player)
+        .collect();
     possible.extend(sorted_ids(state).into_iter().map(Target::Object));
     possible.sort_by_key(target_order);
-    possible.into_iter().filter(|target| attack_target_is_legal(state, script_runtime, actor, target).is_ok()).collect()
+    possible
+        .into_iter()
+        .filter(|target| attack_target_is_legal(state, script_runtime, actor, target).is_ok())
+        .collect()
 }
 
 /// CR 508.1d: the creatures `actor` must declare as attackers. A creature that
 /// "attacks each combat if able" is required only when it is able: it passes
 /// `attacker_can_attack` and there is something to attack.
-pub(crate) fn required_attackers(state: &GameState, script_runtime: &ScriptRuntime, actor: PlayerId) -> Vec<ObjectId> {
+pub(crate) fn required_attackers(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+) -> Vec<ObjectId> {
     if legal_defenders(state, script_runtime, actor).is_empty() {
         return Vec::new();
     }
     sorted_ids(state)
         .into_iter()
         .filter(|&id| attacker_can_attack(state, script_runtime, actor, id).is_ok())
-        .filter(|&id| effective_keywords(state, script_runtime, id).contains(KeywordSet::ATTACKS_EACH_COMBAT))
+        .filter(|&id| {
+            effective_keywords(state, script_runtime, id).contains(KeywordSet::ATTACKS_EACH_COMBAT)
+        })
         .collect()
 }
 
@@ -67,7 +83,8 @@ pub(crate) fn attack_declaration_is_legal(
         .any(|required| !attackers.iter().any(|(id, _)| *id == required));
     if left_home {
         return Err(Rejected::IllegalAction(
-            "a creature that attacks each combat if able must be declared as an attacker".to_string(),
+            "a creature that attacks each combat if able must be declared as an attacker"
+                .to_string(),
         ));
     }
     Ok(())
@@ -90,7 +107,11 @@ pub(crate) fn pass_would_skip_a_required_attack(
 
 /// CR 702.111b: how many creatures must block `attacker` once any block it.
 /// Two for menace, one otherwise (CR 702.111c: repeated menace changes nothing).
-pub(crate) fn blockers_needed(state: &GameState, script_runtime: &ScriptRuntime, attacker: ObjectId) -> usize {
+pub(crate) fn blockers_needed(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    attacker: ObjectId,
+) -> usize {
     if effective_keywords(state, script_runtime, attacker).contains(KeywordSet::MENACE) {
         2
     } else {
@@ -114,7 +135,8 @@ pub(crate) fn block_declaration_is_legal(
     for (attacker, count) in blocker_counts {
         if count < blockers_needed(state, script_runtime, attacker) {
             return Err(Rejected::IllegalAction(
-                "an attacker with menace can't be blocked except by two or more creatures".to_string(),
+                "an attacker with menace can't be blocked except by two or more creatures"
+                    .to_string(),
             ));
         }
     }
@@ -138,12 +160,16 @@ pub(crate) fn blockable_attackers(
             let blockers: Vec<ObjectId> = ids
                 .iter()
                 .copied()
-                .filter(|&blocker| block_is_legal(state, script_runtime, player, combat, blocker, *attacker).is_ok())
+                .filter(|&blocker| {
+                    block_is_legal(state, script_runtime, player, combat, blocker, *attacker)
+                        .is_ok()
+                })
                 .collect();
             (*attacker, blockers)
         })
         .filter(|(attacker, blockers)| {
-            !blockers.is_empty() && blockers.len() >= blockers_needed(state, script_runtime, *attacker)
+            !blockers.is_empty()
+                && blockers.len() >= blockers_needed(state, script_runtime, *attacker)
         })
         .collect()
 }
@@ -152,7 +178,10 @@ pub(crate) fn blockable_attackers(
 mod tests {
     use super::*;
     use crate::script::ScriptRuntime;
-    use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet as SupertypeSetT};
+    use crate::types::card::{
+        CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference,
+        SupertypeSet as SupertypeSetT,
+    };
     use crate::types::combat::CombatState;
     use crate::types::counter::CounterSet;
     use crate::types::game::{GameState, RngState};
@@ -180,14 +209,21 @@ mod tests {
         }
     }
 
-    fn object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet, zone: ZoneKind) -> GameObject {
+    fn object(
+        id: ObjectId,
+        controller: PlayerId,
+        card_types: CardTypeSet,
+        zone: ZoneKind,
+    ) -> GameObject {
         GameObject {
             object_id: id,
             lineage: crate::types::ids::ObjectLineage { previous: None },
             definition: CardDefinition {
                 definition_id: 1,
                 name: "Test Object".to_string(),
-                mana_cost: ManaCost { symbols: Vec::new() },
+                mana_cost: ManaCost {
+                    symbols: Vec::new(),
+                },
                 color_indicator: None,
                 supertypes: SupertypeSetT::empty(),
                 card_types,
@@ -224,7 +260,10 @@ mod tests {
             controlled_since_turn: 0,
             is_commander: false,
             is_token: false,
-            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            visibility: VisibilityPolicy {
+                public: true,
+                visible_to: Vec::new(),
+            },
             copy_generation: 0,
             entered_via_escape: false,
         }
@@ -264,7 +303,10 @@ mod tests {
             land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
-            rng: RngState { seed: 1, draws_consumed: 0 },
+            rng: RngState {
+                seed: 1,
+                draws_consumed: 0,
+            },
             next_event_id: 0,
             next_sequence_no: 10,
             next_object_id: 1000,
@@ -341,7 +383,9 @@ mod tests {
         let normal = creature(ObjectId(2), p0);
         let state = state_with(vec![required, normal]);
         let attackers = vec![(ObjectId(2), Target::Player(p1))];
-        assert!(attack_declaration_is_legal(&state, &ScriptRuntime::new(), p0, &attackers).is_err());
+        assert!(
+            attack_declaration_is_legal(&state, &ScriptRuntime::new(), p0, &attackers).is_err()
+        );
     }
 
     #[test]
@@ -350,7 +394,11 @@ mod tests {
         let mut c = creature(ObjectId(1), p0);
         c.definition.keywords = KeywordSet::ATTACKS_EACH_COMBAT;
         let state = state_with(vec![c]);
-        assert!(pass_would_skip_a_required_attack(&state, &ScriptRuntime::new(), p0));
+        assert!(pass_would_skip_a_required_attack(
+            &state,
+            &ScriptRuntime::new(),
+            p0
+        ));
     }
 
     #[test]
@@ -361,7 +409,11 @@ mod tests {
         let mut state = state_with(vec![c]);
         state.step = Step::DeclareBlockers;
         state.combat = Some(combat_with(Vec::new()));
-        assert!(!pass_would_skip_a_required_attack(&state, &ScriptRuntime::new(), p0));
+        assert!(!pass_would_skip_a_required_attack(
+            &state,
+            &ScriptRuntime::new(),
+            p0
+        ));
     }
 
     #[test]
@@ -371,8 +423,14 @@ mod tests {
         menace.definition.keywords = KeywordSet::MENACE;
         let normal = creature(ObjectId(2), p0);
         let state = state_with(vec![menace, normal]);
-        assert_eq!(blockers_needed(&state, &ScriptRuntime::new(), ObjectId(1)), 2);
-        assert_eq!(blockers_needed(&state, &ScriptRuntime::new(), ObjectId(2)), 1);
+        assert_eq!(
+            blockers_needed(&state, &ScriptRuntime::new(), ObjectId(1)),
+            2
+        );
+        assert_eq!(
+            blockers_needed(&state, &ScriptRuntime::new(), ObjectId(2)),
+            1
+        );
     }
 
     #[test]
@@ -408,7 +466,10 @@ mod tests {
         menace.definition.keywords = KeywordSet::MENACE;
         let blocker = creature(ObjectId(3), p0);
         let state = state_with(vec![attacker1, menace, blocker]);
-        let combat = combat_with(vec![(ObjectId(1), Target::Player(p0)), (ObjectId(2), Target::Player(p0))]);
+        let combat = combat_with(vec![
+            (ObjectId(1), Target::Player(p0)),
+            (ObjectId(2), Target::Player(p0)),
+        ]);
         let result = blockable_attackers(&state, &ScriptRuntime::new(), p0, &combat);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, ObjectId(1));

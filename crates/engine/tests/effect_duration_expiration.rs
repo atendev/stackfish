@@ -5,10 +5,21 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
+use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
 fn base_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone> {
-    zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Command, ZoneKind::Battlefield, ZoneKind::Exile])
+    zones(
+        p0,
+        p1,
+        &[
+            ZoneKind::Library,
+            ZoneKind::Hand,
+            ZoneKind::Graveyard,
+            ZoneKind::Command,
+            ZoneKind::Battlefield,
+            ZoneKind::Exile,
+        ],
+    )
 }
 
 fn state_at_end_step(active: PlayerId) -> GameState {
@@ -43,7 +54,9 @@ fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Test Permanent".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
+        mana_cost: ManaCost {
+            symbols: Vec::new(),
+        },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
@@ -65,12 +78,19 @@ fn creature_definition() -> CardDefinition {
 }
 
 fn permanent(id: ObjectId, owner: PlayerId, controller: PlayerId) -> GameObject {
-    GameObject { controller, controlled_since_turn: 1, ..card_object(id, creature_definition(), owner, ZoneKind::Battlefield) }
+    GameObject {
+        controller,
+        controlled_since_turn: 1,
+        ..card_object(id, creature_definition(), owner, ZoneKind::Battlefield)
+    }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
     state.objects.insert(id, object);
 }
 
@@ -78,8 +98,19 @@ fn inert_effect(source: ObjectId, duration: EffectDuration) -> ContinuousEffect 
     ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
+        affected: AffectedFilter::Primitive(EffectFilter {
+            controller: None,
+            card_types: None,
+            self_only: false,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 0,
+            toughness: 0,
+        }),
         timestamp: SequenceNo(0),
         duration,
         condition: None,
@@ -97,7 +128,10 @@ fn step_until_pause(engine: &mut Engine) -> StepStatus {
 
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
-        .submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
         .expect("PassPriority should be accepted");
 }
 
@@ -123,7 +157,9 @@ fn pass_both_players(engine: &mut Engine, first: PlayerId, second: PlayerId) -> 
 #[test]
 fn until_end_of_combat_effect_survives_until_only_the_first_player_has_passed() {
     let mut state = state_at_end_of_combat();
-    state.continuous_effects.push(inert_effect(ObjectId(1), EffectDuration::UntilEndOfCombat));
+    state
+        .continuous_effects
+        .push(inert_effect(ObjectId(1), EffectDuration::UntilEndOfCombat));
     let mut engine = Engine::new(state);
 
     let s = step_until_pause(&mut engine);
@@ -138,9 +174,15 @@ fn until_end_of_combat_effect_survives_until_only_the_first_player_has_passed() 
 #[test]
 fn until_end_of_combat_effect_drains_when_the_combat_phase_actually_ends() {
     let mut state = state_at_end_of_combat();
-    state.continuous_effects.push(inert_effect(ObjectId(1), EffectDuration::UntilEndOfCombat));
-    state.continuous_effects.push(inert_effect(ObjectId(2), EffectDuration::Permanent));
-    state.continuous_effects.push(inert_effect(ObjectId(3), EffectDuration::UntilEndOfTurn));
+    state
+        .continuous_effects
+        .push(inert_effect(ObjectId(1), EffectDuration::UntilEndOfCombat));
+    state
+        .continuous_effects
+        .push(inert_effect(ObjectId(2), EffectDuration::Permanent));
+    state
+        .continuous_effects
+        .push(inert_effect(ObjectId(3), EffectDuration::UntilEndOfTurn));
     let mut engine = Engine::new(state);
 
     let status = pass_both_players(&mut engine, PlayerId(0), PlayerId(1));
@@ -153,11 +195,13 @@ fn until_end_of_combat_effect_drains_when_the_combat_phase_actually_ends() {
         2,
         "only the UntilEndOfCombat effect should have drained"
     );
-    assert!(engine
-        .state()
-        .continuous_effects
-        .iter()
-        .all(|e| !matches!(e.duration, EffectDuration::UntilEndOfCombat)));
+    assert!(
+        engine
+            .state()
+            .continuous_effects
+            .iter()
+            .all(|e| !matches!(e.duration, EffectDuration::UntilEndOfCombat))
+    );
 }
 
 // CR 723.1
@@ -167,7 +211,9 @@ fn until_your_next_turn_effect_survives_cleanup_into_the_opponents_turn() {
     let p1 = PlayerId(1);
     let mut state = state_at_end_step(p0);
     put_on_battlefield(&mut state, permanent(ObjectId(1), p0, p0));
-    state.continuous_effects.push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
+    state
+        .continuous_effects
+        .push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
     let mut engine = Engine::new(state);
 
     pass_both_players(&mut engine, p0, p1);
@@ -184,7 +230,9 @@ fn until_your_next_turn_effect_drains_when_the_turn_cycles_back_to_its_controlle
     // The turn about to end is the opponent's, so cleanup's rotation lands on p0: the beginning of p0's next turn.
     let mut state = state_at_end_step(p1);
     put_on_battlefield(&mut state, permanent(ObjectId(1), p0, p0));
-    state.continuous_effects.push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
+    state
+        .continuous_effects
+        .push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
     let mut engine = Engine::new(state);
 
     pass_both_players(&mut engine, p1, p0);
@@ -203,7 +251,9 @@ fn until_your_next_turn_effect_with_unresolvable_source_is_left_inert_rather_tha
     let p1 = PlayerId(1);
     let mut state = state_at_end_step(p1);
     // Source ObjectId(1) is placed nowhere, like a spell-sourced effect after the spell resolves.
-    state.continuous_effects.push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
+    state
+        .continuous_effects
+        .push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
     let mut engine = Engine::new(state);
 
     pass_both_players(&mut engine, p1, p0);
@@ -221,7 +271,9 @@ fn until_your_next_turn_effect_is_untouched_by_the_end_of_combat_drain() {
     let p0 = PlayerId(0);
     let mut state = state_at_end_of_combat();
     put_on_battlefield(&mut state, permanent(ObjectId(1), p0, p0));
-    state.continuous_effects.push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
+    state
+        .continuous_effects
+        .push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
     let mut engine = Engine::new(state);
 
     pass_both_players(&mut engine, p0, PlayerId(1));

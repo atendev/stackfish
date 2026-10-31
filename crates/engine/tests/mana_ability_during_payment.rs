@@ -2,16 +2,32 @@
 
 use stackfish_engine::engine::{ActionError, Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state};
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state,
+};
 
 fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
-    minimal_card_definition(1, "Test Spell", "test_spell", mana_cost, CardTypeSet::SORCERY)
+    minimal_card_definition(
+        1,
+        "Test Spell",
+        "test_spell",
+        mana_cost,
+        CardTypeSet::SORCERY,
+    )
 }
 
 fn land_definition() -> CardDefinition {
     CardDefinition {
         oracle_text: "{T}: Add {R}.".to_string(),
-        ..minimal_card_definition(2, "Test Mountain", "test_mountain", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            2,
+            "Test Mountain",
+            "test_mountain",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     }
 }
 
@@ -20,14 +36,30 @@ fn creature_definition() -> CardDefinition {
         power: Some(PTValue::Fixed(1)),
         toughness: Some(PTValue::Fixed(1)),
         oracle_text: "{T}: You gain 1 life.".to_string(),
-        ..minimal_card_definition(3, "Test Cleric", "test_cleric", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            3,
+            "Test Cleric",
+            "test_cleric",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
 fn treasure_definition() -> CardDefinition {
     CardDefinition {
         oracle_text: "Sacrifice this artifact: Add one blue mana.".to_string(),
-        ..minimal_card_definition(4, "Test Treasure", "test_treasure", ManaCost { symbols: Vec::new() }, CardTypeSet::ARTIFACT)
+        ..minimal_card_definition(
+            4,
+            "Test Treasure",
+            "test_treasure",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::ARTIFACT,
+        )
     }
 }
 
@@ -55,7 +87,11 @@ fn non_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
         source,
         kind: AbilityKind::Activated,
         condition: None,
-        cost: Some(CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() }),
+        cost: Some(CostSpec {
+            mana: None,
+            additional: vec![AdditionalCost::TapSelf],
+            alternative: Vec::new(),
+        }),
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
@@ -74,7 +110,14 @@ fn sacrifice_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
         cost: Some(CostSpec {
             mana: None,
             additional: vec![AdditionalCost::Sacrifice {
-                filter: FilterSpec { card_types: Some(CardTypeSet::ARTIFACT), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+                filter: FilterSpec {
+                    card_types: Some(CardTypeSet::ARTIFACT),
+                    supertypes: None,
+                    subtypes: None,
+                    controller: None,
+                    random: false,
+                    extra: None,
+                },
             }],
             alternative: Vec::new(),
         }),
@@ -88,13 +131,25 @@ fn sacrifice_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
 fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId) -> Result<(), ActionError> {
     engine.submit_action(PlayerAction {
         player,
-        kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
-        x_value: None,
+        kind: PlayerActionKind::ActivateAbility {
+            source,
+            ability_index: 0,
+            targets: Vec::new(),
+            chosen_colors: Vec::new(),
+            x_value: None,
         },
     })
 }
 
-fn state_with_fixtures() -> (GameState, ObjectId, ObjectId, ObjectId, ObjectId, ObjectId, ObjectId) {
+fn state_with_fixtures() -> (
+    GameState,
+    ObjectId,
+    ObjectId,
+    ObjectId,
+    ObjectId,
+    ObjectId,
+    ObjectId,
+) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let spell = ObjectId(0);
@@ -105,23 +160,56 @@ fn state_with_fixtures() -> (GameState, ObjectId, ObjectId, ObjectId, ObjectId, 
     let treasure = ObjectId(5);
 
     let mana_cost = ManaCost {
-        symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)), ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+        symbols: vec![
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+        ],
     };
 
     let mut state = two_player_state(hand_battlefield_graveyard_zones(p0, p1));
-    state.objects.insert(spell, card_object(spell, spell_definition(mana_cost), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(spell);
+    state.objects.insert(
+        spell,
+        card_object(spell, spell_definition(mana_cost), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(spell);
 
     for &land in &[land1, land2] {
-        state.objects.insert(land, card_object(land, land_definition(), p0, ZoneKind::Battlefield));
-        state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(land);
+        state.objects.insert(
+            land,
+            card_object(land, land_definition(), p0, ZoneKind::Battlefield),
+        );
+        state
+            .zone_mut(ZoneKind::Battlefield, None)
+            .unwrap()
+            .push_bottom(land);
     }
-    state.objects.insert(cleric, card_object(cleric, creature_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(cleric);
-    state.objects.insert(opponent_land, card_object(opponent_land, land_definition(), p1, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(opponent_land);
-    state.objects.insert(treasure, card_object(treasure, treasure_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(treasure);
+    state.objects.insert(
+        cleric,
+        card_object(cleric, creature_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(cleric);
+    state.objects.insert(
+        opponent_land,
+        card_object(opponent_land, land_definition(), p1, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(opponent_land);
+    state.objects.insert(
+        treasure,
+        card_object(treasure, treasure_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(treasure);
 
     state.abilities = vec![
         mana_ability(0, land1, vec![ManaUnit::Colored(Color::Red)]),
@@ -138,7 +226,14 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None, pay_buyback: false },
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("player holds priority, spell is in hand, main phase, empty stack");
 }
@@ -153,7 +248,8 @@ fn tapping_a_land_mid_payment_floats_mana_the_payment_then_spends() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { player, .. } if player == p0));
 
-    activate(&mut engine, p0, land1).expect("CR 601.2g/605.3a: a mana ability may be activated mid-payment");
+    activate(&mut engine, p0, land1)
+        .expect("CR 601.2g/605.3a: a mana ability may be activated mid-payment");
     let status = drain(&mut engine);
     assert!(
         matches!(status, StepStatus::AwaitingPayment { player, .. } if player == p0),
@@ -169,7 +265,10 @@ fn tapping_a_land_mid_payment_floats_mana_the_payment_then_spends() {
 
     engine
         .submit_payment(PaymentPlan {
-            payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::Red)], phyrexian_life: 0 }],
+            payments: vec![CostPayment::Mana {
+                units: vec![ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::Red)],
+                phyrexian_life: 0,
+            }],
         })
         .expect("the mana tapped mid-payment covers the {R}{R} cost exactly");
     let status = drain(&mut engine);
@@ -192,7 +291,10 @@ fn a_different_player_cannot_activate_a_mana_ability_mid_payment() {
     let err = activate(&mut engine, p1, opponent_land).unwrap_err();
     assert!(matches!(err, ActionError::IllegalAction(_)));
     assert!(matches!(engine.state().object(opponent_land), Some(obj) if !obj.tapped));
-    assert!(matches!(drain(&mut engine), StepStatus::AwaitingPayment { player, .. } if player == p0), "outer payment still open, untouched");
+    assert!(
+        matches!(drain(&mut engine), StepStatus::AwaitingPayment { player, .. } if player == p0),
+        "outer payment still open, untouched"
+    );
 }
 
 // CR 601.2g, 605.3a
@@ -208,8 +310,15 @@ fn a_non_mana_ability_cannot_be_activated_mid_payment() {
 
     let err = activate(&mut engine, p0, cleric).unwrap_err();
     assert!(matches!(err, ActionError::IllegalAction(_)));
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "gain-life ability never ran");
-    assert!(matches!(drain(&mut engine), StepStatus::AwaitingPayment { player, .. } if player == p0), "outer payment still open, untouched");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "gain-life ability never ran"
+    );
+    assert!(
+        matches!(drain(&mut engine), StepStatus::AwaitingPayment { player, .. } if player == p0),
+        "outer payment still open, untouched"
+    );
 }
 
 // Casting a second spell mid-payment is still illegal, since only mana abilities are widened.
@@ -218,8 +327,21 @@ fn casting_a_second_spell_mid_payment_is_still_illegal() {
     let p0 = PlayerId(0);
     let (mut state, spell, ..) = state_with_fixtures();
     let second_spell = ObjectId(6);
-    state.objects.insert(second_spell, card_object(second_spell, spell_definition(ManaCost { symbols: Vec::new() }), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(second_spell);
+    state.objects.insert(
+        second_spell,
+        card_object(
+            second_spell,
+            spell_definition(ManaCost {
+                symbols: Vec::new(),
+            }),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(second_spell);
     let mut engine = Engine::new(state);
 
     cast(&mut engine, p0, spell);
@@ -251,38 +373,59 @@ fn a_real_cost_mana_ability_activated_mid_payment_nests_and_resumes_the_outer_pa
     cast(&mut engine, p0, spell);
     drain(&mut engine);
 
-    activate(&mut engine, p0, treasure).expect("a mana ability, even a real-cost one, may be activated mid-payment");
+    activate(&mut engine, p0, treasure)
+        .expect("a mana ability, even a real-cost one, may be activated mid-payment");
     let status = drain(&mut engine);
     assert!(
         matches!(status, StepStatus::AwaitingPayment { player, .. } if player == p0),
         "the Treasure's own Sacrifice cost must pause too, got {status:?}"
     );
-    assert!(engine.state().object(treasure).is_some(), "not sacrificed until its own payment commits");
+    assert!(
+        engine.state().object(treasure).is_some(),
+        "not sacrificed until its own payment commits"
+    );
 
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(treasure)] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Sacrifice(treasure)],
+        })
         .expect("sacrificing the Treasure pays its own cost");
     let status = drain(&mut engine);
     assert!(
         matches!(status, StepStatus::AwaitingPayment { player, .. } if player == p0),
         "outer spell payment resumed after the nested one settled, got {status:?}"
     );
-    assert!(engine.state().object(treasure).is_none(), "the Treasure is gone");
-    assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "its mana was added, even though the outer {{R}}{{R}} cost can't use it");
+    assert!(
+        engine.state().object(treasure).is_none(),
+        "the Treasure is gone"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().mana_pool.blue,
+        1,
+        "its mana was added, even though the outer {{R}}{{R}} cost can't use it"
+    );
 
     // Finish paying the outer {R}{R} with both Mountains. The Treasure's blue mana is left floating.
-    activate(&mut engine, p0, land1).expect("still mid the outer payment, still the payer's own mana ability");
+    activate(&mut engine, p0, land1)
+        .expect("still mid the outer payment, still the payer's own mana ability");
     drain(&mut engine);
     activate(&mut engine, p0, land2).expect("still mid the outer payment");
     drain(&mut engine);
     engine
         .submit_payment(PaymentPlan {
-            payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::Red)], phyrexian_life: 0 }],
+            payments: vec![CostPayment::Mana {
+                units: vec![ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::Red)],
+                phyrexian_life: 0,
+            }],
         })
         .expect("both Mountains cover the {R}{R} cost");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "the Treasure's mana is still floating, untouched");
+    assert_eq!(
+        engine.state().player(p0).unwrap().mana_pool.blue,
+        1,
+        "the Treasure's mana is still floating, untouched"
+    );
 }
 
 // Declining a nested mana ability's cost (`unwind_payment`) resumes the outer payment.
@@ -299,13 +442,18 @@ fn unwinding_a_nested_payment_resumes_the_outer_payment() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { player, .. } if player == p0));
 
-    engine.unwind_payment().expect("declining the Treasure's own cost");
+    engine
+        .unwind_payment()
+        .expect("declining the Treasure's own cost");
     let status = drain(&mut engine);
     assert!(
         matches!(status, StepStatus::AwaitingPayment { player, .. } if player == p0),
         "outer spell payment resumed, not abandoned, got {status:?}"
     );
-    assert!(engine.state().object(treasure).is_some(), "the Treasure survives - its activation was undone, not committed");
+    assert!(
+        engine.state().object(treasure).is_some(),
+        "the Treasure survives - its activation was undone, not committed"
+    );
 
     // Pay the outer cost another way, which shows the outer pause survived.
     activate(&mut engine, p0, land1).expect("still mid the outer payment");
@@ -314,7 +462,10 @@ fn unwinding_a_nested_payment_resumes_the_outer_payment() {
     drain(&mut engine);
     engine
         .submit_payment(PaymentPlan {
-            payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::Red)], phyrexian_life: 0 }],
+            payments: vec![CostPayment::Mana {
+                units: vec![ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::Red)],
+                phyrexian_life: 0,
+            }],
         })
         .expect("both Mountains cover the {R}{R} cost");
     let status = drain(&mut engine);
@@ -326,6 +477,10 @@ fn unwinding_a_nested_payment_resumes_the_outer_payment() {
 fn submit_payment_while_not_awaiting_is_still_rejected() {
     let (state, ..) = state_with_fixtures();
     let mut engine = Engine::new(state);
-    let err = engine.submit_payment(PaymentPlan { payments: Vec::new() }).unwrap_err();
+    let err = engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .unwrap_err();
     assert!(matches!(err, PaymentError::NotAwaitingPayment));
 }

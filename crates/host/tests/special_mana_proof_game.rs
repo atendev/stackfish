@@ -4,7 +4,9 @@
 use std::collections::BTreeSet;
 
 use serde_json::json;
-use stackfish_engine::{CardDefinition, CardTypeSet, ManaCost, PTValue, ScriptReference, Subtype, SupertypeSet};
+use stackfish_engine::{
+    CardDefinition, CardTypeSet, ManaCost, PTValue, ScriptReference, Subtype, SupertypeSet,
+};
 use stackfish_host::{Bot, FixtureCardSource, PROTOCOL_VERSION, Session};
 use stackfish_testutil::minimal_card_definition;
 
@@ -40,12 +42,24 @@ end
 return s
 "#
     );
-    let supertypes = if snow { SupertypeSet::SNOW | SupertypeSet::BASIC } else { SupertypeSet::BASIC };
+    let supertypes = if snow {
+        SupertypeSet::SNOW | SupertypeSet::BASIC
+    } else {
+        SupertypeSet::BASIC
+    };
     CardDefinition {
         supertypes,
         subtypes: vec![Subtype(name.to_string())],
         script_ref: ScriptReference::Inline(lua),
-        ..minimal_card_definition(id, name, name, ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            id,
+            name,
+            name,
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     }
 }
 
@@ -78,9 +92,14 @@ fn setup(seed: u64) -> Vec<u8> {
         json!({ "card": "Snow Mountain", "count": 6 }),
         json!({ "card": "Wastes", "count": 5 }),
     ];
-    deck.extend(CREATURES.iter().map(|(name, _, count)| json!({ "card": name, "count": count })));
+    deck.extend(
+        CREATURES
+            .iter()
+            .map(|(name, _, count)| json!({ "card": name, "count": count })),
+    );
     let body = json!({ "players": [{ "deck": deck }, { "deck": deck }], "format": "standard", "seed": seed.to_string() });
-    serde_json::to_vec(&json!({ "v": PROTOCOL_VERSION, "kind": "setup", "body": body })).expect("setup is JSON")
+    serde_json::to_vec(&json!({ "v": PROTOCOL_VERSION, "kind": "setup", "body": body }))
+        .expect("setup is JSON")
 }
 
 #[test]
@@ -100,8 +119,13 @@ fn a_bot_pays_special_mana_costs_through_whole_games() {
         let (mut session, _) = Session::create(&setup(seed), &source)
             .unwrap_or_else(|e| panic!("the setup is valid: {}", String::from_utf8_lossy(&e)));
         let mut bot = Bot::new(seed).recording(&[]);
-        let outcome = bot.play(&mut session, ANSWER_LIMIT).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
-        assert_eq!(outcome.rejected, 0, "seed {seed}: the Session rejected a bot Answer");
+        let outcome = bot
+            .play(&mut session, ANSWER_LIMIT)
+            .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        assert_eq!(
+            outcome.rejected, 0,
+            "seed {seed}: the Session rejected a bot Answer"
+        );
 
         for seat in 0..2 {
             for event in bot.events(seat) {
@@ -113,7 +137,12 @@ fn a_bot_pays_special_mana_costs_through_whole_games() {
                         }
                     }
                     Some("mana_added") => {
-                        snow_mana += event["units"].as_array().into_iter().flatten().filter(|u| u["kind"] == "snow_colored").count();
+                        snow_mana += event["units"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|u| u["kind"] == "snow_colored")
+                            .count();
                     }
                     Some("life_changed") if event["delta"] == -2 => paid_with_life += 1,
                     _ => {}
@@ -123,7 +152,10 @@ fn a_bot_pays_special_mana_costs_through_whole_games() {
     }
 
     for (name, cost, _) in CREATURES {
-        assert!(entered.contains(name), "{name} {cost} never entered the battlefield in 30 games: {entered:?}");
+        assert!(
+            entered.contains(name),
+            "{name} {cost} never entered the battlefield in 30 games: {entered:?}"
+        );
     }
     assert!(snow_mana > 0, "no snow mana was produced");
     assert!(paid_with_life > 0, "no 2 life payment was seen");
@@ -134,7 +166,10 @@ fn the_same_seed_gives_the_same_game() {
     let source = cards();
     let hash = |seed: u64| {
         let (mut session, _) = Session::create(&setup(seed), &source).expect("valid setup");
-        Bot::new(seed).play(&mut session, ANSWER_LIMIT).expect("the game ends").transcript_hash
+        Bot::new(seed)
+            .play(&mut session, ANSWER_LIMIT)
+            .expect("the game ends")
+            .transcript_hash
     };
     assert_eq!(hash(5), hash(5));
 }

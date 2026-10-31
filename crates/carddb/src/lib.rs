@@ -7,7 +7,9 @@ mod script;
 mod types_line;
 
 use rusqlite::Connection;
-use stackfish_engine::{CardDefinition, KeywordSet, ManaCost, ModeChoice, PTValue, ScriptReference};
+use stackfish_engine::{
+    CardDefinition, KeywordSet, ManaCost, ModeChoice, PTValue, ScriptReference,
+};
 use std::path::Path;
 
 pub use types_line::TypeLineError;
@@ -33,7 +35,10 @@ impl std::fmt::Display for CardLoadError {
             CardLoadError::Sqlite(e) => write!(f, "sqlite error: {e}"),
             CardLoadError::NotFound(key) => write!(f, "no card found for {key:?}"),
             CardLoadError::MultiFace(name) => {
-                write!(f, "{name:?} has multiple faces (DFC/split/flip/adventure) - not supported, see DESIGN.md non-goals")
+                write!(
+                    f,
+                    "{name:?} has multiple faces (DFC/split/flip/adventure) - not supported, see DESIGN.md non-goals"
+                )
             }
             CardLoadError::ManaCost(e) => write!(f, "mana_cost parse error: {}", e.0),
             CardLoadError::TypeLine(e) => write!(f, "type_line parse error: {e}"),
@@ -117,11 +122,16 @@ impl CardDb {
 
         let mana_cost = match row.mana_cost.as_deref() {
             Some(s) if !s.is_empty() => ManaCost::parse(s).map_err(CardLoadError::ManaCost)?,
-            _ => ManaCost { symbols: Vec::new() },
+            _ => ManaCost {
+                symbols: Vec::new(),
+            },
         };
 
-        let types_line::ParsedTypeLine { supertypes, card_types, subtypes } =
-            types_line::parse(&row.type_line).map_err(CardLoadError::TypeLine)?;
+        let types_line::ParsedTypeLine {
+            supertypes,
+            card_types,
+            subtypes,
+        } = types_line::parse(&row.type_line).map_err(CardLoadError::TypeLine)?;
 
         let keywords = self.load_keywords(&row.oracle_id)?;
         let script_ref = self.load_script_ref(&row.oracle_id)?;
@@ -177,7 +187,9 @@ impl CardDb {
                 |row| row.get(0),
             )
             .optional()?;
-        Ok(ScriptReference::Inline(source.unwrap_or_else(script::vanilla_stub)))
+        Ok(ScriptReference::Inline(
+            source.unwrap_or_else(script::vanilla_stub),
+        ))
     }
 
     /// The highest active `version` of each `(oracle_id, test_name)` in `card_tests`,
@@ -243,7 +255,10 @@ fn parse_pt(raw: Option<&str>) -> Option<PTValue> {
     if let Ok(n) = raw.parse::<i32>() {
         return Some(PTValue::Fixed(n));
     }
-    Some(PTValue::CharacteristicDefining { display: raw.to_string(), script: None })
+    Some(PTValue::CharacteristicDefining {
+        display: raw.to_string(),
+        script: None,
+    })
 }
 
 // FNV-1a over the oracle_id UUID, because the schema has no numeric id. `DefaultHasher` is

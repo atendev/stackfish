@@ -6,7 +6,8 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::triggers::collect_triggers;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
+    two_player_state as base_two_player_state,
 };
 
 const CONDITION_ENTERS_BATTLEFIELD: &str = r#"
@@ -30,7 +31,15 @@ fn bear_definition() -> CardDefinition {
         toughness: Some(PTValue::Fixed(2)),
         oracle_text: "When this creature enters the battlefield, you gain 1 life.".to_string(),
         script_ref: ScriptReference::Inline(String::new()),
-        ..minimal_card_definition(1, "Test Bear", "test_bear", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            1,
+            "Test Bear",
+            "test_bear",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -42,7 +51,12 @@ fn zone_change_event(object: ObjectId, from: ZoneKind, to: ZoneKind) -> GameEven
     GameEvent {
         event_id: EventId(0),
         sequence_no: SequenceNo(0),
-        kind: GameEventKind::ZoneChange { object, from, to, last_known_info: None },
+        kind: GameEventKind::ZoneChange {
+            object,
+            from,
+            to,
+            last_known_info: None,
+        },
         caused_by_command: None,
         parent_event: None,
     }
@@ -53,11 +67,19 @@ fn collect_triggers_matches_a_real_condition_script() {
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let mut runtime = ScriptRuntime::new();
-    let condition = runtime.load_function(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
+    let condition = runtime
+        .load_function(CONDITION_ENTERS_BATTLEFIELD)
+        .expect("condition script loads");
 
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -86,11 +108,19 @@ fn collect_triggers_condition_false_on_a_different_object() {
     let bear = ObjectId(0);
     let someone_else = ObjectId(1);
     let mut runtime = ScriptRuntime::new();
-    let condition = runtime.load_function(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
+    let condition = runtime
+        .load_function(CONDITION_ENTERS_BATTLEFIELD)
+        .expect("condition script loads");
 
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -108,7 +138,10 @@ fn collect_triggers_condition_false_on_a_different_object() {
     // A different object entering the battlefield does not match, since the condition checks event.object == source.
     let event = zone_change_event(someone_else, ZoneKind::Hand, ZoneKind::Battlefield);
     let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
-    assert!(pending.is_empty(), "the bear's ETB condition shouldn't fire for a different object");
+    assert!(
+        pending.is_empty(),
+        "the bear's ETB condition shouldn't fire for a different object"
+    );
 }
 
 #[test]
@@ -116,11 +149,19 @@ fn collect_triggers_condition_false_on_wrong_destination_zone() {
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let mut runtime = ScriptRuntime::new();
-    let condition = runtime.load_function(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
+    let condition = runtime
+        .load_function(CONDITION_ENTERS_BATTLEFIELD)
+        .expect("condition script loads");
 
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -148,8 +189,14 @@ fn collect_triggers_none_condition_matches_any_event() {
     let runtime = ScriptRuntime::new();
 
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -174,14 +221,21 @@ fn collect_triggers_none_condition_matches_any_event() {
         parent_event: None,
     };
     let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
-    assert_eq!(pending.len(), 1, "no condition means no filter - any event matches");
+    assert_eq!(
+        pending.len(),
+        1,
+        "no condition means no filter - any event matches"
+    );
 }
 
 #[test]
 fn engine_load_script_rejects_malformed_lua() {
     let mut engine = Engine::new(two_player_state());
     let result = engine.load_script("this is not valid lua {{{");
-    assert!(result.is_err(), "a syntax error should fail to load, not panic");
+    assert!(
+        result.is_err(),
+        "a syntax error should fail to load, not panic"
+    );
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
@@ -190,12 +244,21 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
         matches!(status, StepStatus::AwaitingPayment { .. }),
         "expected a pause for the cast's (free) cost, got {status:?}"
     );
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
 }
 
 #[test]
@@ -204,12 +267,22 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(bear);
 
     let mut engine = Engine::new(state);
-    let condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
-    let operation = engine.load_script(OPERATION_GAIN_LIFE_1).expect("operation script loads");
+    let condition = engine
+        .load_script(CONDITION_ENTERS_BATTLEFIELD)
+        .expect("condition script loads");
+    let operation = engine
+        .load_script(OPERATION_GAIN_LIFE_1)
+        .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -227,14 +300,29 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card: bear,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
 
     // The spell is on the stack, and the hand to stack ZoneChange does not match the ETB condition, so no ability is pending.
-    assert_eq!(engine.state().stack.len(), 1, "only the spell itself is on the stack so far");
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "no life gain before the creature resolves");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "only the spell itself is on the stack so far"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "no life gain before the creature resolves"
+    );
 
     // Both players pass, CR 117.4 resolves the spell onto the battlefield, and the ETB match pushes the ability in the same run.
     pass(&mut engine, p0);
@@ -243,8 +331,16 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert_eq!(engine.state().stack.len(), 1, "the ETB ability itself is now on the stack");
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "ability hasn't resolved yet");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the ETB ability itself is now on the stack"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "ability hasn't resolved yet"
+    );
 
     // Both players pass again, which resolves the ability and invokes its Lua callback.
     pass(&mut engine, p0);
@@ -253,8 +349,15 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(engine.state().stack.is_empty(), "both the spell and its triggered ability have resolved");
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "the operation script's GainLife(1) applied");
+    assert!(
+        engine.state().stack.is_empty(),
+        "both the spell and its triggered ability have resolved"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "the operation script's GainLife(1) applied"
+    );
 
     let resolved_count = engine
         .state()
@@ -262,7 +365,10 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
         .iter()
         .filter(|e| matches!(e.kind, GameEventKind::StackObjectResolved { .. }))
         .count();
-    assert_eq!(resolved_count, 2, "the spell and the triggered ability each resolved once");
+    assert_eq!(
+        resolved_count, 2,
+        "the spell and the triggered ability each resolved once"
+    );
 }
 
 #[test]
@@ -272,14 +378,30 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
     let bear = ObjectId(0);
     let other_creature = ObjectId(1);
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(bear);
-    state.objects.insert(other_creature, card_object(other_creature, bear_definition(), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(other_creature);
+    state.objects.insert(
+        bear,
+        card_object(bear, bear_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(bear);
+    state.objects.insert(
+        other_creature,
+        card_object(other_creature, bear_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(other_creature);
 
     let mut engine = Engine::new(state);
-    let condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
-    let operation = engine.load_script(OPERATION_GAIN_LIFE_1).expect("operation script loads");
+    let condition = engine
+        .load_script(CONDITION_ENTERS_BATTLEFIELD)
+        .expect("condition script loads");
+    let operation = engine
+        .load_script(OPERATION_GAIN_LIFE_1)
+        .expect("operation script loads");
     // The ability is registered to bear, so another creature with the same definition does not fire it.
     engine.state_mut().abilities.push(RegisteredAbility {
         modes: Vec::new(),
@@ -303,7 +425,8 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None, pay_buyback: false,
+                alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("p0 holds priority");
@@ -314,6 +437,13 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
 
-    assert!(engine.state().stack.is_empty(), "no ability should have triggered off a different object");
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "no life gain - the bear itself never entered");
+    assert!(
+        engine.state().stack.is_empty(),
+        "no ability should have triggered off a different object"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "no life gain - the bear itself never entered"
+    );
 }

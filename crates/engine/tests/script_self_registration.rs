@@ -5,7 +5,8 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
+    two_player_state as base_two_player_state,
 };
 
 const SELF_REGISTER_GAIN_LIFE_PRIMITIVE: &str = r#"
@@ -79,7 +80,15 @@ fn bear_definition(script: &str) -> CardDefinition {
         toughness: Some(PTValue::Fixed(2)),
         oracle_text: "When this creature enters the battlefield, you gain 1 life.".to_string(),
         script_ref: ScriptReference::Inline(script.to_string()),
-        ..minimal_card_definition(1, "Test Bear", "test_bear", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
+        ..minimal_card_definition(
+            1,
+            "Test Bear",
+            "test_bear",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
     }
 }
 
@@ -87,7 +96,15 @@ fn land_definition(script: &str) -> CardDefinition {
     CardDefinition {
         oracle_text: "When this land enters the battlefield, you gain 1 life.".to_string(),
         script_ref: ScriptReference::Inline(script.to_string()),
-        ..minimal_card_definition(2, "Test Land", "test_land", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
+        ..minimal_card_definition(
+            2,
+            "Test Land",
+            "test_land",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
     }
 }
 
@@ -100,10 +117,15 @@ fn run_card_script_self_registers_a_primitive_ability() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.abilities.len(), 1);
     let ability = &state.abilities[0];
@@ -111,7 +133,9 @@ fn run_card_script_self_registers_a_primitive_ability() {
     assert_eq!(ability.kind, AbilityKind::Triggered);
     assert!(matches!(
         ability.condition,
-        Some(ConditionSpec::Primitive(ConditionPrimitive::EntersBattlefield))
+        Some(ConditionSpec::Primitive(
+            ConditionPrimitive::EntersBattlefield
+        ))
     ));
     assert!(matches!(ability.effect, Some(AbilityEffect::GainLife(1))));
 }
@@ -121,10 +145,15 @@ fn run_card_script_self_registers_a_custom_function_ability() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_REGISTER_GAIN_LIFE_CUSTOM);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.abilities.len(), 1);
     let ability = &state.abilities[0];
@@ -133,7 +162,10 @@ fn run_card_script_self_registers_a_custom_function_ability() {
         matches!(ability.condition, Some(ConditionSpec::Script(_))),
         "a custom function passed to SetCondition must decode to ConditionSpec::Script, not a primitive"
     );
-    assert!(ability.effect.is_none(), "a custom function passed to SetOperation has no Rust-native effect");
+    assert!(
+        ability.effect.is_none(),
+        "a custom function passed to SetOperation has no Rust-native effect"
+    );
 }
 
 #[test]
@@ -141,10 +173,15 @@ fn run_card_script_without_set_condition_registers_unconditionally() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_REGISTER_UNCONDITIONAL);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("script self-registers cleanly");
 
     assert_eq!(state.abilities.len(), 1);
     assert!(
@@ -159,13 +196,22 @@ fn run_card_script_register_without_set_operation_is_an_error() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_REGISTER_NO_OPERATION);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
     let result = runtime.run_card_script(&mut state, &definition, bear);
 
-    assert!(result.is_err(), "Register() with no SetOperation() must fail, not silently register a broken ability");
-    assert!(state.abilities.is_empty(), "no partial ability should have been committed");
+    assert!(
+        result.is_err(),
+        "Register() with no SetOperation() must fail, not silently register a broken ability"
+    );
+    assert!(
+        state.abilities.is_empty(),
+        "no partial ability should have been committed"
+    );
 }
 
 #[test]
@@ -173,10 +219,15 @@ fn run_card_script_can_register_multiple_abilities_from_one_script_call() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_REGISTER_TWO_ABILITIES);
-    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+    state.objects.insert(
+        bear,
+        card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield),
+    );
 
     let mut runtime = ScriptRuntime::new();
-    runtime.run_card_script(&mut state, &definition, bear).expect("both abilities register cleanly");
+    runtime
+        .run_card_script(&mut state, &definition, bear)
+        .expect("both abilities register cleanly");
 
     assert_eq!(
         state.abilities.len(),
@@ -191,10 +242,18 @@ fn run_card_script_can_register_multiple_abilities_from_one_script_call() {
 fn dying_creatures_registered_ability_is_purged_by_sba() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
-    let mut object = card_object(bear, bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE), PlayerId(0), ZoneKind::Battlefield);
+    let mut object = card_object(
+        bear,
+        bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE),
+        PlayerId(0),
+        ZoneKind::Battlefield,
+    );
     object.damage_marked = 2; // == toughness, lethal (CR 704.5g).
     state.objects.insert(bear, object);
-    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(bear);
     // Simulates the ability the creature would have self-registered on an earlier battlefield entry.
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
@@ -202,7 +261,9 @@ fn dying_creatures_registered_ability_is_purged_by_sba() {
         id: AbilityId(0),
         source: bear,
         kind: AbilityKind::Triggered,
-        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::EntersBattlefield)),
+        condition: Some(ConditionSpec::Primitive(
+            ConditionPrimitive::EntersBattlefield,
+        )),
         cost: None,
         target: None,
         operation: ScriptHandle(0),
@@ -225,12 +286,21 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
         matches!(status, StepStatus::AwaitingPayment { .. }),
         "expected a pause for the cast's (free) cost, got {status:?}"
     );
-    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
     drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
-    engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
 }
 
 #[test]
@@ -239,22 +309,51 @@ fn cast_self_registering_creature_gains_life_on_etb_end_to_end() {
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(bear, card_object(bear, bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(bear);
+    state.objects.insert(
+        bear,
+        card_object(
+            bear,
+            bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(bear);
 
     let mut engine = Engine::new(state);
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+            kind: PlayerActionKind::CastSpell {
+                card: bear,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
 
     // The spell is on the stack, so the ETB ability is not registered until the creature reaches the battlefield.
-    assert_eq!(engine.state().stack.len(), 1, "only the spell itself is on the stack so far");
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "no life gain before the creature resolves");
-    assert!(engine.state().abilities.is_empty(), "self-registration hasn't run yet - still on the stack");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "only the spell itself is on the stack so far"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "no life gain before the creature resolves"
+    );
+    assert!(
+        engine.state().abilities.is_empty(),
+        "self-registration hasn't run yet - still on the stack"
+    );
 
     // Both players pass, which resolves the spell, runs run_card_script and self-registers the ETB ability, which matches this ZoneChange and goes on the stack in the same run.
     pass(&mut engine, p0);
@@ -263,9 +362,21 @@ fn cast_self_registering_creature_gains_life_on_etb_end_to_end() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert_eq!(engine.state().stack.len(), 1, "the self-registered ETB ability itself is now on the stack");
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "ability hasn't resolved yet");
-    assert_eq!(engine.state().abilities.len(), 1, "self-registration ran exactly once");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the self-registered ETB ability itself is now on the stack"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "ability hasn't resolved yet"
+    );
+    assert_eq!(
+        engine.state().abilities.len(),
+        1,
+        "self-registration ran exactly once"
+    );
 
     // Both players pass again - resolves the self-registered ability.
     pass(&mut engine, p0);
@@ -274,8 +385,15 @@ fn cast_self_registering_creature_gains_life_on_etb_end_to_end() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert!(engine.state().stack.is_empty(), "both the spell and its self-registered ability have resolved");
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "the self-registered ability's GainLife(1) applied");
+    assert!(
+        engine.state().stack.is_empty(),
+        "both the spell and its self-registered ability have resolved"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "the self-registered ability's GainLife(1) applied"
+    );
 }
 
 #[test]
@@ -285,10 +403,32 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
     let first = ObjectId(0);
     let second = ObjectId(1);
     let mut state = two_player_state();
-    state.objects.insert(first, card_object(first, bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(first);
-    state.objects.insert(second, card_object(second, bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(second);
+    state.objects.insert(
+        first,
+        card_object(
+            first,
+            bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(first);
+    state.objects.insert(
+        second,
+        card_object(
+            second,
+            bear_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(second);
 
     let mut engine = Engine::new(state);
 
@@ -296,7 +436,14 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
         engine
             .submit_action(PlayerAction {
                 player: p0,
-                kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
+                kind: PlayerActionKind::CastSpell {
+                    card,
+                    modes: Vec::new(),
+                    targets: Vec::new(),
+                    x_value: None,
+                    alternative_cost: None,
+                    pay_buyback: false,
+                },
             })
             .expect("p0 holds priority");
         pay_free_and_drain(engine);
@@ -311,17 +458,30 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
     };
 
     cast_and_resolve(&mut engine, first);
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "first creature's own self-registered ability fired");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "first creature's own self-registered ability fired"
+    );
     // The second creature is still in hand, so its script also ran (hand sweep). Count only abilities whose source is on the battlefield.
     let on_battlefield = |engine: &Engine| {
         engine
             .state()
             .abilities
             .iter()
-            .filter(|a| engine.state().object(a.source).is_some_and(|o| o.zone == ZoneKind::Battlefield))
+            .filter(|a| {
+                engine
+                    .state()
+                    .object(a.source)
+                    .is_some_and(|o| o.zone == ZoneKind::Battlefield)
+            })
             .count()
     };
-    assert_eq!(on_battlefield(&engine), 1, "only one ability registered so far");
+    assert_eq!(
+        on_battlefield(&engine),
+        1,
+        "only one ability registered so far"
+    );
 
     cast_and_resolve(&mut engine, second);
     assert_eq!(
@@ -329,7 +489,11 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
         22,
         "second creature's own self-registered ability fired exactly once - no cross-firing, no double-firing"
     );
-    assert_eq!(on_battlefield(&engine), 2, "each creature registered its own distinct ability");
+    assert_eq!(
+        on_battlefield(&engine),
+        2,
+        "each creature registered its own distinct ability"
+    );
     assert!(engine.state().stack.is_empty());
 }
 
@@ -339,19 +503,41 @@ fn play_land_self_registering_ability_fires_end_to_end() {
     let p1 = PlayerId(1);
     let land = ObjectId(0);
     let mut state = two_player_state();
-    state.objects.insert(land, card_object(land, land_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE), p0, ZoneKind::Hand));
-    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+    state.objects.insert(
+        land,
+        card_object(
+            land,
+            land_definition(SELF_REGISTER_GAIN_LIFE_PRIMITIVE),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(land);
 
     let mut engine = Engine::new(state);
     engine
-        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: land } })
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card: land },
+        })
         .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
 
     // PlayLand does not use the stack, but the triggered ability it self-registers does (CR 603.3b, 603.4).
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().stack.len(), 1, "the land's self-registered ETB ability is on the stack");
-    assert_eq!(engine.state().player(p0).unwrap().life, 20, "ability hasn't resolved yet");
+    assert_eq!(
+        engine.state().stack.len(),
+        1,
+        "the land's self-registered ETB ability is on the stack"
+    );
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20,
+        "ability hasn't resolved yet"
+    );
 
     pass(&mut engine, p0);
     drain(&mut engine);
@@ -360,5 +546,9 @@ fn play_land_self_registering_ability_fires_end_to_end() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     assert!(engine.state().stack.is_empty());
-    assert_eq!(engine.state().player(p0).unwrap().life, 21, "the land's self-registered ability applied GainLife(1)");
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        21,
+        "the land's self-registered ability applied GainLife(1)"
+    );
 }

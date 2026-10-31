@@ -17,7 +17,9 @@ pub enum PipelineExit {
     AdvanceTurnStep,
     /// CR 514.3: priority opens only if the ledger grew past `since_ledger`
     /// during the pass; otherwise the turn advances silently.
-    CleanupCheck { since_ledger: usize },
+    CleanupCheck {
+        since_ledger: usize,
+    },
     /// CR 514.1: always falls through to a fresh SBA check after the cleanup discard.
     CleanupSbaCheck,
 }

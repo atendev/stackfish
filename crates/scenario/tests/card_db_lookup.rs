@@ -3,7 +3,7 @@
 
 use rusqlite::Connection;
 use stackfish_engine::{CardTypeSet, KeywordSet, PTValue, Subtype};
-use stackfish_scenario::{build_initial_state, run, ScenarioFile};
+use stackfish_scenario::{ScenarioFile, build_initial_state, run};
 use std::path::{Path, PathBuf};
 
 const FIXTURE_SCHEMA_AND_DATA: &str = "
@@ -71,7 +71,10 @@ fn unique_temp_path(name: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("stackfish-scenario-carddb-test-{}-{n}-{name}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "stackfish-scenario-carddb-test-{}-{n}-{name}",
+        std::process::id()
+    ))
 }
 
 fn fixture_db_path() -> PathBuf {

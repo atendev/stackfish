@@ -16,7 +16,15 @@ fn definition(name: &str, types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
-        ..minimal_card_definition(1, name, name, ManaCost { symbols: Vec::new() }, types)
+        ..minimal_card_definition(
+            1,
+            name,
+            name,
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            types,
+        )
     }
 }
 
@@ -46,13 +54,22 @@ fn main_state() -> GameState {
         ..two_player_state(zones(
             P0,
             P1,
-            &[ZoneKind::Hand, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Command],
+            &[
+                ZoneKind::Hand,
+                ZoneKind::Battlefield,
+                ZoneKind::Graveyard,
+                ZoneKind::Command,
+            ],
         ))
     }
 }
 
 fn combat_state(step: Step) -> GameState {
-    GameState { phase: Phase::Combat, step, ..main_state() }
+    GameState {
+        phase: Phase::Combat,
+        step,
+        ..main_state()
+    }
 }
 
 fn put(state: &mut GameState, owner: Option<PlayerId>, object: GameObject) {
@@ -62,11 +79,19 @@ fn put(state: &mut GameState, owner: Option<PlayerId>, object: GameObject) {
 }
 
 fn in_hand(state: &mut GameState, id: u64, owner: PlayerId, definition: CardDefinition) {
-    put(state, Some(owner), card_object(ObjectId(id), definition, owner, ZoneKind::Hand));
+    put(
+        state,
+        Some(owner),
+        card_object(ObjectId(id), definition, owner, ZoneKind::Hand),
+    );
 }
 
 fn on_battlefield(state: &mut GameState, id: u64, owner: PlayerId, definition: CardDefinition) {
-    put(state, None, card_object(ObjectId(id), definition, owner, ZoneKind::Battlefield));
+    put(
+        state,
+        None,
+        card_object(ObjectId(id), definition, owner, ZoneKind::Battlefield),
+    );
 }
 
 fn cast_entry(entries: &[Entry], card: u64) -> Option<&stackfish_engine::decision::CastEntry> {
@@ -76,9 +101,19 @@ fn cast_entry(entries: &[Entry], card: u64) -> Option<&stackfish_engine::decisio
     })
 }
 
-fn answer(engine: &mut Engine, player: PlayerId, reply: Reply) -> Result<(), stackfish_engine::decision::Rejection> {
+fn answer(
+    engine: &mut Engine,
+    player: PlayerId,
+    reply: Reply,
+) -> Result<(), stackfish_engine::decision::Rejection> {
     let decision = engine.open_decision().expect("a Decision is open");
-    engine.answer(player, Answer { decision: decision.id, reply })
+    engine.answer(
+        player,
+        Answer {
+            decision: decision.id,
+            reply,
+        },
+    )
 }
 
 fn rejection_code(result: Result<(), stackfish_engine::decision::Rejection>) -> RejectionCode {
@@ -96,7 +131,10 @@ fn a_land_is_offered_once_per_turn_in_a_main_phase_with_an_empty_stack() {
     let mut state = main_state();
     in_hand(&mut state, 1, P0, definition("Forest", CardTypeSet::LAND));
     let engine = Engine::new(state);
-    assert_eq!(engine.legal_actions(), vec![Entry::PlayLand { card: ObjectId(1) }, Entry::Pass]);
+    assert_eq!(
+        engine.legal_actions(),
+        vec![Entry::PlayLand { card: ObjectId(1) }, Entry::Pass]
+    );
 
     let mut played = main_state();
     in_hand(&mut played, 1, P0, definition("Forest", CardTypeSet::LAND));
@@ -110,13 +148,19 @@ fn a_land_is_offered_once_per_turn_in_a_main_phase_with_an_empty_stack() {
 
 #[test]
 fn sorcery_speed_cards_need_the_main_phase_but_instants_and_flash_do_not() {
-    let flash = CardDefinition { keywords: KeywordSet::FLASH, ..definition("Ambusher", CardTypeSet::CREATURE) };
+    let flash = CardDefinition {
+        keywords: KeywordSet::FLASH,
+        ..definition("Ambusher", CardTypeSet::CREATURE)
+    };
     let mut state = combat_state(Step::DeclareAttackers);
     in_hand(&mut state, 1, P0, definition("Bear", CardTypeSet::CREATURE));
     in_hand(&mut state, 2, P0, definition("Bolt", CardTypeSet::INSTANT));
     in_hand(&mut state, 3, P0, flash);
     let entries = Engine::new(state).legal_actions();
-    assert!(cast_entry(&entries, 1).is_none(), "a creature cannot be cast during combat");
+    assert!(
+        cast_entry(&entries, 1).is_none(),
+        "a creature cannot be cast during combat"
+    );
     assert!(cast_entry(&entries, 2).is_some());
     assert!(cast_entry(&entries, 3).is_some());
 
@@ -129,7 +173,12 @@ fn sorcery_speed_cards_need_the_main_phase_but_instants_and_flash_do_not() {
 fn only_the_priority_players_cards_are_offered() {
     let mut state = main_state();
     in_hand(&mut state, 1, P0, definition("Bolt", CardTypeSet::INSTANT));
-    in_hand(&mut state, 2, P1, definition("Counter", CardTypeSet::INSTANT));
+    in_hand(
+        &mut state,
+        2,
+        P1,
+        definition("Counter", CardTypeSet::INSTANT),
+    );
     state.priority_player = P1;
     let entries = Engine::new(state).legal_actions();
     assert!(cast_entry(&entries, 1).is_none());
@@ -138,11 +187,17 @@ fn only_the_priority_players_cards_are_offered() {
 
 #[test]
 fn target_slots_list_candidates_and_a_spell_without_any_is_not_offered() {
-    let bolt = CardDefinition { target_requirement: Some(creature_target()), ..definition("Doom Blade", CardTypeSet::INSTANT) };
+    let bolt = CardDefinition {
+        target_requirement: Some(creature_target()),
+        ..definition("Doom Blade", CardTypeSet::INSTANT)
+    };
 
     let mut empty = main_state();
     in_hand(&mut empty, 1, P0, bolt.clone());
-    assert!(cast_entry(&Engine::new(empty).legal_actions(), 1).is_none(), "no creature to target");
+    assert!(
+        cast_entry(&Engine::new(empty).legal_actions(), 1).is_none(),
+        "no creature to target"
+    );
 
     let mut state = main_state();
     in_hand(&mut state, 1, P0, bolt);
@@ -150,23 +205,34 @@ fn target_slots_list_candidates_and_a_spell_without_any_is_not_offered() {
     on_battlefield(&mut state, 5, P0, definition("Elk", CardTypeSet::CREATURE));
     let entries = Engine::new(state).legal_actions();
     let entry = cast_entry(&entries, 1).expect("a creature can be targeted");
-    let EntryTargets::Fixed(slots) = &entry.targets else { panic!("not modal") };
+    let EntryTargets::Fixed(slots) = &entry.targets else {
+        panic!("not modal")
+    };
     assert_eq!(slots.len(), 1);
-    assert_eq!(slots[0].candidates, vec![Target::Object(ObjectId(5)), Target::Object(ObjectId(9))]);
+    assert_eq!(
+        slots[0].candidates,
+        vec![Target::Object(ObjectId(5)), Target::Object(ObjectId(9))]
+    );
     assert_eq!((slots[0].min, slots[0].max), (1, Some(1)));
 }
 
 #[test]
 fn x_buyback_and_alternative_costs_are_flagged() {
     let x_spell = CardDefinition {
-        mana_cost: ManaCost { symbols: vec![ManaSymbol::X] },
-        buyback_cost: Some(ManaCost { symbols: Vec::new() }),
+        mana_cost: ManaCost {
+            symbols: vec![ManaSymbol::X],
+        },
+        buyback_cost: Some(ManaCost {
+            symbols: Vec::new(),
+        }),
         ..definition("Blaze", CardTypeSet::SORCERY)
     };
     let flashback = CardDefinition {
         alternative_costs: vec![AlternativeCost::Replacement {
             description: "Flashback".to_string(),
-            cost: CostSpec::mana_only(ManaCost { symbols: Vec::new() }),
+            cost: CostSpec::mana_only(ManaCost {
+                symbols: Vec::new(),
+            }),
             from_zone: ZoneKind::Graveyard,
             exile_on_leaving_stack: true,
             escape: false,
@@ -175,13 +241,20 @@ fn x_buyback_and_alternative_costs_are_flagged() {
     };
     let mut state = main_state();
     in_hand(&mut state, 1, P0, x_spell);
-    put(&mut state, Some(P0), card_object(ObjectId(2), flashback, P0, ZoneKind::Graveyard));
+    put(
+        &mut state,
+        Some(P0),
+        card_object(ObjectId(2), flashback, P0, ZoneKind::Graveyard),
+    );
     let entries = Engine::new(state).legal_actions();
 
     let blaze = cast_entry(&entries, 1).unwrap();
     assert!(blaze.x && blaze.buyback && blaze.normal && blaze.alternative_costs.is_empty());
     let grudge = cast_entry(&entries, 2).expect("flashback grants the graveyard cast");
-    assert!(!grudge.normal, "a graveyard card cannot be cast for its normal cost");
+    assert!(
+        !grudge.normal,
+        "a graveyard card cannot be cast for its normal cost"
+    );
     assert_eq!(grudge.alternative_costs, vec![0]);
 }
 
@@ -206,11 +279,19 @@ fn a_modal_spell_lists_the_range_and_slots_per_mode() {
     let entries = Engine::new(state).legal_actions();
     let entry = cast_entry(&entries, 1).expect("the untargeted mode is always usable");
     let range = entry.modes.as_ref().expect("modal");
-    assert_eq!((range.mode_count, range.min, range.max, range.repeatable), (2, 1, 1, false));
-    let EntryTargets::PerMode(per_mode) = &entry.targets else { panic!("modal") };
+    assert_eq!(
+        (range.mode_count, range.min, range.max, range.repeatable),
+        (2, 1, 1, false)
+    );
+    let EntryTargets::PerMode(per_mode) = &entry.targets else {
+        panic!("modal")
+    };
     assert!(per_mode[0].is_empty());
     assert_eq!(per_mode[1].len(), 1);
-    assert!(per_mode[1][0].candidates.is_empty(), "no creature in play yet");
+    assert!(
+        per_mode[1][0].candidates.is_empty(),
+        "no creature in play yet"
+    );
 }
 
 fn tap_ability(source: u64, effect: AbilityEffect, cost: Option<CostSpec>) -> RegisteredAbility {
@@ -231,38 +312,67 @@ fn tap_ability(source: u64, effect: AbilityEffect, cost: Option<CostSpec>) -> Re
 
 #[test]
 fn a_tap_ability_is_offered_only_while_the_source_is_untapped_and_not_summoning_sick() {
-    let tap = CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() };
+    let tap = CostSpec {
+        mana: None,
+        additional: vec![AdditionalCost::TapSelf],
+        alternative: Vec::new(),
+    };
     let mut state = main_state();
     on_battlefield(&mut state, 1, P0, definition("Elf", CardTypeSet::CREATURE));
-    state.abilities.push(tap_ability(1, AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)]), Some(tap.clone())));
+    state.abilities.push(tap_ability(
+        1,
+        AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)]),
+        Some(tap.clone()),
+    ));
 
     let entries = Engine::new(state).legal_actions();
-    let Entry::Activate(activate) = &entries[0] else { panic!("expected an Activate entry, got {entries:?}") };
+    let Entry::Activate(activate) = &entries[0] else {
+        panic!("expected an Activate entry, got {entries:?}")
+    };
     assert_eq!((activate.source, activate.ability_index), (ObjectId(1), 0));
     assert!(activate.mana_ability);
     assert!(activate.color_choice.is_none());
 
     let mut sick = main_state();
     on_battlefield(&mut sick, 1, P0, definition("Elf", CardTypeSet::CREATURE));
-    sick.objects.get_mut(&ObjectId(1)).unwrap().controlled_since_turn = 1;
-    sick.abilities.push(tap_ability(1, AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)]), Some(tap)));
+    sick.objects
+        .get_mut(&ObjectId(1))
+        .unwrap()
+        .controlled_since_turn = 1;
+    sick.abilities.push(tap_ability(
+        1,
+        AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)]),
+        Some(tap),
+    ));
     assert_eq!(Engine::new(sick).legal_actions(), vec![Entry::Pass]);
-
 }
 
 #[test]
 fn an_any_color_mana_ability_lists_its_colors() {
     let mut state = main_state();
-    on_battlefield(&mut state, 1, P0, definition("Treasure", CardTypeSet::ARTIFACT));
+    on_battlefield(
+        &mut state,
+        1,
+        P0,
+        definition("Treasure", CardTypeSet::ARTIFACT),
+    );
     state.abilities.push(tap_ability(
         1,
-        AbilityEffect::AddManaChoice { count: 1, choices: ColorSet::RED | ColorSet::GREEN },
+        AbilityEffect::AddManaChoice {
+            count: 1,
+            choices: ColorSet::RED | ColorSet::GREEN,
+        },
         None,
     ));
     let entries = Engine::new(state).legal_actions();
-    let Entry::Activate(activate) = &entries[0] else { panic!("expected an Activate entry") };
+    let Entry::Activate(activate) = &entries[0] else {
+        panic!("expected an Activate entry")
+    };
     let choice = activate.color_choice.as_ref().expect("a color choice");
-    assert_eq!((choice.count, choice.colors.clone()), (1, vec![Color::Red, Color::Green]));
+    assert_eq!(
+        (choice.count, choice.colors.clone()),
+        (1, vec![Color::Red, Color::Green])
+    );
 }
 
 #[test]
@@ -272,10 +382,17 @@ fn an_ability_index_counts_every_ability_on_its_source() {
     let mut trigger = tap_ability(1, AbilityEffect::GainLife(1), None);
     trigger.kind = AbilityKind::Triggered;
     state.abilities.push(trigger);
-    state.abilities.push(tap_ability(1, AbilityEffect::GainLife(1), None));
+    state
+        .abilities
+        .push(tap_ability(1, AbilityEffect::GainLife(1), None));
     let entries = Engine::new(state).legal_actions();
-    let Entry::Activate(activate) = &entries[0] else { panic!("expected an Activate entry") };
-    assert_eq!(activate.ability_index, 1, "the triggered ability takes index 0");
+    let Entry::Activate(activate) = &entries[0] else {
+        panic!("expected an Activate entry")
+    };
+    assert_eq!(
+        activate.ability_index, 1,
+        "the triggered ability takes index 0"
+    );
 }
 
 #[test]
@@ -300,11 +417,27 @@ fn a_priority_answer_that_no_entry_offers_is_rejected_and_changes_nothing() {
     let first = engine.open_decision().unwrap().id;
 
     // The land is not a spell, an unknown card is not castable, and the bear has no {X} or buyback cost.
-    assert_eq!(rejection_code(answer(&mut engine, P0, cast(2, None, false))), RejectionCode::InvalidChoice);
-    assert_eq!(rejection_code(answer(&mut engine, P0, cast(99, None, false))), RejectionCode::InvalidChoice);
-    assert_eq!(rejection_code(answer(&mut engine, P0, cast(1, Some(2), false))), RejectionCode::InvalidChoice);
-    assert_eq!(rejection_code(answer(&mut engine, P0, cast(1, None, true))), RejectionCode::InvalidChoice);
-    assert_eq!(engine.open_decision().unwrap().id, first, "a rejection keeps the Decision open");
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, cast(2, None, false))),
+        RejectionCode::InvalidChoice
+    );
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, cast(99, None, false))),
+        RejectionCode::InvalidChoice
+    );
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, cast(1, Some(2), false))),
+        RejectionCode::InvalidChoice
+    );
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, cast(1, None, true))),
+        RejectionCode::InvalidChoice
+    );
+    assert_eq!(
+        engine.open_decision().unwrap().id,
+        first,
+        "a rejection keeps the Decision open"
+    );
 
     answer(&mut engine, P0, cast(1, None, false)).expect("the bear is castable");
 }
@@ -314,8 +447,14 @@ fn a_card_in_the_wrong_zone_or_at_the_wrong_time_cannot_be_played() {
     let mut state = combat_state(Step::DeclareAttackers);
     in_hand(&mut state, 1, P0, definition("Forest", CardTypeSet::LAND));
     let mut engine = Engine::new(state);
-    let play = Reply::Action(PlayerAction { player: P0, kind: PlayerActionKind::PlayLand { card: ObjectId(1) } });
-    assert_eq!(rejection_code(answer(&mut engine, P0, play)), RejectionCode::InvalidChoice);
+    let play = Reply::Action(PlayerAction {
+        player: P0,
+        kind: PlayerActionKind::PlayLand { card: ObjectId(1) },
+    });
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, play)),
+        RejectionCode::InvalidChoice
+    );
 }
 
 #[test]
@@ -324,14 +463,30 @@ fn every_listed_entry_is_accepted_by_the_engine() {
         let mut state = main_state();
         in_hand(&mut state, 1, P0, definition("Forest", CardTypeSet::LAND));
         in_hand(&mut state, 2, P0, definition("Bear", CardTypeSet::CREATURE));
-        in_hand(&mut state, 3, P0, CardDefinition { target_requirement: Some(creature_target()), ..definition("Doom Blade", CardTypeSet::INSTANT) });
+        in_hand(
+            &mut state,
+            3,
+            P0,
+            CardDefinition {
+                target_requirement: Some(creature_target()),
+                ..definition("Doom Blade", CardTypeSet::INSTANT)
+            },
+        );
         on_battlefield(&mut state, 4, P1, definition("Elk", CardTypeSet::CREATURE));
         on_battlefield(&mut state, 5, P0, definition("Mox", CardTypeSet::ARTIFACT));
-        state.abilities.push(tap_ability(5, AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Red)]), None));
+        state.abilities.push(tap_ability(
+            5,
+            AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Red)]),
+            None,
+        ));
         state
     };
     let entries = Engine::new(build()).legal_actions();
-    assert_eq!(entries.len(), 5, "land, two casts, one ability and pass: {entries:?}");
+    assert_eq!(
+        entries.len(),
+        5,
+        "land, two casts, one ability and pass: {entries:?}"
+    );
     for index in 0..entries.len() {
         let mut engine = Engine::new(build());
         let entry = engine.legal_actions().remove(index);
@@ -342,7 +497,10 @@ fn every_listed_entry_is_accepted_by_the_engine() {
                 card: cast.card,
                 modes: Vec::new(),
                 targets: match &cast.targets {
-                    EntryTargets::Fixed(slots) => slots.iter().flat_map(|s| s.candidates.first().copied()).collect(),
+                    EntryTargets::Fixed(slots) => slots
+                        .iter()
+                        .flat_map(|s| s.candidates.first().copied())
+                        .collect(),
                     EntryTargets::PerMode(_) => unreachable!("no modal card here"),
                 },
                 x_value: None,
@@ -357,9 +515,17 @@ fn every_listed_entry_is_accepted_by_the_engine() {
                 x_value: None,
             },
         };
-        answer(&mut engine, P0, Reply::Action(PlayerAction { player: P0, kind })).expect("the facade accepts it");
+        answer(
+            &mut engine,
+            P0,
+            Reply::Action(PlayerAction { player: P0, kind }),
+        )
+        .expect("the facade accepts it");
         let status = drain(&mut engine);
-        assert!(!matches!(status, StepStatus::Error(_)), "entry {index} failed in the engine: {status:?}");
+        assert!(
+            !matches!(status, StepStatus::Error(_)),
+            "entry {index} failed in the engine: {status:?}"
+        );
     }
 }
 
@@ -367,22 +533,48 @@ fn every_listed_entry_is_accepted_by_the_engine() {
 fn attackers_are_untapped_creatures_without_summoning_sickness_or_defender() {
     let mut state = combat_state(Step::DeclareAttackers);
     on_battlefield(&mut state, 1, P0, definition("Bear", CardTypeSet::CREATURE));
-    on_battlefield(&mut state, 2, P0, definition("Tapped", CardTypeSet::CREATURE));
+    on_battlefield(
+        &mut state,
+        2,
+        P0,
+        definition("Tapped", CardTypeSet::CREATURE),
+    );
     state.objects.get_mut(&ObjectId(2)).unwrap().tapped = true;
-    on_battlefield(&mut state, 3, P0, definition("Fresh", CardTypeSet::CREATURE));
-    state.objects.get_mut(&ObjectId(3)).unwrap().controlled_since_turn = 1;
+    on_battlefield(
+        &mut state,
+        3,
+        P0,
+        definition("Fresh", CardTypeSet::CREATURE),
+    );
+    state
+        .objects
+        .get_mut(&ObjectId(3))
+        .unwrap()
+        .controlled_since_turn = 1;
     on_battlefield(
         &mut state,
         4,
         P0,
-        CardDefinition { keywords: KeywordSet::DEFENDER, ..definition("Wall", CardTypeSet::CREATURE) },
+        CardDefinition {
+            keywords: KeywordSet::DEFENDER,
+            ..definition("Wall", CardTypeSet::CREATURE)
+        },
     );
     on_battlefield(&mut state, 5, P0, definition("Rock", CardTypeSet::ARTIFACT));
-    on_battlefield(&mut state, 6, P1, definition("Their Bear", CardTypeSet::CREATURE));
+    on_battlefield(
+        &mut state,
+        6,
+        P1,
+        definition("Their Bear", CardTypeSet::CREATURE),
+    );
     let engine = Engine::new(state);
     assert_eq!(
         engine.legal_attackers(),
-        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)], required: false }]
+        vec![AttackerEntry {
+            attacker: ObjectId(1),
+            defenders: vec![Target::Player(P1)],
+            required: false
+        }]
     );
 }
 
@@ -390,12 +582,30 @@ fn attackers_are_untapped_creatures_without_summoning_sickness_or_defender() {
 fn a_creature_that_is_not_on_the_battlefield_is_never_an_attacker() {
     let mut state = combat_state(Step::DeclareAttackers);
     on_battlefield(&mut state, 1, P0, definition("Bear", CardTypeSet::CREATURE));
-    in_hand(&mut state, 2, P0, definition("In Hand", CardTypeSet::CREATURE));
-    put(&mut state, Some(P0), card_object(ObjectId(3), definition("In Graveyard", CardTypeSet::CREATURE), P0, ZoneKind::Graveyard));
+    in_hand(
+        &mut state,
+        2,
+        P0,
+        definition("In Hand", CardTypeSet::CREATURE),
+    );
+    put(
+        &mut state,
+        Some(P0),
+        card_object(
+            ObjectId(3),
+            definition("In Graveyard", CardTypeSet::CREATURE),
+            P0,
+            ZoneKind::Graveyard,
+        ),
+    );
     let engine = Engine::new(state);
     assert_eq!(
         engine.legal_attackers(),
-        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)], required: false }],
+        vec![AttackerEntry {
+            attacker: ObjectId(1),
+            defenders: vec![Target::Player(P1)],
+            required: false
+        }],
         "CR 508.1a: only a creature on the battlefield attacks"
     );
 }
@@ -404,11 +614,20 @@ fn a_creature_that_is_not_on_the_battlefield_is_never_an_attacker() {
 fn a_planeswalker_that_is_not_on_the_battlefield_is_not_a_defender() {
     let mut state = combat_state(Step::DeclareAttackers);
     on_battlefield(&mut state, 1, P0, definition("Bear", CardTypeSet::CREATURE));
-    in_hand(&mut state, 2, P1, definition("In Hand", CardTypeSet::PLANESWALKER));
+    in_hand(
+        &mut state,
+        2,
+        P1,
+        definition("In Hand", CardTypeSet::PLANESWALKER),
+    );
     let engine = Engine::new(state);
     assert_eq!(
         engine.legal_attackers(),
-        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)], required: false }],
+        vec![AttackerEntry {
+            attacker: ObjectId(1),
+            defenders: vec![Target::Player(P1)],
+            required: false
+        }],
         "CR 508.1b: an attacked planeswalker is a permanent"
     );
 }
@@ -417,7 +636,12 @@ fn a_planeswalker_that_is_not_on_the_battlefield_is_not_a_defender() {
 fn a_creature_that_is_not_on_the_battlefield_never_blocks() {
     let mut state = combat_state(Step::DeclareBlockers);
     on_battlefield(&mut state, 1, P0, definition("Bear", CardTypeSet::CREATURE));
-    in_hand(&mut state, 2, P1, definition("In Hand", CardTypeSet::CREATURE));
+    in_hand(
+        &mut state,
+        2,
+        P1,
+        definition("In Hand", CardTypeSet::CREATURE),
+    );
     state.combat = Some(CombatState {
         attackers: vec![(ObjectId(1), Target::Player(P1))],
         blocks: Vec::new(),
@@ -428,7 +652,10 @@ fn a_creature_that_is_not_on_the_battlefield_never_blocks() {
         pending_damage_splits: HashMap::new(),
     });
     let engine = Engine::new(state);
-    assert!(engine.legal_blockers(P1).is_empty(), "CR 509.1a: only a creature on the battlefield blocks");
+    assert!(
+        engine.legal_blockers(P1).is_empty(),
+        "CR 509.1a: only a creature on the battlefield blocks"
+    );
 }
 
 #[test]
@@ -438,7 +665,10 @@ fn a_flying_attacker_can_only_be_blocked_by_flying_or_reach() {
         &mut state,
         1,
         P0,
-        CardDefinition { keywords: KeywordSet::FLYING, ..definition("Drake", CardTypeSet::CREATURE) },
+        CardDefinition {
+            keywords: KeywordSet::FLYING,
+            ..definition("Drake", CardTypeSet::CREATURE)
+        },
     );
     on_battlefield(&mut state, 2, P0, definition("Bear", CardTypeSet::CREATURE));
     on_battlefield(&mut state, 3, P1, definition("Elk", CardTypeSet::CREATURE));
@@ -446,10 +676,16 @@ fn a_flying_attacker_can_only_be_blocked_by_flying_or_reach() {
         &mut state,
         4,
         P1,
-        CardDefinition { keywords: KeywordSet::REACH, ..definition("Spider", CardTypeSet::CREATURE) },
+        CardDefinition {
+            keywords: KeywordSet::REACH,
+            ..definition("Spider", CardTypeSet::CREATURE)
+        },
     );
     state.combat = Some(CombatState {
-        attackers: vec![(ObjectId(1), Target::Player(P1)), (ObjectId(2), Target::Player(P1))],
+        attackers: vec![
+            (ObjectId(1), Target::Player(P1)),
+            (ObjectId(2), Target::Player(P1)),
+        ],
         blocks: Vec::new(),
         declared_defenders: Vec::new(),
         bands: Vec::new(),
@@ -461,11 +697,20 @@ fn a_flying_attacker_can_only_be_blocked_by_flying_or_reach() {
     assert_eq!(
         engine.legal_blockers(P1),
         vec![
-            BlockerEntry { blocker: ObjectId(3), attackers: vec![ObjectId(2)] },
-            BlockerEntry { blocker: ObjectId(4), attackers: vec![ObjectId(1), ObjectId(2)] },
+            BlockerEntry {
+                blocker: ObjectId(3),
+                attackers: vec![ObjectId(2)]
+            },
+            BlockerEntry {
+                blocker: ObjectId(4),
+                attackers: vec![ObjectId(1), ObjectId(2)]
+            },
         ]
     );
-    assert!(engine.legal_blockers(P0).is_empty(), "the attacking player does not block");
+    assert!(
+        engine.legal_blockers(P0).is_empty(),
+        "the attacking player does not block"
+    );
 }
 
 #[test]
@@ -476,21 +721,46 @@ fn the_declare_attackers_decision_comes_before_priority_and_checks_the_reply() {
 
     let decision = engine.open_decision().unwrap();
     assert_eq!(decision.player, P0);
-    assert!(matches!(&decision.shape, ReplyShape::DeclareAttackers { attackers } if attackers.len() == 1));
+    assert!(
+        matches!(&decision.shape, ReplyShape::DeclareAttackers { attackers } if attackers.len() == 1)
+    );
 
     // The attacker cannot attack its own controller or attack twice.
     let own = Reply::DeclareAttackers(vec![(ObjectId(1), Target::Player(P0))]);
-    assert_eq!(rejection_code(answer(&mut engine, P0, own)), RejectionCode::InvalidChoice);
-    let twice = Reply::DeclareAttackers(vec![(ObjectId(1), Target::Player(P1)), (ObjectId(1), Target::Player(P1))]);
-    assert_eq!(rejection_code(answer(&mut engine, P0, twice)), RejectionCode::InvalidChoice);
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, own)),
+        RejectionCode::InvalidChoice
+    );
+    let twice = Reply::DeclareAttackers(vec![
+        (ObjectId(1), Target::Player(P1)),
+        (ObjectId(1), Target::Player(P1)),
+    ]);
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, twice)),
+        RejectionCode::InvalidChoice
+    );
     // A priority action is the wrong kind of reply here.
-    let pass = Reply::Action(PlayerAction { player: P0, kind: PlayerActionKind::PassPriority });
-    assert_eq!(rejection_code(answer(&mut engine, P0, pass)), RejectionCode::WrongAnswerShape);
+    let pass = Reply::Action(PlayerAction {
+        player: P0,
+        kind: PlayerActionKind::PassPriority,
+    });
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, pass)),
+        RejectionCode::WrongAnswerShape
+    );
 
-    answer(&mut engine, P0, Reply::DeclareAttackers(vec![(ObjectId(1), Target::Player(P1))])).unwrap();
+    answer(
+        &mut engine,
+        P0,
+        Reply::DeclareAttackers(vec![(ObjectId(1), Target::Player(P1))]),
+    )
+    .unwrap();
     assert!(!matches!(drain(&mut engine), StepStatus::Error(_)));
     assert_eq!(engine.state().combat.as_ref().unwrap().attackers.len(), 1);
-    assert!(matches!(engine.open_decision().unwrap().shape, ReplyShape::Action { .. }));
+    assert!(matches!(
+        engine.open_decision().unwrap().shape,
+        ReplyShape::Action { .. }
+    ));
 }
 
 #[test]
@@ -509,16 +779,30 @@ fn a_defending_player_declares_blockers_before_priority_and_may_declare_none() {
     });
     let mut engine = Engine::new(state);
     let decision = engine.open_decision().unwrap();
-    assert_eq!(decision.player, P1, "the defender answers although P0 holds priority");
-    assert!(matches!(&decision.shape, ReplyShape::DeclareBlockers { blockers } if blockers.len() == 1));
+    assert_eq!(
+        decision.player, P1,
+        "the defender answers although P0 holds priority"
+    );
+    assert!(
+        matches!(&decision.shape, ReplyShape::DeclareBlockers { blockers } if blockers.len() == 1)
+    );
 
     let unlisted = Reply::DeclareBlockers(vec![(ObjectId(1), ObjectId(1))]);
-    assert_eq!(rejection_code(answer(&mut engine, P1, unlisted)), RejectionCode::InvalidChoice);
-    assert_eq!(rejection_code(answer(&mut engine, P0, Reply::DeclareBlockers(Vec::new()))), RejectionCode::WrongSeat);
+    assert_eq!(
+        rejection_code(answer(&mut engine, P1, unlisted)),
+        RejectionCode::InvalidChoice
+    );
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, Reply::DeclareBlockers(Vec::new()))),
+        RejectionCode::WrongSeat
+    );
 
     answer(&mut engine, P1, Reply::DeclareBlockers(Vec::new())).unwrap();
     assert!(!matches!(drain(&mut engine), StepStatus::Error(_)));
-    assert!(matches!(engine.open_decision().unwrap().shape, ReplyShape::Action { .. }));
+    assert!(matches!(
+        engine.open_decision().unwrap().shape,
+        ReplyShape::Action { .. }
+    ));
 }
 
 fn double_blocked_state() -> GameState {
@@ -531,7 +815,10 @@ fn double_blocked_state() -> GameState {
         &mut state,
         1,
         P0,
-        CardDefinition { power: Some(PTValue::Fixed(3)), ..definition("Ogre", CardTypeSet::CREATURE) },
+        CardDefinition {
+            power: Some(PTValue::Fixed(3)),
+            ..definition("Ogre", CardTypeSet::CREATURE)
+        },
     );
     on_battlefield(&mut state, 2, P1, sturdy("Wall A"));
     on_battlefield(&mut state, 3, P1, sturdy("Wall B"));
@@ -552,20 +839,37 @@ fn a_double_blocked_attacker_asks_its_controller_for_a_split() {
     let mut engine = Engine::new(double_blocked_state());
     let decision = engine.open_decision().unwrap();
     assert_eq!(decision.player, P0);
-    let ReplyShape::AssignDamage { splits } = &decision.shape else { panic!("expected AssignDamage") };
+    let ReplyShape::AssignDamage { splits } = &decision.shape else {
+        panic!("expected AssignDamage")
+    };
     assert_eq!(splits.len(), 1);
     assert_eq!((splits[0].source, splits[0].power), (ObjectId(1), 3));
     assert_eq!(splits[0].recipients, vec![ObjectId(2), ObjectId(3)]);
     assert!(splits[0].spill.is_none());
 
     // 2 + 2 is more than the Ogre's power, and a split must name both blockers.
-    let too_much = Reply::AssignDamage(vec![(ObjectId(1), vec![(ObjectId(2), 2), (ObjectId(3), 2)])]);
-    assert_eq!(rejection_code(answer(&mut engine, P0, too_much)), RejectionCode::InvalidChoice);
+    let too_much = Reply::AssignDamage(vec![(
+        ObjectId(1),
+        vec![(ObjectId(2), 2), (ObjectId(3), 2)],
+    )]);
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, too_much)),
+        RejectionCode::InvalidChoice
+    );
     let one_blocker = Reply::AssignDamage(vec![(ObjectId(1), vec![(ObjectId(2), 3)])]);
-    assert_eq!(rejection_code(answer(&mut engine, P0, one_blocker)), RejectionCode::InvalidChoice);
-    assert_eq!(rejection_code(answer(&mut engine, P1, Reply::AssignDamage(Vec::new()))), RejectionCode::WrongSeat);
+    assert_eq!(
+        rejection_code(answer(&mut engine, P0, one_blocker)),
+        RejectionCode::InvalidChoice
+    );
+    assert_eq!(
+        rejection_code(answer(&mut engine, P1, Reply::AssignDamage(Vec::new()))),
+        RejectionCode::WrongSeat
+    );
 
-    let split = Reply::AssignDamage(vec![(ObjectId(1), vec![(ObjectId(2), 2), (ObjectId(3), 1)])]);
+    let split = Reply::AssignDamage(vec![(
+        ObjectId(1),
+        vec![(ObjectId(2), 2), (ObjectId(3), 1)],
+    )]);
     answer(&mut engine, P0, split).unwrap();
     assert!(!matches!(drain(&mut engine), StepStatus::Error(_)));
     assert_eq!(engine.state().object(ObjectId(2)).unwrap().damage_marked, 2);

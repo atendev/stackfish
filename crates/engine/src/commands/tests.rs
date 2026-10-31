@@ -3,19 +3,20 @@ use std::collections::HashMap;
 use super::attach::retire_object;
 use crate::types::ability::{AbilityEffect, AbilityKind, RegisteredAbility};
 use crate::types::card::ModeChoice;
+use crate::types::cost::FilterController;
 use crate::types::counter::CounterSet;
 use crate::types::effect::{
-    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
-    EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
+    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter,
+    EffectPayload, EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload,
+    ReplacementSpec,
 };
-use crate::types::cost::FilterController;
 use crate::types::game::GameState;
 use crate::types::game::RngState;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo};
 use crate::types::mana::ManaPool;
 use crate::types::player::{
-    DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected, HandSizeEffect,
-    HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerState,
+    DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
+    HandSizeEffect, HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerState,
 };
 use crate::types::turn::{Phase, Step};
 
@@ -57,7 +58,10 @@ fn minimal_state() -> GameState {
         land_play_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
+        rng: RngState {
+            seed: 1,
+            draws_consumed: 0,
+        },
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 0,
@@ -94,11 +98,19 @@ fn dummy_continuous_effect(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter { 
+        affected: AffectedFilter::Primitive(EffectFilter {
             controller: None,
             card_types: None,
-            self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
-        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
+            self_only: true,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+        }),
+        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+            power: 1,
+            toughness: 1,
+        }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -113,7 +125,15 @@ fn dummy_replacement_effect(source: ObjectId) -> ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
+                affected: EffectFilter {
+                    controller: None,
+                    card_types: None,
+                    self_only: true,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    supertypes: None,
+                    excluded_supertypes: None,
+                },
             },
             payload: ReplacementPayload::Regenerate,
         },
@@ -151,7 +171,12 @@ fn dummy_draw_limit_modifier(source: ObjectId) -> DrawLimitModifier {
 }
 
 fn dummy_land_play_modifier(source: ObjectId) -> LandPlayModifier {
-    LandPlayModifier { source, controller: PlayerId(0), affected: LandPlayAffected::Filter(FilterController::You), additional: 1 }
+    LandPlayModifier {
+        source,
+        controller: PlayerId(0),
+        affected: LandPlayAffected::Filter(FilterController::You),
+        additional: 1,
+    }
 }
 
 #[test]
@@ -159,25 +184,61 @@ fn retire_object_purges_only_the_retired_source() {
     let mut state = minimal_state();
     state.abilities.push(dummy_ability(ObjectId(1)));
     state.abilities.push(dummy_ability(ObjectId(2)));
-    state.continuous_effects.push(dummy_continuous_effect(ObjectId(1)));
-    state.continuous_effects.push(dummy_continuous_effect(ObjectId(2)));
-    state.replacement_effects.push(dummy_replacement_effect(ObjectId(1)));
-    state.replacement_effects.push(dummy_replacement_effect(ObjectId(2)));
-    state.hand_size_modifiers.push(dummy_hand_size_modifier(ObjectId(1)));
-    state.hand_size_modifiers.push(dummy_hand_size_modifier(ObjectId(2)));
-    state.hand_reveal_modifiers.push(dummy_hand_reveal_modifier(ObjectId(1)));
-    state.hand_reveal_modifiers.push(dummy_hand_reveal_modifier(ObjectId(2)));
-    state.draw_limit_modifiers.push(dummy_draw_limit_modifier(ObjectId(1)));
-    state.draw_limit_modifiers.push(dummy_draw_limit_modifier(ObjectId(2)));
-    state.land_play_modifiers.push(dummy_land_play_modifier(ObjectId(1)));
-    state.land_play_modifiers.push(dummy_land_play_modifier(ObjectId(2)));
+    state
+        .continuous_effects
+        .push(dummy_continuous_effect(ObjectId(1)));
+    state
+        .continuous_effects
+        .push(dummy_continuous_effect(ObjectId(2)));
+    state
+        .replacement_effects
+        .push(dummy_replacement_effect(ObjectId(1)));
+    state
+        .replacement_effects
+        .push(dummy_replacement_effect(ObjectId(2)));
+    state
+        .hand_size_modifiers
+        .push(dummy_hand_size_modifier(ObjectId(1)));
+    state
+        .hand_size_modifiers
+        .push(dummy_hand_size_modifier(ObjectId(2)));
+    state
+        .hand_reveal_modifiers
+        .push(dummy_hand_reveal_modifier(ObjectId(1)));
+    state
+        .hand_reveal_modifiers
+        .push(dummy_hand_reveal_modifier(ObjectId(2)));
+    state
+        .draw_limit_modifiers
+        .push(dummy_draw_limit_modifier(ObjectId(1)));
+    state
+        .draw_limit_modifiers
+        .push(dummy_draw_limit_modifier(ObjectId(2)));
+    state
+        .land_play_modifiers
+        .push(dummy_land_play_modifier(ObjectId(1)));
+    state
+        .land_play_modifiers
+        .push(dummy_land_play_modifier(ObjectId(2)));
 
     let departed = retire_object(&mut state, ObjectId(1));
 
-    assert_eq!(departed.len(), 1, "the retired object's own Triggered ability is returned");
+    assert_eq!(
+        departed.len(),
+        1,
+        "the retired object's own Triggered ability is returned"
+    );
     assert_eq!(departed[0].source, ObjectId(1));
-    assert_eq!(state.abilities.len(), 1, "only ObjectId(1)'s ability should be purged");
-    assert_eq!(state.abilities[0].source, ObjectId(2), "ObjectId(2)'s ability must survive untouched");
+    assert_eq!(
+        state.abilities.len(),
+        1,
+        "only ObjectId(1)'s ability should be purged"
+    );
+    assert_eq!(
+        state.abilities[0].source,
+        ObjectId(2),
+        "ObjectId(2)'s ability must survive untouched"
+    );
     assert_eq!(
         state.continuous_effects.len(),
         1,
@@ -198,12 +259,28 @@ fn retire_object_purges_only_the_retired_source() {
         ObjectId(2),
         "ObjectId(2)'s replacement effect must survive untouched"
     );
-    assert_eq!(state.hand_size_modifiers.len(), 1, "only ObjectId(1)'s hand size modifier should be purged");
+    assert_eq!(
+        state.hand_size_modifiers.len(),
+        1,
+        "only ObjectId(1)'s hand size modifier should be purged"
+    );
     assert_eq!(state.hand_size_modifiers[0].source, ObjectId(2));
-    assert_eq!(state.hand_reveal_modifiers.len(), 1, "only ObjectId(1)'s hand reveal modifier should be purged");
+    assert_eq!(
+        state.hand_reveal_modifiers.len(),
+        1,
+        "only ObjectId(1)'s hand reveal modifier should be purged"
+    );
     assert_eq!(state.hand_reveal_modifiers[0].source, ObjectId(2));
-    assert_eq!(state.draw_limit_modifiers.len(), 1, "only ObjectId(1)'s draw limit modifier should be purged");
+    assert_eq!(
+        state.draw_limit_modifiers.len(),
+        1,
+        "only ObjectId(1)'s draw limit modifier should be purged"
+    );
     assert_eq!(state.draw_limit_modifiers[0].source, ObjectId(2));
-    assert_eq!(state.land_play_modifiers.len(), 1, "only ObjectId(1)'s land play modifier should be purged");
+    assert_eq!(
+        state.land_play_modifiers.len(),
+        1,
+        "only ObjectId(1)'s land play modifier should be purged"
+    );
     assert_eq!(state.land_play_modifiers[0].source, ObjectId(2));
 }
