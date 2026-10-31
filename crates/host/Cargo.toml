@@ -12,3 +12,6 @@ serde_json = { workspace = true }
 [dev-dependencies]
 rusqlite = { workspace = true }
 stackfish-testutil = { path = "../testutil" }
+
+[lints]
+workspace = true

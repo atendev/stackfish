@@ -11,3 +11,6 @@ toml = "0.8"
 
 [dev-dependencies]
 rusqlite = { workspace = true }
+
+[lints]
+workspace = true

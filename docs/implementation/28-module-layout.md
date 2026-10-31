@@ -19,4 +19,12 @@ single owner and comment passes touch files in their final shape.
   (shortcut helpers), `assertions.rs` (`verify_expectations`), `load.rs` (TOML parsing) and
   `schema.rs` (scenario types).
 
+## Visibility
+
+- `EngineCommand`, `CommandOutcome`, `ProcessState` and `commands::execute_command` are `pub(crate)`. Hosts reach the engine through `Engine::submit_action`, `step`, `open_decision` and `answer`.
+- `engine_context` and `script_api` are private modules. `commands` stays `pub` for `Rejected`, `Internal`, `AttachProposal` and `propose_attach`.
+- An engine item is `pub` only when another crate or an integration test names it. Fields of public or serde-shaped types stay `pub`.
+- The scenario schema types in `crates/scenario/src/schema.rs` stay re-exported `pub` because they are the documented TOML format.
+- The workspace lint `unreachable_pub` covers `host`, `godot`, `carddb` and `scenario`. The engine is exempt because its modules are public.
+
 See the closed tickets in `.plan/closed/` for the original rationale.

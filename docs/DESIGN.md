@@ -87,7 +87,7 @@ surface gaps.
 ## Core modules
 
 (From the adaptation doc, adjusted for N-player + step-able core. The cleanup map split the
-original monolithic files into submodules by subsystem; see `docs/implementation/28-module-layout.md`.)
+original monolithic files into submodules by subsystem; see `docs/implementation/28-module-layout.md`, which also lists what is `pub` and what is `pub(crate)`.)
 
 1. **Game Instance** — owns full mutable state for one game (N players, not fixed count).
    `crates/engine/src/types/game.rs` and `crates/engine/src/engine/mod.rs`.
