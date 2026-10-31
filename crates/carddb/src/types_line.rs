@@ -13,7 +13,7 @@ impl std::fmt::Display for TypeLineError {
     }
 }
 
-pub struct ParsedTypeLine {
+pub(crate) struct ParsedTypeLine {
     pub supertypes: SupertypeSet,
     pub card_types: CardTypeSet,
     pub subtypes: Vec<Subtype>,
@@ -21,7 +21,7 @@ pub struct ParsedTypeLine {
 
 /// Splits on the em dash (U+2014) between the type portion and the subtypes. A line with
 /// no dash has no subtypes.
-pub fn parse(type_line: &str) -> Result<ParsedTypeLine, TypeLineError> {
+pub(crate) fn parse(type_line: &str) -> Result<ParsedTypeLine, TypeLineError> {
     let (left, right) = match type_line.split_once('—') {
         Some((l, r)) => (l, Some(r)),
         None => (type_line, None),

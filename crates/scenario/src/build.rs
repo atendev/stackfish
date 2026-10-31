@@ -445,7 +445,7 @@ fn zone_owner_for(kind: ZoneKind, player: PlayerId) -> Option<PlayerId> {
 }
 
 /// The built state, the card-key to `ObjectId` map and the scripts `run()` loads once an engine exists.
-pub type InitialState = (
+pub(crate) type InitialState = (
     GameState,
     HashMap<String, ObjectId>,
     Vec<PendingTriggerScript>,

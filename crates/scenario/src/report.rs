@@ -34,7 +34,7 @@ pub struct EntryReport {
 impl EntryReport {
     /// A hard failure is a failed assertion, an engine rejection that `expect_error` did not
     /// ask for, or an accepted action when `expect_error` did. `NotImplemented` is never one.
-    pub fn is_hard_failure(&self) -> bool {
+    pub(crate) fn is_hard_failure(&self) -> bool {
         match (&self.outcome, self.expect_error) {
             (EntryOutcome::Assertion(AssertionOutcome::Failed { .. }), _) => true,
             (EntryOutcome::Action(StepOutcome::Errored(_)), expect_error) => !expect_error,

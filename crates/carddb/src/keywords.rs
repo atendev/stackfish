@@ -3,7 +3,7 @@
 
 use stackfish_engine::KeywordSet;
 
-pub fn parse(names: &[String]) -> KeywordSet {
+pub(crate) fn parse(names: &[String]) -> KeywordSet {
     let mut set = KeywordSet::empty();
     for name in names {
         if let Some(bit) = parse_one(name) {
