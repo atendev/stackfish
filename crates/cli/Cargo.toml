@@ -8,5 +8,4 @@ name = "stackfish-cli"
 path = "src/main.rs"
 
 [dependencies]
-stackfish-engine = { path = "../engine" }
 stackfish-scenario = { path = "../scenario" }
