@@ -170,13 +170,12 @@ impl Engine {
                 // vanilla spells, which would log a false failure every time.
                 // TODO: `cast.rs` collapses a `ForEachPlayer`-wrapped handle to `ScriptHandle(0)`, so a plain custom function that is the runtime's first handle reads as the placeholder
                 let outcome = self.script_runtime.invoke_operation(top.operation, &mut self.state, top.source, top.controller);
-                if let Err(ref e) = outcome {
-                    if top.operation != ScriptHandle(0) {
+                if let Err(ref e) = outcome
+                    && top.operation != ScriptHandle(0) {
                         self.log_events(vec![GameEventKind::ScriptError {
                             message: format!("operation script error on source {:?}: {e:?}", top.source),
                         }]);
                     }
-                }
                 match outcome {
                     Ok(OperationOutcome::Finished) | Err(_) => ControlFlow::Continue(events),
                     // The script yielded mid-resolution: pause the run here. `events` moves
@@ -230,6 +229,7 @@ impl Engine {
     /// the cascade and madness casts, but inside an active pipeline run, so
     /// `pipeline_context` is left untouched. An illegal cast is logged as a
     /// `ScriptError`; the script is not told why.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn resolve_pending_cast(
         &mut self,
         card: ObjectId,

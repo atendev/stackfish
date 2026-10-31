@@ -124,11 +124,10 @@ fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, alterna
 // A payment can commit several zone moves, so find the one whose destination is `to`.
 fn zone_change_to(engine: &Engine, to: ZoneKind) -> (ObjectId, ZoneKind, ZoneKind) {
     for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange { object, from, to: event_to, .. } = event.kind {
-            if event_to == to {
+        if let GameEventKind::ZoneChange { object, from, to: event_to, .. } = event.kind
+            && event_to == to {
                 return (object, from, event_to);
             }
-        }
     }
     panic!("expected a ZoneChange event with to={to:?} in the ledger");
 }

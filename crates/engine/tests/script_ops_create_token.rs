@@ -791,5 +791,5 @@ fn dying_token_goes_to_graveyard_todo_cr111_7() {
     assert_eq!(bf.contents[0], attacker, "the surviving creature is the attacker");
     // The graveyard holds the resolved spell + the dead token
     let gy = engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap();
-    assert!(gy.contents.len() >= 1, "token went to graveyard (CR 111.7 cessation not yet implemented)");
+    assert!(!gy.contents.is_empty(), "token went to graveyard (CR 111.7 cessation not yet implemented)");
 }

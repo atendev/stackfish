@@ -43,11 +43,10 @@ pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind,
 /// its per-card loop on it, which CR 121.2b allows (multi-card draws may be
 /// partly carried out).
 pub(crate) fn propose_draw(state: &mut GameState, player: PlayerId) -> Option<GameEventKind> {
-    if let Some(limit) = crate::types::player::effective_draw_limit(&state.draw_limit_modifiers, player) {
-        if crate::types::player::cards_drawn_this_turn(state, player) >= limit {
+    if let Some(limit) = crate::types::player::effective_draw_limit(&state.draw_limit_modifiers, player)
+        && crate::types::player::cards_drawn_this_turn(state, player) >= limit {
             return None;
         }
-    }
     let card = state.zone(ZoneKind::Library, Some(player)).and_then(|library| library.contents.front().copied());
     let Some(card) = card else {
         if let Some(p) = state.player_mut(player) {
@@ -232,16 +231,14 @@ pub(crate) fn apply_damage_event(
             // Keyed by name and not ObjectId (see PlayerState::commander_damage_taken). The
             // name is read before source_is_commander's borrow of `state` ends, so it
             // survives into the `player_mut` borrow below.
-            if is_combat_damage && source_is_commander && amount > 0 {
-                if let Some(name) = state.object(source).map(|o| o.definition.name.clone()) {
-                    if let Some(player) = state.player_mut(pid) {
+            if is_combat_damage && source_is_commander && amount > 0
+                && let Some(name) = state.object(source).map(|o| o.definition.name.clone())
+                    && let Some(player) = state.player_mut(pid) {
                         match player.commander_damage_taken.iter_mut().find(|(s, _)| *s == name) {
                             Some((_, total)) => *total += amount,
                             None => player.commander_damage_taken.push((name, amount)),
                         }
                     }
-                }
-            }
             // CR 702.90b
             if is_infect {
                 let timestamp = state.allocate_sequence_no();
@@ -255,8 +252,8 @@ pub(crate) fn apply_damage_event(
         Target::Object(id) => {
             // TODO: damage to planeswalkers and battles marks loyalty or defense loss and not damage_marked, and GameObject has no loyalty or defense damage path, so only creature targets work (CR 120.3c/d)
             let timestamp = state.allocate_sequence_no();
-            if let Some(object) = state.object_mut(id) {
-                if object.definition.card_types.contains(CardTypeSet::CREATURE) {
+            if let Some(object) = state.object_mut(id)
+                && object.definition.card_types.contains(CardTypeSet::CREATURE) {
                     // CR 702.80a/702.90c
                     if replaces_with_counters {
                         object.counters.add(CounterKind::MinusOneMinusOne, amount as i32, timestamp);
@@ -267,7 +264,6 @@ pub(crate) fn apply_damage_event(
                         }
                     }
                 }
-            }
         }
         // CR 702/119: damage is dealt to a permanent or a player, never to an ability.
         Target::Ability(_) => unreachable!("damage is never dealt to an ability"),
@@ -276,11 +272,9 @@ pub(crate) fn apply_damage_event(
     // CR 702.15b
     // Lifelink's gain is in addition to any other result of the damage, to a player
     // or an object alike.
-    if has_lifelink && amount > 0 {
-        if let Some(controller) = source_controller {
-            if let Some(player) = state.player_mut(controller) {
+    if has_lifelink && amount > 0
+        && let Some(controller) = source_controller
+            && let Some(player) = state.player_mut(controller) {
                 player.lose_life(-(amount as i32));
             }
-        }
-    }
 }

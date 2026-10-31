@@ -336,11 +336,10 @@ impl Engine {
 
         self.state.commander_return_offered.insert(commander);
         let mut events = Vec::new();
-        if returned {
-            if let Some(event) = sba::move_commander_to_command_zone(&mut self.state, commander) {
+        if returned
+            && let Some(event) = sba::move_commander_to_command_zone(&mut self.state, commander) {
                 events.push(event);
             }
-        }
 
         self.process_state = match then {
             SbaResumeThen::SbaLoop => self.finish_sba_loop(events, Vec::new()),
@@ -551,11 +550,10 @@ impl Engine {
                 }
                 self.state.objects.insert(new_id, new_object);
                 // CR 610.3: only a card that landed in exile is linked.
-                if let ScriptedZoneMoveKind::ExileUntilLeaves { source } = kind {
-                    if to == ZoneKind::Exile {
+                if let ScriptedZoneMoveKind::ExileUntilLeaves { source } = kind
+                    && to == ZoneKind::Exile {
                         self.state.linked_exiles.push(LinkedExile { source, exiled: new_id });
                     }
-                }
 
                 let event_id = self.state.allocate_event_id();
                 let sequence_no = self.state.allocate_sequence_no();
@@ -653,7 +651,7 @@ impl Engine {
                 new_object.zone = to;
                 new_object.timestamp = self.state.allocate_sequence_no();
 
-                if let Some(zone) = self.state.zone_mut(ScriptedZoneMoveKind::Discard.from_zone(), Some(owner)) {
+                if let Some(zone) = self.state.zone_mut(ScriptedZoneMoveKind::Discard.source_zone(), Some(owner)) {
                     zone.remove(old_id);
                 }
                 let departed = commands::retire_object(&mut self.state, old_id);
@@ -670,7 +668,7 @@ impl Engine {
                     sequence_no,
                     kind: GameEventKind::ZoneChange {
                         object: new_id,
-                        from: ScriptedZoneMoveKind::Discard.from_zone(),
+                        from: ScriptedZoneMoveKind::Discard.source_zone(),
                         to,
                         last_known_info: Some(last_known_info),
                     },
@@ -689,7 +687,7 @@ impl Engine {
     fn return_linked_exiles(&mut self) -> Option<ProcessState> {
         let (due, waiting): (Vec<LinkedExile>, Vec<LinkedExile>) =
             std::mem::take(&mut self.state.linked_exiles).into_iter().partition(|link| {
-                self.state.object(link.source).map_or(true, |source| source.zone != ZoneKind::Battlefield)
+                self.state.object(link.source).is_none_or(|source| source.zone != ZoneKind::Battlefield)
             });
         self.state.linked_exiles = waiting;
         if due.is_empty() {

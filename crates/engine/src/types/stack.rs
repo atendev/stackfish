@@ -74,6 +74,7 @@ pub struct PendingModeChoice {
 impl StackObject {
     /// Takes `chosen_modes`, `targets` and `x_value` because a cast already
     /// has them, which avoids building an inconsistent object first.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         stack_id: ObjectId,
         kind: StackEntryKind,

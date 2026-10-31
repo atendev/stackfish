@@ -68,11 +68,10 @@ pub fn collect_triggers(
         };
         // CR 707.9g: skip an ability granted by a copy effect that a later copy
         // effect on the same object has superseded.
-        if let Some(&granted_generation) = state.linked_ability_generation.get(&ability.id) {
-            if source_object.copy_generation != granted_generation {
+        if let Some(&granted_generation) = state.linked_ability_generation.get(&ability.id)
+            && source_object.copy_generation != granted_generation {
                 continue;
             }
-        }
         // CR 113.6
         // Defensive: the ability is also deregistered when its source leaves the zone.
         if state.ability_function_zones.get(&ability.id).is_some_and(|z| *z != source_object.zone) {

@@ -125,7 +125,7 @@ pub struct StepResult {
 /// Which scripted zone-move op a `ReplacementResumeTarget::ScriptedZoneMove` is
 /// resuming. Destroy and sacrifice commit through the SBA death helpers. Exile is
 /// committed inline because its zone has no owner. Discard moves a card off a hand
-/// rather than a permanent off the battlefield (CR 701.9), so `from_zone()` is read
+/// rather than a permanent off the battlefield (CR 701.9), so `source_zone()` is read
 /// instead of assuming the battlefield.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ScriptedZoneMoveKind {
@@ -157,12 +157,12 @@ impl ScriptedZoneMoveKind {
                 matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard | ZoneKind::Exile)
             }
             ScriptedZoneMoveKind::Reanimate { .. } => matches!(zone, ZoneKind::Graveyard | ZoneKind::Exile),
-            other => zone == other.from_zone(),
+            other => zone == other.source_zone(),
         }
     }
 
     /// The zone each queued id must sit in: the battlefield, or the hand for discard (CR 701.9a).
-    pub(in crate::engine) fn from_zone(self) -> ZoneKind {
+    pub(in crate::engine) fn source_zone(self) -> ZoneKind {
         match self {
             ScriptedZoneMoveKind::Discard => ZoneKind::Hand,
             ScriptedZoneMoveKind::Mill => ZoneKind::Library,
@@ -216,6 +216,7 @@ pub struct PendingZoneMove {
 /// Which pipeline a paused `AwaitingReplacementChoice` resumes into. The pause is
 /// identical either way; only what happens after the choice differs.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ReplacementResumeTarget {
     /// A command's proposed events; `remaining` and `checked` carry the run.
     ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
@@ -300,6 +301,7 @@ pub enum SbaResumeThen {
 /// variant; `SbaLoop` re-enters itself so a replay viewer sees each SBA pass
 /// (CR 704.3). `legal_actions()` reads state on demand, so it has no pause of its own.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ProcessState {
     PriorityWindow,
     /// Accepted by `submit_action`; the next `step()` runs it.

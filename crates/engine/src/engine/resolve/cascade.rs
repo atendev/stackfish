@@ -29,13 +29,10 @@ impl Engine {
 
         let mut exiled = Vec::new();
         let mut candidate = None;
-        loop {
-            let Some(card) =
-                self.state.zone(ZoneKind::Library, Some(controller)).and_then(|z| z.contents.front().copied())
-            else {
-                // CR 702.85a: the library ran out, so the walk stops.
-                break;
-            };
+        // CR 702.85a: the walk stops when the library runs out.
+        while let Some(card) =
+            self.state.zone(ZoneKind::Library, Some(controller)).and_then(|z| z.contents.front().copied())
+        {
             let Some(proposed) = commands::propose_zone_move(&self.state, card, ZoneKind::Library, ZoneKind::Exile)
             else {
                 break;

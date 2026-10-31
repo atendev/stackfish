@@ -35,6 +35,12 @@ pub struct ScriptRuntime {
     registry: Rc<RefCell<ScriptRegistry>>,
 }
 
+impl Default for ScriptRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScriptRuntime {
     pub fn new() -> Self {
         let lua = Lua::new();
@@ -155,7 +161,7 @@ impl ScriptRuntime {
 
         let (queued, function_zones) = {
             let mut registry = self.registry.borrow_mut();
-            let queued: Vec<RegisteredAbility> = registry.pending_triggered.drain(..).collect();
+            let queued: Vec<RegisteredAbility> = std::mem::take(&mut registry.pending_triggered);
             let zones: std::collections::HashMap<usize, ZoneKind> =
                 registry.pending_function_zones.drain(..).collect();
             (queued, zones)
@@ -197,7 +203,7 @@ impl ScriptRuntime {
         // CR 113.6: an ability that declared `:SetFunctionsFrom(zone)` is kept only while its source is in that zone (Anger-style graveyard statics), and an undeclared one only on the battlefield. CR 604.3 characteristic-defining statics (`:SetCharacteristicDefining()`) bypass this filter below.
         // TODO: "functions in any zone" statics that aren't CDAs (a spell's own cost reduction) are still discarded off the battlefield; no such script-registered shape exists yet
         // TODO: a CDA registers only where a script run happens (hand, library, graveyard, exile, battlefield), not in the command zone
-        let on_battlefield = source_zone.map_or(true, |z| z == ZoneKind::Battlefield);
+        let on_battlefield = source_zone.is_none_or(|z| z == ZoneKind::Battlefield);
         fn take_functioning<T>(
             queue: &mut Vec<(T, Option<ZoneKind>)>,
             source_zone: Option<ZoneKind>,

@@ -194,7 +194,7 @@ fn target_has_protection_from(
             .protection_subtypes
             .iter()
             .any(|s| source_characteristics.subtypes.contains(s))
-        || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name)
+        || target_characteristics.protection_names.contains(&source_characteristics.name)
 }
 
 /// CR 702.11b/702.18a: whether `id` cannot be chosen as a target by a spell or
@@ -234,6 +234,7 @@ fn target_blocked_by_hexproof_or_shroud(
 /// activation, trigger candidate scan, CR 608.2b recheck): the filter, the
 /// protection check and the hexproof/shroud check. Attachment legality
 /// that isn't targeting uses `attachment_target_is_legal` instead.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn target_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -252,6 +253,7 @@ pub(crate) fn target_is_legal(
 /// rechecks of an attached Aura or Equipment and the CR 303.4f scan for an Aura
 /// entering uncast. An Aura permanent does not target (CR 115.1b), so hexproof
 /// and shroud do not apply. Protection still does (CR 702.16d).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn attachment_target_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -271,6 +273,7 @@ pub(crate) fn attachment_target_is_legal(
 /// `FilterController::You` and `Opponent` are relative to who casts or activates
 /// and not to the target.
 /// TODO: the zone-change half of CR 608.2b (CR 115.2) is not checked, because this asks only whether the target is legal now; the two coincide for every current filter since an `Object` filter's `zone` is fixed
+#[allow(clippy::too_many_arguments)]
 fn target_is_legal_impl(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -342,51 +345,45 @@ fn target_is_legal_impl(
                 || excluded_supertypes.is_some()
             {
                 let effective = crate::layers::effective_characteristics(state, script_runtime, id);
-                if let Some(types) = card_types {
-                    if !effective.card_types.intersects(*types) {
+                if let Some(types) = card_types
+                    && !effective.card_types.intersects(*types) {
                         return false;
                     }
-                }
                 // CR 601.2c/115
                 // The negated form (a nonland target). Independent of `card_types` above, so a
                 // filter can combine a positive card_types with an excluded_subtypes.
-                if let Some(types) = excluded_card_types {
-                    if effective.card_types.intersects(*types) {
+                if let Some(types) = excluded_card_types
+                    && effective.card_types.intersects(*types) {
                         return false;
                     }
-                }
                 // CR 205.4b
                 // Matches if the target has any subtype in the list (or, not and, as in
                 // cost.rs's FilterSpec::subtypes). Checked against effective_characteristics
                 // like card_types above, not the raw CardDefinition.
-                if let Some(subtypes) = subtypes {
-                    if !subtypes.iter().any(|s| effective.subtypes.contains(s)) {
+                if let Some(subtypes) = subtypes
+                    && !subtypes.iter().any(|s| effective.subtypes.contains(s)) {
                         return false;
                     }
-                }
                 // CR 601.2c/115/205.4b
                 // The negated form: rejects if the target has any subtype in the list.
-                if let Some(excluded) = excluded_subtypes {
-                    if excluded.iter().any(|s| effective.subtypes.contains(s)) {
+                if let Some(excluded) = excluded_subtypes
+                    && excluded.iter().any(|s| effective.subtypes.contains(s)) {
                         return false;
                     }
-                }
                 // CR 205.4a
                 // The same intersection against effective_characteristics as card_types,
                 // mirroring cost.rs's FilterSpec::matches.
-                if let Some(types) = supertypes {
-                    if !effective.supertypes.intersects(*types) {
+                if let Some(types) = supertypes
+                    && !effective.supertypes.intersects(*types) {
                         return false;
                     }
-                }
                 // CR 601.2c/115/205.4a
                 // The negated form: rejects if the target's supertypes intersect this set.
                 // Checked independently of `supertypes`, so a filter can combine both.
-                if let Some(types) = excluded_supertypes {
-                    if effective.supertypes.intersects(*types) {
+                if let Some(types) = excluded_supertypes
+                    && effective.supertypes.intersects(*types) {
                         return false;
                     }
-                }
             }
             if let Some(fc) = controller {
                 // CR 108.4
@@ -1396,7 +1393,7 @@ mod tests {
     #[test]
     fn combine_single_mode_returns_its_own_target_and_effect() {
         let mode = mode_with_effect(AbilityEffect::Damage(3));
-        let result = combine_chosen_modes(&[mode.clone()], &[0]).unwrap();
+        let result = combine_chosen_modes(std::slice::from_ref(&mode), &[0]).unwrap();
         assert_eq!(result.0, None);
         assert_eq!(result.1, Some(AbilityEffect::Damage(3)));
     }

@@ -37,8 +37,8 @@ impl Engine {
         // CR 700.2e: a modal spell whose mode is chosen by another player has nothing
         // resolvable yet, so pause without popping. `submit_mode_choice` patches it
         // in place and re-enters here.
-        if let Some(top) = self.state.stack.last() {
-            if let Some(pending) = &top.pending_mode_choice {
+        if let Some(top) = self.state.stack.last()
+            && let Some(pending) = &top.pending_mode_choice {
                 let status = StepStatus::AwaitingModeChoice {
                     player: pending.chooser,
                     stack_id: top.stack_id,
@@ -53,7 +53,6 @@ impl Engine {
                 };
                 return status;
             }
-        }
         // A leftover continuation from an unfinished resolution must not resume into this one.
         self.modal_continuation = None;
         let Some(mut top) = self.state.stack.pop() else {

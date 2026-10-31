@@ -114,11 +114,10 @@ pub(crate) fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (En
                 ScriptReference::Inline(source) if !source.is_empty() => Some(source.clone()),
                 _ => None,
             };
-            if spec.target_requirement.is_none() {
-                if let Some(source) = &resolved_script {
+            if spec.target_requirement.is_none()
+                && let Some(source) = &resolved_script {
                     register_script_target_requirement(&mut engine, card_ids[key], source);
                 }
-            }
             if let Some(source) = &resolved_script {
                 register_script_operation(&mut engine, card_ids[key], source);
             }

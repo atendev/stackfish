@@ -693,9 +693,7 @@ pub(crate) fn block_is_legal(
             .iter()
             .any(|s| blocker_characteristics.subtypes.contains(s))
         || attacker_characteristics
-            .protection_names
-            .iter()
-            .any(|n| *n == blocker_characteristics.name)
+            .protection_names.contains(&blocker_characteristics.name)
         || attacker_characteristics.protection_players.iter().any(|who| match who {
             FilterController::You => blocker_object.controller == attacker_object.controller,
             FilterController::Opponent => blocker_object.controller != attacker_object.controller,

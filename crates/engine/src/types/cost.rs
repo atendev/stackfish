@@ -34,21 +34,18 @@ impl FilterSpec {
         if self.extra.is_some() {
             return false;
         }
-        if let Some(types) = self.card_types {
-            if !object.definition.card_types.intersects(types) {
+        if let Some(types) = self.card_types
+            && !object.definition.card_types.intersects(types) {
                 return false;
             }
-        }
-        if let Some(supertypes) = self.supertypes {
-            if !object.definition.supertypes.intersects(supertypes) {
+        if let Some(supertypes) = self.supertypes
+            && !object.definition.supertypes.intersects(supertypes) {
                 return false;
             }
-        }
-        if let Some(subtypes) = &self.subtypes {
-            if !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
+        if let Some(subtypes) = &self.subtypes
+            && !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
                 return false;
             }
-        }
         if let Some(fc) = self.controller {
             let ok = match fc {
                 FilterController::You => object_controller == viewer,

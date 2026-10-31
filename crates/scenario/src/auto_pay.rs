@@ -84,9 +84,9 @@ fn units_from_tally(mut tally: [u32; 6], generic: u32, pip_colors: &[Color]) -> 
         units.push(slot_letter(slot).to_string());
     }
     let mut remaining = generic;
-    for slot in 0..tally.len() {
-        while remaining > 0 && tally[slot] > 0 {
-            tally[slot] -= 1;
+    for (slot, count) in tally.iter_mut().enumerate() {
+        while remaining > 0 && *count > 0 {
+            *count -= 1;
             units.push(slot_letter(slot).to_string());
             remaining -= 1;
         }
@@ -126,13 +126,12 @@ fn pick_mana_source(
         }
         candidates.push((ability.source, index, units));
     }
-    if let Some(&color) = missing.first() {
-        if let Some((source, index, _)) =
+    if let Some(&color) = missing.first()
+        && let Some((source, index, _)) =
             candidates.iter().find(|(_, _, units)| units.contains(&ManaUnit::Colored(color)))
         {
             return Some((*source, *index));
         }
-    }
     candidates.first().map(|(source, index, _)| (*source, *index))
 }
 

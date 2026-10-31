@@ -204,8 +204,8 @@ impl Engine {
             // because no player action supplied them.
             // CR 702.21a: Ward targets the spell or ability that caused it, so it is
             // filled in here. If that object left the stack the trigger is removed.
-            if let Some(TargetSpec::Primitive(req)) = &ability.target {
-                if req.filter == TargetFilter::TriggeringStackObject {
+            if let Some(TargetSpec::Primitive(req)) = &ability.target
+                && req.filter == TargetFilter::TriggeringStackObject {
                     let target = trigger.triggering_stack.and_then(|id| {
                         let so = self.state.stack.iter().find(|so| so.stack_id == id)?;
                         Some(if commands::is_ability_stack_entry(&so.kind) { Target::Ability(id) } else { Target::Object(id) })
@@ -215,7 +215,6 @@ impl Engine {
                     }
                     continue;
                 }
-            }
             if let Some(spec) = &ability.target {
                 let spec = spec.clone();
                 let candidates =

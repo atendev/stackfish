@@ -140,7 +140,7 @@ fn protection_prevents(
             .protection_subtypes
             .iter()
             .any(|s| source_characteristics.subtypes.contains(s))
-        || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name)
+        || target_characteristics.protection_names.contains(&source_characteristics.name)
         || target_characteristics.protection_players.iter().any(|who| match who {
             FilterController::You => source_controller == target_controller,
             FilterController::Opponent => source_controller != target_controller,
@@ -406,11 +406,10 @@ pub fn pending_devour_choice(
                 return false;
             }
             // CR 702.82c
-            if let Some(quality) = &quality {
-                if !effective.subtypes.contains(quality) {
+            if let Some(quality) = &quality
+                && !effective.subtypes.contains(quality) {
                     return false;
                 }
-            }
             true
         })
         .map(|obj| obj.object_id)

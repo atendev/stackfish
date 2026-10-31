@@ -275,11 +275,10 @@ impl Engine {
             }
             PlayerActionKind::TakeMulligan => {
                 let taken = self.state.player(player).expect("valid player").mulligans_taken;
-                if let Some(max) = self.settings.max_mulligans {
-                    if taken >= max {
+                if let Some(max) = self.settings.max_mulligans
+                    && taken >= max {
                         return Err(MulliganError::MaxMulligansReached);
                     }
-                }
                 self.state.player_mut(player).expect("valid player").mulligans_taken += 1;
                 self.return_hand_to_library(player);
                 self.shuffle_library(player);
@@ -536,7 +535,7 @@ impl Engine {
 
     fn next_mulligan_player(&self) -> Option<PlayerId> {
         self.state.turn_order.iter().copied()
-            .find(|&pid| !self.state.player(pid).map_or(false, |p| p.hand_kept))
+            .find(|&pid| !self.state.player(pid).is_some_and(|p| p.hand_kept))
     }
 
     /// The next undecided player after `current` in turn order, wrapping to
@@ -547,7 +546,7 @@ impl Engine {
         let cur_pos = order.iter().position(|&p| p == current)?;
         for i in 1..=n {
             let pid = order[(cur_pos + i) % n];
-            if !self.state.player(pid).map_or(false, |p| p.hand_kept) {
+            if !self.state.player(pid).is_some_and(|p| p.hand_kept) {
                 return Some(pid);
             }
         }

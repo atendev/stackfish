@@ -23,6 +23,12 @@ pub struct CounterSet {
     counters: Vec<(CounterKind, i32, crate::types::ids::SequenceNo)>,
 }
 
+impl Default for CounterSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CounterSet {
     pub fn new() -> Self {
         CounterSet { counters: Vec::new() }

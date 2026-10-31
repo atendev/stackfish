@@ -140,6 +140,7 @@ impl Engine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn resolve_modal_from(
         &mut self,
         top: &StackObject,

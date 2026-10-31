@@ -110,11 +110,10 @@ impl Engine {
             return Err(ScriptChoiceError::WrongRequestKind);
         };
         // `Game.ChooseN` excludes earlier picks; see `ScriptChoiceRequest::SelectTarget`.
-        if let Target::Object(id) = chosen {
-            if exclude_ids.contains(&id) {
+        if let Target::Object(id) = chosen
+            && exclude_ids.contains(&id) {
                 return Err(ScriptChoiceError::InvalidCandidate);
             }
-        }
         // CR 702.16c: protection checks the resolving object's source, not the controller
         // or the stack id.
         // TODO: `SelectTarget` carries a bare filter, so "another target" can't be expressed (CR 115.4)

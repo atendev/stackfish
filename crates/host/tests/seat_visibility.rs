@@ -302,7 +302,7 @@ fn a_decision_is_opaque_to_everyone_but_its_chooser_and_an_omniscient_seat() {
     };
     let chooser = view(&mut table, 0);
     assert_eq!(chooser["shape"], "action");
-    assert!(chooser["entries"].as_array().unwrap().len() >= 1);
+    assert!(!chooser["entries"].as_array().unwrap().is_empty());
     assert_eq!(view(&mut table, OMNISCIENT), chooser, "an omniscient Seat sees the full Decision");
 
     for seat in [1, 2] {

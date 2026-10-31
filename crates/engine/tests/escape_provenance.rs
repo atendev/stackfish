@@ -179,7 +179,7 @@ fn escaping_grants_the_life_trigger_counters_and_conditional_keyword() {
         2,
         "CR 702.138c: escapes with two +1/+1 counters"
     );
-    let effective = effective_characteristics(&engine.state(), &ScriptRuntime::new(), permanent);
+    let effective = effective_characteristics(engine.state(), &ScriptRuntime::new(), permanent);
     assert!(effective.keywords.contains(KeywordSet::FLYING), "CR 702.138d: escapes with flying");
 
     // The ETB trigger ("if it escaped") is now on the stack - resolve it.
@@ -219,7 +219,7 @@ fn casting_normally_grants_none_of_the_escape_gated_effects() {
         0,
         "CR 702.138c only applies to an escaped incarnation"
     );
-    let effective = effective_characteristics(&engine.state(), &ScriptRuntime::new(), permanent);
+    let effective = effective_characteristics(engine.state(), &ScriptRuntime::new(), permanent);
     assert!(!effective.keywords.contains(KeywordSet::FLYING), "CR 702.138d only applies to an escaped incarnation");
 
     // The intervening-if never held, so collect_triggers filters the trigger out before it reaches the stack.

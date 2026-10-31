@@ -411,7 +411,7 @@ fn competing_replacements_on_the_return_pause_and_the_return_still_finishes() {
         panic!("expected a CR 616.1 ordering choice, got {status:?}");
     };
     assert_eq!(candidates.len(), 2);
-    engine.submit_replacement_choice(candidates[0].clone()).unwrap();
+    engine.submit_replacement_choice(candidates[0]).unwrap();
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == P0), "{status:?}");
     assert!(find(&engine, "Creature 2", ZoneKind::Battlefield).is_none());

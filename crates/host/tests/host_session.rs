@@ -146,9 +146,7 @@ fn creation_rejects_bad_envelopes_and_bodies() {
     let response = attempt(json!({ "v": 1, "kind": "setup", "body": numeric_seed }));
     assert_eq!(error_code(&response), "malformed_message");
 
-    let (_, bytes) = Session::create(&serde_json::to_vec(&json!({ "v": 1, "kind": "setup", "body": valid_body })).unwrap(), &cards())
-        .ok()
-        .expect("the same body is fine with a string seed");
+    let (_, bytes) = Session::create(&serde_json::to_vec(&json!({ "v": 1, "kind": "setup", "body": valid_body })).unwrap(), &cards()).expect("the same body is fine with a string seed");
     assert_eq!(parse(&bytes)["body"]["seats"], json!([0, 1]));
 
     assert!(Session::create(b"not json", &cards()).is_err());

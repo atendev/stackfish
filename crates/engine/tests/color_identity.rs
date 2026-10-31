@@ -134,7 +134,7 @@ fn basic_land_legality_falls_out_of_the_general_rule() {
     let mountain = card("Mountain", "{0}", "{T}: Add {R}.");
 
     let green_commander = commander_color_identity(&[card("Green General", "{2}{G}", "")]);
-    assert!(illegal_cards_for_color_identity(green_commander, &[forest.clone()]).is_empty());
+    assert!(illegal_cards_for_color_identity(green_commander, std::slice::from_ref(&forest)).is_empty());
     assert_eq!(illegal_cards_for_color_identity(green_commander, &[mountain]).len(), 1);
 
     let blue_commander = commander_color_identity(&[card("Blue General", "{2}{U}", "")]);

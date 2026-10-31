@@ -13,6 +13,7 @@ use crate::types::stack::StackEntryKind;
 use crate::types::zone::ZoneKind;
 
 /// What one `check_state_based_actions` pass produced.
+#[allow(clippy::large_enum_variant)]
 pub enum SbaOutcome {
     /// Events from this pass, for the caller to append to the ledger; empty means
     /// CR 704.3's fixed point. The second element holds the dying objects'
@@ -476,11 +477,10 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
 /// entry. No zone change or new `ObjectId`, since `id` stays on the battlefield.
 fn commit_unattach(state: &mut GameState, id: ObjectId) -> GameEvent {
     let was_attached_to = state.object_mut(id).and_then(|o| o.attached_to.take());
-    if let Some(target_id) = was_attached_to {
-        if let Some(target) = state.object_mut(target_id) {
+    if let Some(target_id) = was_attached_to
+        && let Some(target) = state.object_mut(target_id) {
             target.attachments.retain(|&a| a != id);
         }
-    }
     let event_id = state.allocate_event_id();
     let sequence_no = state.allocate_sequence_no();
     GameEvent {
@@ -530,6 +530,7 @@ fn commit_token_cessation(state: &mut GameState, id: ObjectId) -> (GameEvent, Ve
 }
 
 /// What one `resolve_deaths` call produced.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum DeathResolution {
     /// Every pending death is moved or gone. Holds the committed events and the dead
     /// objects' `Triggered` abilities (see `SbaOutcome::Progressed`).

@@ -23,10 +23,10 @@ pub fn commander_color_identity(commanders: &[CardDefinition]) -> ColorSet {
 
 /// CR 903.5c: every card whose color identity is not a subset of `commander_identity`.
 /// Basic lands need no separate check (CR 903.5d): their `{T}: Add` text carries the symbol.
-pub fn illegal_cards_for_color_identity<'a>(
+pub fn illegal_cards_for_color_identity(
     commander_identity: ColorSet,
-    cards: &'a [CardDefinition],
-) -> Vec<&'a CardDefinition> {
+    cards: &[CardDefinition],
+) -> Vec<&CardDefinition> {
     cards.iter().filter(|c| !commander_identity.contains(color_identity(c))).collect()
 }
 
@@ -63,11 +63,10 @@ fn mana_symbol_groups(text: &str) -> Vec<ColorSet> {
             }
             inner.push(c);
         }
-        if closed {
-            if let Ok(cost) = ManaCost::parse(&format!("{{{inner}}}")) {
+        if closed
+            && let Ok(cost) = ManaCost::parse(&format!("{{{inner}}}")) {
                 groups.push(cost.colors());
             }
-        }
     }
     groups
 }

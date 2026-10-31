@@ -233,15 +233,13 @@ fn the_original_owner_can_no_longer_activate_a_gain_controlled_sources_ability()
             x_value: None,
         },
     });
-    match result {
-        Ok(_) => {
-            let status = drain(&mut engine);
-            assert!(
-                matches!(status, StepStatus::Error(_)),
-                "p1 no longer effectively controls the source and must not be able to activate it, got {status:?}"
-            );
-        }
-        Err(_) => {} // rejected up front - also an acceptable "not allowed" outcome
+    // A rejection up front is also an acceptable "not allowed" outcome.
+    if result.is_ok() {
+        let status = drain(&mut engine);
+        assert!(
+            matches!(status, StepStatus::Error(_)),
+            "p1 no longer effectively controls the source and must not be able to activate it, got {status:?}"
+        );
     }
 }
 

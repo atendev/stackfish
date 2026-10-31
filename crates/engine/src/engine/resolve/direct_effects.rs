@@ -159,11 +159,10 @@ impl Engine {
             if let Some(power) = first_power {
                 push_damage(first, second, power);
             }
-            if mutual {
-                if let Some(power) = second_power {
+            if mutual
+                && let Some(power) = second_power {
                     push_damage(second, first, power);
                 }
-            }
         }
         ControlFlow::Continue(events)
     }

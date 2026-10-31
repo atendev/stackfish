@@ -38,6 +38,7 @@ pub(crate) struct CastPlan {
     pending_mode_choice: Option<PendingModeChoice>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn validate_cast_spell(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -478,11 +479,10 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
     // This cast counts toward the next commander tax once the zone move above
     // commits.
     // TODO: a cast abandoned through Engine::unwind_payment (CR 601.6) keeps this increment, and unwind_payment returns any unwound spell to hand whatever its origin zone, so an unwound commander cast already loses its command-zone recastability
-    if cast_from_command_zone {
-        if let Some(p) = state.player_mut(actor) {
+    if cast_from_command_zone
+        && let Some(p) = state.player_mut(actor) {
             *p.commander_casts.entry(last_known_info.definition.name.clone()).or_insert(0) += 1;
         }
-    }
 
     // CR 608.2m
     // The card's Rust-native fast-path effect (Shock's damage, say), if it has one;

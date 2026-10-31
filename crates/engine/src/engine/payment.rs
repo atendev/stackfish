@@ -205,11 +205,10 @@ impl Engine {
         let stack_object = self.state.stack.remove(idx);
 
         let mut events = Vec::new();
-        if matches!(stack_object.kind, StackEntryKind::Spell) {
-            if let Some(event) = self.move_resolving_spell(stack_id, ZoneKind::Hand, false, false) {
+        if matches!(stack_object.kind, StackEntryKind::Spell)
+            && let Some(event) = self.move_resolving_spell(stack_id, ZoneKind::Hand, false, false) {
                 events.push(event);
             }
-        }
         events.push(GameEventKind::CastingUnwound { stack_id });
 
         for kind in events {

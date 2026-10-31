@@ -51,6 +51,10 @@ impl Zone {
         self.contents.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.contents.is_empty()
+    }
+
     pub fn top(&self) -> Option<ObjectId> {
         self.contents.front().copied()
     }

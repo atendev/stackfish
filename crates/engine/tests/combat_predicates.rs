@@ -125,7 +125,8 @@ fn a_creature_that_cannot_attack_is_not_required_to() {
     let tapped = |state: &mut GameState| state.objects.get_mut(&ObjectId(1)).unwrap().tapped = true;
     let sick = |state: &mut GameState| state.objects.get_mut(&ObjectId(1)).unwrap().controlled_since_turn = 1;
     let eliminated = |state: &mut GameState| state.players.iter_mut().find(|p| p.player_id == P1).unwrap().eliminated = true;
-    let cases: [(&str, KeywordSet, &dyn Fn(&mut GameState)); 4] = [
+    type Tweak<'a> = &'a dyn Fn(&mut GameState);
+    let cases: [(&str, KeywordSet, Tweak); 4] = [
         ("tapped", KeywordSet::ATTACKS_EACH_COMBAT, &tapped),
         ("summoning sick", KeywordSet::ATTACKS_EACH_COMBAT, &sick),
         ("defender", KeywordSet::ATTACKS_EACH_COMBAT | KeywordSet::DEFENDER, &|_| {}),

@@ -406,18 +406,19 @@ fn zone_owner_for(kind: ZoneKind, player: PlayerId) -> Option<PlayerId> {
     }
 }
 
-/// Builds a `GameState` from struct literals. Returns it with a card-key to `ObjectId` map
-/// and the scripts that `run()` must load once an engine exists.
-pub fn build_initial_state(
-    file: &ScenarioFile,
-) -> (
+/// The built state, the card-key to `ObjectId` map and the scripts `run()` loads once an engine exists.
+pub type InitialState = (
     GameState,
     HashMap<String, ObjectId>,
     Vec<PendingTriggerScript>,
     Vec<PendingTargetScript>,
     Vec<PendingScriptTargetRequirement>,
     Vec<PendingScriptOperation>,
-) {
+);
+
+/// Builds a `GameState` from struct literals. Returns it with a card-key to `ObjectId` map
+/// and the scripts that `run()` must load once an engine exists.
+pub fn build_initial_state(file: &ScenarioFile) -> InitialState {
     let card_db = open_card_db(file);
     let mut next_object_id: u64 = 0;
     // `AbilityId` shares the sequence counter that `allocate_sequence_no` uses, so a fixed
@@ -557,12 +558,11 @@ pub fn build_initial_state(
             target_scripts.push(PendingTargetScript { object: object_id, script: script.clone() });
         }
         // An explicit TOML `target_requirement` wins; the script's own fills the gap.
-        if spec.target_requirement.is_none() {
-            if let Some(source) = &resolved_script {
+        if spec.target_requirement.is_none()
+            && let Some(source) = &resolved_script {
                 script_target_requirements
                     .push(PendingScriptTargetRequirement { object: object_id, source: source.clone() });
             }
-        }
         if let Some(source) = &resolved_script {
             script_operations.push(PendingScriptOperation { object: object_id, source: source.clone() });
         }

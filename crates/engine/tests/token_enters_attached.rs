@@ -175,7 +175,7 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-fn battlefield_objects_excluding<'a>(state: &'a GameState, exclude: Vec<ObjectId>) -> Vec<&'a GameObject> {
+fn battlefield_objects_excluding(state: &GameState, exclude: Vec<ObjectId>) -> Vec<&GameObject> {
     state
         .objects
         .values()

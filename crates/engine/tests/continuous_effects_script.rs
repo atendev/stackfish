@@ -68,8 +68,8 @@ fn affects_predicate_matches_only_the_identical_object() {
     let state = base_state();
     let source = ObjectId(1);
     let controller = PlayerId(0);
-    assert_eq!(runtime.invoke_continuous_affects(handle, &state, source, source, controller, None).unwrap(), true);
-    assert_eq!(runtime.invoke_continuous_affects(handle, &state, ObjectId(2), source, controller, None).unwrap(), false);
+    assert!(runtime.invoke_continuous_affects(handle, &state, source, source, controller, None).unwrap());
+    assert!(!runtime.invoke_continuous_affects(handle, &state, ObjectId(2), source, controller, None).unwrap());
 }
 
 #[test]

@@ -95,11 +95,10 @@ impl Engine {
                 parent_event,
             });
         }
-        if modal_resume {
-            if let Some(continuation) = self.modal_continuation.take() {
+        if modal_resume
+            && let Some(continuation) = self.modal_continuation.take() {
                 return self.resume_modal_resolution(continuation);
             }
-        }
         // CR 601.2f: pause for payment after the cast's events are committed.
         self.process_state = match self.pending_payment.take() {
             Some(PendingPaymentRequest { stack_id, payer, cost, source, on_paid }) => {

@@ -143,12 +143,12 @@ fn check_activate(
         None if !chosen_colors.is_empty() => {
             return Err(invalid("this ability has no mana color to choose"));
         }
-        Some(choice) => {
-            if chosen_colors.len() != choice.count as usize || chosen_colors.iter().any(|c| !choice.colors.contains(c)) {
-                return Err(invalid(format!("choose {} color(s) from the listed colors", choice.count)));
-            }
+        Some(choice)
+            if chosen_colors.len() != choice.count as usize || chosen_colors.iter().any(|c| !choice.colors.contains(c)) =>
+        {
+            return Err(invalid(format!("choose {} color(s) from the listed colors", choice.count)));
         }
-        None => {}
+        _ => {}
     }
     check_targets(entry.targets.iter().collect(), targets)
 }

@@ -40,6 +40,7 @@ pub(crate) enum ActivatePlan {
     },
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn validate_activate_ability(
     state: &GameState,
     script_runtime: &ScriptRuntime,

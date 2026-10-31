@@ -447,31 +447,26 @@ pub(crate) fn matches_effect_filter(
             return false;
         }
     }
-    if let Some(types) = filter.card_types {
-        if !object.definition.card_types.intersects(types) {
+    if let Some(types) = filter.card_types
+        && !object.definition.card_types.intersects(types) {
             return false;
         }
-    }
-    if let Some(subtypes) = &filter.subtypes {
-        if !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
+    if let Some(subtypes) = &filter.subtypes
+        && !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
             return false;
         }
-    }
-    if let Some(subtypes) = &filter.excluded_subtypes {
-        if subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
+    if let Some(subtypes) = &filter.excluded_subtypes
+        && subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
             return false;
         }
-    }
-    if let Some(types) = filter.supertypes {
-        if !object.definition.supertypes.intersects(types) {
+    if let Some(types) = filter.supertypes
+        && !object.definition.supertypes.intersects(types) {
             return false;
         }
-    }
-    if let Some(types) = filter.excluded_supertypes {
-        if object.definition.supertypes.intersects(types) {
+    if let Some(types) = filter.excluded_supertypes
+        && object.definition.supertypes.intersects(types) {
             return false;
         }
-    }
     true
 }
 
@@ -873,32 +868,27 @@ fn event_target_matches(
                     return false;
                 }
             }
-            if let Some(types) = filter.card_types {
-                if !object.definition.card_types.intersects(types) {
+            if let Some(types) = filter.card_types
+                && !object.definition.card_types.intersects(types) {
                     return false;
                 }
-            }
             // CR 205.4b: raw field, not `effective_characteristics`, as in `matches_effect_filter`. This is a near-duplicate with a layers-aware controller and an event-shaped `Target`, so the check is repeated.
-            if let Some(subtypes) = &filter.subtypes {
-                if !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
+            if let Some(subtypes) = &filter.subtypes
+                && !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
                     return false;
                 }
-            }
-            if let Some(subtypes) = &filter.excluded_subtypes {
-                if subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
+            if let Some(subtypes) = &filter.excluded_subtypes
+                && subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
                     return false;
                 }
-            }
-            if let Some(types) = filter.supertypes {
-                if !object.definition.supertypes.intersects(types) {
+            if let Some(types) = filter.supertypes
+                && !object.definition.supertypes.intersects(types) {
                     return false;
                 }
-            }
-            if let Some(types) = filter.excluded_supertypes {
-                if object.definition.supertypes.intersects(types) {
+            if let Some(types) = filter.excluded_supertypes
+                && object.definition.supertypes.intersects(types) {
                     return false;
                 }
-            }
             true
         }
         // Never reached in practice: call sites pass a `DamageDealt` target (never an ability, CR 614.9) or a `Target::Object`.

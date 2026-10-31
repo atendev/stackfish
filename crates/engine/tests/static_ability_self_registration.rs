@@ -342,7 +342,7 @@ fn dying_creatures_registered_static_ability_is_purged_by_sba() {
     let _events = stackfish_engine::sba::check_state_based_actions(&mut state, &script_runtime);
 
     assert!(
-        state.objects.get(&bear).is_none() || state.objects[&bear].zone != ZoneKind::Battlefield,
+        !state.objects.contains_key(&bear) || state.objects[&bear].zone != ZoneKind::Battlefield,
         "3 damage is lethal against the buffed 3 toughness - the creature should have died"
     );
     assert!(

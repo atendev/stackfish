@@ -76,6 +76,7 @@ fn refuse_start(code: ErrorCode, message: impl Into<String>) -> Vec<u8> {
     Response::error(code, message).to_bytes()
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_request(bytes: &[u8]) -> Result<Request, Response> {
     let request: Request = serde_json::from_slice(bytes)
         .map_err(|e| Response::error(ErrorCode::MalformedMessage, format!("not a valid request: {e}")))?;
@@ -88,6 +89,7 @@ fn parse_request(bytes: &[u8]) -> Result<Request, Response> {
     Ok(request)
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_body<T: for<'de> Deserialize<'de>>(request: &Request) -> Result<T, Response> {
     serde_json::from_value(request.body.clone()).map_err(|e| {
         Response::error(ErrorCode::MalformedMessage, format!("bad {} body: {e}", request.kind))

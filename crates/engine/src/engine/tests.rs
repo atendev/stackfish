@@ -190,12 +190,7 @@ fn replacement_check_applies_single_match_and_commits_rewritten_event() {
     engine.process_state =
         ProcessState::ReplacementCheck { remaining: VecDeque::from([event]), checked: Vec::new() };
 
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            _ => break,
-        }
-    }
+    while let StepStatus::Progressed = engine.step().status {}
 
     let last = engine.state().ledger.last().expect("CommitEvents must have appended the resolved event");
     assert!(
@@ -263,12 +258,7 @@ fn submit_replacement_choice_applies_chosen_then_resolves_the_other_and_commits(
     // b still matches the (already-prevented) event since it isn't
     // excluded yet - this drains it too, then commits once nothing else
     // matches (CR 616.1: a is now excluded and can't reapply).
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            _ => break,
-        }
-    }
+    while let StepStatus::Progressed = engine.step().status {}
 
     let last = engine.state().ledger.last().expect("CommitEvents must have appended the resolved event");
     assert!(matches!(last.kind, GameEventKind::DamageDealt { amount: 0, .. }));
@@ -446,12 +436,7 @@ fn all_candidates_declining_dispatches_otherwise_only_once_the_queue_is_empty() 
     assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield, "otherwise must not fire early");
 
     engine.decline_unless_paid(p2).expect("p2 is the current front");
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            _ => break,
-        }
-    }
+    while let StepStatus::Progressed = engine.step().status {}
     assert!(engine.state().object(source).is_none(), "otherwise finally fires once every candidate has declined");
     let resolved = engine
         .state()

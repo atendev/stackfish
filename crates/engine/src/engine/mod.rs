@@ -553,13 +553,12 @@ impl Engine {
         result: Result<T, ScriptError>,
     ) {
         let has_real_script = matches!(script_ref, ScriptReference::Inline(s) if !s.is_empty());
-        if has_real_script {
-            if let Err(e) = result {
+        if has_real_script
+            && let Err(e) = result {
                 self.log_events(vec![GameEventKind::ScriptError {
                     message: format!("card script error on source {source:?}: {e:?}"),
                 }]);
             }
-        }
     }
 
     /// Loads a standalone Lua callback and returns a handle for hand-built

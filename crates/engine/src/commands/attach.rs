@@ -57,19 +57,6 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     });
 }
 
-/// Removes `old_id` from `state.objects` and purges every `RegisteredAbility`,
-/// `ContinuousEffect` and `ReplacementEffect` still pointing at it. Call it at a
-/// zone-change site that does not call `remap_abilities` for `old_id` (discard,
-/// `draw_step`, SBA-driven death). Calling both deletes what remap carried
-/// forward; calling neither leaves dead entries behind.
-///
-/// Returns the departing object's `Triggered` abilities (CR 603.10), which would
-/// otherwise be deleted before `collect_triggers` sees them. `sba::commit_death`
-/// and `move_to_graveyard_for_cost` pass them to the engine's last-known-
-/// information stash. `submit_discard` and `draw_step` drop them, because `Dies`
-/// and `LeavesBattlefield` need `from == Battlefield`.
-/// TODO: stash departed abilities from hand and library once a condition can consume them
-
 /// CR 707.2a: removes every `RegisteredAbility`, `ContinuousEffect` and
 /// `ReplacementEffect` sourced from `id` without removing `id` from
 /// `state.objects` or purging any zone, unlike `retire_object`. The copied object
@@ -287,22 +274,19 @@ pub(crate) fn legal_entry_attach_candidates(
 /// target's `attachments` first, leaving no stale entry.
 pub(crate) fn attach_permanent(state: &mut GameState, attaching_id: ObjectId, target_id: ObjectId) {
     let previous_target = state.object(attaching_id).and_then(|o| o.attached_to);
-    if let Some(old_target_id) = previous_target {
-        if old_target_id != target_id {
-            if let Some(old_target) = state.object_mut(old_target_id) {
+    if let Some(old_target_id) = previous_target
+        && old_target_id != target_id
+            && let Some(old_target) = state.object_mut(old_target_id) {
                 old_target.attachments.retain(|&id| id != attaching_id);
             }
-        }
-    }
     if let Some(attaching) = state.object_mut(attaching_id) {
         attaching.attached_to = Some(target_id);
         attaching.attached_to_player = None;
     }
-    if let Some(target) = state.object_mut(target_id) {
-        if !target.attachments.contains(&attaching_id) {
+    if let Some(target) = state.object_mut(target_id)
+        && !target.attachments.contains(&attaching_id) {
             target.attachments.push(attaching_id);
         }
-    }
 }
 
 /// CR 303.4b: the "or player" half of `attach_permanent`, for an Aura enchanting
@@ -351,6 +335,18 @@ pub fn propose_attach(candidates: &[ObjectId]) -> AttachProposal {
     }
 }
 
+/// Removes `old_id` from `state.objects` and purges every `RegisteredAbility`,
+/// `ContinuousEffect` and `ReplacementEffect` still pointing at it. Call it at a
+/// zone-change site that does not call `remap_abilities` for `old_id` (discard,
+/// `draw_step`, SBA-driven death). Calling both deletes what remap carried
+/// forward; calling neither leaves dead entries behind.
+///
+/// Returns the departing object's `Triggered` abilities (CR 603.10), which would
+/// otherwise be deleted before `collect_triggers` sees them. `sba::commit_death`
+/// and `move_to_graveyard_for_cost` pass them to the engine's last-known-
+/// information stash. `submit_discard` and `draw_step` drop them, because `Dies`
+/// and `LeavesBattlefield` need `from == Battlefield`.
+/// TODO: stash departed abilities from hand and library once a condition can consume them
 pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<RegisteredAbility> {
     let removed = state.objects.remove(&old_id);
     // CR 303.4b/301.5a
@@ -358,11 +354,10 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     // drop it from that object's `attachments` too, best effort. An object attached
     // to old_id keeps a stale `attached_to`, which the SBA checks (CR 704.5m/704.5n)
     // notice on their next pass, as in a real game.
-    if let Some(target_id) = removed.and_then(|o| o.attached_to) {
-        if let Some(target) = state.object_mut(target_id) {
+    if let Some(target_id) = removed.and_then(|o| o.attached_to)
+        && let Some(target) = state.object_mut(target_id) {
             target.attachments.retain(|&id| id != old_id);
         }
-    }
     let mut departed_triggered = Vec::new();
     state.off_battlefield_scripts_run.remove(&old_id);
     // CR 610.3: the exiled card left exile by another route, so there is
