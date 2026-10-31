@@ -7,9 +7,11 @@ mod event;
 mod mana;
 mod reply;
 
-pub use decision::{WireCardIdentity, WireDecision, offered_objects};
-pub use event::{WireEvent, WireEventKind, WireIdentity, WireObjectSummary, WireRevealedCard};
-pub use reply::AnswerBody;
+pub(crate) use decision::{WireCardIdentity, WireDecision, offered_objects};
+pub(crate) use event::{
+    WireEvent, WireEventKind, WireIdentity, WireObjectSummary, WireRevealedCard,
+};
+pub(crate) use reply::AnswerBody;
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -88,7 +90,7 @@ impl From<WireColor> for Color {
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum WireZone {
+pub(crate) enum WireZone {
     Library,
     Hand,
     Battlefield,

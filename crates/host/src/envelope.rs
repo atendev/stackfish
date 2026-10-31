@@ -57,7 +57,7 @@ impl Serialize for ErrorCode {
 /// A request as it arrives. `body` stays raw until `kind` says how to parse it.
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct Request {
+pub(crate) struct Request {
     pub v: u32,
     pub kind: String,
     pub seat: Option<u32>,
@@ -66,7 +66,7 @@ pub struct Request {
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum Status {
+pub(crate) enum Status {
     Created,
     DecisionOpen,
     StillRunning,
@@ -75,13 +75,13 @@ pub enum Status {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct WireError {
+pub(crate) struct WireError {
     pub code: ErrorCode,
     pub message: String,
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct Response {
+pub(crate) struct Response {
     pub status: Status,
     pub events: Vec<WireEvent>,
     /// Present when a Decision is open, including after a refused request.
@@ -109,14 +109,14 @@ impl Response {
         }
     }
 
-    pub fn created(seats: Vec<u32>) -> Self {
+    pub(crate) fn created(seats: Vec<u32>) -> Self {
         Response {
             seats: Some(seats),
             ..Response::empty(Status::Created)
         }
     }
 
-    pub fn decision_open(events: Vec<WireEvent>, decision: WireDecision) -> Self {
+    pub(crate) fn decision_open(events: Vec<WireEvent>, decision: WireDecision) -> Self {
         Response {
             events,
             decision: Some(decision),
@@ -124,14 +124,14 @@ impl Response {
         }
     }
 
-    pub fn still_running(events: Vec<WireEvent>) -> Self {
+    pub(crate) fn still_running(events: Vec<WireEvent>) -> Self {
         Response {
             events,
             ..Response::empty(Status::StillRunning)
         }
     }
 
-    pub fn game_over(events: Vec<WireEvent>, winner: Option<u32>) -> Self {
+    pub(crate) fn game_over(events: Vec<WireEvent>, winner: Option<u32>) -> Self {
         Response {
             events,
             winner: Some(winner),
@@ -139,7 +139,7 @@ impl Response {
         }
     }
 
-    pub fn error(code: ErrorCode, message: impl Into<String>) -> Self {
+    pub(crate) fn error(code: ErrorCode, message: impl Into<String>) -> Self {
         Response {
             error: Some(WireError {
                 code,
@@ -150,7 +150,7 @@ impl Response {
     }
 
     /// A refusal that leaves a Decision open reports `decision_open` for it.
-    pub fn refusal(
+    pub(crate) fn refusal(
         code: ErrorCode,
         message: impl Into<String>,
         open: Option<WireDecision>,
@@ -164,14 +164,14 @@ impl Response {
     }
 
     /// A fatal error carries the events produced before it.
-    pub fn fatal(events: Vec<WireEvent>, message: impl Into<String>) -> Self {
+    pub(crate) fn fatal(events: Vec<WireEvent>, message: impl Into<String>) -> Self {
         Response {
             events,
             ..Response::error(ErrorCode::PipelineError, message)
         }
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         #[derive(Serialize)]
         struct Envelope<'a> {
             v: u32,

@@ -18,7 +18,7 @@ use crate::wire::{
 
 /// One Seat's point of view.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Viewer {
+pub(crate) enum Viewer {
     /// A player Seat, never omniscient.
     Player(PlayerId),
     /// A spectator Seat; the host sets `omniscient` at creation.
@@ -36,7 +36,7 @@ impl Viewer {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Place {
+pub(crate) struct Place {
     zone: ZoneKind,
     owner: Option<PlayerId>,
 }
@@ -71,7 +71,7 @@ struct Side {
 /// A `ZoneChange` read while the new object still exists. The engine event holds only the
 /// new id, so the old id, owner and identity come from the state right after the step.
 #[derive(Debug)]
-pub struct Move {
+pub(crate) struct Move {
     object: ObjectId,
     previous: Option<ObjectId>,
     from: Side,
@@ -141,7 +141,7 @@ impl Move {
 
 // `Cycled` and `MadnessExiled`: a discard whose card now lies in a public zone.
 #[derive(Debug)]
-pub struct Marker {
+pub(crate) struct Marker {
     cycled: bool,
     object: ObjectId,
     in_hand: Side,
@@ -173,7 +173,7 @@ impl Marker {
 
 /// One ledger event with the facts each viewer's copy depends on.
 #[derive(Debug)]
-pub enum Observed {
+pub(crate) enum Observed {
     /// Identical for every viewer; its ids lie in public zones.
     Public(WireEventKind),
     /// Names a source that may sit in a hidden zone, such as a card in hand with a cycling trigger.
@@ -215,7 +215,7 @@ fn without_source(kind: &WireEventKind) -> WireEventKind {
 
 impl Observed {
     /// The event as `viewer` receives it, or `None` when it stays hidden.
-    pub fn kind_for(&self, viewer: Viewer) -> Option<WireEventKind> {
+    pub(crate) fn kind_for(&self, viewer: Viewer) -> Option<WireEventKind> {
         match self {
             Observed::Public(kind) => Some(kind.clone()),
             Observed::Located { kind, source } => match source {
@@ -259,7 +259,7 @@ impl Observed {
 /// because their old ids can still turn up in a later event, such as a trigger whose
 /// source was the card in hand.
 #[derive(Default)]
-pub struct Observer {
+pub(crate) struct Observer {
     retired: HashMap<ObjectId, Place>,
 }
 
@@ -277,7 +277,7 @@ impl Observer {
 
     /// Reads `event`. Call it once per ledger entry, in order, against the state right
     /// after the step that wrote it.
-    pub fn observe(&mut self, state: &GameState, event: &GameEvent) -> Observed {
+    pub(crate) fn observe(&mut self, state: &GameState, event: &GameEvent) -> Observed {
         use GameEventKind as K;
         let plain = || {
             WireEventKind::plain(&event.kind)
@@ -400,7 +400,7 @@ impl Observer {
 
 /// The open Decision as `viewer` sees it. The chooser sees every option and the identity of
 /// each offered hidden card. Anyone else sees the reply kind, a count and the public options.
-pub fn decision_for(viewer: Viewer, state: &GameState, decision: &Decision) -> WireDecision {
+pub(crate) fn decision_for(viewer: Viewer, state: &GameState, decision: &Decision) -> WireDecision {
     if viewer.omniscient() || viewer == Viewer::Player(decision.player) {
         let identities = offered_objects(&decision.shape)
             .into_iter()
