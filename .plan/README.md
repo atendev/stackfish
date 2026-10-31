@@ -27,7 +27,7 @@ This folder holds the Wayfinder map for the project. Commit it. It is the record
 
 ## Running a ticket
 
-Follow the loop in the project `CLAUDE.md` under Vertical Slice Instructions. Implementation tickets end in a Merge / Don't merge prompt. Grilling tickets end in an Approve / Deny prompt. Close the ticket only after Merge or Approve.
+Follow the loop in the project `CLAUDE.md` under Vertical Slice Instructions. Implementation tickets end in a Merge / Don't merge prompt. Grilling tickets get an Approve / Deny prompt, and after Approve they close on a branch and get the same Merge / Don't merge prompt. Both prompts are `AskUserQuestion` buttons. Close an implementation ticket only after Merge, and a grilling ticket only after Approve.
 
 ## Claiming and closing a ticket
 
