@@ -89,13 +89,16 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 
 - TODO(snapshot): ticket 004's `(Seat, state)` view is not built, and no request asks for a snapshot. A Seat that
   joins late has no way to learn the current state. `view.rs` is written so a snapshot can reuse its rule.
-- TODO: nothing in the engine writes a `Revealed` event, and nothing sets `face_down`, so both rules are only tested
-  with constructed events.
+- `Revealed` producers (ticket 027): `Game.Ops.Search` with `reveal = true` (CR 701.23e) and both amplify answers
+  (CR 702.38a), through `Engine::reveal_event`. The host tests still use constructed events.
+- TODO: nothing sets `face_down`, because face-down mechanics are a design non-goal, so that rule is only tested with
+  constructed objects.
 - TODO(outbox): a Seat that never sends a request keeps its outbox growing. The Session never drops events.
 - TODO: ids inside other events (`damage_dealt.source`, `became_target`, and so on) are assumed to lie in public zones.
   `no_seat_ever_receives_a_hidden_id` checks that over one bot game.
-- TODO: ticket 004 asks for a rule in the engine's event-writing notes that free-text fields (`script_error`,
-  `state_based_action_applied`) never name a hidden card.
+- The free-text rule (ticket 027) is in `DESIGN.md`, "Writing events". Every `script_error` message comes from
+  `GameState::script_error_message`, which leaves out the id and detail of a library or hand source. Before this, a
+  library card's broken script logged its id and Lua error text to every Seat at game start.
 - Replay export (the setup bytes and the accepted Answers in order, from 001) is not built.
 - The carddb-backed `CardSource` is not built. It wraps `CardDb::load_by_oracle_id`.
 - The Payment cost lists additional costs without their filters (`sacrifice`, `discard`, `tap_permanents`,

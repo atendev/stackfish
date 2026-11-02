@@ -623,6 +623,47 @@ mod tests {
         }
     }
 
+    // CR 701.23e
+    #[test]
+    fn a_card_revealed_from_the_library_shows_its_identity_to_everyone_and_its_id_only_to_omniscient_seats()
+     {
+        let mut session = started();
+        let card = {
+            let state = session.engine.state();
+            let id = *state
+                .zone(ZoneKind::Library, Some(PlayerId(0)))
+                .unwrap()
+                .contents
+                .front()
+                .unwrap();
+            state.object(id).unwrap().clone()
+        };
+        let observed = observe(
+            &mut session,
+            GameEventKind::Revealed {
+                player: PlayerId(0),
+                zone: ZoneKind::Library,
+                cards: vec![RevealedCard {
+                    object: card.object_id,
+                    snapshot: card.clone(),
+                }],
+            },
+        );
+        for (viewer, sees_id) in VIEWERS.into_iter().zip([false, false, false, true]) {
+            let event = kind_json(&observed, viewer).expect("a reveal reaches every Seat");
+            assert_eq!(
+                event["cards"][0]["identity"]["name"],
+                card.definition.name.as_str(),
+                "{viewer:?}"
+            );
+            assert_eq!(
+                event["cards"][0].get("object").is_some(),
+                sees_id,
+                "{viewer:?}"
+            );
+        }
+    }
+
     #[test]
     fn scry_and_surveil_results_go_to_the_controller_and_rng_draws_to_omniscient_seats() {
         let mut session = started();

@@ -91,9 +91,10 @@ impl Engine {
         );
         if let Err(ref e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
-                message: format!(
-                    "operation script error on source {:?}: {e:?}",
-                    each_player.source
+                message: self.state.script_error_message(
+                    "operation script error",
+                    each_player.source,
+                    &e,
                 ),
             }]);
         }
@@ -226,9 +227,10 @@ impl Engine {
         );
         if let Err(ref e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
-                message: format!(
-                    "operation script error on source {:?}: {e:?}",
-                    loop_state.source
+                message: self.state.script_error_message(
+                    "operation script error",
+                    loop_state.source,
+                    &e,
                 ),
             }]);
         }

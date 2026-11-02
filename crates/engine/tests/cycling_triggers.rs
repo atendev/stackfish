@@ -254,6 +254,7 @@ fn cycled_trigger_fires_off_typecycling_too() {
             count: 1,
             destination: SearchDestination::Hand,
             shuffle_after: true,
+            reveal: false,
         },
     ));
     state.abilities.push(cycled_trigger(card));

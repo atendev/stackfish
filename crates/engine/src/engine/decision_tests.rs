@@ -150,6 +150,7 @@ fn pick_pauses_list_explicit_candidates_with_bounds() {
         count: 2,
         destination: crate::types::ability::SearchDestination::Hand,
         shuffle_after: true,
+        reveal: false,
     };
     let ReplyShape::Pick { min, max, .. } = engine_in(search).open_decision().unwrap().shape else {
         panic!("expected Pick")
@@ -172,6 +173,7 @@ fn a_search_lists_its_candidates_by_id_and_not_in_library_order() {
         count: 1,
         destination: crate::types::ability::SearchDestination::Hand,
         shuffle_after: true,
+        reveal: false,
     };
     let ReplyShape::Pick { candidates, .. } = engine_in(search).open_decision().unwrap().shape
     else {

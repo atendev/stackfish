@@ -207,9 +207,10 @@ impl Engine {
                     && top.operation != ScriptHandle(0)
                 {
                     self.log_events(vec![GameEventKind::ScriptError {
-                        message: format!(
-                            "operation script error on source {:?}: {e:?}",
-                            top.source
+                        message: self.state.script_error_message(
+                            "operation script error",
+                            top.source,
+                            &e,
                         ),
                     }]);
                 }
@@ -334,8 +335,10 @@ impl Engine {
                     self.poison(internal.clone());
                 }
                 self.log_events(vec![GameEventKind::ScriptError {
-                    message: format!(
-                        "script-requested cast failed on source {stack_id:?}: {err:?}"
+                    message: self.state.script_error_message(
+                        "script-requested cast failed",
+                        stack_id,
+                        &err,
                     ),
                 }]);
                 let mut final_events: std::collections::VecDeque<GameEventKind> =

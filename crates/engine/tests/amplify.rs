@@ -420,6 +420,25 @@ fn revealing_both_offered_cards_grants_two_counters_and_keeps_them_in_hand() {
         hand.contains(&hand_a) && hand.contains(&hand_b),
         "both revealed cards remain in hand"
     );
+    // CR 701.20a
+    let revealed: Vec<_> = engine
+        .state()
+        .ledger
+        .iter()
+        .filter_map(|e| match &e.kind {
+            GameEventKind::Revealed {
+                player,
+                zone,
+                cards,
+            } => Some((
+                *player,
+                *zone,
+                cards.iter().map(|c| c.object).collect::<Vec<_>>(),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(revealed, vec![(p0, ZoneKind::Hand, vec![hand_a, hand_b])]);
 }
 
 #[test]
@@ -493,6 +512,14 @@ fn revealing_nothing_grants_no_counters_but_still_resolves() {
     assert!(
         engine.state().object(hand_a).is_some(),
         "the hand card was never touched"
+    );
+    assert!(
+        !engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::Revealed { .. })),
+        "an empty reveal logs nothing"
     );
 }
 

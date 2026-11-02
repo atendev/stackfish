@@ -640,3 +640,25 @@ fn a_later_candidate_paying_stops_the_queue_before_otherwise_fires() {
         "otherwise never fires - p2 paid"
     );
 }
+
+// CR 400.2
+#[test]
+fn script_error_message_hides_a_library_or_hand_source() {
+    let mut state = minimal_state();
+    for (id, zone) in [
+        (ObjectId(1), ZoneKind::Library),
+        (ObjectId(2), ZoneKind::Hand),
+        (ObjectId(3), ZoneKind::Battlefield),
+    ] {
+        let mut object = dummy_object(id, PlayerId(0));
+        object.zone = zone;
+        state.objects.insert(id, object);
+    }
+    let detail = "boom in Secret Card's script";
+    for hidden in [ObjectId(1), ObjectId(2)] {
+        let message = state.script_error_message("card script error", hidden, &detail);
+        assert_eq!(message, "card script error on a hidden source");
+    }
+    let message = state.script_error_message("card script error", ObjectId(3), &detail);
+    assert!(message.contains("ObjectId(3)") && message.contains("Secret Card"));
+}

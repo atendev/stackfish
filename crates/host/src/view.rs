@@ -361,7 +361,8 @@ impl Observer {
                     source: self.hidden_place(state, *source),
                 }
             }
-            // These events happen in public zones, and their free text never names a hidden card.
+            // These events happen in public zones. The engine keeps hidden cards out of their free
+            // text (`DESIGN.md`, "Writing events").
             K::LifeChanged { .. }
             | K::DamageDealt { .. }
             | K::CounterAdded { .. }

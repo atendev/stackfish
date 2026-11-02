@@ -938,6 +938,7 @@ fn an_aura_entering_the_battlefield_attached_can_pick_a_hexproof_or_shroud_creat
                 enters_attached: true,
             },
             shuffle_after: true,
+            reveal: false,
         }),
         ..minimal_card_definition(
             40,

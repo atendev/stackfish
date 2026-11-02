@@ -223,6 +223,7 @@ fn run_card_script_self_registers_a_typecycling_ability() {
             count,
             destination: SearchDestination::Hand,
             shuffle_after,
+            reveal: false,
         }) => {
             assert_eq!(filter.card_types, Some(CardTypeSet::LAND));
             assert_eq!(*count, 1);
@@ -523,6 +524,7 @@ fn typecycling_discards_itself_and_searches_for_a_land() {
             count: 1,
             destination: SearchDestination::Hand,
             shuffle_after: true,
+            reveal: false,
         },
     ));
 
@@ -815,6 +817,7 @@ fn a_tutored_card_gets_its_cycling_ability_registered_in_hand() {
             count: 1,
             destination: SearchDestination::Hand,
             shuffle_after: true,
+            reveal: false,
         }),
         intervening_if: None,
     });

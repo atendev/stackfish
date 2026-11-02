@@ -16,7 +16,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 6. Lua event visibility. Let conditions see damage, life, tap/untap and mill events, and make `GainLife` and combat damage emit `LifeChanged`. This unblocks the most card scripts for the least work.
 7. Modal builders in Lua for spells and triggered abilities, then modal activated abilities in `commands/activate.rs` (its CR 700.2b TODO).
 8. CR 601.2d division of damage or counters among targets, then subtype and exclusion keys on `DestroyAll` filters.
-9. `Revealed` and `face_down` producers and the free-text event rule (ticket 027). Search reveal (CR 701.23e) is the first natural producer.
+9. Done on `phase5/revealed-face-down-producers` (awaiting review): ticket 027, `Revealed` from a revealing search and from amplify, the free-text event rule in `DESIGN.md`, and the `ScriptError` redaction. `face_down` has no producer, since face-down mechanics are a design non-goal (item 12).
 10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target, stun counters, Condescend's X, Echo's control check, and CR 104.4b loop detection (ticket 029).
 11. Housekeeping, alongside the above: ticket 017 (stale notes and the `.plan/` commit policy), 032 (rejection text and payment cost filters), 033 (Godot smoke test in CI, export and web builds), 034 (unconfirmed gdext items), the live `todo!()` body in `ScriptRuntime::invoke_cost` (not checked for reachability; the one in `commands/mod.rs` went away in ticket 035), and a stale-prose pass over `docs/lua/` (for example, "Protection from an attached Aura/Equipment" in `not-available-yet.md` may predate `14-protection-attach.md`).
 12. Design non-goals (planeswalkers, battles, double-faced, split and flip cards, sagas, face-down permanents, team rules). If the card database holds any of these, the loader should skip or reject them explicitly before then.
@@ -62,10 +62,9 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 
 - **Seat visibility (`phase5/seat-visibility`, B4)**: see `18-host-session.md`. Open items:
   - No `(Seat, state)` snapshot request. A Seat that joins late cannot learn the current state.
-  - The engine writes no `Revealed` event and sets no `face_down`, so those two rules only have constructed-event tests.
+  - The engine sets no `face_down`, so that rule only has constructed-object tests. `Revealed` comes from a revealing search and from amplify (ticket 027).
   - Outboxes grow until a Seat sends a request.
   - Event ids other than the ones `view.rs` checks (trigger and replacement sources) are assumed to lie in public zones.
-  - The engine's event-writing notes still lack the rule that free-text fields never name a hidden card.
 
 - **Legal actions (`phase5/legal-actions`, B2)**: see `17-legal-actions.md`. Open items:
   - Done in `phase5/x-aware-target-candidates`: a `mana_value` filter that mentions X lists every candidate legal for

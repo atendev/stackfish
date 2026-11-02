@@ -179,6 +179,7 @@ fn cases() -> Vec<Case> {
         count: 1,
         destination: SearchDestination::Hand,
         shuffle_after: false,
+        reveal: false,
     };
     let entry_attach = || ProcessState::AwaitingEntryAttachChoice {
         attaching: ObjectId(4),
@@ -369,6 +370,7 @@ fn cases() -> Vec<Case> {
                 count: 2,
                 destination: SearchDestination::Hand,
                 shuffle_after: false,
+                reveal: false,
             },
             |e| e.submit_search_choice(ids(&[8, 8]))
         ),

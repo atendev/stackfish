@@ -529,14 +529,14 @@ pub(crate) fn bind_game_globals(
     ops.set("Scry", scry)?;
     let surveil = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::Surveil(n))))?;
     ops.set("Surveil", surveil)?;
-    // `Game.Ops.Search(filter_table, count, opts?)`. `filter_table` goes through `decode_filter_table`, as `Game.Costs.Sacrifice` does. `opts.destination` is `"Hand"` (default) or `"Battlefield"`, and `opts.tapped` and `opts.enters_attached` matter only for `"Battlefield"` (CR 303.4f-h, meaningful for a found Aura; see `SearchDestination::Battlefield`). `opts.shuffle` defaults to `true` (CR 701.24a).
+    // `Game.Ops.Search(filter_table, count, opts?)`. `filter_table` goes through `decode_filter_table`, as `Game.Costs.Sacrifice` does. `opts.destination` is `"Hand"` (default) or `"Battlefield"`, and `opts.tapped` and `opts.enters_attached` matter only for `"Battlefield"` (CR 303.4f-h, meaningful for a found Aura; see `SearchDestination::Battlefield`). `opts.shuffle` defaults to `true` (CR 701.24a). `opts.reveal` defaults to `false` (CR 701.23e).
     let search = lua.create_function(
         |_, (filter_table, count, opts): (Table, u32, Option<Table>)| {
             let filter = decode_filter_table(filter_table).map_err(to_lua_err)?;
             if let Some(opts) = &opts {
                 reject_unknown_keys(
                     opts,
-                    &["destination", "tapped", "enters_attached", "shuffle"],
+                    &["destination", "tapped", "enters_attached", "shuffle", "reveal"],
                     &[],
                     "Game.Ops.Search opts",
                 )
@@ -580,11 +580,18 @@ pub(crate) fn bind_game_globals(
                     .map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
                 None => None,
             };
+            let reveal: Option<bool> = match &opts {
+                Some(t) => t
+                    .get("reveal")
+                    .map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+                None => None,
+            };
             Ok(OperationTag(AbilityEffect::Search {
                 filter,
                 count,
                 destination,
                 shuffle_after: shuffle_after.unwrap_or(true),
+                reveal: reveal.unwrap_or(false),
             }))
         },
     )?;

@@ -175,9 +175,10 @@ impl Engine {
                     Ok(holds) => holds,
                     Err(e) => {
                         self.log_events(vec![GameEventKind::ScriptError {
-                            message: format!(
-                                "intervening-if script error resolving source {:?}: {e:?}",
-                                top.source
+                            message: self.state.script_error_message(
+                                "intervening-if script error",
+                                top.source,
+                                &e,
                             ),
                         }]);
                         false
@@ -442,12 +443,14 @@ impl Engine {
                 count,
                 destination,
                 shuffle_after,
+                reveal,
             }) => self.resolve_search_effect(
                 top,
                 filter,
                 *count,
                 *destination,
                 *shuffle_after,
+                *reveal,
                 events,
             ),
             // CR 707.2: `top.source` becomes a copy of its first target's copiable values,

@@ -146,6 +146,7 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn resolve_search_effect(
         &mut self,
         top: &StackObject,
@@ -153,6 +154,7 @@ impl Engine {
         count: u32,
         destination: SearchDestination,
         shuffle_after: bool,
+        reveal: bool,
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let candidates: Vec<ObjectId> = self
@@ -177,6 +179,7 @@ impl Engine {
                 count,
                 destination,
                 shuffle_after,
+                reveal,
             };
             return ControlFlow::Break(StepStatus::Progressed);
         }
