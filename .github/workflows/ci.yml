@@ -29,10 +29,11 @@ jobs:
         run: tools/check.sh --full
 
   godot-smoke:
+    name: godot-smoke (Godot ${{ matrix.godot }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # 4.2.2 is the adapter's compatibility_minimum and API level. 4.7.2 is the newest Godot gdext 0.5.5 supports.
+      # 4.2 is the adapter's compatibility_minimum and API level, tested at its last patch. 4.7.2 is the newest Godot gdext 0.5.5 supports.
       matrix:
         include:
           - godot: 4.2.2
