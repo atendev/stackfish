@@ -349,6 +349,13 @@ pub(super) fn validate_cast_spell(
         x_value,
     )?;
 
+    // CR 107.3b
+    if free_cast && x_value.is_some_and(|x| x != 0) {
+        return Err(Rejected::IllegalAction(
+            "a spell cast without paying its mana cost must announce X as 0".to_string(),
+        ));
+    }
+
     // CR 601.2f
     // Total cost is the printed mana cost, or the announced alternative cost in its
     // place (CR 601.2b), never both. `cost.additional` is filled only from chosen

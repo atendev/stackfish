@@ -116,6 +116,75 @@ pub enum AdditionalCost {
     },
 }
 
+impl AdditionalCost {
+    /// Whether `id` may be the object this cost names for `payer`. Only the
+    /// four filtered costs name a chosen object, so every other kind is false.
+    /// `PaymentPlan::validate` and the Payment Decision's candidate lists share it.
+    pub(crate) fn accepts(
+        &self,
+        state: &GameState,
+        script_runtime: &ScriptRuntime,
+        payer: PlayerId,
+        id: ObjectId,
+    ) -> bool {
+        let Some(obj) = state.object(id) else {
+            return false;
+        };
+        match self {
+            AdditionalCost::TapPermanents { filter, .. } => {
+                if obj.tapped || obj.zone != ZoneKind::Battlefield {
+                    return false;
+                }
+                let controller = crate::layers::effective_controller(state, script_runtime, id);
+                filter.matches(obj, controller, payer)
+            }
+            // A graveyard card's `.controller` equals its owner (CR 108.4).
+            AdditionalCost::ExileFromGraveyard { filter, .. } => {
+                obj.zone == ZoneKind::Graveyard
+                    && obj.controller == payer
+                    && filter.matches(obj, obj.controller, payer)
+            }
+            // CR 701.21a
+            // Only a permanent the payer controls right now, after layers.
+            AdditionalCost::Sacrifice { filter } => {
+                let controller = crate::layers::effective_controller(state, script_runtime, id);
+                obj.zone == ZoneKind::Battlefield
+                    && controller == payer
+                    && filter.matches(obj, controller, payer)
+            }
+            // A hand card's `.controller` equals its owner (CR 108.4).
+            AdditionalCost::Discard { filter } => {
+                obj.zone == ZoneKind::Hand
+                    && obj.controller == payer
+                    && filter.matches(obj, obj.controller, payer)
+            }
+            AdditionalCost::TapSelf
+            | AdditionalCost::SacrificeSelf
+            | AdditionalCost::DiscardSelf
+            | AdditionalCost::LifePayment { .. }
+            | AdditionalCost::Other { .. } => false,
+        }
+    }
+
+    /// Every object `accepts` allows, in ascending id order. Empty for a cost
+    /// that names no chosen object.
+    pub(crate) fn eligible(
+        &self,
+        state: &GameState,
+        script_runtime: &ScriptRuntime,
+        payer: PlayerId,
+    ) -> Vec<ObjectId> {
+        let mut ids: Vec<ObjectId> = state
+            .objects
+            .keys()
+            .copied()
+            .filter(|id| self.accepts(state, script_runtime, payer, *id))
+            .collect();
+        ids.sort();
+        ids
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum AlternativeCost {
     /// Flashback, escape and similar: replaces the mana cost entirely and is
@@ -803,66 +872,39 @@ impl PaymentPlan {
                         return false;
                     }
                 }
-                AdditionalCost::TapPermanents { filter, count } => {
+                AdditionalCost::TapPermanents { count, .. } => {
                     let mut used: Vec<ObjectId> = Vec::with_capacity(*count as usize);
                     for _ in 0..*count {
                         let Some(CostPayment::Tap(id)) = payments.next() else {
                             return false;
                         };
-                        if used.contains(id) {
-                            return false;
-                        }
-                        let Some(obj) = state.object(*id) else {
-                            return false;
-                        };
-                        if obj.tapped || obj.zone != ZoneKind::Battlefield {
-                            return false;
-                        }
-                        let controller =
-                            crate::layers::effective_controller(state, script_runtime, *id);
-                        if !filter.matches(obj, controller, payer) {
+                        if used.contains(id)
+                            || !additional.accepts(state, script_runtime, payer, *id)
+                        {
                             return false;
                         }
                         used.push(*id);
                     }
                 }
-                AdditionalCost::ExileFromGraveyard { filter, count } => {
+                AdditionalCost::ExileFromGraveyard { count, .. } => {
                     let mut used: Vec<ObjectId> = Vec::with_capacity(*count as usize);
                     for _ in 0..*count {
                         let Some(CostPayment::Exile(id)) = payments.next() else {
                             return false;
                         };
-                        if used.contains(id) {
-                            return false;
-                        }
-                        let Some(obj) = state.object(*id) else {
-                            return false;
-                        };
-                        // A graveyard card's `.controller` equals its owner (CR 108.4).
-                        if obj.zone != ZoneKind::Graveyard || obj.controller != payer {
-                            return false;
-                        }
-                        if !filter.matches(obj, obj.controller, payer) {
+                        if used.contains(id)
+                            || !additional.accepts(state, script_runtime, payer, *id)
+                        {
                             return false;
                         }
                         used.push(*id);
                     }
                 }
-                AdditionalCost::Sacrifice { filter } => {
+                AdditionalCost::Sacrifice { .. } => {
                     let Some(CostPayment::Sacrifice(id)) = payments.next() else {
                         return false;
                     };
-                    let Some(obj) = state.object(*id) else {
-                        return false;
-                    };
-                    // CR 701.20a: you can only sacrifice a permanent you
-                    // *currently* control (layers::effective_controller).
-                    let controller =
-                        crate::layers::effective_controller(state, script_runtime, *id);
-                    if obj.zone != ZoneKind::Battlefield || controller != payer {
-                        return false;
-                    }
-                    if !filter.matches(obj, controller, payer) {
+                    if !additional.accepts(state, script_runtime, payer, *id) {
                         return false;
                     }
                 }
@@ -876,25 +918,19 @@ impl PaymentPlan {
                     let Some(obj) = state.object(*id) else {
                         return false;
                     };
-                    // CR 701.20a: the `Sacrifice{filter}` check without the filter, since the id is pinned to source.
+                    // CR 701.21a
+                    // The `Sacrifice{filter}` check without the filter, since the id is pinned to source.
                     let controller =
                         crate::layers::effective_controller(state, script_runtime, *id);
                     if obj.zone != ZoneKind::Battlefield || controller != payer {
                         return false;
                     }
                 }
-                AdditionalCost::Discard { filter } => {
+                AdditionalCost::Discard { .. } => {
                     let Some(CostPayment::Discard(id)) = payments.next() else {
                         return false;
                     };
-                    let Some(obj) = state.object(*id) else {
-                        return false;
-                    };
-                    // A hand card's `.controller` equals its owner (CR 108.4), so the raw field is correct.
-                    if obj.zone != ZoneKind::Hand || obj.controller != payer {
-                        return false;
-                    }
-                    if !filter.matches(obj, obj.controller, payer) {
+                    if !additional.accepts(state, script_runtime, payer, *id) {
                         return false;
                     }
                 }

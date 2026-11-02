@@ -324,15 +324,47 @@ pub(crate) fn plan_payment(
         }));
     }
 
+    // The source and every object named once stay out of later picks, so one
+    // object never pays two costs.
+    let mut used: Vec<Value> = source.into_iter().cloned().collect();
     for additional in cost["additional"].as_array()? {
-        let payment = match additional["kind"].as_str()? {
-            "tap_self" => json!({ "kind": "tap", "object": source? }),
-            "sacrifice_self" => json!({ "kind": "sacrifice", "object": source? }),
-            "discard_self" => json!({ "kind": "discard", "object": source? }),
-            "life_payment" => json!({ "kind": "life", "amount": additional["amount"] }),
+        let (kind, count) = match additional["kind"].as_str()? {
+            "tap_self" => {
+                payments.push(json!({ "kind": "tap", "object": source? }));
+                continue;
+            }
+            "sacrifice_self" => {
+                payments.push(json!({ "kind": "sacrifice", "object": source? }));
+                continue;
+            }
+            "discard_self" => {
+                payments.push(json!({ "kind": "discard", "object": source? }));
+                continue;
+            }
+            "life_payment" => {
+                payments.push(json!({ "kind": "life", "amount": additional["amount"] }));
+                continue;
+            }
+            "sacrifice" => ("sacrifice", 1),
+            "discard" => ("discard", 1),
+            "tap_permanents" => ("tap", additional["count"].as_u64()?),
+            "exile_from_graveyard" => ("exile", additional["count"].as_u64()?),
             _ => return None,
         };
-        payments.push(payment);
+        let picked: Vec<Value> = additional["candidates"]
+            .as_array()?
+            .iter()
+            .filter(|candidate| !used.contains(candidate))
+            .take(count as usize)
+            .cloned()
+            .collect();
+        if picked.len() < count as usize {
+            return None;
+        }
+        for object in picked {
+            payments.push(json!({ "kind": kind, "object": object }));
+            used.push(object);
+        }
     }
     Some((payments, spent))
 }
@@ -527,5 +559,45 @@ mod tests {
             plan_payment(&cost, &pool(&[colored("red")]), 0, Some(&source)).unwrap();
         let kinds: Vec<_> = payments.iter().map(|p| p["kind"].clone()).collect();
         assert_eq!(kinds, ["mana", "tap", "life"]);
+    }
+
+    #[test]
+    fn filtered_costs_pay_from_their_candidates() {
+        let cost = json!({ "mana": "", "additional": [
+            { "kind": "sacrifice", "candidates": ["4", "6"] },
+            { "kind": "tap_permanents", "count": 2, "candidates": ["4", "5", "6"] },
+            { "kind": "exile_from_graveyard", "count": 1, "candidates": ["9"] },
+            { "kind": "discard", "candidates": ["8"] },
+        ] });
+        let (payments, _) = plan_payment(&cost, &Pool::default(), 0, None).unwrap();
+        assert_eq!(
+            payments,
+            vec![
+                json!({ "kind": "sacrifice", "object": "4" }),
+                json!({ "kind": "tap", "object": "5" }),
+                json!({ "kind": "tap", "object": "6" }),
+                json!({ "kind": "exile", "object": "9" }),
+                json!({ "kind": "discard", "object": "8" }),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_filtered_cost_never_names_the_source_or_an_object_twice() {
+        let source = json!("4");
+        let cost = json!({ "mana": "", "additional": [
+            { "kind": "tap_self" },
+            { "kind": "sacrifice", "candidates": ["4", "5"] },
+        ] });
+        let (payments, _) = plan_payment(&cost, &Pool::default(), 0, Some(&source)).unwrap();
+        assert_eq!(payments[1], json!({ "kind": "sacrifice", "object": "5" }));
+
+        let short = json!({ "mana": "", "additional": [
+            { "kind": "tap_permanents", "count": 2, "candidates": ["4", "5"] },
+        ] });
+        assert!(
+            plan_payment(&short, &Pool::default(), 0, Some(&source)).is_none(),
+            "only one candidate is left once the source is set aside"
+        );
     }
 }

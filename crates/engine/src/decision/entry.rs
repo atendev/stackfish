@@ -76,6 +76,16 @@ pub struct CastEntry {
     pub buyback: bool,
 }
 
+/// What a cast offered by a resolving ability announces (CR 601.2b, 601.2c).
+/// `x` means the Answer must give X, and CR 107.3b allows only 0.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CastOptions {
+    /// `None` when the card is not modal.
+    pub modes: Option<ModeRange>,
+    pub targets: EntryTargets,
+    pub x: bool,
+}
+
 /// An "add one mana of any color" choice that the activation announces
 /// (CR 602.2b).
 #[derive(Clone, PartialEq, Eq, Debug)]

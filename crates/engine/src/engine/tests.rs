@@ -132,7 +132,7 @@ fn submit_trigger_order_rejects_non_permutation_and_accepts_real_reordering() {
 
 // Replacement and prevention, driven directly through the pipeline
 
-fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::GameObject {
+pub(super) fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::GameObject {
     use crate::types::card::{
         CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet,
     };
