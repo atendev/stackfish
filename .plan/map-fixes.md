@@ -15,6 +15,7 @@ Every item left open by the closed Host protocol tickets (001 to 015) is either 
 
 ## Decisions so far
 
+- 020 Late join, replay and wire versioning. A `snapshot` request returns the Seat's view with `through_sequence_no` and clears its outbox. A replay is the verbatim setup bytes plus accepted Answers, with per-card fingerprints and an engine build id checked before a Session is created. `v` stays 1 under an explicit pre-release rule in 007, and `outbox_cap` drops a whole outbox and sets `resync` until the Seat takes a snapshot. [closed/020-late-join-replay-versioning.md]
 - 016 Save the gdext research file. The file is on `master` as 6e8401d and the 008 pointer is fixed. [closed/016-save-gdext-research.md]
 - 018 Wrong-thread behavior in the Godot adapter. gdext's safeguards stay on, so a wrong-thread call gives `null` and a script error. 009 is not rewritten and points to 018. The smoke test pins `null` by default. [closed/018-wrong-thread-behavior.md]
 
@@ -67,7 +68,7 @@ Ticket types and modes follow `README.md`.
   - A thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. 006 says it needs no new decision. The Godot `create` serves only the proof cards until it exists. CI must still not depend on `../stackfish-db`.
 - 021 Seat state snapshot. Type task, HITL. Blocked by 020. Origin 013, 015.
 - 022 Replay export and card data version. Type task, HITL. Blocked by 020. Origin 001, 006, 012.
-- 023 Wire version bump and outbox bound. Type task, HITL. Blocked by 020. Origin 013.
+- 023 Wire version bump and outbox bound. Type task, HITL. Blocked by 020, 021. Origin 013.
 - 025 Atomicity harness and audit. Type task, HITL. Origin 001, 010. Decided in 024. Closed.
   - Add test-only `Clone` and `PartialEq` on the `GameState` type graph (fallback: a state fingerprint) and a harness that feeds illegal inputs and asserts state and ledger are unchanged.
   - Audit every `execute_command` branch and every `submit_*` method for mutate-then-`Err`, and fix what the audit finds.
@@ -118,10 +119,10 @@ Ticket types and modes follow `README.md`.
 
 ## Frontier
 
-Open tickets, unblocked and unclaimed. 020 unblocks 021 to 023. 034 is research, so a subagent can take it alone.
+Open tickets, unblocked and unclaimed. 020 is closed, so 021 and 022 are open. 034 is research, so a subagent can take it alone.
 
-- 020, 028, 029, 030, 031, 032, 033, 034
+- 021, 022, 028, 029, 030, 031, 032, 033, 034
 
 Blocked:
 
-- 021, 022, 023 wait on 020.
+- 023 waits on 021.
