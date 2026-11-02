@@ -7,7 +7,7 @@ Every item left open by the closed Host protocol tickets (001 to 015) is either 
 ## Notes
 
 - This map follows `map.md` (Host protocol). That map is complete. This one collects its leftovers, found by reading all 15 closed tickets on 2026-10-17.
-- Ticket numbers continue from 016. No ticket files exist yet. Create each file in `tickets/` from `TICKET.template.md` when it is picked up.
+- Ticket numbers continue from 016. Every open ticket has a file in `tickets/`, made from `TICKET.template.md`. The list under Tickets is a summary, and the files are the record.
 - Build tickets are `phase5/<name>` slices that follow the CLAUDE.md slice workflow: a requirements report first, approval before every commit, a closing report, and the user merges.
 - Use the vocabulary in `CONTEXT.md` (Session, Seat, Decision, Answer).
 - When a fix changes the Lua API, check the game stub in `docs/`.
@@ -21,6 +21,10 @@ Every item left open by the closed Host protocol tickets (001 to 015) is either 
 - 024 How the engine recovers from a failed command. A rejected input changes nothing, and the engine keeps that by validating before it mutates, not by snapshot and restore. Script errors stay "log and continue", and an engine bug stays fatal. Build work is 025, 035, 026 and 036, in that order. [closed/024-engine-atomicity.md]
 - 019 Carddb-backed CardSource. A thin wrapper over `stackfish_carddb::CardDb::load_by_oracle_id` in `crates/host/src/carddb_source.rs`, with a `create_with_db` entry point in the Godot adapter. CI stays independent of `../stackfish-db` by using in-memory fixture DBs in tests. [closed/019-carddb-card-source.md]
 - 037 Real-card proof bot. `crates/host/tests/real_card_bot.rs` curates two 40-card decks from `../stackfish-db/stackfish.db` and runs the random bot through the host protocol. It skips when the DB is absent. [closed/037-real-card-proof-bot.md]
+- 025 Atomicity harness and audit. `Engine::snapshot()` and the testutil assertions prove a rejected input changes nothing, and a proof game sends illegal Answers at every Decision. The audit fixed five mutate-then-`Err` bugs. [closed/025-atomicity-harness.md]
+- 035 Error split and Session mapping. `CommandError` is `Rejected` from validation or `Internal` from apply. The Session answers a refusal with `invalid_answer` and keeps the Decision open, and an `Internal` error or a panic ends it with `pipeline_error` or `engine_panic`. [closed/035-error-split.md]
+- 026 Whole-declaration combat predicates. Menace and "attacks each combat if able" are one module, `commands/combat/predicate.rs`, shared by validation and the entry builders. [closed/026-whole-declaration-predicates.md]
+- 036 Mode-combination predicate. `mode_can_join_others` in `commands/legality.rs` is the one rule for the cast, the modal entries, modal triggers and the opponent's mode choice. [closed/036-mode-combination-predicate.md]
 
 ## Not yet specified
 
@@ -33,7 +37,7 @@ Ticket types and modes follow `README.md`.
 
 ### A. Housekeeping
 
-- 016 Save the gdext research file. Type task, HITL. Origin 008.
+- 016 Save the gdext research file. Type task, HITL. Origin 008. Closed.
   - `docs/research/gdext-constraints.md` exists only as an untracked file in the worktree `.claude/worktrees/agent-ac916927a9e12b438`, on branch `research/gdext-constraints`. It is not on master. Commit it (with permission) and fix the pointer in `closed/008-gdext-constraints.md`.
 - 017 Reconcile stale notes and policy conflicts. Type task, HITL. Origin 007, 009, 010, 011, 001.
   - `map.md` says `.plan/` is git-ignored. `README.md` and the global instructions say to commit it. Pick one.
@@ -44,7 +48,7 @@ Ticket types and modes follow `README.md`.
 
 ### B. Decisions
 
-- 018 Wrong-thread behavior in the Godot adapter. Type grilling, HITL. Origin 009, 015.
+- 018 Wrong-thread behavior in the Godot adapter. Type grilling, HITL. Origin 009, 015. Closed.
   - 009 promised an empty `PackedByteArray`. With gdext's safeguards on, GDScript gets `null` and a script error instead. Decide whether to document `null`, or compile the check out of release builds with `godot/safeguards-release-disengaged`. This is the only open item that contradicts a closed decision.
 - 020 Late join, replay and wire versioning. Type grilling, HITL. Origin 001, 006, 012, 013, 015.
   - Shape of the `(Seat, state)` snapshot. 004 requires it to equal the fold of that Seat's events.
@@ -52,29 +56,29 @@ Ticket types and modes follow `README.md`.
   - How to record the card data version, so a replay resolves the same cards. 006 left this open.
   - Whether to bump `v` for the `zone_change.object` change.
   - A bound or a drain rule for the per-Seat outbox, which grows without limit for a Seat that never polls.
-- 024 How the engine recovers from a failed command. Type grilling, HITL. Origin 001, 002, 010, 011.
+- 024 How the engine recovers from a failed command. Type grilling, HITL. Origin 001, 002, 010, 011. Closed.
   - `ProcessState::Error` leaves partial mutation. 001 left rollback to this item, and 002 said to revisit it. Choose between rolling back state, validating the whole command before it mutates anything, or leaving it fatal. Menace, must-attack and mode-combination rules depend on the answer.
 
 ### C. Build
 
-- 019 Carddb-backed CardSource. Type task, HITL. Origin 006, 015.
+- 019 Carddb-backed CardSource. Type task, HITL. Origin 006, 015. Closed.
   - A thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. 006 says it needs no new decision. The Godot `create` serves only the proof cards until it exists. CI must still not depend on `../stackfish-db`.
 - 021 Seat state snapshot. Type task, HITL. Blocked by 020. Origin 013, 015.
 - 022 Replay export and card data version. Type task, HITL. Blocked by 020. Origin 001, 006, 012.
 - 023 Wire version bump and outbox bound. Type task, HITL. Blocked by 020. Origin 013.
-- 025 Atomicity harness and audit. Type task, HITL. Origin 001, 010. Decided in 024.
+- 025 Atomicity harness and audit. Type task, HITL. Origin 001, 010. Decided in 024. Closed.
   - Add test-only `Clone` and `PartialEq` on the `GameState` type graph (fallback: a state fingerprint) and a harness that feeds illegal inputs and asserts state and ledger are unchanged.
   - Audit every `execute_command` branch and every `submit_*` method for mutate-then-`Err`, and fix what the audit finds.
   - Update the "no rollback" doc comments on `StepStatus::Error` and in `engine/mod.rs`.
-- 035 Error split and Session mapping. Type task, HITL. Blocked by 025. Origin 001, 024.
+- 035 Error split and Session mapping. Type task, HITL. Blocked by 025. Origin 001, 024. Closed.
   - Split `CommandError` into `Rejected` (buildable only in the validation phase) and `Internal`.
   - The Session answers `Rejected` with a rejection response and continues. It treats `Internal` as fatal.
   - `Session` catches a panic, marks itself dead and reports a stable error code.
   - `submit_action` and the other `submit_*` methods validate on their own, so the result does not depend on the caller.
-- 026 Whole-declaration combat predicates. Type task, HITL. Blocked by 035. Origin 011. Decided in 024.
+- 026 Whole-declaration combat predicates. Type task, HITL. Blocked by 035. Origin 011. Decided in 024. Closed.
   - Menace and must attack, as one predicate shared by `legal_attackers`, `legal_blockers` and command validation.
   - The check runs before the command mutates anything.
-- 036 Mode-combination predicate. Type task, HITL. Blocked by 035. Origin 011. Decided in 024.
+- 036 Mode-combination predicate. Type task, HITL. Blocked by 035. Origin 011. Decided in 024. Closed.
   - An impossible mode pair (`combine_chosen_modes` cannot combine it) is rejected at announcement and not listed in the modal entries.
   - Shares the predicate between the entries and the cast validation.
 - 027 Revealed and face-down producers, and the event-writing rule. Type task, HITL. Origin 004, 013.
@@ -112,12 +116,10 @@ Ticket types and modes follow `README.md`.
 
 ## Frontier
 
-Open tickets, unblocked and unclaimed. Suggested first picks are 019, 020 and 025. 020 unblocks 021 to 023, and 025 starts the atomicity chain.
+Open tickets, unblocked and unclaimed. 020 unblocks 021 to 023. 034 is research, so a subagent can take it alone.
 
 - 017, 020, 027, 028, 029, 030, 031, 032, 033, 034
 
 Blocked:
 
 - 021, 022, 023 wait on 020.
-
-In review, claimed: 026 on `phase5/combat-predicates` and 036 on `phase5/mode-combination`. 025 and 035 are built (`phase5/atomicity-harness`, `phase5/error-split`).
