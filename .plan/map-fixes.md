@@ -30,10 +30,10 @@ Every item left open by the closed Host protocol tickets (001 to 015) is either 
 - 027 Revealed producers and the free-text event rule. A revealing `Game.Ops.Search` and amplify log `Revealed`. `face_down` has no producer, since face-down mechanics are a non-goal. `GameState::script_error_message` keeps a hidden card's id and script text out of `ScriptError`, and `DESIGN.md` holds the rule. [closed/027-revealed-face-down-producers.md]
 - 021 Seat state snapshot. A `snapshot` request returns the poll response plus the Seat's filtered view of current state and drops its outbox. Fold tests found engine changes that write no event, moved to 072. [closed/021-seat-state-snapshot.md]
 - 022 Replay export and card data version. `export_replay` returns the setup bytes, accepted Answers, card fingerprints and engine build id. `Session::from_replay` refuses changed cards or another build before any card loads, then plays the Answers. Lua scripts lose `os`, `io` and `math.random`. [closed/022-replay-export-card-data-version.md]
+- 023 Wire version bump and outbox bound. `v` stays 1 under a pre-release rule in 007 that lasts until the first tagged `crates/host` release or the first external host. Setup `outbox_cap` (default 4096) drops a whole overflowing outbox and sends `resync: true` until the Seat takes a snapshot. `from_replay` lifts the cap while it plays. [closed/023-wire-version-bump-outbox-bound.md]
 
 ## Not yet specified
 
-- Wire `v` bump policy. 013 changed `zone_change.object`, which 007 calls breaking, and left `v` at 1. Ticket 020 decides whether to bump now or to treat it as pre-release.
 - Whether the Lua API needs changes for any item below. Check at each requirements report.
 
 ## Tickets
@@ -70,7 +70,7 @@ Ticket types and modes follow `README.md`.
   - A thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. 006 says it needs no new decision. The Godot `create` serves only the proof cards until it exists. CI must still not depend on `../stackfish-db`.
 - 021 Seat state snapshot. Type task, HITL. Origin 013, 015. Closed.
 - 022 Replay export and card data version. Type task, HITL. Origin 001, 006, 012. Closed.
-- 023 Wire version bump and outbox bound. Type task, HITL. Origin 013.
+- 023 Wire version bump and outbox bound. Type task, HITL. Origin 013. Closed.
 - 072 Ledger events the snapshot fold needs. Type task, HITL. Origin 021.
 - 025 Atomicity harness and audit. Type task, HITL. Origin 001, 010. Decided in 024. Closed.
   - Add test-only `Clone` and `PartialEq` on the `GameState` type graph (fallback: a state fingerprint) and a harness that feeds illegal inputs and asserts state and ledger are unchanged.
@@ -124,7 +124,7 @@ Ticket types and modes follow `README.md`.
 
 Open tickets, unblocked and unclaimed. 034 is research, so a subagent can take it alone.
 
-- 023, 028, 029, 030, 031, 032, 033, 034, 072
+- 028, 029, 030, 031, 032, 033, 034, 072
 
 Blocked:
 
