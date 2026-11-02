@@ -40,5 +40,5 @@ Which encoding do messages use (JSON, MessagePack, or another), and what is the 
 - Unknown fields and unknown `kind` values are rejected with `malformed_message`.
 - A breaking change bumps `v`. A breaking change is a change to an existing field's name, type, or meaning, or to a kind's required fields. An optional field or a new kind does not bump `v`.
 - Mismatched `v` is checked at `setup` and rejected with `unsupported_version`. There is no separate handshake.
-- Derived here, not separately confirmed: the rejected-Answer response shape and the `seat`-less `setup` request. Both follow from the answers above.
+- The rejected-Answer response shape and the `seat`-less `setup` request were derived here from the answers above. The user confirmed both in 017, and the code in `crates/host/src/session.rs` matches them.
 

@@ -24,10 +24,10 @@ Does `crates/godot` keep the Session on Godot's main thread and refuse calls fro
 - A call from the wrong thread returns an empty `PackedByteArray` and logs through Godot's error macro. This adds no wire error code, so 007 stays closed. Superseded in part by 018: with gdext's safeguards on, a wrong-thread call gives `null` and a script error, not an empty array.
 - One Godot class holds one Session per instance. There is no registry and no global state. GDScript creates as many instances as it needs. Each Session owns its own `Lua` state.
 - The adapter adds no wall-clock limit and no budget parameter of its own. A host that wants smooth frames sends Advance with a small budget each frame. The Session's default cap (ticket 001) is the only guard on Answer, and a capped Answer returns "still running" so the host sends Advance.
-- A host that later needs the engine off the main thread can wrap the adapter in its own thread, because the Session API is bytes in and bytes out.
+- A host that later needs the engine off the main thread can wrap the adapter in its own thread, because the Session API is bytes in and bytes out. Corrected by 015: with gdext's safeguards on, creating `StackfishSession` off the main thread aborts Godot, so such a host must create it on the main thread.
 
 Handed to other tickets:
 
 - B3 should expose the Session's default cap as a Setup override, so a Godot host can set a low one. This touches 006 and 007, which are closed, so B3's requirements report should raise it.
-- B6's smoke test calls the adapter from a second thread to confirm the guard fires. It also records whether dropping the Godot object on a non-main thread is safe. That stays unconfirmed until the test runs.
+- B6's smoke test calls the adapter from a second thread to confirm the guard fires. It also records whether dropping the Godot object on a non-main thread is safe. Answered by 015 and 018: dropping the last reference off-thread ran without a crash in one smoke run, which is not proof, and a wrong-thread call gives `null`.
 

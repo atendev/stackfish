@@ -28,7 +28,7 @@ Does the host call step for every ledger entry, or does the Session run the engi
 - A pipeline failure (`StepStatus::Error`) is fatal. The Session reports the error plus the events produced before it, then refuses every later message. Rollback is left to the engine atomicity item in `map.md`.
 - Replay is not a Session feature. A viewer is a host. It creates a fresh Session from the recorded seed and setup, sends Advance with budget 1, and sends each recorded Answer when a Decision opens. The Session exports the seed, the setup and the accepted Answers in order. Rewinding builds a new Session and steps forward. Snapshots stay open in DESIGN.md.
 - Animation pacing stays in the host. Events carry `sequence_no`, so Godot can play a batch at its own speed.
-- `step()` does not map to one ledger entry. It can add zero or several events. DESIGN.md says "one ledger entry" and should say "one state transition".
+- `step()` does not map to one ledger entry. It can add zero or several events. DESIGN.md says "one state transition", which 017 checked.
 
 Handed to other tickets:
 

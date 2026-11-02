@@ -25,6 +25,7 @@ Every item left open by the closed Host protocol tickets (001 to 015) is either 
 - 035 Error split and Session mapping. `CommandError` is `Rejected` from validation or `Internal` from apply. The Session answers a refusal with `invalid_answer` and keeps the Decision open, and an `Internal` error or a panic ends it with `pipeline_error` or `engine_panic`. [closed/035-error-split.md]
 - 026 Whole-declaration combat predicates. Menace and "attacks each combat if able" are one module, `commands/combat/predicate.rs`, shared by validation and the entry builders. [closed/026-whole-declaration-predicates.md]
 - 036 Mode-combination predicate. `mode_can_join_others` in `commands/legality.rs` is the one rule for the cast, the modal entries, modal triggers and the opponent's mode choice. [closed/036-mode-combination-predicate.md]
+- 017 Reconcile stale notes and policy conflicts. `.plan/` is committed. The user confirmed 007's rejected-Answer shape, the `seat`-less `setup`, and the deleted 010 to 015 branches. 009, 010 and 011 now match what 015 and the repo show. [closed/017-reconcile-stale-notes.md]
 
 ## Not yet specified
 
@@ -39,7 +40,7 @@ Ticket types and modes follow `README.md`.
 
 - 016 Save the gdext research file. Type task, HITL. Origin 008. Closed.
   - `docs/research/gdext-constraints.md` exists only as an untracked file in the worktree `.claude/worktrees/agent-ac916927a9e12b438`, on branch `research/gdext-constraints`. It is not on master. Commit it (with permission) and fix the pointer in `closed/008-gdext-constraints.md`.
-- 017 Reconcile stale notes and policy conflicts. Type task, HITL. Origin 007, 009, 010, 011, 001.
+- 017 Reconcile stale notes and policy conflicts. Type task, HITL. Origin 007, 009, 010, 011, 001. Closed.
   - `map.md` says `.plan/` is git-ignored. `README.md` and the global instructions say to commit it. Pick one.
   - 010 and 011 say "Not pushed yet", but `master` matches `origin/master`. The feature branches for 010 to 015 exist neither locally nor on origin, so confirm that is intended.
   - 009 says the drop-off-main-thread behavior is unconfirmed and that creating the object off-thread works. 015 found it safe to drop and found that creation aborts Godot with the safeguards on.
@@ -118,7 +119,7 @@ Ticket types and modes follow `README.md`.
 
 Open tickets, unblocked and unclaimed. 020 unblocks 021 to 023. 034 is research, so a subagent can take it alone.
 
-- 017, 020, 027, 028, 029, 030, 031, 032, 033, 034
+- 020, 027, 028, 029, 030, 031, 032, 033, 034
 
 Blocked:
 

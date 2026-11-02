@@ -21,7 +21,7 @@ Build the Decision/Answer facade in the engine. Answers are a tagged enum that t
 
 ## Resolution
 
-Built on `phase5/decision-answer-facade`, merged to master as 5dcfbb6 (commit e79c4d6). Not pushed yet.
+Built on `phase5/decision-answer-facade`, merged to master as 5dcfbb6 (commit e79c4d6). Master is pushed. The branch was deleted after the merge, as the slice workflow says, so the merge commit is the record.
 
 - `crates/engine/src/decision/`: `Engine::open_decision()` builds a Decision from `ProcessState`, and `Engine::answer(player, Answer)` checks and routes it to the existing `submit_*` and `decline_*` methods. See `docs/implementation/16-decision-facade.md`.
 - Rejections run in order: `not_open`, `stale_decision`, `wrong_seat`, `wrong_answer_shape`, `invalid_choice`. A rejected Answer changes nothing.
