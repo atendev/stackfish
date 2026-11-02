@@ -39,9 +39,11 @@ Which encoding do messages use (JSON, MessagePack, or another), and what is the 
   - A pipeline error returns `error` with the events produced before it. The Session refuses every later message.
 - Every `u64` is a decimal string, which covers the seed and `ObjectId`. `PlayerId` (`u32`) is a JSON number.
 - Every `GameEvent` variant has a mirror type and a `kind` tag. A variant added later is additive and does not bump `v`.
-- Error codes: `unsupported_version`, `malformed_message`, `unknown_seat`, `not_your_decision`, `no_open_decision`, `stale_decision`, `invalid_answer`, `game_over`, `setup_invalid`, `pipeline_error`. Adding a code is additive. Removing or renaming one bumps `v`.
+- Error codes: `unsupported_version`, `malformed_message`, `unknown_seat`, `not_your_decision`, `no_open_decision`, `stale_decision`, `invalid_answer`, `game_over`, `setup_invalid`, `pipeline_error`. Adding a code is additive. Removing or renaming one bumps `v`. The code also has `engine_panic` (035) and `decision_pending` (012), both additive.
+- `setup` takes an optional `outbox_cap` (023, a JSON number, default 4096). A Seat whose queued events pass it lapses: its events are dropped, and every response to it has empty `events` and `resync: true` until it sends `snapshot`. `resync` is absent otherwise. Both are additive.
 - Unknown fields and unknown `kind` values are rejected with `malformed_message`.
 - A breaking change bumps `v`. A breaking change is a change to an existing field's name, type, or meaning, or to a kind's required fields. An optional field or a new kind does not bump `v`.
-- Mismatched `v` is checked at `setup` and rejected with `unsupported_version`. There is no separate handshake.
+- Pre-release rule (020, built in 023): `v` stays 1 until the first release, which is the first tagged release of `crates/host` or the first host outside this repository, whichever comes first. Until then a breaking change, such as 013's change to `zone_change.object`, lands without a bump. After it, the rule above applies.
+- Mismatched `v` is checked on every request, `setup` included, and rejected with `unsupported_version`. There is no separate handshake.
 - The rejected-Answer response shape and the `seat`-less `setup` request were derived here from the answers above. The user confirmed both in 017, and the code in `crates/host/src/session.rs` matches them.
 

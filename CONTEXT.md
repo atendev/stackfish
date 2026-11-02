@@ -26,6 +26,10 @@ _Avoid_: Fetch, sync, subscribe
 A Seat's view of the current state, filtered by the same rule as its events and stamped with the last event it covers. A Seat that asks for one drops its queued events and resumes from the events after that point.
 _Avoid_: Dump, state sync, resync
 
+**Lapsed Seat**:
+A Seat whose queued events passed the setup's `outbox_cap`, so the Session dropped them. It gets no events, and its responses carry the `resync` flag, until it asks for a Snapshot. The flag names what the Seat must do, not the Snapshot itself.
+_Avoid_: Disconnected, stale, overflowed
+
 **Decision**:
 A point where the engine cannot continue until a specific player chooses, together with who must choose and what the choices are.
 _Avoid_: Prompt, pause, request, choice

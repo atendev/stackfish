@@ -44,7 +44,8 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   `stale_decision` to `stale_decision`, and `invalid_choice` and `wrong_answer_shape` to `invalid_answer`.
 - `decision_pending` is an eleventh error code. 007 had none for an `advance` sent while a Decision is open.
 - `budget` is a plain integer of at least 1. `step_cap` in setup (default 100000) bounds an `answer` and an `advance`
-  without a budget.
+  without a budget. `outbox_cap` in setup (default 4096, at least 1) bounds each Seat's outbox, as described under
+  "Outbox cap" below.
 - Replies are tagged by `kind`, matching the Decision's `shape`: `pick`, `yes_no`, `order`, `modes`, `partition`,
   `payment`, `targets`, `may_cast`, `action`, `declare_attackers`, `declare_blockers`, `assign_damage`. An `action`
   reply carries only the four priority actions, because every other `PlayerActionKind` has a shape of its own.
@@ -122,12 +123,30 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   key that differs. It then runs to each Decision with `step_cap` batches and applies the next Answer. A recorded
   Answer that does not fit (no Decision open, or the engine refuses it) gives `setup_invalid` naming its index. After
   the last Answer it runs on to the next Decision or the end, so a replay exported mid-run loads further ahead. It
-  never drains an outbox, so every Seat can `poll` the whole game.
+  never drains an outbox and lifts `outbox_cap` while it plays, so every Seat can `poll` the whole game. The cap
+  applies again from the first event after loading, and a Seat whose outbox is at or past the cap then lapses.
 - A database fingerprint covers the `cards` columns, sorted keyword names and the active script's version and source.
   A fixture fingerprint covers the printed characteristics, mode choice and script source.
 - TODO: an omniscient stream digest in the file, so a loader catches an Answer swapped for another legal one.
 - TODO: the fixture fingerprint skips `effect`, `modes`, `alternative_costs`, `buyback_cost` and `target_requirement`.
 - Determinism also rests on the `HashMap` walk audit (ticket 028) and on Lua `pairs` order, which is not seeded.
+
+## Outbox cap and wire version (ticket 023)
+
+- `outbox_cap` (setup, `u64`, default `DEFAULT_OUTBOX_CAP` = 4096, `0` refused with `setup_invalid`) counts events per
+  Seat. The check runs when an event is queued (`Seat::queue`): an outbox already holding the cap is dropped whole,
+  that event is not queued, and the Seat lapses. A Seat may hold exactly the cap without lapsing.
+- A lapsed Seat gets nothing queued. Every response to a request naming it (`poll`, `advance`, `answer`, refusals) has
+  empty `events` and `resync: true`, and still shows the open Decision. A lapsed player still answers as usual. Only
+  `snapshot` clears the mark, and its response has no `resync`. `resync` is absent from every other response.
+- The default came from full bot games over seeds 0 to 39, taking the largest outbox at the moment it was drained:
+  58 events with 2 players, 77 with 4 in the commander preset, 108 with 6. Eliminated players' Seats were left out,
+  since the bot never polls them and the cap is meant to lapse them. The rest of the headroom is for real cards and
+  was not measured.
+- The cap never changes the game: `outbox_cap.rs` replays a bot game's Answers under a cap of 1 and gets the same
+  Answers, the same winner and the same snapshots.
+- `v` stays 1 under the pre-release rule in 007: until the first tagged `crates/host` release or the first host outside
+  this repository, breaking changes land without a bump. `v` is checked on every request.
 
 ## Engine changes
 
@@ -140,7 +159,6 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   (CR 702.38a), through `Engine::reveal_event`. The host tests still use constructed events.
 - TODO: nothing sets `face_down`, because face-down mechanics are a design non-goal, so that rule is only tested with
   constructed objects.
-- TODO(outbox): a Seat that never sends a request keeps its outbox growing. The Session never drops events.
 - TODO: ids inside other events (`damage_dealt.source`, `became_target`, and so on) are assumed to lie in public zones.
   `no_seat_ever_receives_a_hidden_id` checks that over one bot game.
 - The free-text rule (ticket 027) is in `DESIGN.md`, "Writing events". Every `script_error` message comes from

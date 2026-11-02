@@ -64,7 +64,6 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Seat visibility (`phase5/seat-visibility`, B4)**: see `18-host-session.md`. Open items:
   - No `(Seat, state)` snapshot request. A Seat that joins late cannot learn the current state.
   - The engine sets no `face_down`, so that rule only has constructed-object tests. `Revealed` comes from a revealing search and from amplify (ticket 027).
-  - Outboxes grow until a Seat sends a request.
   - Event ids other than the ones `view.rs` checks (trigger and replacement sources) are assumed to lie in public zones.
 
 - **Legal actions (`phase5/legal-actions`, B2)**: see `17-legal-actions.md`. Open items:

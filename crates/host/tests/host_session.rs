@@ -158,6 +158,11 @@ fn creation_fails_with_a_named_error_for_each_structural_problem() {
         json!({ "players": two_players(), "format": "standard", "seed": "1", "step_cap": 0 }),
     );
     assert_eq!(error_code(&response), "setup_invalid");
+
+    let response = create_error(
+        json!({ "players": two_players(), "format": "standard", "seed": "1", "outbox_cap": 0 }),
+    );
+    assert_eq!(error_code(&response), "setup_invalid");
 }
 
 #[test]

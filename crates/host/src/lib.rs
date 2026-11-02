@@ -22,4 +22,4 @@ pub use envelope::{ErrorCode, PROTOCOL_VERSION};
 pub use proof_cards::{proof_cards, proof_setup_request};
 pub use replay::{REPLAY_VERSION, Replay, engine_build_id};
 pub use session::Session;
-pub use setup::DEFAULT_STEP_CAP;
+pub use setup::{DEFAULT_OUTBOX_CAP, DEFAULT_STEP_CAP};
