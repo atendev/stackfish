@@ -6,7 +6,10 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    assign_combat_damage, card_object, cast_spell, drain, pass_both_and_drain, pay_free_and_drain,
+    permanent, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(
     id: u64,
@@ -84,19 +87,6 @@ fn become_blocked_spell_definition() -> CardDefinition {
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn combat_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -144,53 +134,6 @@ fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>
     drain(engine)
 }
 
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 // Reversed pass order: p1 cast the spell and holds priority back after casting (CR 601.2i).
 fn pass_p1_then_p0_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     engine
@@ -206,20 +149,6 @@ fn pass_p1_then_p0_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) ->
             kind: PlayerActionKind::PassPriority,
         })
         .unwrap();
-    drain(engine)
-}
-
-fn assign_combat_damage(
-    engine: &mut Engine,
-    player: PlayerId,
-    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::AssignCombatDamage { assignments },
-        })
-        .expect("turn-based action, no priority required");
     drain(engine)
 }
 

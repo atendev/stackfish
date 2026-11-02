@@ -4,10 +4,13 @@
 use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
+use stackfish_engine::sba::check_state_based_actions;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, dies_ability, drain, progressed, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(name: &str, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -58,22 +61,6 @@ fn creature(
     }
 }
 
-fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-        id: AbilityId(0),
-        source,
-        kind: AbilityKind::Triggered,
-        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
-        cost: None,
-        target: None,
-        operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::GainLife(1)),
-        intervening_if: None,
-    }
-}
-
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -88,15 +75,6 @@ fn base_state() -> GameState {
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn put_in_exile(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
     let owner = object.owner;
@@ -107,21 +85,6 @@ fn put_in_exile(state: &mut GameState, object: GameObject) {
         .unwrap()
         .push_bottom(id);
     state.objects.insert(id, object);
-}
-
-fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
-    match outcome {
-        SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => {
-            panic!("fixture didn't expect a replacement ordering-choice pause")
-        }
-        SbaOutcome::NeedsLegendRuleChoice { .. } => {
-            panic!("fixture didn't expect a legend-rule choice pause")
-        }
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
-            panic!("fixture didn't expect a commander-return choice pause")
-        }
-    }
 }
 
 #[test]

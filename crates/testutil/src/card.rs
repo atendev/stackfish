@@ -32,3 +32,21 @@ pub fn minimal_card_definition(
         mode_choice: ModeChoice::Exactly(1),
     }
 }
+
+/// A vanilla 2/2 creature named `name` with definition id 1 and script key `bear`.
+/// Tests that only need some creature on the battlefield share it.
+pub fn creature_definition(name: &str) -> CardDefinition {
+    CardDefinition {
+        power: Some(PTValue::Fixed(2)),
+        toughness: Some(PTValue::Fixed(2)),
+        ..minimal_card_definition(
+            1,
+            name,
+            "bear",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::CREATURE,
+        )
+    }
+}

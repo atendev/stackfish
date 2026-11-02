@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::Engine;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones,
+    assign_combat_damage, hand_battlefield_graveyard_zones, permanent, put_on_battlefield,
     two_player_state as base_two_player_state, zones,
 };
 
@@ -66,19 +66,6 @@ fn vanilla_creature_definition(name: &str, power: i32, toughness: i32) -> CardDe
         script_ref: ScriptReference::ByKey(name.to_string()),
         ..creature_definition(name, power, toughness, "")
     }
-}
-
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn combat_damage_state(combat: CombatState) -> GameState {
@@ -159,20 +146,6 @@ fn mismatched_would_die_filter_and_redirect_damage_payload_is_a_real_register_ti
         state.replacement_effects.is_empty(),
         "no partial effect should have been committed"
     );
-}
-
-fn assign_combat_damage(
-    engine: &mut Engine,
-    player: PlayerId,
-    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::AssignCombatDamage { assignments },
-        })
-        .expect("turn-based action, no priority required");
-    drain(engine)
 }
 
 #[test]

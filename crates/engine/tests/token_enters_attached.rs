@@ -5,7 +5,8 @@
 use stackfish_engine::engine::{AttachChoiceError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, pass_both_and_drain, pay_free_and_drain,
+    put_on_battlefield, two_player_state as base_two_player_state,
 };
 
 fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinition {
@@ -149,15 +150,6 @@ fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 // The CopyOf source sits in the graveyard, where it is exempt from the CR 704.5m unattached-Aura SBA, because a battlefield Aura with zero legal targets would already have died.
 fn put_in_graveyard(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
@@ -183,37 +175,6 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 fn battlefield_objects_excluding(state: &GameState, exclude: Vec<ObjectId>) -> Vec<&GameObject> {

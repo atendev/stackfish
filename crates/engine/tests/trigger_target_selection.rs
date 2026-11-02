@@ -3,34 +3,10 @@
 
 use stackfish_engine::engine::{Engine, StepStatus, TriggerTargetsError};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
-
-fn creature_definition(name: &str) -> CardDefinition {
-    CardDefinition {
-        definition_id: 1,
-        name: name.to_string(),
-        mana_cost: ManaCost {
-            symbols: Vec::new(),
-        },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: Some(PTValue::Fixed(2)),
-        toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("bear".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        buyback_cost: None,
-        effect: None,
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-    }
-}
+use stackfish_testutil::{
+    card_object, creature_definition, drain, pass_both_and_drain,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
@@ -48,23 +24,6 @@ fn two_player_state() -> GameState {
             ],
         ))
     }
-}
-
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 fn destroy_target_creature_trigger(source: ObjectId, exclude_source: bool) -> RegisteredAbility {
@@ -222,7 +181,7 @@ fn triggered_ability_pauses_for_a_real_target_choice_and_resolves_against_it() {
         .push(destroy_target_creature_trigger(reaper, false));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     let StepStatus::AwaitingTriggerTargets {
         player,
         spec,
@@ -269,7 +228,7 @@ fn triggered_ability_pauses_for_a_real_target_choice_and_resolves_against_it() {
     );
 
     // The stack object still needs both players to pass priority before it resolves.
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "resolution finishes cleanly, got {status:?}"
@@ -311,7 +270,7 @@ fn triggered_ability_with_zero_legal_targets_is_removed_from_the_stack_without_p
         .push(destroy_target_creature_trigger(reaper, true));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "no pause - straight through to the next priority window, got {status:?}"
@@ -363,7 +322,7 @@ fn submit_trigger_targets_rejects_a_candidate_not_offered() {
         .push(destroy_target_creature_trigger(reaper, false));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingTriggerTargets { .. }));
 
     let not_a_candidate = ObjectId(999);
@@ -444,7 +403,7 @@ fn vesuvans_granted_upkeep_ability_now_really_fires_and_becomes_a_copy() {
     });
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     let StepStatus::AwaitingTriggerTargets {
         player, candidates, ..
     } = status
@@ -458,7 +417,7 @@ fn vesuvans_granted_upkeep_ability_now_really_fires_and_becomes_a_copy() {
         .submit_trigger_targets(vec![Target::Object(salamander)])
         .expect("Salamander was offered");
     drain(&mut engine);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     let runtime = stackfish_engine::script::ScriptRuntime::new();
@@ -522,7 +481,7 @@ fn triggered_ability_with_multiple_target_words_pauses_once_and_resolves_both() 
         .push(destroy_creature_and_land_trigger(reaper));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     let StepStatus::AwaitingTriggerTargets {
         player,
         spec,
@@ -545,7 +504,7 @@ fn triggered_ability_with_multiple_target_words_pauses_once_and_resolves_both() 
         .submit_trigger_targets(vec![Target::Object(bear), Target::Object(swamp)])
         .expect("both words satisfied");
     drain(&mut engine);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "resolution finishes cleanly, got {status:?}"
@@ -598,7 +557,7 @@ fn triggered_ability_with_multiple_target_words_and_one_unsatisfiable_is_removed
         .push(destroy_creature_and_land_trigger(reaper));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "no pause - straight through, got {status:?}"

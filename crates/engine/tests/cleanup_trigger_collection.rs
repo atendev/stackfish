@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, dies_ability, drain, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -47,22 +49,6 @@ fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -
     }
 }
 
-fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-        id: AbilityId(0),
-        source,
-        kind: AbilityKind::Triggered,
-        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
-        cost: None,
-        target: None,
-        operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::GainLife(1)),
-        intervening_if: None,
-    }
-}
-
 fn state_at_end_step() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -85,15 +71,6 @@ fn state_at_end_step() -> GameState {
     }
 }
 
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -104,21 +81,21 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 }
 
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 end-step priority, got {s:?}"
     );
     pass(engine, p0);
 
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p1),
         "expected p1 end-step priority, got {s:?}"
     );
     pass(engine, p1);
 
-    step_until_pause(engine)
+    drain(engine)
 }
 
 #[test]
@@ -217,9 +194,9 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
 
     // Resolve the trigger for real: both pass, GainLife(1) applies.
     pass(&mut engine, p0);
-    step_until_pause(&mut engine);
+    drain(&mut engine);
     pass(&mut engine, p1);
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
 
     assert_eq!(
         engine.state().player(p0).unwrap().life,
@@ -233,9 +210,9 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
         "expected priority to reopen once more for p0 with the stack now empty, got {status:?}"
     );
     pass(&mut engine, p0);
-    step_until_pause(&mut engine);
+    drain(&mut engine);
     pass(&mut engine, p1);
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
 
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p1),

@@ -8,7 +8,8 @@ use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, minimal_card_definition, two_player_state as base_two_player_state,
+    assign_combat_damage, card_object, drain, minimal_card_definition, pass_both_and_drain,
+    put_on_battlefield, two_player_state as base_two_player_state,
 };
 
 fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
@@ -35,15 +36,6 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn combat_damage_state(combat: CombatState) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -54,20 +46,6 @@ fn combat_damage_state(combat: CombatState) -> GameState {
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
         ..base_two_player_state(vec![Zone::new(ZoneKind::Battlefield, None)])
     }
-}
-
-fn assign_combat_damage(
-    engine: &mut Engine,
-    player: PlayerId,
-    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::AssignCombatDamage { assignments },
-        })
-        .expect("turn-based action, no priority required");
-    drain(engine)
 }
 
 fn try_assign_combat_damage(
@@ -422,23 +400,6 @@ fn zero_power_attacker_assigns_no_damage() {
     );
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn unblocked_attacker_deals_damage_with_no_assign_combat_damage_submission_at_all() {
     let p0 = PlayerId(0);
@@ -460,7 +421,7 @@ fn unblocked_attacker_deals_damage_with_no_assign_combat_damage_submission_at_al
     );
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "priority reopens normally on Step::CombatDamage afterward - only the assignment itself is automatic"
@@ -514,7 +475,7 @@ fn single_non_trample_blocker_also_deals_damage_automatically() {
     );
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     assert_eq!(
         engine.state().object(attacker).unwrap().damage_marked,
@@ -559,7 +520,7 @@ fn double_blocked_attacker_still_waits_for_a_real_split_after_the_auto_fire_atte
     );
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { .. }),
         "a real split still needs a real submission"
@@ -608,7 +569,7 @@ fn redundant_explicit_submission_after_auto_fire_is_a_harmless_noop() {
     );
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     let p1_life_after_auto_fire = engine
         .state()
         .players

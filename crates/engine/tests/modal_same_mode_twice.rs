@@ -1,25 +1,14 @@
 //! CR 700.2d: "you may choose the same mode more than once" (Profane Command). Each instance gets its own target slot, and a CR 700.2h additional cost is paid once per instance.
 //! `ModeChoice::ExactlyRepeatable` and `UpToRepeatable` skip the `CastSpell` dedup check, and everything downstream was already agnostic to repeats.
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
-use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
+use stackfish_engine::engine::{Engine, PaymentError};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    any_target_requirement, card_object, drain, pass_both_and_drain, pay_free_and_drain,
+    two_player_main_phase_state,
 };
-
-fn any_target_requirement() -> TargetSpec {
-    TargetSpec::Primitive(TargetRequirement {
-        filter: TargetFilter::AnyTarget,
-        count: 1,
-        up_to: false,
-        at_least: false,
-        exclude_source: false,
-    })
-}
 
 fn repeatable_definition(mode_choice: ModeChoice) -> CardDefinition {
     CardDefinition {
@@ -86,16 +75,6 @@ fn repeatable_cost_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 fn cast_spell(
     engine: &mut Engine,
     player: PlayerId,
@@ -138,40 +117,9 @@ fn try_cast_spell(
     })
 }
 
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn choosing_the_same_mode_twice_doubles_its_effect_when_repeatable() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -204,7 +152,7 @@ fn choosing_the_same_mode_twice_doubles_its_effect_when_repeatable() {
 
 #[test]
 fn repeated_mode_with_a_target_allows_reusing_the_same_target() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -243,7 +191,7 @@ fn repeated_mode_with_a_target_allows_reusing_the_same_target() {
 
 #[test]
 fn repeated_mode_with_a_target_allows_choosing_different_targets() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -324,7 +272,7 @@ fn repeated_mode_with_a_target_allows_choosing_different_targets() {
 
 #[test]
 fn repeated_mode_with_an_additional_cost_charges_it_once_per_instance() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -380,7 +328,7 @@ fn repeated_mode_with_an_additional_cost_charges_it_once_per_instance() {
 
 #[test]
 fn up_to_repeatable_allows_choosing_one_mode_three_times() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -412,7 +360,7 @@ fn up_to_repeatable_allows_choosing_one_mode_three_times() {
 
 #[test]
 fn a_non_repeatable_modal_card_still_rejects_a_repeated_index() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     // Same two modes, but plain `Exactly` - not repeatable.

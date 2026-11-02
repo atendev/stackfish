@@ -7,7 +7,8 @@ use stackfish_engine::engine::{Engine, ScriptChoiceError, StepStatus};
 use stackfish_engine::script::ScriptChoiceRequest;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+    card_object, drain, player_state, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
 };
 
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
@@ -108,15 +109,6 @@ fn two_player_state() -> GameState {
             ],
         ))
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn put_in_hand(state: &mut GameState, object: GameObject) {

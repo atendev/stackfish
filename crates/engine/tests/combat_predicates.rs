@@ -9,7 +9,8 @@ use stackfish_engine::decision::{
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    assert_action_rejected, card_object, drain, minimal_card_definition, two_player_state, zones,
+    assert_action_rejected, card_object, drain, minimal_card_definition, no_filter,
+    two_player_state, zones,
 };
 
 const P0: PlayerId = PlayerId(0);
@@ -108,18 +109,6 @@ fn assert_illegal(error: ActionError) {
         matches!(error, ActionError::Rejected(Rejected::IllegalAction(_))),
         "expected an illegal action, got {error:?}"
     );
-}
-
-fn no_filter() -> EffectFilter {
-    EffectFilter {
-        controller: None,
-        card_types: None,
-        self_only: false,
-        subtypes: None,
-        excluded_subtypes: None,
-        supertypes: None,
-        excluded_supertypes: None,
-    }
 }
 
 fn self_keyword_effect(

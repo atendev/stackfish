@@ -4,45 +4,9 @@
 use stackfish_engine::engine::{Engine, StepStatus, TriggerModeChoiceError};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+    any_target_requirement, card_object, creature_definition, drain, pass_both_and_drain,
+    player_state, two_player_state as base_two_player_state, zones,
 };
-
-fn creature_definition(name: &str) -> CardDefinition {
-    CardDefinition {
-        definition_id: 1,
-        name: name.to_string(),
-        mana_cost: ManaCost {
-            symbols: Vec::new(),
-        },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: Some(PTValue::Fixed(2)),
-        toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("bear".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        buyback_cost: None,
-        effect: None,
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-    }
-}
-
-fn any_target_requirement() -> TargetSpec {
-    TargetSpec::Primitive(TargetRequirement {
-        filter: TargetFilter::AnyTarget,
-        count: 1,
-        up_to: false,
-        at_least: false,
-        exclude_source: false,
-    })
-}
 
 fn modal_upkeep_ability_chosen_by_opponent(
     source: ObjectId,
@@ -117,23 +81,6 @@ fn two_player_state() -> GameState {
     }
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn pass_all(engine: &mut Engine, players: &[PlayerId]) -> StepStatus {
     let mut status = StepStatus::Progressed;
     for &player in players {
@@ -175,7 +122,7 @@ fn the_trigger_pauses_for_the_other_players_mode_choice_not_the_controllers() {
         ));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
 
     let StepStatus::AwaitingTriggerModeChoice {
         player, min, max, ..
@@ -222,14 +169,14 @@ fn the_other_players_chosen_mode_resolves_for_the_triggers_own_controller() {
         ));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     // p1 chooses mode 0 (GainLife(3)) though p0 is the controller and benefits.
     engine
         .submit_trigger_mode_choice(vec![0])
         .expect("p1 chooses mode 0, within range, no duplicates");
     drain(&mut engine);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
@@ -269,7 +216,7 @@ fn choosing_two_modes_resolves_both_for_the_controller() {
         ));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     engine
         .submit_trigger_mode_choice(vec![1, 0])
@@ -284,7 +231,7 @@ fn choosing_two_modes_resolves_both_for_the_controller() {
         .submit_trigger_targets(Vec::new())
         .expect("every combined mode is targetless");
     drain(&mut engine);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
@@ -327,7 +274,7 @@ fn a_mode_with_a_target_requirement_makes_the_whole_trigger_never_fire() {
         ));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
 
     // No pause: straight to the next priority window, as for a trigger with no legal target (CR 603.3d).
     assert!(
@@ -419,7 +366,7 @@ fn submit_trigger_mode_choice_still_rejects_a_duplicate_for_a_chosen_by_opponent
         ));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     let err = engine.submit_trigger_mode_choice(vec![0, 0]).unwrap_err();
     assert!(

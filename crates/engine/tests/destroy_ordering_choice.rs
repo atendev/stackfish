@@ -8,7 +8,10 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state, zones};
+use stackfish_testutil::{
+    card_object, cast_spell, drain, pass_both_and_drain, pay_free_and_drain, put_on_battlefield,
+    two_player_state, zones,
+};
 
 fn creature_definition(definition_id: u64, name: &str, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -259,15 +262,6 @@ fn base_state() -> GameState {
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn put_in_hand(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
     let owner = object.owner;
@@ -276,53 +270,6 @@ fn put_in_hand(state: &mut GameState, object: GameObject) {
         .unwrap()
         .push_bottom(id);
     state.objects.insert(id, object);
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 #[test]

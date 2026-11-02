@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 fn base_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone> {
     zones(
@@ -85,15 +87,6 @@ fn permanent(id: ObjectId, owner: PlayerId, controller: PlayerId) -> GameObject 
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn inert_effect(source: ObjectId, duration: EffectDuration) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -117,15 +110,6 @@ fn inert_effect(source: ObjectId, duration: EffectDuration) -> ContinuousEffect 
     }
 }
 
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -136,21 +120,21 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 }
 
 fn pass_both_players(engine: &mut Engine, first: PlayerId, second: PlayerId) -> StepStatus {
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == first),
         "expected {first:?} priority, got {s:?}"
     );
     pass(engine, first);
 
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == second),
         "expected {second:?} priority, got {s:?}"
     );
     pass(engine, second);
 
-    step_until_pause(engine)
+    drain(engine)
 }
 
 // CR 511.2/500.5a
@@ -162,7 +146,7 @@ fn until_end_of_combat_effect_survives_until_only_the_first_player_has_passed() 
         .push(inert_effect(ObjectId(1), EffectDuration::UntilEndOfCombat));
     let mut engine = Engine::new(state);
 
-    let s = step_until_pause(&mut engine);
+    let s = drain(&mut engine);
     assert!(matches!(s, StepStatus::AwaitingAction { player } if player == PlayerId(0)));
     pass(&mut engine, PlayerId(0));
 

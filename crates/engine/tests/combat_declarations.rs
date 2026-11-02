@@ -8,7 +8,10 @@ use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, player_state, two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, pass_to_declare_blockers, player_state, put_on_battlefield,
+    two_player_state, zones,
+};
 
 fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
@@ -70,15 +73,6 @@ fn combat_state_3p() -> GameState {
     state
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn declare_attackers(
     engine: &mut Engine,
     player: PlayerId,
@@ -129,27 +123,6 @@ fn try_declare_blockers(
         kind: PlayerActionKind::DeclareBlockers { blocks },
     })?;
     Ok(drain(engine))
-}
-
-// Goes through the real AdvanceTurnStep pipeline because Engine::state() is read-only.
-fn pass_to_declare_blockers(engine: &mut Engine) {
-    for _ in 0..10 {
-        if engine.state().step == Step::DeclareBlockers {
-            return;
-        }
-        let active = engine.state().priority_player;
-        engine
-            .submit_action(PlayerAction {
-                player: active,
-                kind: PlayerActionKind::PassPriority,
-            })
-            .expect("priority window");
-        drain(engine);
-    }
-    panic!(
-        "never reached DeclareBlockers - state.step = {:?}",
-        engine.state().step
-    );
 }
 
 #[test]

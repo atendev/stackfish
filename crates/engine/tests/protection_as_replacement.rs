@@ -7,7 +7,9 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    drain, permanent, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 const STATIC_PROTECTION_FROM_RED: &str = r#"
 local s = {}
@@ -96,19 +98,6 @@ fn vanilla_creature(
         script_ref: ScriptReference::ByKey(name.to_string()),
         ..creature_definition(id, name, power, toughness, color, "")
     }
-}
-
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn combat_damage_state(combat: CombatState) -> GameState {

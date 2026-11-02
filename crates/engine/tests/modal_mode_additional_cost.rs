@@ -1,23 +1,11 @@
 //! CR 700.2h: a modal spell mode with its own additional cost, `SpellMode.additional_cost`. The `CastSpell` arm appends every chosen mode's cost to `CostSpec.additional`, so `PaymentPlan::validate` and `submit_payment` need no change.
 //! `AdditionalCost::LifePayment` is the exercised shape.
 
-use std::collections::HashMap;
-
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    any_target_requirement, card_object, drain, pass_both_and_drain, two_player_main_phase_state,
 };
-
-fn any_target_requirement() -> TargetSpec {
-    TargetSpec::Primitive(TargetRequirement {
-        filter: TargetFilter::AnyTarget,
-        count: 1,
-        up_to: false,
-        at_least: false,
-        exclude_source: false,
-    })
-}
 
 fn mode_cost_definition() -> CardDefinition {
     CardDefinition {
@@ -62,16 +50,6 @@ fn mode_cost_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 fn cast_spell(
     engine: &mut Engine,
     player: PlayerId,
@@ -94,26 +72,9 @@ fn cast_spell(
         .expect("player holds priority, spell is in hand");
 }
 
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn mode_with_no_additional_cost_pays_with_an_empty_plan() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -150,7 +111,7 @@ fn mode_with_no_additional_cost_pays_with_an_empty_plan() {
 
 #[test]
 fn mode_with_an_additional_cost_requires_paying_it() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -197,7 +158,7 @@ fn mode_with_an_additional_cost_requires_paying_it() {
 
 #[test]
 fn choosing_both_modes_still_only_requires_the_one_costed_modes_payment() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -242,7 +203,7 @@ fn choosing_both_modes_still_only_requires_the_one_costed_modes_payment() {
 
 #[test]
 fn insufficient_life_to_pay_the_modes_cost_is_rejected() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -279,7 +240,7 @@ fn insufficient_life_to_pay_the_modes_cost_is_rejected() {
 
 #[test]
 fn non_modal_spell_is_unaffected_by_mode_additional_cost_plumbing() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);

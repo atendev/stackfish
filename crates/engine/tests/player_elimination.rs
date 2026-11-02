@@ -6,7 +6,9 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, dies_ability, drain, two_player_state as base_two_player_state, zones,
+};
 
 fn player_state(id: PlayerId, life: i32) -> PlayerState {
     PlayerState {
@@ -48,22 +50,6 @@ fn creature_definition() -> CardDefinition {
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
-    }
-}
-
-fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-        id: AbilityId(0),
-        source,
-        kind: AbilityKind::Triggered,
-        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
-        cost: None,
-        target: None,
-        operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::GainLife(1)),
-        intervening_if: None,
     }
 }
 

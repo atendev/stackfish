@@ -2,14 +2,10 @@
 //! `:AddCost` adds one `Game.Costs.*` component per call, so one activation can need several.
 //! It shares the triggered and static builders' registration queue and call sites.
 
-use std::collections::HashMap;
-
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
-};
+use stackfish_testutil::{card_object, drain, two_player_main_phase_state};
 
 const SELF_TAP_GAIN_LIFE: &str = r#"
 local s = {}
@@ -127,19 +123,9 @@ fn bear_definition(script: &str) -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 #[test]
 fn run_card_script_self_registers_an_activated_ability() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_TAP_GAIN_LIFE);
     state.objects.insert(
@@ -167,7 +153,7 @@ fn run_card_script_self_registers_an_activated_ability() {
 
 #[test]
 fn run_card_script_register_without_set_operation_is_an_error() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = bear_definition(NO_SET_OPERATION);
     state.objects.insert(
@@ -190,7 +176,7 @@ fn run_card_script_register_without_set_operation_is_an_error() {
 
 #[test]
 fn run_card_script_can_register_activated_ability_with_no_cost() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = bear_definition(NO_COST_AT_ALL);
     state.objects.insert(
@@ -212,7 +198,7 @@ fn run_card_script_can_register_activated_ability_with_no_cost() {
 
 #[test]
 fn run_card_script_accumulates_multiple_add_cost_calls() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = bear_definition(COMBINED_COST);
     state.objects.insert(
@@ -239,7 +225,7 @@ fn run_card_script_accumulates_multiple_add_cost_calls() {
 
 #[test]
 fn run_card_script_self_registers_activated_ability_with_sacrifice_self_cost() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SACRIFICE_SELF_COST);
     state.objects.insert(
@@ -264,7 +250,7 @@ fn run_card_script_self_registers_activated_ability_with_sacrifice_self_cost() {
 
 #[test]
 fn run_card_script_self_registers_activated_ability_with_a_mana_cost() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MANA_COST);
     state.objects.insert(
@@ -300,7 +286,7 @@ fn run_card_script_self_registers_activated_ability_with_a_mana_cost() {
 
 #[test]
 fn run_card_script_rejects_setting_the_mana_cost_twice() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MANA_COST_SET_TWICE);
     state.objects.insert(
@@ -323,7 +309,7 @@ fn run_card_script_rejects_setting_the_mana_cost_twice() {
 
 #[test]
 fn run_card_script_rejects_a_malformed_mana_cost_string() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = bear_definition(MALFORMED_MANA_COST);
     state.objects.insert(
@@ -352,7 +338,7 @@ fn play_land_self_registered_activated_ability_can_be_activated_paid_and_resolve
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let land = ObjectId(0);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     state.objects.insert(
         land,
         card_object(
@@ -442,7 +428,7 @@ fn play_land_self_registered_activated_ability_with_mana_cost_can_be_activated_p
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let land = ObjectId(0);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     state.objects.insert(
         land,
         card_object(land, land_definition(MANA_COST), p0, ZoneKind::Hand),

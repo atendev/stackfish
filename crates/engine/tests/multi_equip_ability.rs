@@ -1,15 +1,11 @@
 //! CR 702.6d: if a permanent has multiple equip abilities, any of them may be activated. `equip_ability.rs` named this an unattempted TODO, and that TODO over-matched a different wall.
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
-};
+use stackfish_testutil::{drain, pass_both_and_drain, permanent, two_player_main_phase_state};
 
 fn creature_definition(id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefinition {
     CardDefinition {
@@ -130,10 +126,6 @@ fn equip_dragon(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
 fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     let id = obj.object_id;
     state
@@ -141,16 +133,6 @@ fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
         .unwrap()
         .push_bottom(id);
     state.objects.insert(id, obj);
-}
-
-fn base_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
 }
 
 fn activate(
@@ -207,26 +189,9 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn either_of_two_equip_abilities_may_be_activated_keeping_its_own_restriction() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
@@ -297,7 +262,7 @@ return s
 
 #[test]
 fn a_script_can_self_register_two_distinct_equip_abilities_on_one_card() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let equipment = ObjectId(0);
     let mut definition = equipment_definition();
     definition.script_ref = ScriptReference::Inline(TWO_EQUIP_ABILITIES.to_string());

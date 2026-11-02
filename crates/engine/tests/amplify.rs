@@ -9,7 +9,8 @@ use stackfish_engine::replacement;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, pass_both_and_drain, pay_free_and_drain,
+    two_player_state as base_two_player_state,
 };
 
 fn creature_definition(
@@ -295,37 +296,6 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand, main phase, empty stack");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 #[test]

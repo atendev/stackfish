@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(
     definition_id: u64,
@@ -75,15 +77,6 @@ fn base_state() -> GameState {
         step: Step::PreCombatMain,
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn full_text_effect(source: ObjectId, donor: &CardDefinition, timestamp: u64) -> ContinuousEffect {
@@ -310,15 +303,6 @@ fn state_at_end_step() -> GameState {
     }
 }
 
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -331,15 +315,15 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 fn pass_through_end_step(engine: &mut Engine) -> StepStatus {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 end-step priority, got {s:?}"
     );
     pass(engine, p0);
-    step_until_pause(engine);
+    drain(engine);
     pass(engine, p1);
-    step_until_pause(engine)
+    drain(engine)
 }
 
 #[test]

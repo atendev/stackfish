@@ -3,13 +3,14 @@
 // TODO: CR 303.4d multi-candidate choice mixing object and player candidates
 // TODO: CR 303.4m "enchanted player" references for continuous and replacement effects
 
-use std::collections::HashMap;
-
-use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
+use stackfish_engine::engine::Engine;
+use stackfish_engine::sba::check_state_based_actions;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state};
+use stackfish_testutil::{
+    card_object, cast_spell, pass_both_and_drain, pay_free_and_drain, permanent, progressed,
+    two_player_main_phase_state,
+};
 
 fn aura_enchant_player_definition() -> CardDefinition {
     CardDefinition {
@@ -62,10 +63,6 @@ fn aura_enchant_low_life_player_definition(runtime: &mut ScriptRuntime) -> CardD
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
 fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     let id = obj.object_id;
     state
@@ -75,63 +72,6 @@ fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     state.objects.insert(id, obj);
 }
 
-fn base_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn find_battlefield_object_named<'a>(state: &'a GameState, name: &str) -> Option<&'a GameObject> {
     state
         .objects
@@ -139,25 +79,10 @@ fn find_battlefield_object_named<'a>(state: &'a GameState, name: &str) -> Option
         .find(|o| o.zone == ZoneKind::Battlefield && o.definition.name == name)
 }
 
-fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
-    match outcome {
-        SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => {
-            panic!("fixture didn't expect a replacement ordering-choice pause")
-        }
-        SbaOutcome::NeedsLegendRuleChoice { .. } => {
-            panic!("fixture didn't expect a legend-rule choice pause")
-        }
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
-            panic!("fixture didn't expect a commander-return choice pause")
-        }
-    }
-}
-
 // CR 303.4a/b
 #[test]
 fn casting_an_aura_at_a_player_attaches_it_on_resolution() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -199,7 +124,7 @@ fn casting_an_aura_at_a_player_attaches_it_on_resolution() {
 // CR 704.5m/303.4c
 #[test]
 fn a_healthy_player_attached_aura_is_unaffected_by_sba() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let aura = ObjectId(0);
@@ -216,7 +141,7 @@ fn a_healthy_player_attached_aura_is_unaffected_by_sba() {
 
 #[test]
 fn an_aura_enchanting_an_eliminated_player_dies_via_sba() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let aura = ObjectId(0);
@@ -241,7 +166,7 @@ fn an_aura_enchanting_an_eliminated_player_dies_via_sba() {
 
 #[test]
 fn an_aura_not_attached_to_anything_still_dies_via_sba_with_the_new_field_present() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let aura = ObjectId(0);
     // Neither attached_to nor attached_to_player set - permanent()'s own default.
@@ -261,7 +186,7 @@ fn an_aura_not_attached_to_anything_still_dies_via_sba_with_the_new_field_presen
 #[test]
 fn an_aura_enchanting_a_player_who_stops_matching_its_own_scripted_filter_falls_off() {
     let mut runtime = ScriptRuntime::new();
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let aura = ObjectId(0);
@@ -291,7 +216,7 @@ fn an_aura_enchanting_a_player_who_stops_matching_its_own_scripted_filter_falls_
 #[test]
 fn an_aura_enchanting_a_player_who_still_matches_its_scripted_filter_is_unaffected() {
     let mut runtime = ScriptRuntime::new();
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let aura = ObjectId(0);

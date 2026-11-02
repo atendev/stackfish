@@ -6,7 +6,9 @@ use stackfish_engine::engine::{Engine, LegendRuleChoiceError, StepStatus};
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
@@ -21,15 +23,6 @@ fn base_state() -> GameState {
             &[ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile],
         ))
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn permanent_definition(

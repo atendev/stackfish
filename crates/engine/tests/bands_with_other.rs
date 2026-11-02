@@ -7,7 +7,10 @@ use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    declare_attackers, declare_blockers, drain, permanent, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(
     id: u64,
@@ -64,19 +67,6 @@ fn legendary_creature_definition_pt(
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn bands_with_other(source: ObjectId, quality: &str) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -130,18 +120,6 @@ fn combat_state() -> GameState {
     }
 }
 
-fn declare_attackers(
-    engine: &mut Engine,
-    player: PlayerId,
-    attackers: Vec<(ObjectId, Target)>,
-) -> Result<StepStatus, ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::DeclareAttackers { attackers },
-    })?;
-    Ok(drain(engine))
-}
-
 fn declare_bands(
     engine: &mut Engine,
     player: PlayerId,
@@ -150,18 +128,6 @@ fn declare_bands(
     engine.submit_action(PlayerAction {
         player,
         kind: PlayerActionKind::DeclareBands { bands },
-    })?;
-    Ok(drain(engine))
-}
-
-fn declare_blockers(
-    engine: &mut Engine,
-    player: PlayerId,
-    blocks: Vec<(ObjectId, ObjectId)>,
-) -> Result<StepStatus, ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::DeclareBlockers { blocks },
     })?;
     Ok(drain(engine))
 }

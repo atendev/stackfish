@@ -9,7 +9,8 @@ use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, ModeChoiceError, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+    any_target_requirement, card_object, drain, pass_both_and_drain, pay_free_and_drain,
+    player_state, two_player_state as base_two_player_state, zones,
 };
 
 fn chosen_by_opponent_definition(mode_choice: ModeChoice) -> CardDefinition {
@@ -53,16 +54,6 @@ fn chosen_by_opponent_definition(mode_choice: ModeChoice) -> CardDefinition {
         ],
         mode_choice,
     }
-}
-
-fn any_target_requirement() -> TargetSpec {
-    TargetSpec::Primitive(TargetRequirement {
-        filter: TargetFilter::AnyTarget,
-        count: 1,
-        up_to: false,
-        at_least: false,
-        exclude_source: false,
-    })
 }
 
 fn chosen_by_opponent_with_a_target_definition() -> CardDefinition {
@@ -145,37 +136,6 @@ fn try_cast_spell(
             pay_buyback: false,
         },
     })
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 #[test]

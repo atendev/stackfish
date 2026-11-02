@@ -6,7 +6,7 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
@@ -115,15 +115,6 @@ fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) -> V
     ids
 }
 
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -134,19 +125,19 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 }
 
 fn pass_to_cleanup_discard(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 end-step priority, got {s:?}"
     );
     pass(engine, p0);
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p1),
         "expected p1 end-step priority, got {s:?}"
     );
     pass(engine, p1);
-    step_until_pause(engine)
+    drain(engine)
 }
 
 const DISCARDED_CARD_GOES_TO_EXILE: &str = r#"
@@ -192,7 +183,7 @@ fn a_cleanup_discard_is_replacement_checked_for_real() {
     engine
         .submit_discard(vec![hand_ids[0]])
         .expect("valid discard");
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
 
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p1),
@@ -239,7 +230,7 @@ fn a_cleanup_discard_without_a_matching_replacement_lands_in_the_graveyard_norma
     engine
         .submit_discard(vec![hand_ids[0]])
         .expect("valid discard");
-    step_until_pause(&mut engine);
+    drain(&mut engine);
 
     assert_eq!(
         engine
@@ -312,7 +303,7 @@ fn two_matching_wards_pause_the_cleanup_discard_for_a_cr_616_1_choice() {
     engine
         .submit_discard(vec![hand_ids[0]])
         .expect("valid discard");
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
     let StepStatus::AwaitingReplacementChoice { player, candidates } = status else {
         panic!(
             "two matching replacement effects on a cleanup discard must pause for a CR 616.1 choice, got {status:?}"
@@ -328,7 +319,7 @@ fn two_matching_wards_pause_the_cleanup_discard_for_a_cr_616_1_choice() {
     engine
         .submit_replacement_choice(ReplacementCandidate::Registered(ward_b))
         .expect("ward_b is a real candidate");
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p1),
         "discard should finish resolving after the choice, got {status:?}"

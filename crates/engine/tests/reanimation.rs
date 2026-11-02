@@ -6,7 +6,8 @@ use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones,
+    card_object, drain, life, minimal_card_definition, two_player_state as base_two_player_state,
+    zones,
 };
 
 const P0: PlayerId = PlayerId(0);
@@ -345,10 +346,6 @@ fn names_in(engine: &Engine, zone: ZoneKind, owner: Option<PlayerId>) -> Vec<Str
         .collect();
     names.sort();
     names
-}
-
-fn life(engine: &Engine, player: PlayerId) -> i32 {
-    engine.state().player(player).unwrap().life
 }
 
 fn ward_to(source: u64, destination: ZoneKind) -> ReplacementEffect {

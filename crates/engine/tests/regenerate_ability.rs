@@ -1,14 +1,12 @@
 //! CR 701.19a, 701.19c: `AbilityEffect::Regenerate` (`Game.Ops.Regenerate()`) is the first creation path for a regeneration shield. A target with `KeywordSet::CANT_BE_REGENERATED` gets no shield, and the spell or ability still fully resolves.
 //! `CardDefinition.effect` is set directly to take the Rust fast path in `ResolveStackTop`, as in pump_effect.rs.
 
-use std::collections::HashMap;
-
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, cast_spell, pass_both_and_drain, pay_free_and_drain, two_player_main_phase_state,
 };
 
 fn creature_definition(toughness: i32, keywords: KeywordSet) -> CardDefinition {
@@ -71,66 +69,9 @@ fn regenerate_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn regenerate_spell_creates_a_shield_that_saves_its_target_from_lethal_damage() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -202,7 +143,7 @@ fn regenerate_spell_creates_a_shield_that_saves_its_target_from_lethal_damage() 
 
 #[test]
 fn regenerate_spell_creates_no_shield_for_a_target_that_cant_be_regenerated() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -281,7 +222,7 @@ fn regenerate_spell_creates_no_shield_for_a_target_that_cant_be_regenerated() {
 
 #[test]
 fn regenerate_spell_shield_is_pinned_to_its_target_not_a_bystander() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);

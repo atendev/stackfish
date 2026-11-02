@@ -1,25 +1,14 @@
 //! CR 700.2i: pawprint ({P}) modes are chosen by total weight against a budget and not by count, validated by an explicit weight-sum check in `CastSpell` and `submit_trigger_mode_choice` (CR 603.3c). Choosing zero modes is legal.
 // TODO: repeatable pawprint-budget modes and the CR 700.2e opponent-chosen combination
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus, TriggerModeChoiceError};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    any_target_requirement, card_object, creature_definition, drain, pass_both_and_drain,
+    pay_free_and_drain, two_player_main_phase_state, two_player_state as base_two_player_state,
 };
-
-fn any_target_requirement() -> TargetSpec {
-    TargetSpec::Primitive(TargetRequirement {
-        filter: TargetFilter::AnyTarget,
-        count: 1,
-        up_to: false,
-        at_least: false,
-        exclude_source: false,
-    })
-}
 
 fn pawprint_budget_definition() -> CardDefinition {
     CardDefinition {
@@ -61,16 +50,6 @@ fn pawprint_budget_definition() -> CardDefinition {
             },
         ],
         mode_choice: ModeChoice::PawprintBudget(3),
-    }
-}
-
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
     }
 }
 
@@ -116,40 +95,9 @@ fn try_cast_spell(
     })
 }
 
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn choosing_both_modes_exactly_fills_the_budget() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -182,7 +130,7 @@ fn choosing_both_modes_exactly_fills_the_budget() {
 
 #[test]
 fn choosing_only_the_cheap_mode_is_legal_with_budget_to_spare() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -209,7 +157,7 @@ fn choosing_only_the_cheap_mode_is_legal_with_budget_to_spare() {
 
 #[test]
 fn choosing_zero_modes_is_legal_cr_700_2i_sets_no_floor() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -237,7 +185,7 @@ fn choosing_zero_modes_is_legal_cr_700_2i_sets_no_floor() {
 
 #[test]
 fn choosing_a_combination_over_budget_is_rejected() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     // A third weight-2 mode makes 2+2+1 = 5 > 3 possible to attempt.
@@ -281,7 +229,7 @@ fn choosing_a_combination_over_budget_is_rejected() {
 
 #[test]
 fn choosing_the_same_pawprint_mode_twice_is_rejected() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -308,33 +256,6 @@ fn choosing_the_same_pawprint_mode_twice_is_rejected() {
     );
 }
 
-fn creature_definition(name: &str) -> CardDefinition {
-    CardDefinition {
-        definition_id: 1,
-        name: name.to_string(),
-        mana_cost: ManaCost {
-            symbols: Vec::new(),
-        },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: Some(PTValue::Fixed(2)),
-        toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("bear".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        buyback_cost: None,
-        effect: None,
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-    }
-}
-
 fn trigger_two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -351,23 +272,6 @@ fn trigger_two_player_state() -> GameState {
             ],
         ))
     }
-}
-
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 fn pawprint_budget_upkeep_ability(
@@ -433,7 +337,7 @@ fn a_pawprint_budgeted_trigger_accepts_a_combination_within_budget() {
         .push(pawprint_budget_upkeep_ability(reaper, None));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     let StepStatus::AwaitingTriggerModeChoice {
         player, min, max, ..
     } = status
@@ -464,7 +368,7 @@ fn a_pawprint_budgeted_trigger_accepts_a_combination_within_budget() {
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "resolution finishes cleanly, got {status:?}"
     );
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { .. }),
         "got {status:?}"
@@ -506,7 +410,7 @@ fn a_pawprint_budgeted_trigger_rejects_a_combination_over_budget() {
         .push(pawprint_budget_upkeep_ability(reaper, Some(extra)));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     // Modes 1 and 2 together cost 2 + 2 = 4 > budget of 3.
     let err = engine.submit_trigger_mode_choice(vec![1, 2]).unwrap_err();

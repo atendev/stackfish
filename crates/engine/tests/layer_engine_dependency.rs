@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, no_filter, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -51,27 +53,6 @@ fn base_state() -> GameState {
         step: Step::CombatDamage,
         last_active_turn_number: HashMap::from([(p0, 1)]),
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
-    }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
-fn no_filter() -> EffectFilter {
-    EffectFilter {
-        controller: None,
-        card_types: None,
-        self_only: false,
-        subtypes: None,
-        excluded_subtypes: None,
-        supertypes: None,
-        excluded_supertypes: None,
     }
 }
 

@@ -2,7 +2,9 @@
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, pass_both_and_drain, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
@@ -71,23 +73,6 @@ fn two_player_state() -> GameState {
     }
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn untapped_event_ids(engine: &Engine) -> Vec<ObjectId> {
     engine
         .state()
@@ -150,7 +135,7 @@ fn untap_only_untaps_active_players_tapped_permanents() {
 
     // active_player defaults to p0, and CR 502.3 untaps only that player's permanents.
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     assert!(
@@ -176,7 +161,7 @@ fn no_priority_during_untap() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
 
     // CR 502.4: the untap step opens no priority window, so one pass-round from PreGame lands on Upkeep.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
@@ -204,7 +189,7 @@ fn draw_on_turn_2_or_later() {
         .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().step, Step::Draw);
 
@@ -260,7 +245,7 @@ fn draw_skipped_on_turn_1_two_player() {
         .push_bottom(card);
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     // CR 500.7, 500.8: a skipped step has no turn-based actions and no priority window, so priority opens at PreCombatMain.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().phase, Phase::Main);
@@ -302,7 +287,7 @@ fn draw_from_empty_library_is_a_noop_draw_not_a_panic() {
     state.turn_number = 2; // not the skip case - library is just empty.
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
 
     // CR 104.3c, 704.5b: an empty library is a state-based loss and not a panic. With two players the SBA pass ends the game before Draw opens priority (CR 104.2a).
     assert!(

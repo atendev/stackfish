@@ -7,8 +7,8 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::triggers::collect_triggers;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, player_state,
-    two_player_state as base_two_player_state,
+    card_object, creature_definition, hand_battlefield_graveyard_zones, pass_both_and_drain,
+    pay_free_and_drain, player_state, two_player_state as base_two_player_state,
 };
 
 const ALWAYS_ERRORS: &str = "function(...) error('boom') end";
@@ -22,33 +22,6 @@ function(source, controller, state)
     return true
 end
 "#;
-
-fn creature_definition(name: &str) -> CardDefinition {
-    CardDefinition {
-        definition_id: 1,
-        name: name.to_string(),
-        mana_cost: ManaCost {
-            symbols: Vec::new(),
-        },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: Some(PTValue::Fixed(2)),
-        toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("bear".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        buyback_cost: None,
-        effect: None,
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-    }
-}
 
 fn drain_spell_definition() -> CardDefinition {
     CardDefinition {
@@ -93,23 +66,6 @@ fn two_player_state(p0_life: i32) -> GameState {
     }
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
@@ -124,20 +80,6 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
 }
 
 fn script_error_events(engine: &Engine) -> Vec<String> {
@@ -378,7 +320,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
         intervening_if: Some(InterveningIfSpec::Script(handle)),
     });
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().stack.len(),
@@ -395,7 +337,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
     pay_free_and_drain(&mut engine);
     assert_eq!(engine.state().stack.len(), 2);
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().player(p0).unwrap().life,
@@ -409,7 +351,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
     );
 
     // CR 608.2a's recheck hits the erroring branch (life 5 <= 10), falls back to "doesn't hold", fizzles, and logs a ScriptError.
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty());
     assert_eq!(

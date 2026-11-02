@@ -2,16 +2,14 @@
 //! The timing restriction matches on `effect == Some(AbilityEffect::Attach)` in `ActivateAbility`. CR 702.6c limits only who may activate, so a creature changing controllers does not knock the Equipment off.
 // TODO: further equip restrictions beyond "creature you control" (CR 702.6c), multiple equip abilities (CR 702.6d), Equip planeswalker (CR 702.6e) and phasing (CR 702.26i)
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
+use stackfish_engine::sba::check_state_based_actions;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    drain, pass_both_and_drain, permanent, progressed, two_player_main_phase_state,
 };
 
 const STATIC_EQUIP: &str = r#"
@@ -111,10 +109,6 @@ fn equip_ability(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
 fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     let id = obj.object_id;
     state
@@ -141,16 +135,6 @@ fn protection_from_green(source: ObjectId) -> ContinuousEffect {
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
-    }
-}
-
-fn base_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
     }
 }
 
@@ -201,41 +185,9 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
-fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
-    match outcome {
-        SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => {
-            panic!("fixture didn't expect a replacement ordering-choice pause")
-        }
-        SbaOutcome::NeedsLegendRuleChoice { .. } => {
-            panic!("fixture didn't expect a legend-rule choice pause")
-        }
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
-            panic!("fixture didn't expect a commander-return choice pause")
-        }
-    }
-}
-
 #[test]
 fn game_ops_attach_self_registers_a_real_equip_ability() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let equipment = ObjectId(0);
     let mut definition = equipment_definition();
@@ -264,7 +216,7 @@ fn game_ops_attach_self_registers_a_real_equip_ability() {
 // CR 702.6a
 #[test]
 fn equipping_a_creature_you_control_attaches_it() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);
@@ -302,7 +254,7 @@ fn equipping_a_creature_you_control_attaches_it() {
 
 #[test]
 fn equipping_a_creature_you_dont_control_is_rejected() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
@@ -325,7 +277,7 @@ fn equipping_a_creature_you_dont_control_is_rejected() {
 
 #[test]
 fn activating_equip_with_a_nonempty_stack_is_rejected() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);
@@ -378,7 +330,7 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
 
 #[test]
 fn reequipping_to_a_different_creature_moves_the_attachment() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear1 = ObjectId(0);
@@ -431,7 +383,7 @@ fn reequipping_to_a_different_creature_moves_the_attachment() {
 // CR 704.5n
 #[test]
 fn an_equipped_creature_dying_makes_the_equipment_fall_off_but_stay_on_the_battlefield() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);
@@ -478,7 +430,7 @@ fn an_equipped_creature_dying_makes_the_equipment_fall_off_but_stay_on_the_battl
 
 #[test]
 fn an_equipped_creatures_controller_changing_does_not_unattach_the_equipment() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
@@ -503,7 +455,7 @@ fn an_equipped_creatures_controller_changing_does_not_unattach_the_equipment() {
 
 #[test]
 fn a_legally_equipped_creature_is_unaffected() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);
@@ -525,7 +477,7 @@ fn a_legally_equipped_creature_is_unaffected() {
 #[test]
 fn an_unattached_equipment_is_not_itself_a_violation() {
     // CR 301.5b: Equipment can sit unattached indefinitely, unlike an Aura (CR 704.5m).
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let equipment = ObjectId(0);
     put_on_battlefield(&mut state, permanent(equipment, equipment_definition(), p0));
@@ -542,7 +494,7 @@ fn an_unattached_equipment_is_not_itself_a_violation() {
 // An equipped creature gaining protection from the Equipment's color makes it fall off (CR 702.16).
 #[test]
 fn an_equipped_creature_gaining_protection_from_the_equipment_makes_it_fall_off() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);

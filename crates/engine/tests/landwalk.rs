@@ -5,7 +5,10 @@ use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, player_state};
+use stackfish_testutil::{
+    declare_attackers, declare_blockers, pass_to_declare_blockers, permanent, player_state,
+    put_on_battlefield,
+};
 
 fn creature_definition(id: u64, name: &str, extra_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
@@ -116,19 +119,6 @@ fn landwalk_quality(source: ObjectId, quality: LandwalkQuality) -> ContinuousEff
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn islandwalk(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -169,50 +159,6 @@ fn combat_state(players: Vec<PlayerId>) -> GameState {
         zones: vec![Zone::new(ZoneKind::Battlefield, None)],
         ..stackfish_testutil::two_player_state(Vec::new())
     }
-}
-
-fn declare_attackers(
-    engine: &mut Engine,
-    player: PlayerId,
-    attackers: Vec<(ObjectId, Target)>,
-) -> Result<StepStatus, ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::DeclareAttackers { attackers },
-    })?;
-    Ok(drain(engine))
-}
-
-fn declare_blockers(
-    engine: &mut Engine,
-    player: PlayerId,
-    blocks: Vec<(ObjectId, ObjectId)>,
-) -> Result<StepStatus, ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::DeclareBlockers { blocks },
-    })?;
-    Ok(drain(engine))
-}
-
-fn pass_to_declare_blockers(engine: &mut Engine) {
-    for _ in 0..10 {
-        if engine.state().step == Step::DeclareBlockers {
-            return;
-        }
-        let active = engine.state().priority_player;
-        engine
-            .submit_action(PlayerAction {
-                player: active,
-                kind: PlayerActionKind::PassPriority,
-            })
-            .expect("priority window");
-        drain(engine);
-    }
-    panic!(
-        "never reached DeclareBlockers - state.step = {:?}",
-        engine.state().step
-    );
 }
 
 fn assert_legal_block(status: Result<StepStatus, ActionError>) {

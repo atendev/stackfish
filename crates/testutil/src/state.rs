@@ -56,6 +56,18 @@ pub fn two_player_state(zones: Vec<Zone>) -> GameState {
     }
 }
 
+/// `two_player_state` in the precombat main step with hand, battlefield and graveyard zones,
+/// where both players have already had a turn.
+pub fn two_player_main_phase_state() -> GameState {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    GameState {
+        step: Step::PreCombatMain,
+        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
+        ..two_player_state(hand_battlefield_graveyard_zones(p0, p1))
+    }
+}
+
 /// A one-player `GameState` with the same defaults as `two_player_state`, in the precombat main step.
 pub fn single_player_state(player: PlayerId, zones: Vec<Zone>) -> GameState {
     GameState {

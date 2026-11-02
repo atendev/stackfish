@@ -6,8 +6,8 @@
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    battlefield_graveyard_exile_zones, card_object, drain, minimal_card_definition,
-    two_player_state as base_two_player_state,
+    battlefield_graveyard_exile_zones, card_object, dies_ability, drain, minimal_card_definition,
+    put_on_battlefield, two_player_state as base_two_player_state,
 };
 
 fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
@@ -54,31 +54,6 @@ fn combat_damage_state(combat: CombatState) -> GameState {
     state.step = Step::CombatDamage;
     state.combat = Some(combat);
     state
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
-fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-        id: AbilityId(0),
-        source,
-        kind: AbilityKind::Triggered,
-        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
-        cost: None,
-        target: None,
-        operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::GainLife(1)),
-        intervening_if: None,
-    }
 }
 
 fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {

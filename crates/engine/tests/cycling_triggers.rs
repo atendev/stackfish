@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones,
+    card_object, drain, minimal_card_definition, pass_both_and_drain,
+    two_player_state as base_two_player_state, zones,
 };
 
 fn cycler_definition(definition_id: u64, name: &str) -> CardDefinition {
@@ -127,23 +128,6 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId) {
             },
         })
         .expect("player controls source and holds priority");
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 #[test]

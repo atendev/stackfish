@@ -8,7 +8,10 @@ use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    drain, pass_both_and_drain, permanent, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -35,19 +38,6 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     }
-}
-
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn another_target_creature_ability(source: ObjectId) -> RegisteredAbility {
@@ -130,23 +120,6 @@ fn try_activate(
         },
     })?;
     Ok(drain(engine))
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 #[test]

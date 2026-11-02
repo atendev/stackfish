@@ -3,34 +3,10 @@
 
 use stackfish_engine::engine::{Engine, StepStatus, TriggerModeChoiceError};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
-
-fn creature_definition(name: &str) -> CardDefinition {
-    CardDefinition {
-        definition_id: 1,
-        name: name.to_string(),
-        mana_cost: ManaCost {
-            symbols: Vec::new(),
-        },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: Some(PTValue::Fixed(2)),
-        toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("bear".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        buyback_cost: None,
-        effect: None,
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-    }
-}
+use stackfish_testutil::{
+    any_target_requirement, card_object, creature_definition, drain, pass_both_and_drain,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
@@ -48,33 +24,6 @@ fn two_player_state() -> GameState {
             ],
         ))
     }
-}
-
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
-fn any_target_requirement() -> TargetSpec {
-    TargetSpec::Primitive(TargetRequirement {
-        filter: TargetFilter::AnyTarget,
-        count: 1,
-        up_to: false,
-        at_least: false,
-        exclude_source: false,
-    })
 }
 
 fn creature_target_requirement(exclude_source: bool) -> TargetSpec {
@@ -163,7 +112,7 @@ fn single_mode_chosen_resolves_only_that_effect() {
         .push(modal_upkeep_ability(reaper, ModeChoice::Exactly(1), false));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     let StepStatus::AwaitingTriggerModeChoice {
         player,
         modes,
@@ -194,7 +143,7 @@ fn single_mode_chosen_resolves_only_that_effect() {
     );
     assert_eq!(engine.state().stack.len(), 1);
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "got {status:?}"
@@ -230,7 +179,7 @@ fn two_modes_chosen_combine_and_resolve_both_against_their_own_targets() {
         .push(modal_upkeep_ability(reaper, ModeChoice::UpTo(2), false));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingTriggerModeChoice { .. }),
         "got {status:?}"
@@ -263,7 +212,7 @@ fn two_modes_chosen_combine_and_resolve_both_against_their_own_targets() {
         .submit_trigger_targets(vec![Target::Player(p1)])
         .expect("mode 1's own target");
     drain(&mut engine);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "got {status:?}"
@@ -314,7 +263,7 @@ fn a_single_chosen_mode_with_its_own_target_chains_into_real_target_selection() 
         .push(modal_upkeep_ability(reaper, ModeChoice::Exactly(1), false));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     // A single chosen mode (Destroy target creature) passes its effect and target_requirement through unwrapped from Modal.
     engine
         .submit_trigger_mode_choice(vec![2])
@@ -341,7 +290,7 @@ fn a_single_chosen_mode_with_its_own_target_chains_into_real_target_selection() 
         .submit_trigger_targets(vec![Target::Object(bear)])
         .expect("Bear was offered");
     drain(&mut engine);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "got {status:?}"
@@ -378,7 +327,7 @@ fn a_chosen_mode_with_no_legal_target_removes_the_whole_ability_from_the_stack()
         .push(modal_upkeep_ability(reaper, ModeChoice::Exactly(1), true));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     engine
         .submit_trigger_mode_choice(vec![2])
         .expect("mode 2 is in range");
@@ -430,7 +379,7 @@ fn submit_trigger_mode_choice_rejects_a_count_outside_the_announced_range() {
         .push(modal_upkeep_ability(reaper, ModeChoice::Exactly(1), false));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     let err = engine.submit_trigger_mode_choice(vec![0, 1]).unwrap_err();
     assert!(matches!(err, TriggerModeChoiceError::InvalidCount));
     // Still paused - a rejected answer doesn't consume the choice.
@@ -461,7 +410,7 @@ fn submit_trigger_mode_choice_rejects_a_duplicate_mode_when_not_repeatable() {
         .push(modal_upkeep_ability(reaper, ModeChoice::UpTo(2), false));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     let err = engine.submit_trigger_mode_choice(vec![0, 0]).unwrap_err();
     assert!(matches!(err, TriggerModeChoiceError::DuplicateMode));
 }
@@ -490,7 +439,7 @@ fn submit_trigger_mode_choice_rejects_an_out_of_range_index() {
         .push(modal_upkeep_ability(reaper, ModeChoice::Exactly(1), false));
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     let err = engine.submit_trigger_mode_choice(vec![99]).unwrap_err();
     assert!(matches!(err, TriggerModeChoiceError::NoSuchMode));
 }

@@ -9,7 +9,7 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, player_state,
+    drain, hand_battlefield_graveyard_zones, permanent, player_state,
     two_player_state as base_two_player_state,
 };
 
@@ -51,10 +51,6 @@ fn land_definition(id: u64, script: &str) -> CardDefinition {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     }
-}
-
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
 fn put_in_hand(state: &mut GameState, mut obj: GameObject, owner: PlayerId) {

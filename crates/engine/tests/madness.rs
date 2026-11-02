@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+    card_object, drain, last_zone_change, pass_both_and_drain, player_state,
+    two_player_state as base_two_player_state, zones,
 };
 
 fn madness_bolt_definition() -> CardDefinition {
@@ -198,35 +199,6 @@ fn two_player_state(pool: ManaPool) -> GameState {
             ],
         ))
     }
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
-fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
-    for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange {
-            object, from, to, ..
-        } = event.kind
-        {
-            return (object, from, to);
-        }
-    }
-    panic!("expected a ZoneChange event in the ledger");
 }
 
 fn discard_to_cleanup(

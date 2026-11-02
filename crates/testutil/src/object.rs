@@ -39,3 +39,19 @@ pub fn card_object(
         entered_via_escape: false,
     }
 }
+
+/// A `card_object` on the battlefield.
+pub fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
+    card_object(id, definition, owner, ZoneKind::Battlefield)
+}
+
+/// Inserts `object` into `state` and puts its id at the bottom of the shared battlefield.
+/// Panics if `state` has no battlefield zone.
+pub fn put_on_battlefield(state: &mut GameState, object: GameObject) {
+    let id = object.object_id;
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(id);
+    state.objects.insert(id, object);
+}

@@ -7,7 +7,7 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
     card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
-    two_player_state as base_two_player_state,
+    pay_free_and_drain, two_player_state as base_two_player_state,
 };
 
 fn script_error_events(engine: &Engine) -> Vec<String> {
@@ -175,20 +175,6 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
 }
 
 #[test]

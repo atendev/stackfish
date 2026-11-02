@@ -8,7 +8,9 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, pass_both_and_drain, two_player_state as base_two_player_state, zones,
+};
 
 const SELF_REGISTER_UNCONDITIONAL: &str = r#"
 local s = {}
@@ -316,23 +318,6 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority");
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 // CR 707.2, 707.3

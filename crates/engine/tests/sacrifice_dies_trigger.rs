@@ -5,7 +5,10 @@ use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state};
+use stackfish_testutil::{
+    card_object, dies_ability, drain, pass_both_and_drain,
+    two_player_state as base_two_player_state,
+};
 
 fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
@@ -69,22 +72,6 @@ fn discard_cost() -> CostSpec {
             },
         }],
         alternative: Vec::new(),
-    }
-}
-
-fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-        id: AbilityId(0),
-        source,
-        kind: AbilityKind::Triggered,
-        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
-        cost: None,
-        target: None,
-        operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::GainLife(1)),
-        intervening_if: None,
     }
 }
 
@@ -164,23 +151,6 @@ fn state_with_cost(
     (state, p0, p1, source, fodder, hand_card)
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: ObjectId) {
     engine
         .submit_action(PlayerAction {
@@ -229,7 +199,7 @@ fn dies_trigger_fires_and_resolves_after_a_sacrifice_cost_payment() {
     );
 
     // Both players pass, and the Dies trigger on top of the stack resolves first.
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().stack.len(),
