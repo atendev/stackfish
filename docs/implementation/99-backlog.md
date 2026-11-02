@@ -42,12 +42,13 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Proof game (`phase5/proof-game-bot`, B5)**: see `19-proof-game.md`. Fixed on the way: creatures outside the
   battlefield could attack and block, simultaneous deaths took ids in `HashMap` order, and a script with no
   `register_abilities` raised a `script_error`. Open items:
-  - The bot declines every `may_cast` Decision, and it cannot pay a sacrifice, discard, tap or graveyard-exile cost.
-    It pays hybrid, Phyrexian, `{C}`, snow and `{X}` costs (`26-special-mana-payment.md`).
+  - Done in ticket 030 (`30-payment-candidates.md`): the bot accepts `may_cast` and pays sacrifice, discard, tap and
+    graveyard-exile costs from the Payment candidates. No byte-level game offers `may_cast` yet (no Lua constructor
+    for madness or cascade). Phyrexian stays partly open: the bot keeps 1 life and assumes 20 starting life.
   - Other unordered `HashMap` walks may still decide an order a host sees. Grep `objects.values()` before trusting a
     new replay test. Ticket 025 sorted the five state-based action collectors that walked `objects` (the same seed
     sometimes ordered `Unattached` events differently); 8 more `objects` walks outside `sba.rs` are unchecked (ticket 028).
-  - No card in the set uses a sacrifice or discard cost, menace or a must-attack rule (the keyword exists since ticket
+  - No main proof card uses a sacrifice or discard cost (`cost_proof_game.rs` has its own set), menace or a must-attack rule (the keyword exists since ticket
     026, but no proof card has it), so the engine atomicity item (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it, and
     `Bot::injecting_illegal_answers` now sends illegal Answers at every Decision (see `21-atomicity.md`).
   - Proof spells were inert until `Engine::new_game` started loading a script's `operation()` and `target_requirement()`
@@ -57,7 +58,9 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Host Session (`phase5/host-session`, B3)**: see `18-host-session.md`. Open items:
   - Replay export and the carddb-backed `CardSource` are built (`18-host-session.md`). Lua `pairs` order over string
     keys is not seeded, and the replay file has no stream digest.
-  - A Payment Decision lists additional costs without their filters.
+  - A Payment Decision lists candidate ids for filtered costs but not the filters (ticket 030).
+  - `PaymentPlan::validate` lets one object pay two different additional costs, and `TapPermanents` does not exclude
+    the source or require "you control" unless the filter says so.
   - Done in tickets 025 and 035: an input rejection changes nothing, the `Session` catches a panic and marks itself
     dead (`engine_panic`), an engine `Internal` error halts it, and script errors keep logging and continuing.
 

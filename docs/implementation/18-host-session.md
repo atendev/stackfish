@@ -164,8 +164,10 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 - The free-text rule (ticket 027) is in `DESIGN.md`, "Writing events". Every `script_error` message comes from
   `GameState::script_error_message`, which leaves out the id and detail of a library or hand source. Before this, a
   library card's broken script logged its id and Lua error text to every Seat at game start.
-- The Payment cost lists additional costs without their filters (`sacrifice`, `discard`, `tap_permanents`,
-  `exile_from_graveyard`), because the engine does not list eligible objects for a Payment Decision.
+- A Payment cost's `sacrifice`, `discard`, `tap_permanents` and `exile_from_graveyard` entries carry `candidates`, the
+  ids that may pay them. The filter itself is not sent. See `30-payment-candidates.md`.
+- A `may_cast` Decision carries `options` (`modes`, `targets` in the cast-entry form, `x`) when a cast can be announced.
+  `x: true` asks for X, and 0 is the only legal value (CR 107.3b).
 - Rejection messages are the engine's `Debug` text, passed through.
 - Ticket 035 (`22-error-split.md`): a refusal that gets past the facade is a normal `invalid_answer` and the Decision stays
   open. An engine `Internal` error halts the Session as `pipeline_error`, and a panic kills it as `engine_panic`. Both send a

@@ -37,8 +37,11 @@ declare modes.
   its pool from `mana_added` events (emptied on every `step_started` and `phase_started`), casts a card the pool
   covers, and taps mana sources when a card needs more mana than the pool holds.
 - Payment: mana first, then the additional costs in the listed order. `tap_self`, `sacrifice_self` and `discard_self`
-  name the source of the last ability the bot activated. Any other cost, and any hybrid, Phyrexian, snow or `{X}`
-  cost, gets "cannot pay".
+  name the source of the last ability the bot activated. `sacrifice`, `discard`, `tap_permanents` and
+  `exile_from_graveyard` take the first unused ids from their `candidates`, never the source. Too few gives "cannot
+  pay". Hybrid, Phyrexian, snow and `{X}` are planned as in `26-special-mana-payment.md`.
+- `may_cast`: with `options`, the bot casts 3 times in 4 with random modes and targets (X is 0), and otherwise
+  declines. Without `options` it declines.
 - Combat: each attacker attacks with probability 1/2 at a random defender, each blocker blocks with probability 1/3, and
   a creature gives all its damage to its first recipient.
 - A rejected Answer is replaced once by a fallback that is always legal (pass priority, or "cannot pay") and counted
@@ -77,12 +80,10 @@ Until the atomicity work (see `21-atomicity.md`), every spell in the set resolve
 
 ## Open items
 
-- TODO(proof bot): the bot never accepts a `may_cast` Decision (madness, cascade), because the Decision does not list
-  the cast's modes or targets.
-- TODO(proof bot): it cannot pay a sacrifice, discard, tap or graveyard-exile cost, because a Payment Decision does not
-  list the eligible objects. The proof set has no such card.
+- TODO(proof bot): no byte-level game offers a `may_cast` Decision, because madness and cascade have no Lua constructor a
+  fixture card can use. Engine and bot unit tests cover it.
 - TODO(proof bot): a pawprint mode budget (CR 700.2i) is read as a plain mode count, and attackers and blockers are
   chosen at random with no regard for the board.
-- The bot gives "cannot pay" for hybrid, Phyrexian, snow and `{X}` costs.
+- The bot never spends its last point of life on a Phyrexian symbol and assumes 20 starting life unless told.
 - Other `HashMap` walks over `state.objects` may still decide an order that reaches a host. The 500-seed run found
   none, but the proof set covers only part of the engine.
