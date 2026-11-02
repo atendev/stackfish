@@ -47,6 +47,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 067: Deferred. CI does not check out the private `stackfish-db`, because each run would pull about 0.58 GiB of LFS against a 10 GiB a month quota, and the smoke test already runs locally. The plan for a later reversal (deploy key, `STACKFISH_DB_DIR` in the test, opt-in `STACKFISH_DB_REQUIRED=1`) is in the ticket. [closed/067-ci-access-to-stackfish-db.md]
 - 068: Moved the 39 `tests/scenarios/phase5/` files into ten feature folders without the prefix and pointed every TOML comment and `docs/scenario_format.md` path at them, fixing the paths that were already stale. Branch-name comments name the rule instead. [closed/068-rename-phase5-scenarios.md]
 - 069: Added 18 shared helpers to `stackfish_testutil` (priority, cast, payment and combat drivers, battlefield placement, a vanilla 2/2, the main-phase two-player state and three ability fixtures) and deleted 448 identical local copies from 171 engine test files. Variant helpers such as `vanilla_creature` and `bolt_definition` stay local. [closed/069-shared-test-helpers.md]
+- 070: The scenario test runs every file, then fails once with each failing file and its failed entries (`expected X, got Y`, the engine error, or a load panic message). One collected report won over a generated `#[test]` per file. [closed/070-per-file-scenario-failures.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -76,7 +77,7 @@ Stop the test binary sprawl, drop the `phase5_` prefix, and fill in missing modu
 - 060 Decide which repetitive Rust tests become TOML scenarios and whether to rename `phase5_*.toml`. Type grilling, HITL. Blocked by 046. Closed.
 - 068 Rename the phase5 TOML scenarios into feature folders and fix their references. Type task, HITL. Follows 060. Closed.
 - 069 Move duplicated engine test helpers into `stackfish_testutil`. Type task, HITL. Follows 060. Optional. Closed.
-- 070 Report scenario failures per file instead of stopping at the first. Type task, HITL. Follows 060. Optional.
+- 070 Report scenario failures per file instead of stopping at the first. Type task, HITL. Follows 060. Optional. Closed.
 - 071 Move the targeting and layer tests the scenario schema can express to TOML. Type task, HITL. Blocked by 070. Optional.
 
 ### C. Lua API audit and cleanup
@@ -114,9 +115,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 070
+- 071
 
-Blocked: 071 (by 070).
+Blocked: none.
 
 ## Not yet specified
 

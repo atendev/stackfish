@@ -9,7 +9,8 @@ plus assertions to check afterward. Used by:
 
 - `cargo test --workspace` — runs every `.toml` file under `crates/engine/tests/scenarios/`
   automatically, including subdirectories like `combat/` and `mechanics/banding/` (see
-  `crates/engine/tests/scenarios.rs`).
+  `crates/engine/tests/scenarios.rs`). The test runs every file before it fails, then lists
+  each failing file with its failed entries, or the panic message if the file could not load.
 - `cargo run -p stackfish-cli -- path/to/scenario.toml` — runs one scenario file and prints a
   report. Use this for one-off manual or AI-driven testing.
 - `cargo run -p stackfish-cli -- db-tests path/to/cards.sqlite` — runs every active row in that
