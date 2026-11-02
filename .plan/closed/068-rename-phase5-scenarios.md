@@ -3,9 +3,9 @@ id: 068
 title: Rename the phase5 TOML scenarios into feature folders and fix their references
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: [060]
-claimed: true
+claimed: false
 ---
 
 ## Question
