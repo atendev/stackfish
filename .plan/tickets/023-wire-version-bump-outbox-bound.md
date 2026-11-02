@@ -4,7 +4,7 @@ title: Wire version bump and outbox bound
 type: task
 mode: HITL
 status: open
-blocked_by: [020]
+blocked_by: [020, 021]
 claimed: false
 ---
 
