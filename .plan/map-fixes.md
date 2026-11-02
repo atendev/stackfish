@@ -26,6 +26,7 @@ Every item left open by the closed Host protocol tickets (001 to 015) is either 
 - 026 Whole-declaration combat predicates. Menace and "attacks each combat if able" are one module, `commands/combat/predicate.rs`, shared by validation and the entry builders. [closed/026-whole-declaration-predicates.md]
 - 036 Mode-combination predicate. `mode_can_join_others` in `commands/legality.rs` is the one rule for the cast, the modal entries, modal triggers and the opponent's mode choice. [closed/036-mode-combination-predicate.md]
 - 017 Reconcile stale notes and policy conflicts. `.plan/` is committed. The user confirmed 007's rejected-Answer shape, the `seat`-less `setup`, and the deleted 010 to 015 branches. 009, 010 and 011 now match what 015 and the repo show. [closed/017-reconcile-stale-notes.md]
+- 027 Revealed producers and the free-text event rule. A revealing `Game.Ops.Search` and amplify log `Revealed`. `face_down` has no producer, since face-down mechanics are a non-goal. `GameState::script_error_message` keeps a hidden card's id and script text out of `ScriptError`, and `DESIGN.md` holds the rule. [closed/027-revealed-face-down-producers.md]
 
 ## Not yet specified
 
@@ -82,7 +83,7 @@ Ticket types and modes follow `README.md`.
 - 036 Mode-combination predicate. Type task, HITL. Blocked by 035. Origin 011. Decided in 024. Closed.
   - An impossible mode pair (`combine_chosen_modes` cannot combine it) is rejected at announcement and not listed in the modal entries.
   - Shares the predicate between the entries and the cast validation.
-- 027 Revealed and face-down producers, and the event-writing rule. Type task, HITL. Origin 004, 013.
+- 027 Revealed and face-down producers, and the event-writing rule. Type task, HITL. Origin 004, 013. Closed.
   - The engine never emits `Revealed` or `face_down`.
   - Write the rule "never put a hidden identity in a free-text event field" into the engine's event-writing guidelines (`ScriptError`, `StateBasedActionApplied`, `RngDrawn`).
 - 028 Audit unordered `HashMap` walks over game state. Type task, HITL. Origin 014.
@@ -119,7 +120,7 @@ Ticket types and modes follow `README.md`.
 
 Open tickets, unblocked and unclaimed. 020 unblocks 021 to 023. 034 is research, so a subagent can take it alone.
 
-- 020, 027, 028, 029, 030, 031, 032, 033, 034
+- 020, 028, 029, 030, 031, 032, 033, 034
 
 Blocked:
 
