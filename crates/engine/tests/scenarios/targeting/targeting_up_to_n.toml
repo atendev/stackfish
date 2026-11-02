@@ -1,0 +1,86 @@
+# CR 115.6, 601.2c: an "up to two" spell cast with zero targets is legal and
+# still resolves to the graveyard. The 1-or-2-target, rejection and fizzle
+# cases stay in crates/engine/tests/targeting_up_to_n.rs, since they assert
+# damage marked, ledger event kinds or the rejection variant.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear_a"
+name = "Bear A"
+types = ["Creature"]
+power = 2
+toughness = 5
+
+[[cards]]
+key = "bear_b"
+name = "Bear B"
+types = ["Creature"]
+power = 2
+toughness = 5
+
+[[cards]]
+key = "volley"
+name = "Test Volley"
+types = ["Instant"]
+
+[cards.target_requirement]
+filter = "object"
+card_types = ["Creature"]
+count = 2
+up_to = true
+
+# Two legal targets exist, so choosing none is the caster's choice and not a
+# lack of candidates.
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "bear_a"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "bear_b"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "volley"
+
+[[steps]]
+type = "advance_to_phase"
+phase = "main"
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "volley"
+targets = []
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_object_zone"
+card = "volley"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_priority_player"
+equals = 0

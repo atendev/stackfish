@@ -28,6 +28,13 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     are not built.
   - The spell-load word check in `pregame` has no integration test, and a two-word fight on an ability is untested.
   - Scenario TOML has no field for a chain.
+- **Scenario assertions the Rust targeting and layer tests need**: 28 of the 32 tests in `targeting_basics`,
+  `targeting_up_to_n`, `targeting_at_least_n` and `layer_engine_basics` stay in Rust because the schema lacks:
+  - `expect_error` with a rejection variant (it accepts any error, so the `InvalidTarget` tests can't move).
+  - An exact `damage_marked` assertion, and a `CardSpec` resolution effect without a Lua script.
+  - Ledger event kinds present or absent (`Fizzled`, `StackObjectResolved`) and a stack object's targets.
+  - Effective power, toughness and keywords after layers, and a per-effect timestamp on `continuous_effect`.
+  - A mid-scenario state edit that makes a chosen target leave play, for the fizzle tests.
 - **Godot adapter (`phase5/godot-adapter`, B6)**: see `20-godot-adapter.md`. Open items:
   - `create` serves only the proof card set until the carddb-backed `CardSource` exists.
   - Export (copy step into `res://`, macOS `.framework`), web, hot reload and the late-join snapshot are untouched.

@@ -1,0 +1,49 @@
+# CR 613.1f, 702.12b, 704.5g: Indestructible granted by a layer 6 effect stops
+# the lethal-damage state-based action, same as a printed one does in
+# combat/keyword_primitives.toml.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "source"
+name = "Test Enchantment"
+types = ["Enchantment"]
+
+[cards.continuous_effect]
+layer = "ability_adding"
+keywords = ["Indestructible"]
+filter_card_types = ["Creature"]
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "source"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+damage_marked = 5
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"

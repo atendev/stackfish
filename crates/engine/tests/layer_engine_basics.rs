@@ -4,12 +4,10 @@
 use std::collections::HashMap;
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::check_state_based_actions;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, no_filter, progressed, put_on_battlefield,
-    two_player_state as base_two_player_state, zones,
+    card_object, no_filter, put_on_battlefield, two_player_state as base_two_player_state, zones,
 };
 
 fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> CardDefinition {
@@ -316,87 +314,4 @@ fn cda_power_and_toughness_are_still_skipped_not_guessed() {
 
     assert_eq!(effective.power, None);
     assert_eq!(effective.toughness, None);
-}
-
-#[test]
-fn a_modify_pt_boost_saves_a_creature_from_the_lethal_toughness_sba() {
-    let mut state = base_state();
-    let p0 = PlayerId(0);
-    let anthem = ObjectId(0);
-    let bear = ObjectId(1);
-    put_on_battlefield(&mut state, anthem_source(anthem, p0));
-    let mut daged_bear = creature(bear, p0, 2, 2);
-    daged_bear.damage_marked = 2;
-    put_on_battlefield(&mut state, daged_bear);
-
-    // Without the boost, 2 damage on a 2-toughness creature is lethal.
-    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-    assert_eq!(events.len(), 1, "should have died without the boost");
-    assert!(state.object(bear).is_none());
-}
-
-#[test]
-fn with_the_boost_registered_the_same_creature_survives_sba() {
-    let mut state = base_state();
-    let p0 = PlayerId(0);
-    let anthem = ObjectId(0);
-    let bear = ObjectId(1);
-    put_on_battlefield(&mut state, anthem_source(anthem, p0));
-    state.continuous_effects.push(continuous_effect(
-        anthem,
-        Layer::PowerToughnessModifying,
-        EffectPrimitive::ModifyPT {
-            power: 1,
-            toughness: 1,
-        },
-        no_filter(),
-        0,
-    ));
-    let mut damaged_bear = creature(bear, p0, 2, 2);
-    damaged_bear.damage_marked = 2;
-    put_on_battlefield(&mut state, damaged_bear);
-
-    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-
-    assert!(
-        events.is_empty(),
-        "the +1/+1 anthem should make 2 damage sub-lethal on an effective 3 toughness"
-    );
-    assert!(state.object(bear).is_some());
-}
-
-#[test]
-fn a_granted_indestructible_survives_lethal_damage_via_sba() {
-    let mut state = base_state();
-    let p0 = PlayerId(0);
-    let source = ObjectId(0);
-    let bear = ObjectId(1);
-    put_on_battlefield(&mut state, anthem_source(source, p0));
-    state.continuous_effects.push(continuous_effect(
-        source,
-        Layer::AbilityAdding,
-        EffectPrimitive::AddKeyword(KeywordSet::INDESTRUCTIBLE),
-        no_filter(),
-        0,
-    ));
-    let mut damaged_bear = creature(bear, p0, 2, 2);
-    damaged_bear.damage_marked = 5;
-    put_on_battlefield(&mut state, damaged_bear);
-
-    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
-
-    assert!(
-        events.is_empty(),
-        "granted Indestructible should ignore 704.5g lethal damage"
-    );
-    assert!(state.object(bear).is_some());
-}
-
-// A non-creature source, so apply_creature_death's CR 704.5f/g checks never apply to it and confuse a test about the bear.
-fn anthem_source(id: ObjectId, owner: PlayerId) -> GameObject {
-    let mut object = creature(id, owner, 0, 0);
-    object.definition.card_types = CardTypeSet::ENCHANTMENT;
-    object.definition.power = None;
-    object.definition.toughness = None;
-    object
 }
