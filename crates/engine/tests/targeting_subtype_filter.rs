@@ -1,15 +1,14 @@
 //! CR 205.4b: subtype target restrictions ("target Human", "Equip Dragons") through `TargetFilter::Object::subtypes`, an "or" match against effective subtypes via `effective_characteristics`. It closes the gap on `target.rs`'s TODO list.
 //! Two consumers use it: a cast-time `TargetSpec::Primitive` and the shared Lua table decoder `decode_target_filter_table`.
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::Engine;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, cast_spell, pass_both_and_drain, pay_free_and_drain, try_cast_spell,
+    two_player_main_phase_state,
 };
 
 fn creature_definition(id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefinition {
@@ -146,82 +145,6 @@ fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     state.objects.insert(id, obj);
 }
 
-fn base_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn try_cast_spell(
-    engine: &mut Engine,
-    player: PlayerId,
-    card: ObjectId,
-    targets: Vec<Target>,
-) -> Result<(), ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::CastSpell {
-            card,
-            modes: Vec::new(),
-            targets,
-            x_value: None,
-            alternative_cost: None,
-            pay_buyback: false,
-        },
-    })
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) {
     engine
         .submit_action(PlayerAction {
@@ -258,7 +181,7 @@ fn try_activate(
 // CR 205.4b
 #[test]
 fn casting_at_a_matching_subtype_creature_is_accepted() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let target = ObjectId(0);
     put_on_battlefield(
@@ -295,7 +218,7 @@ fn casting_at_a_matching_subtype_creature_is_accepted() {
 
 #[test]
 fn casting_at_a_non_matching_subtype_creature_is_rejected() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let target = ObjectId(0);
     put_on_battlefield(
@@ -329,7 +252,7 @@ fn casting_at_a_non_matching_subtype_creature_is_rejected() {
 #[test]
 fn spell_fizzles_when_targets_subtype_changes_before_resolution() {
     // Re-checked fresh at resolution (CR 608.2b). RemoveAllAbilities does not touch subtypes, so this simulates the target leaving the battlefield.
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -374,7 +297,7 @@ fn spell_fizzles_when_targets_subtype_changes_before_resolution() {
 // CR 702.6c
 #[test]
 fn game_selecttargets_decoder_accepts_a_subtypes_key_for_equip() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let equipment = ObjectId(0);
     let mut definition = equipment_definition();
@@ -402,7 +325,7 @@ fn game_selecttargets_decoder_accepts_a_subtypes_key_for_equip() {
 
 #[test]
 fn equipping_a_non_matching_subtype_creature_is_rejected() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let equipment = ObjectId(1);
@@ -437,7 +360,7 @@ fn equipping_a_non_matching_subtype_creature_is_rejected() {
 
 #[test]
 fn equipping_a_matching_subtype_creature_attaches_it() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let dragon = ObjectId(0);

@@ -7,7 +7,7 @@ use stackfish_engine::triggers::collect_triggers;
 use stackfish_engine::*;
 use stackfish_testutil::{
     card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
-    two_player_state as base_two_player_state,
+    pay_free_and_drain, two_player_state as base_two_player_state,
 };
 
 const CONDITION_ENTERS_BATTLEFIELD: &str = r#"
@@ -236,20 +236,6 @@ fn engine_load_script_rejects_malformed_lua() {
         result.is_err(),
         "a syntax error should fail to load, not panic"
     );
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {

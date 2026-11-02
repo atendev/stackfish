@@ -1,10 +1,13 @@
 //! CR 701.8, 601.2c: `AbilityEffect::DestroyAll(EffectFilter)` is "destroy all X", which does not target. It reuses the `EffectFilter` shape of `:SetAffected` (controller, card types, subtypes, supertypes: CR 205.4a/b) and the `Destroy` pipeline, so indestructible (CR 702.12b) and `WouldDie` replacement (CR 614.13) apply.
 //! Armageddon is `return Game.Ops.DestroyAll({ card_types = { "Land" } })`.
 
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::Engine;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state};
+use stackfish_testutil::{
+    card_object, hand_battlefield_graveyard_zones, pass_both_and_drain, pay_free_and_drain,
+    two_player_state,
+};
 
 #[test]
 fn destroy_all_decodes_a_card_types_and_controller_filter() {
@@ -249,37 +252,6 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 fn is_on_battlefield(engine: &Engine, name: &str) -> bool {

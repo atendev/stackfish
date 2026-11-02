@@ -4,26 +4,12 @@
 use std::collections::VecDeque;
 
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
+use stackfish_engine::sba::check_state_based_actions;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, player_state, single_player_state};
-
-// No fixture registers a ReplacementEffect on a dying creature, so a CR 616.1 pause here would mean the fixture is wrong.
-fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
-    match outcome {
-        SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => {
-            panic!("fixture didn't expect a replacement ordering-choice pause")
-        }
-        SbaOutcome::NeedsLegendRuleChoice { .. } => {
-            panic!("fixture didn't expect a legend-rule choice pause")
-        }
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
-            panic!("fixture didn't expect a commander-return choice pause")
-        }
-    }
-}
+use stackfish_testutil::{
+    card_object, drain, player_state, progressed, put_on_battlefield, single_player_state,
+};
 
 fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -77,15 +63,6 @@ fn base_state() -> GameState {
             ],
         )
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 // One solo-player PassPriority plus drain advances exactly one step transition.

@@ -7,7 +7,10 @@ use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    assign_combat_damage, card_object, drain, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(
     name: &str,
@@ -53,15 +56,6 @@ fn permanent(
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn combat_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -98,20 +92,6 @@ fn declare_blockers(
             kind: PlayerActionKind::DeclareBlockers { blocks },
         })
         .expect("player holds priority");
-    drain(engine)
-}
-
-fn assign_combat_damage(
-    engine: &mut Engine,
-    player: PlayerId,
-    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::AssignCombatDamage { assignments },
-        })
-        .expect("turn-based action, no priority required");
     drain(engine)
 }
 

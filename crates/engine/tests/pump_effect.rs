@@ -1,14 +1,13 @@
 //! CR 611.2a: `AbilityEffect::Pump` (`Game.Ops.Pump(power, toughness, duration)`) is the first creation path for `UntilYourNextTurn` and `UntilEndOfCombat` effects, resolving against every legal target like `Damage` and `Counters`.
 //! `CardDefinition.effect` is set directly to take the Rust fast path in `ResolveStackTop`, as in script_ops_damage.rs.
 
-use std::collections::HashMap;
-
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, cast_spell, drain, pass_both_and_drain, pay_free_and_drain,
+    two_player_main_phase_state,
 };
 
 fn creature_definition(
@@ -80,63 +79,6 @@ fn growth_definition(duration: EffectDuration) -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 // Passes priority until the active player rotates, that is, until Cleanup has run.
 fn advance_to_next_turn(engine: &mut Engine) {
     let starting_turn = engine.state().turn_number;
@@ -160,7 +102,7 @@ fn advance_to_next_turn(engine: &mut Engine) {
 
 #[test]
 fn pump_spell_boosts_its_target_immediately_on_resolution() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -209,7 +151,7 @@ fn pump_spell_boosts_its_target_immediately_on_resolution() {
 
 #[test]
 fn pump_effect_is_pinned_to_its_target_not_the_spells_own_source() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -271,7 +213,7 @@ fn pump_effect_is_pinned_to_its_target_not_the_spells_own_source() {
 
 #[test]
 fn until_end_of_turn_pump_expires_by_the_start_of_the_next_turn() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -331,7 +273,7 @@ fn until_end_of_turn_pump_expires_by_the_start_of_the_next_turn() {
 
 #[test]
 fn permanent_duration_pump_survives_into_the_next_turn() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);

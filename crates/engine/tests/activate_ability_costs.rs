@@ -5,7 +5,7 @@ use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, single_player_state};
+use stackfish_testutil::{card_object, drain, last_zone_change, single_player_state};
 
 fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
@@ -146,18 +146,6 @@ fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: Obj
         matches!(status, StepStatus::AwaitingPayment { .. }),
         "expected a pause for the ability's cost, got {status:?}"
     );
-}
-
-fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
-    for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange {
-            object, from, to, ..
-        } = event.kind
-        {
-            return (object, from, to);
-        }
-    }
-    panic!("expected a ZoneChange event in the ledger");
 }
 
 #[test]

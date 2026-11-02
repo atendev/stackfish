@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{ActionError, CascadeChoiceError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+    card_object, drain, pass_both_and_drain, player_state,
+    two_player_state as base_two_player_state, zones,
 };
 
 fn cascade_spell_definition() -> CardDefinition {
@@ -150,23 +151,6 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand");
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 fn library_top_to_bottom(state: &mut GameState, p0: PlayerId, defs: Vec<(u64, CardDefinition)>) {

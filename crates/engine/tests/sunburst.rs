@@ -7,7 +7,8 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::types::cost::colors_spent;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, last_zone_change,
+    two_player_state as base_two_player_state,
 };
 
 fn creature_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDefinition {
@@ -349,18 +350,6 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand, main phase, empty stack");
-}
-
-fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
-    for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange {
-            object, from, to, ..
-        } = event.kind
-        {
-            return (object, from, to);
-        }
-    }
-    panic!("expected a ZoneChange event in the ledger");
 }
 
 #[test]

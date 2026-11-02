@@ -6,8 +6,8 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, player_state,
-    two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, pass_both_and_drain, player_state,
+    put_on_battlefield, two_player_state as base_two_player_state,
 };
 
 fn creature_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDefinition {
@@ -50,15 +50,6 @@ fn two_player_state_with_pool(pool: ManaPool) -> GameState {
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn cast_with_x(engine: &mut Engine, player: PlayerId, card: ObjectId, x_value: u32) {
     engine
         .submit_action(PlayerAction {
@@ -90,23 +81,6 @@ fn pay_x_and_drain(engine: &mut Engine, x: u32) -> StepStatus {
             }],
         })
         .expect("X colorless mana covers a bare {X} cost exactly");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
     drain(engine)
 }
 

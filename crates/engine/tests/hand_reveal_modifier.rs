@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, hand_battlefield_graveyard_zones, put_on_battlefield,
+    two_player_state as base_two_player_state,
 };
 
 const ENCHANTED_PLAYER_HAND_REVEALED: &str = r#"
@@ -54,15 +55,6 @@ fn two_player_state() -> GameState {
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
         ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 #[test]

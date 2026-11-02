@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, pass_both_and_drain, two_player_state as base_two_player_state, zones,
+};
 
 fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
@@ -135,23 +137,6 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
             payments: Vec::new(),
         })
         .expect("free cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
     drain(engine)
 }
 

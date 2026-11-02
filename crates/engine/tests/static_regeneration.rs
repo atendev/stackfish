@@ -1,14 +1,10 @@
 //! CR 701.19b: `Game.CreateReplacementEffect` registers a repeatable regeneration shield (`ConsumptionPolicy::Repeatable`, `WouldDie`, `Regenerate`) from a static ability.
 //! CR 701.19c (can't be regenerated) is checked fresh each time the shield is asked to apply (`ReplacementEffect::matches`), since the target's status can change after the shield was registered.
 
-use std::collections::HashMap;
-
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{
-    card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
-};
+use stackfish_testutil::{card_object, two_player_main_phase_state};
 
 const STATIC_REGENERATE_SELF: &str = r#"
 local s = {}
@@ -47,19 +43,9 @@ fn creature_definition(toughness: i32, keywords: KeywordSet, script: &str) -> Ca
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 #[test]
 fn run_card_script_self_registers_a_repeatable_regeneration_shield() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let creature = ObjectId(0);
     let definition = creature_definition(2, KeywordSet::empty(), STATIC_REGENERATE_SELF);
     state.objects.insert(
@@ -97,7 +83,7 @@ fn run_card_script_self_registers_a_repeatable_regeneration_shield() {
 
 #[test]
 fn static_regeneration_shield_survives_being_used_and_saves_target_twice() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let creature = ObjectId(0);
     let object = card_object(
         creature,
@@ -191,7 +177,7 @@ fn static_regeneration_shield_survives_being_used_and_saves_target_twice() {
 
 #[test]
 fn static_regeneration_shield_does_not_save_a_target_that_later_cant_be_regenerated() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let creature = ObjectId(0);
     let object = card_object(
         creature,

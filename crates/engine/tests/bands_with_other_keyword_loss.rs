@@ -9,7 +9,10 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    declare_attackers, drain, permanent, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(
     id: u64,
@@ -48,19 +51,6 @@ fn legendary_creature_definition(id: u64, name: &str, keywords: KeywordSet) -> C
         supertypes: SupertypeSet::LEGENDARY,
         ..creature_definition(id, name, &[], keywords)
     }
-}
-
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn bands_with_other(source: ObjectId, quality: &str) -> ContinuousEffect {
@@ -134,18 +124,6 @@ fn combat_state() -> GameState {
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield]))
     }
-}
-
-fn declare_attackers(
-    engine: &mut Engine,
-    player: PlayerId,
-    attackers: Vec<(ObjectId, Target)>,
-) -> Result<StepStatus, ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::DeclareAttackers { attackers },
-    })?;
-    Ok(drain(engine))
 }
 
 fn declare_bands(

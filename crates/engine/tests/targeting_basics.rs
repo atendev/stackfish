@@ -5,7 +5,8 @@ use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, cast_spell, drain, hand_battlefield_graveyard_zones, pay_free_and_drain,
+    try_cast_spell, two_player_state as base_two_player_state,
 };
 
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
@@ -140,55 +141,6 @@ fn pump_definition() -> CardDefinition {
 
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn try_cast_spell(
-    engine: &mut Engine,
-    player: PlayerId,
-    card: ObjectId,
-    targets: Vec<Target>,
-) -> Result<(), ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::CastSpell {
-            card,
-            modes: Vec::new(),
-            targets,
-            x_value: None,
-            alternative_cost: None,
-            pay_buyback: false,
-        },
-    })
 }
 
 #[test]

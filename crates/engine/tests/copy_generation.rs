@@ -5,7 +5,7 @@
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::triggers::collect_triggers;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state, zones};
+use stackfish_testutil::{card_object, put_on_battlefield, two_player_state, zones};
 
 fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
@@ -62,15 +62,6 @@ fn any_event() -> GameEvent {
         caused_by_command: None,
         parent_event: None,
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn base_state() -> GameState {

@@ -4,7 +4,7 @@
 use stackfish_engine::engine::{Engine, ScriptChoiceError, StepStatus};
 use stackfish_engine::script::ScriptChoiceRequest;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, single_player_state};
+use stackfish_testutil::{card_object, drain, put_on_battlefield, single_player_state};
 
 const SELF_REGISTERING_SELECT_TARGET_THEN_GAIN_LIFE: &str = r#"
 local s = {}
@@ -154,15 +154,6 @@ fn base_state() -> GameState {
             Zone::new(ZoneKind::Graveyard, Some(p0)),
         ],
     )
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 // Plays the self-registering land, activates its ability, pays {0}, and drains. Returns the land's post-CR 400.7 battlefield id.

@@ -6,8 +6,8 @@ use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
-    two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, last_zone_change,
+    minimal_card_definition, pay_free_and_drain, two_player_state as base_two_player_state,
 };
 
 fn land_definition() -> CardDefinition {
@@ -67,34 +67,6 @@ fn creature_definition() -> CardDefinition {
 
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
-}
-
-// Asserts the engine paused on `AwaitingPayment` before paying the empty plan CR 118.5a requires.
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-// Each move mints a new ObjectId (CR 400.7), so tests read the last ZoneChange and not the original id.
-fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
-    for event in engine.state().ledger.iter().rev() {
-        if let GameEventKind::ZoneChange {
-            object, from, to, ..
-        } = event.kind
-        {
-            return (object, from, to);
-        }
-    }
-    panic!("expected a ZoneChange event in the ledger");
 }
 
 #[test]

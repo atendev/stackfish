@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+    assign_combat_damage, card_object, drain, player_state, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
 };
 
 fn creature_definition(
@@ -54,15 +55,6 @@ fn permanent(
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 // Starts at 40 life so one 21-power hit does not also cause the ordinary 0-life SBA loss, which isolates the commander-damage loss.
 fn combat_damage_state(combat: CombatState) -> GameState {
     let p0 = PlayerId(0);
@@ -84,20 +76,6 @@ fn combat_damage_state(combat: CombatState) -> GameState {
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield]))
     }
-}
-
-fn assign_combat_damage(
-    engine: &mut Engine,
-    player: PlayerId,
-    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::AssignCombatDamage { assignments },
-        })
-        .expect("turn-based action, no priority required");
-    drain(engine)
 }
 
 #[test]

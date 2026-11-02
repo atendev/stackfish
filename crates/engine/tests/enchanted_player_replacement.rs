@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, zones};
+use stackfish_testutil::{card_object, put_on_battlefield, zones};
 
 const WHEEL_OF_SUN_AND_MOON: &str = r#"
 local s = {}
@@ -105,15 +105,6 @@ fn wheel_effect(source: ObjectId) -> ReplacementEffect {
         },
         consumption: ConsumptionPolicy::Repeatable,
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 #[test]

@@ -11,7 +11,7 @@ use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, minimal_card_definition, single_player_state,
+    card_object, drain, minimal_card_definition, pass_both_and_drain, single_player_state,
     two_player_state as base_two_player_state, zones,
 };
 
@@ -602,23 +602,6 @@ fn state_at_upkeep_turn_2(p0: PlayerId, p1: PlayerId) -> GameState {
     }
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn a_card_drawn_from_the_library_gets_its_cycling_ability_registered_in_hand() {
     let p0 = PlayerId(0);
@@ -654,7 +637,7 @@ fn a_card_drawn_from_the_library_gets_its_cycling_ability_registered_in_hand() {
         .push_bottom(filler);
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().step, Step::Draw);
 
@@ -685,7 +668,7 @@ fn a_card_drawn_from_the_library_gets_its_cycling_ability_registered_in_hand() {
         })
         .expect("discarding the drawn card itself pays DiscardSelf");
     drain(&mut engine);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     assert_eq!(
         engine

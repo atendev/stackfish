@@ -4,36 +4,9 @@
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, player_state,
-    two_player_state as base_two_player_state,
+    card_object, creature_definition, hand_battlefield_graveyard_zones, pass_both_and_drain,
+    pay_free_and_drain, player_state, two_player_state as base_two_player_state,
 };
-
-fn creature_definition(name: &str) -> CardDefinition {
-    CardDefinition {
-        definition_id: 1,
-        name: name.to_string(),
-        mana_cost: ManaCost {
-            symbols: Vec::new(),
-        },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: Some(PTValue::Fixed(2)),
-        toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("bear".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        buyback_cost: None,
-        effect: None,
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-    }
-}
 
 fn heal_spell_definition() -> CardDefinition {
     CardDefinition {
@@ -98,23 +71,6 @@ fn two_player_state(p0_life: i32) -> GameState {
     }
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
@@ -129,20 +85,6 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
 }
 
 #[test]
@@ -170,7 +112,7 @@ fn intervening_if_false_at_trigger_time_never_triggers_at_all() {
         .push(interveningif_upkeep_ability(permanent, 5));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().step, Step::Upkeep);
     assert!(
@@ -209,7 +151,7 @@ fn intervening_if_true_throughout_resolves_normally() {
         .push(interveningif_upkeep_ability(permanent, 5));
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().stack.len(),
@@ -217,7 +159,7 @@ fn intervening_if_true_throughout_resolves_normally() {
         "intervening-if true at trigger time - collected and pushed"
     );
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(
         engine.state().stack.is_empty(),
@@ -264,7 +206,7 @@ fn a_response_spell_invalidating_the_condition_fizzles_the_trigger_at_resolution
         .push_bottom(heal);
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().stack.len(),
@@ -282,7 +224,7 @@ fn a_response_spell_invalidating_the_condition_fizzles_the_trigger_at_resolution
     );
 
     // The heal resolves first and raises life to 13, above the threshold, before the trigger resolves.
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().player(p0).unwrap().life,
@@ -296,7 +238,7 @@ fn a_response_spell_invalidating_the_condition_fizzles_the_trigger_at_resolution
     );
 
     // The trigger's CR 608.2a recheck sees life 13 > threshold 5, so it is removed from the stack and does nothing.
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty());
     assert_eq!(

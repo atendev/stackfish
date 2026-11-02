@@ -7,7 +7,8 @@ use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+    card_object, drain, pass_both_and_drain, player_state,
+    two_player_state as base_two_player_state, zones,
 };
 
 const ESCAPE_GATED_EFFECTS: &str = r#"
@@ -157,23 +158,6 @@ fn cast_spell(
         .expect("player controls the card and holds priority");
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 // The fresh CR 400.7 id minted by casting, not the graveyard or hand id.
 fn sole_battlefield_object(engine: &Engine) -> ObjectId {
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
@@ -240,7 +224,7 @@ fn escaping_grants_the_life_trigger_counters_and_conditional_keyword() {
     drain(&mut engine);
 
     // Resolve the escaping creature itself off the stack.
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     let permanent = sole_battlefield_object(&engine);
     assert!(
         engine.state().object(permanent).unwrap().entered_via_escape,
@@ -268,7 +252,7 @@ fn escaping_grants_the_life_trigger_counters_and_conditional_keyword() {
         1,
         "the Escaped-gated ETB trigger was collected"
     );
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     assert_eq!(
         engine.state().player(p0).unwrap().life,
         21,
@@ -313,7 +297,7 @@ fn casting_normally_grants_none_of_the_escape_gated_effects() {
         .expect("the plain {2}{B} mana cost is a legal payment");
     drain(&mut engine);
 
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
     let permanent = sole_battlefield_object(&engine);
     assert!(
         !engine.state().object(permanent).unwrap().entered_via_escape,

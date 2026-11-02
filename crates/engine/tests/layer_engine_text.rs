@@ -8,7 +8,9 @@ use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, no_filter, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
@@ -19,15 +21,6 @@ fn base_state() -> GameState {
         last_active_turn_number: HashMap::from([(p0, 1)]),
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn permanent_definition(
@@ -84,18 +77,6 @@ fn permanent(
             owner,
             ZoneKind::Battlefield,
         )
-    }
-}
-
-fn no_filter() -> EffectFilter {
-    EffectFilter {
-        controller: None,
-        card_types: None,
-        self_only: false,
-        subtypes: None,
-        excluded_subtypes: None,
-        supertypes: None,
-        excluded_supertypes: None,
     }
 }
 

@@ -6,7 +6,7 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
     card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition,
-    two_player_state as base_two_player_state,
+    pay_free_and_drain, two_player_state as base_two_player_state,
 };
 
 const SELF_BUFF: &str = r#"
@@ -453,20 +453,6 @@ fn dying_creatures_registered_static_ability_is_purged_by_sba() {
         "the dead creature's self-registered continuous effect must be purged via retire_object, \
          not left dangling"
     );
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {

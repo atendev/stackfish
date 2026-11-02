@@ -2,16 +2,12 @@
 //! `invoke_target_legal` is a static per-candidate predicate checked once at cast or activation from `target_is_legal`, and not a `Game.SelectTargets` suspension. CR 702.16e protection still gates a script-legal candidate.
 // TODO: a player-target script predicate, since candidates are `Target::Object` only
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
-};
+use stackfish_testutil::{drain, permanent, two_player_main_phase_state};
 
 const SCRIPTED_POWER_FOUR_TARGET: &str = r#"
 local s = {}
@@ -85,10 +81,6 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
 fn put_on_battlefield(state: &mut GameState, obj: GameObject) {
     let id = obj.object_id;
     state
@@ -130,19 +122,9 @@ fn protection_from_land(source: ObjectId) -> ContinuousEffect {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 #[test]
 fn set_target_with_a_function_self_registers_a_scripted_target_filter() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let land = ObjectId(0);
     let definition = land_definition(1, SCRIPTED_POWER_FOUR_TARGET);
     put_on_battlefield(&mut state, permanent(land, definition.clone(), PlayerId(0)));
@@ -170,7 +152,7 @@ fn try_play_land_and_activate(
 ) -> (Engine, Result<(), ActionError>) {
     let p0 = PlayerId(0);
     let land = ObjectId(0);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_in_hand(
         &mut state,
         permanent(land, land_definition(1, SCRIPTED_POWER_FOUR_TARGET), p0),
@@ -271,7 +253,7 @@ fn a_player_target_is_rejected_outright_by_a_script_filter() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let land = ObjectId(0);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_in_hand(
         &mut state,
         permanent(land, land_definition(1, SCRIPTED_POWER_FOUR_TARGET), p0),

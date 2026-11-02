@@ -6,7 +6,9 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, pass_both_and_drain, two_player_state as base_two_player_state, zones,
+};
 
 fn land_definition(name: &str) -> CardDefinition {
     CardDefinition {
@@ -93,23 +95,6 @@ fn state_at_upkeep_turn_2() -> GameState {
     state
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 const DRAW_GOES_TO_EXILE_INSTEAD: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -146,7 +131,7 @@ fn a_turn_based_draw_is_replacement_checked_for_real() {
     assert_eq!(state.replacement_effects.len(), 1);
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().step, Step::Draw);
 
@@ -198,7 +183,7 @@ fn a_turn_based_draw_without_a_matching_replacement_lands_in_hand_normally() {
     // No replacement effect is registered: the ward object exists but its script is empty.
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     assert_eq!(
         engine
@@ -228,7 +213,7 @@ fn drawing_from_an_empty_library_still_sets_drew_from_empty_library() {
     let state = state_at_upkeep_turn_2();
 
     let mut engine = Engine::new(state);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(
         engine.state().player(p0).unwrap().drew_from_empty_library,
@@ -289,7 +274,7 @@ fn two_matching_wards_pause_the_draw_for_a_cr_616_1_choice() {
     assert_eq!(state.replacement_effects.len(), 2);
 
     let mut engine = Engine::new(state);
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     let StepStatus::AwaitingReplacementChoice { player, candidates } = status else {
         panic!(
             "two matching replacement effects on a turn-based draw must pause for a CR 616.1 choice, got {status:?}"

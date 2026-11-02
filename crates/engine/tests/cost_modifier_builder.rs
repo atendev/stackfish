@@ -2,14 +2,10 @@
 //! `controller` cannot be set from Lua, so `:Register()` queues a placeholder and the drain step in `run_card_script` resolves the real value.
 //! Closes the CostModifier TODO for a Lua construction path.
 
-use std::collections::HashMap;
-
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
-};
+use stackfish_testutil::{card_object, drain, two_player_main_phase_state};
 
 const CREATURES_COST_ONE_LESS: &str = r#"
 local s = {}
@@ -136,16 +132,6 @@ fn white_bear_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -157,7 +143,7 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 
 #[test]
 fn run_card_script_self_registers_a_cost_modifier() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let land = ObjectId(0);
     let definition = land_definition(CREATURES_COST_ONE_LESS);
     state.objects.insert(
@@ -184,7 +170,7 @@ fn run_card_script_self_registers_a_cost_modifier() {
 
 #[test]
 fn run_card_script_self_registers_a_colored_cost_modifier() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let land = ObjectId(0);
     let definition = land_definition(CREATURES_COST_W_LESS);
     state.objects.insert(
@@ -205,7 +191,7 @@ fn run_card_script_self_registers_a_colored_cost_modifier() {
 
 #[test]
 fn register_without_set_filter_is_an_error() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let land = ObjectId(0);
     let definition = land_definition(NO_SET_FILTER);
     state.objects.insert(
@@ -221,7 +207,7 @@ fn register_without_set_filter_is_an_error() {
 
 #[test]
 fn register_without_set_amount_is_an_error() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let land = ObjectId(0);
     let definition = land_definition(NO_SET_AMOUNT);
     state.objects.insert(
@@ -241,7 +227,7 @@ fn play_land_self_registered_cost_modifier_reduces_a_matching_spells_cost_end_to
     let p1 = PlayerId(1);
     let land = ObjectId(0);
     let bear = ObjectId(1);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     state.objects.insert(
         land,
         card_object(
@@ -333,7 +319,7 @@ fn play_land_self_registered_colored_cost_modifier_reduces_a_matching_spells_cos
     let p1 = PlayerId(1);
     let land = ObjectId(0);
     let bear = ObjectId(1);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     state.objects.insert(
         land,
         card_object(

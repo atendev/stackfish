@@ -9,7 +9,10 @@ use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, cast_spell, drain, pass_both_and_drain, pay_free_and_drain, permanent,
+    put_on_battlefield, try_cast_spell, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
@@ -36,19 +39,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     }
-}
-
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn stifle_definition() -> CardDefinition {
@@ -157,72 +147,6 @@ fn two_player_state() -> GameState {
             ],
         ))
     }
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn try_cast_spell(
-    engine: &mut Engine,
-    player: PlayerId,
-    card: ObjectId,
-    targets: Vec<Target>,
-) -> Result<(), ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::CastSpell {
-            card,
-            modes: Vec::new(),
-            targets,
-            x_value: None,
-            alternative_cost: None,
-            pay_buyback: false,
-        },
-    })
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 #[test]

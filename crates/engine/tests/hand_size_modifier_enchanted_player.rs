@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 const ENCHANTED_PLAYER_HAND_SIZE_THREE: &str = r#"
 local s = {}
@@ -111,24 +113,6 @@ fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) {
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -139,19 +123,19 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 }
 
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 end-step priority, got {s:?}"
     );
     pass(engine, p0);
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p1),
         "expected p1 end-step priority, got {s:?}"
     );
     pass(engine, p1);
-    step_until_pause(engine)
+    drain(engine)
 }
 
 #[test]

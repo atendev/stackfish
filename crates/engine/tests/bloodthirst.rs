@@ -21,12 +21,13 @@
 //! opponents this turn, not a fixed gate) reuses the identical scan and is
 //! a named, cheap follow-up - not built this slice.
 
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::Engine;
 use stackfish_engine::replacement;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, pay_free_and_drain,
+    two_player_state as base_two_player_state,
 };
 
 fn creature_definition(name: &str, script: &str) -> CardDefinition {
@@ -354,20 +355,6 @@ fn set_payload_bloodthirst_registers_correctly() {
             "expected a WouldMoveZone(_, Battlefield)/EntersWithCountersBloodthirst(PlusOnePlusOne, 2) spec, got {other:?}"
         ),
     }
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
 }
 
 fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {

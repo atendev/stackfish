@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, minimal_card_definition, two_player_state as base_two_player_state,
+    assign_combat_damage, card_object, drain, minimal_card_definition, put_on_battlefield,
+    two_player_state as base_two_player_state,
 };
 
 fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
@@ -32,15 +33,6 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn combat_damage_state(combat: CombatState) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -51,20 +43,6 @@ fn combat_damage_state(combat: CombatState) -> GameState {
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
         ..base_two_player_state(vec![Zone::new(ZoneKind::Battlefield, None)])
     }
-}
-
-fn assign_combat_damage(
-    engine: &mut Engine,
-    player: PlayerId,
-    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::AssignCombatDamage { assignments },
-        })
-        .expect("turn-based action, no priority required");
-    drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {

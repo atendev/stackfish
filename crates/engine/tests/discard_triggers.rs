@@ -5,34 +5,9 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
-
-fn creature_definition(name: &str) -> CardDefinition {
-    CardDefinition {
-        definition_id: 1,
-        name: name.to_string(),
-        mana_cost: ManaCost {
-            symbols: Vec::new(),
-        },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: Some(PTValue::Fixed(2)),
-        toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("bear".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        buyback_cost: None,
-        effect: None,
-        modes: Vec::new(),
-        mode_choice: ModeChoice::Exactly(1),
-    }
-}
+use stackfish_testutil::{
+    card_object, creature_definition, drain, two_player_state as base_two_player_state, zones,
+};
 
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
@@ -108,15 +83,6 @@ fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) -> V
     ids
 }
 
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -127,19 +93,19 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 }
 
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 end-step priority, got {s:?}"
     );
     pass(engine, p0);
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p1),
         "expected p1 end-step priority, got {s:?}"
     );
     pass(engine, p1);
-    step_until_pause(engine)
+    drain(engine)
 }
 
 #[test]
@@ -180,7 +146,7 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
 
     engine.submit_discard(vec![ids[0]]).expect("valid discard");
     // The DiscardsCard trigger must be collected and on the stack by the time this settles.
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "expected priority reopened by the trigger, got {status:?}"
@@ -192,9 +158,9 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
     );
 
     pass(&mut engine, p0);
-    step_until_pause(&mut engine);
+    drain(&mut engine);
     pass(&mut engine, p1);
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
     assert!(
         engine.state().stack.is_empty(),
         "the triggered ability resolved"
@@ -208,9 +174,9 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
     // One more full pass round (empty stack) actually advances the turn.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     pass(&mut engine, p0);
-    step_until_pause(&mut engine);
+    drain(&mut engine);
     pass(&mut engine, p1);
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p1),
         "expected p1 Upkeep, got {status:?}"
@@ -253,7 +219,7 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
     engine
         .submit_discard(vec![ids[0], ids[1]])
         .expect("valid discard");
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
 
     // Two cards matched by the same ability's id pause for p0 to order them (CR 603.3b), the same group-size proof as trigger_once_per_turn.rs.
     match status {

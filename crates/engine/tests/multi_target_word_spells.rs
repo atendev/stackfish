@@ -1,14 +1,13 @@
 //! CR 601.2c, 608.2b: spells that use "target" in several places (Plague Spores). `TargetSpec::Multiple(Vec<TargetRequirement>)` splits the submitted list into one chunk per requirement.
 //! This file covers exact counts, and variable counts are in multi_target_word_variable_count.rs. CR 115.3 and 601.2c dedup applies per word, so one object may be chosen for two words, and the spell fizzles only if every target is illegal (CR 608.2b).
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, cast_spell, drain, pass_both_and_drain, pay_free_and_drain, put_on_battlefield,
+    try_cast_spell, two_player_main_phase_state,
 };
 
 fn creature_definition(definition_id: u64, name: &str, colors: ColorSet) -> CardDefinition {
@@ -135,91 +134,6 @@ fn plague_spores_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn try_cast_spell(
-    engine: &mut Engine,
-    player: PlayerId,
-    card: ObjectId,
-    targets: Vec<Target>,
-) -> Result<(), ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::CastSpell {
-            card,
-            modes: Vec::new(),
-            targets,
-            x_value: None,
-            alternative_cost: None,
-            pay_buyback: false,
-        },
-    })
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn both_words_legal_destroys_both_targets() {
     let p0 = PlayerId(0);
@@ -227,7 +141,7 @@ fn both_words_legal_destroys_both_targets() {
     let creature = ObjectId(0);
     let land = ObjectId(1);
     let card = ObjectId(2);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -293,7 +207,7 @@ fn the_same_permanent_can_be_chosen_for_two_different_words() {
     manland.card_types |= CardTypeSet::LAND;
     let dual = ObjectId(0);
     let card = ObjectId(2);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(dual, manland, p1, ZoneKind::Battlefield),
@@ -329,7 +243,7 @@ fn one_word_going_illegal_before_resolution_only_skips_that_word() {
     let creature = ObjectId(0);
     let land = ObjectId(1);
     let card = ObjectId(2);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -402,7 +316,7 @@ fn both_words_illegal_fizzles_the_whole_spell() {
     let creature = ObjectId(0);
     let land = ObjectId(1);
     let card = ObjectId(2);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -480,7 +394,7 @@ fn rejects_a_wrong_count_submission() {
     let creature = ObjectId(0);
     let land = ObjectId(1);
     let card = ObjectId(2);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -530,7 +444,7 @@ fn rejects_targets_that_dont_match_their_own_word() {
     let creature = ObjectId(0);
     let land = ObjectId(1);
     let card = ObjectId(2);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(

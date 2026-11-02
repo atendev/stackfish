@@ -1,14 +1,12 @@
 //! CR 700.2a: the controller chooses exactly one of a spell's modes as part of casting, before targets (CR 601.2b precedes 601.2c). `CastSpell::modes` selects which `SpellMode` supplies the target requirement and effect.
 //! Multi-mode choice is in modal_multi_mode.rs, opponent-chosen modes (CR 700.2e) in modal_chosen_by_opponent.rs, and mode costs (CR 700.2h) in modal_mode_additional_cost.rs.
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::Engine;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, pass_both_and_drain, pay_free_and_drain, two_player_main_phase_state,
 };
 
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
@@ -123,16 +121,6 @@ fn shock_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 fn cast_spell(
     engine: &mut Engine,
     player: PlayerId,
@@ -175,40 +163,9 @@ fn try_cast_spell(
     })
 }
 
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn choosing_mode_zero_gains_life_and_never_touches_mode_ones_target_requirement() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -241,7 +198,7 @@ fn choosing_mode_zero_gains_life_and_never_touches_mode_ones_target_requirement(
 
 #[test]
 fn choosing_mode_one_deals_damage_and_validates_its_own_target_requirement() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -287,7 +244,7 @@ fn choosing_mode_one_deals_damage_and_validates_its_own_target_requirement() {
 
 #[test]
 fn modal_spell_rejects_a_target_illegal_for_the_chosen_modes_own_requirement() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -316,7 +273,7 @@ fn modal_spell_rejects_a_target_illegal_for_the_chosen_modes_own_requirement() {
 
 #[test]
 fn modal_spell_rejects_casting_with_no_mode_chosen() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -345,7 +302,7 @@ fn modal_spell_rejects_casting_with_no_mode_chosen() {
 
 #[test]
 fn modal_spell_rejects_choosing_two_modes() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -374,7 +331,7 @@ fn modal_spell_rejects_choosing_two_modes() {
 
 #[test]
 fn modal_spell_rejects_an_out_of_range_mode_index() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -402,7 +359,7 @@ fn modal_spell_rejects_an_out_of_range_mode_index() {
 
 #[test]
 fn non_modal_spell_rejects_a_mode_choice() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let target = ObjectId(0);
     state.objects.insert(
@@ -446,7 +403,7 @@ fn non_modal_spell_rejects_a_mode_choice() {
 
 #[test]
 fn non_modal_spell_still_casts_normally_with_no_modes_announced() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);

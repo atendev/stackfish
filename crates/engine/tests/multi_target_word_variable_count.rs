@@ -1,14 +1,13 @@
 //! CR 601.2c, 608.2b: a multi-word spell where a word is variable-count (`up_to`, `at_least`). With at most one variable word, `split_targets_by_requirement` derives its count as what the exact-count words leave.
 //! With two or more, `assign_targets_by_filter` assigns each target to a word whose filter it satisfies and accepts any assignment meeting every count bound.
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::Engine;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, cast_spell, pass_both_and_drain, pay_free_and_drain, put_on_battlefield,
+    try_cast_spell, two_player_main_phase_state,
 };
 
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
@@ -250,91 +249,6 @@ fn two_variable_words_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn try_cast_spell(
-    engine: &mut Engine,
-    player: PlayerId,
-    card: ObjectId,
-    targets: Vec<Target>,
-) -> Result<(), ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::CastSpell {
-            card,
-            modes: Vec::new(),
-            targets,
-            x_value: None,
-            alternative_cost: None,
-            pay_buyback: false,
-        },
-    })
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn up_to_word_first_claims_the_remainder_after_the_exact_word() {
     let p0 = PlayerId(0);
@@ -343,7 +257,7 @@ fn up_to_word_first_claims_the_remainder_after_the_exact_word() {
     let wolf = ObjectId(1);
     let land = ObjectId(2);
     let card = ObjectId(3);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -415,7 +329,7 @@ fn up_to_word_can_claim_zero() {
     let p1 = PlayerId(1);
     let land = ObjectId(0);
     let card = ObjectId(1);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -454,7 +368,7 @@ fn up_to_word_second_still_derives_correctly_regardless_of_position() {
     let wolf = ObjectId(1);
     let land = ObjectId(2);
     let card = ObjectId(3);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -528,7 +442,7 @@ fn up_to_word_exceeding_its_own_bound_is_rejected() {
     let fox = ObjectId(2);
     let land = ObjectId(3);
     let card = ObjectId(4);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     for (id, name) in [(bear, "Bear"), (wolf, "Wolf"), (fox, "Fox")] {
         put_on_battlefield(
             &mut state,
@@ -589,7 +503,7 @@ fn at_least_word_below_its_own_bound_is_rejected() {
     let p0 = PlayerId(0);
     let land = ObjectId(0);
     let card = ObjectId(1);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -631,7 +545,7 @@ fn at_least_word_meeting_its_own_bound_resolves() {
     let wolf = ObjectId(1);
     let land = ObjectId(2);
     let card = ObjectId(3);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -695,7 +609,7 @@ fn two_variable_words_with_disjoint_filters_resolves_via_filter_assignment() {
     let bear = ObjectId(0);
     let land = ObjectId(1);
     let card = ObjectId(2);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     put_on_battlefield(
         &mut state,
         card_object(
@@ -789,7 +703,7 @@ fn two_variable_words_with_overlapping_filters_resolves_when_a_split_exists() {
     let fox = ObjectId(2);
     let hare = ObjectId(3);
     let card = ObjectId(4);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     for (id, name) in [(bear, "Bear"), (wolf, "Wolf"), (fox, "Fox"), (hare, "Hare")] {
         put_on_battlefield(
             &mut state,
@@ -846,7 +760,7 @@ fn two_variable_words_with_no_valid_assignment_is_still_rejected() {
     let wolf = ObjectId(1);
     let fox = ObjectId(2);
     let card = ObjectId(3);
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     for (id, name) in [(bear, "Bear"), (wolf, "Wolf"), (fox, "Fox")] {
         put_on_battlefield(
             &mut state,

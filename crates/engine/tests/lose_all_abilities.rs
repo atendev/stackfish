@@ -9,7 +9,10 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    drain, no_filter, pass_to_declare_blockers, permanent, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(
     name: &str,
@@ -43,19 +46,6 @@ fn creature_definition(
     }
 }
 
-fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    card_object(id, definition, owner, ZoneKind::Battlefield)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn combat_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -64,18 +54,6 @@ fn combat_state() -> GameState {
         step: Step::DeclareAttackers,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield]))
-    }
-}
-
-fn no_filter() -> EffectFilter {
-    EffectFilter {
-        controller: None,
-        card_types: None,
-        self_only: false,
-        subtypes: None,
-        excluded_subtypes: None,
-        supertypes: None,
-        excluded_supertypes: None,
     }
 }
 
@@ -279,26 +257,6 @@ fn try_declare_blockers(
         kind: PlayerActionKind::DeclareBlockers { blocks },
     })?;
     Ok(drain(engine))
-}
-
-fn pass_to_declare_blockers(engine: &mut Engine) {
-    for _ in 0..10 {
-        if engine.state().step == Step::DeclareBlockers {
-            return;
-        }
-        let active = engine.state().priority_player;
-        engine
-            .submit_action(PlayerAction {
-                player: active,
-                kind: PlayerActionKind::PassPriority,
-            })
-            .expect("priority window");
-        drain(engine);
-    }
-    panic!(
-        "never reached DeclareBlockers - state.step = {:?}",
-        engine.state().step
-    );
 }
 
 #[test]

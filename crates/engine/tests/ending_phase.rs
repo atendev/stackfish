@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{DiscardError, Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
     let definition = CardDefinition {
@@ -79,15 +79,6 @@ fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) -> V
     ids
 }
 
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -101,21 +92,21 @@ fn pass_through_end_step(engine: &mut Engine) -> StepStatus {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
 
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 end-step priority, got {s:?}"
     );
     pass(engine, p0);
 
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p1),
         "expected p1 end-step priority, got {s:?}"
     );
     pass(engine, p1);
 
-    step_until_pause(engine)
+    drain(engine)
 }
 
 #[test]
@@ -248,7 +239,7 @@ fn submit_discard_valid_moves_cards_to_graveyard_and_advances_turn() {
         .submit_discard(vec![ids[0], ids[1]])
         .expect("valid discard");
 
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
 
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p1),
@@ -325,7 +316,7 @@ fn until_end_of_turn_continuous_effects_drained_at_cleanup() {
     assert_eq!(engine.state().continuous_effects.len(), 2);
 
     pass_through_end_step(&mut engine);
-    // cleanup already ran; effects drained. step_until_pause is idempotent here.
+    // cleanup already ran; effects drained. drain is idempotent here.
 
     assert_eq!(
         engine.state().continuous_effects.len(),

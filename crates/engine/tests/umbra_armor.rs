@@ -1,14 +1,10 @@
 //! CR 702.89a: Umbra armor, "if enchanted permanent would be destroyed, instead remove all damage marked on it and destroy this Aura". `EventFilter::WouldDieEnchanted` resolves against the replacement source's `attached_to`.
 //! `ReplacementPayload::UmbraArmor` has two effects on two objects (clear damage on the enchanted permanent, destroy the Aura with a CR 400.7 new id), so `sba::commit_death_or_regeneration` returns a `Vec` of committed events.
 
-use std::collections::HashMap;
-
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{
-    card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
-};
+use stackfish_testutil::{card_object, put_on_battlefield, two_player_main_phase_state};
 
 const UMBRA_ARMOR_SELF: &str = r#"
 local s = {}
@@ -75,16 +71,6 @@ fn umbra_armor_definition(script: &str) -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 fn umbra_armor_effect(source: ObjectId) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -96,18 +82,9 @@ fn umbra_armor_effect(source: ObjectId) -> ReplacementEffect {
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 #[test]
 fn would_die_enchanted_matches_a_destroy_on_the_enchanted_creature_only() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
     let other_creature = ObjectId(1);
@@ -162,7 +139,7 @@ fn would_die_enchanted_matches_a_destroy_on_the_enchanted_creature_only() {
 
 #[test]
 fn umbra_armor_saves_the_enchanted_creature_and_destroys_the_aura_instead() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
     let aura = ObjectId(1);
@@ -224,7 +201,7 @@ fn umbra_armor_saves_the_enchanted_creature_and_destroys_the_aura_instead() {
 
 #[test]
 fn without_umbra_armor_the_creature_dies_normally() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
     put_on_battlefield(
@@ -274,7 +251,7 @@ fn without_umbra_armor_the_creature_dies_normally() {
 
 #[test]
 fn run_card_script_self_registers_umbra_armor() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let aura = ObjectId(0);
     let definition = umbra_armor_definition(UMBRA_ARMOR_SELF);
     state.objects.insert(

@@ -5,7 +5,9 @@ use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -97,15 +99,6 @@ fn base_state() -> GameState {
     zones.push(Zone::new(ZoneKind::Exile, None));
     zones.push(Zone::new(ZoneKind::Command, Some(p0)));
     base_two_player_state(zones)
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn shield(id: ObjectId, controller: PlayerId) -> GameObject {

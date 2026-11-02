@@ -8,7 +8,10 @@ use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{battlefield_graveyard_exile_zones, card_object, drain, two_player_state};
+use stackfish_testutil::{
+    battlefield_graveyard_exile_zones, card_object, cast_spell, drain, pass_both_and_drain,
+    pay_free_and_drain, progressed, put_on_battlefield, two_player_state,
+};
 
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -101,15 +104,6 @@ fn base_state() -> GameState {
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: 2,
@@ -136,21 +130,6 @@ fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
         mode_choice: ModeChoice::Exactly(1),
     };
     card_object(id, definition, controller, ZoneKind::Battlefield)
-}
-
-fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
-    match outcome {
-        SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => {
-            panic!("fixture didn't expect a replacement ordering-choice pause")
-        }
-        SbaOutcome::NeedsLegendRuleChoice { .. } => {
-            panic!("fixture didn't expect a legend-rule choice pause")
-        }
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
-            panic!("fixture didn't expect a commander-return choice pause")
-        }
-    }
 }
 
 #[test]
@@ -485,53 +464,6 @@ fn put_in_hand(state: &mut GameState, object: GameObject) {
         .unwrap()
         .push_bottom(id);
     state.objects.insert(id, object);
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 #[test]

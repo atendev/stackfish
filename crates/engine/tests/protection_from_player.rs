@@ -1,7 +1,5 @@
 //! CR 702.16k: protection from a player. `AddProtectionPlayer` carries a `FilterController` (`You` or `Opponent`), resolved against the protected object's own controller at each enforcement site, since the source's controller is compared and not its characteristics.
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
@@ -9,8 +7,9 @@ use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object as permanent, drain, hand_battlefield_graveyard_zones,
-    two_player_state as base_two_player_state,
+    card_object as permanent, cast_spell, declare_attackers, declare_blockers, drain,
+    pass_to_declare_blockers, pay_free_and_drain, put_on_battlefield, try_cast_spell,
+    two_player_main_phase_state,
 };
 
 const STATIC_PROTECTION_FROM_OPPONENT: &str = r#"
@@ -111,15 +110,6 @@ fn bolt_definition() -> CardDefinition {
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn protection_from_opponent(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -142,18 +132,8 @@ fn protection_from_opponent(source: ObjectId) -> ContinuousEffect {
     }
 }
 
-fn base_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 fn combat_damage_state(combat: CombatState) -> GameState {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     state.phase = Phase::Combat;
     state.step = Step::CombatDamage;
     state.combat = Some(combat);
@@ -161,59 +141,10 @@ fn combat_damage_state(combat: CombatState) -> GameState {
 }
 
 fn combat_state() -> GameState {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     state.phase = Phase::Combat;
     state.step = Step::DeclareAttackers;
     state
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn try_cast_spell(
-    engine: &mut Engine,
-    player: PlayerId,
-    card: ObjectId,
-    targets: Vec<Target>,
-) -> Result<(), ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::CastSpell {
-            card,
-            modes: Vec::new(),
-            targets,
-            x_value: None,
-            alternative_cost: None,
-            pay_buyback: false,
-        },
-    })
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
 }
 
 fn pass_both_and_drain(
@@ -249,53 +180,9 @@ fn assign_combat_damage(
     Ok(drain(engine))
 }
 
-fn declare_attackers(
-    engine: &mut Engine,
-    player: PlayerId,
-    attackers: Vec<(ObjectId, Target)>,
-) -> Result<StepStatus, ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::DeclareAttackers { attackers },
-    })?;
-    Ok(drain(engine))
-}
-
-fn declare_blockers(
-    engine: &mut Engine,
-    player: PlayerId,
-    blocks: Vec<(ObjectId, ObjectId)>,
-) -> Result<StepStatus, ActionError> {
-    engine.submit_action(PlayerAction {
-        player,
-        kind: PlayerActionKind::DeclareBlockers { blocks },
-    })?;
-    Ok(drain(engine))
-}
-
-fn pass_to_declare_blockers(engine: &mut Engine) {
-    for _ in 0..10 {
-        if engine.state().step == Step::DeclareBlockers {
-            return;
-        }
-        let active = engine.state().priority_player;
-        engine
-            .submit_action(PlayerAction {
-                player: active,
-                kind: PlayerActionKind::PassPriority,
-            })
-            .expect("priority window");
-        drain(engine);
-    }
-    panic!(
-        "never reached DeclareBlockers - state.step = {:?}",
-        engine.state().step
-    );
-}
-
 #[test]
 fn game_effects_add_protection_player_self_registers_and_applies() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let definition = creature_definition(
         1,
@@ -331,7 +218,7 @@ fn game_effects_add_protection_player_self_registers_and_applies() {
 
 #[test]
 fn game_effects_add_protection_player_rejects_any() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let bear = ObjectId(0);
     let bad_script = STATIC_PROTECTION_FROM_OPPONENT.replace("\"opponent\"", "\"any\"");
     let definition = creature_definition(1, "Bear", 2, 2, ScriptReference::Inline(bad_script));
@@ -447,7 +334,7 @@ fn combat_damage_from_a_source_the_protected_controller_owns_still_lands() {
 // CR 702.16c
 #[test]
 fn casting_a_spell_an_opponent_controls_at_a_protected_target_is_rejected() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let target = ObjectId(0);
     put_on_battlefield(
@@ -482,7 +369,7 @@ fn casting_a_spell_an_opponent_controls_at_a_protected_target_is_rejected() {
 
 #[test]
 fn casting_a_spell_the_protected_controller_controls_at_a_protected_target_still_works() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -521,7 +408,7 @@ fn casting_a_spell_the_protected_controller_controls_at_a_protected_target_still
 
 #[test]
 fn spell_fizzles_when_target_gains_protection_from_an_opponent_before_resolution() {
-    let mut state = base_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);

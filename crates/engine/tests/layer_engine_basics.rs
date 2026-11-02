@@ -4,26 +4,13 @@
 use std::collections::HashMap;
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
+use stackfish_engine::sba::check_state_based_actions;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
-
-// No fixture registers a ReplacementEffect on a dying creature, so a CR 616.1 pause here would mean the fixture is wrong.
-fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
-    match outcome {
-        SbaOutcome::Progressed(events, _) => events,
-        SbaOutcome::NeedsOrderingChoice { .. } => {
-            panic!("fixture didn't expect a replacement ordering-choice pause")
-        }
-        SbaOutcome::NeedsLegendRuleChoice { .. } => {
-            panic!("fixture didn't expect a legend-rule choice pause")
-        }
-        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
-            panic!("fixture didn't expect a commander-return choice pause")
-        }
-    }
-}
+use stackfish_testutil::{
+    card_object, no_filter, progressed, put_on_battlefield,
+    two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> CardDefinition {
     CardDefinition {
@@ -72,15 +59,6 @@ fn base_state() -> GameState {
     }
 }
 
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
-}
-
 fn continuous_effect(
     source: ObjectId,
     layer: Layer,
@@ -96,18 +74,6 @@ fn continuous_effect(
         timestamp: SequenceNo(timestamp),
         duration: EffectDuration::Permanent,
         condition: None,
-    }
-}
-
-fn no_filter() -> EffectFilter {
-    EffectFilter {
-        controller: None,
-        card_types: None,
-        self_only: false,
-        subtypes: None,
-        excluded_subtypes: None,
-        supertypes: None,
-        excluded_supertypes: None,
     }
 }
 

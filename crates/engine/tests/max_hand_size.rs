@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
@@ -70,15 +70,6 @@ fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) {
     }
 }
 
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -89,19 +80,19 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 }
 
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 end-step priority, got {s:?}"
     );
     pass(engine, p0);
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(
         matches!(s, StepStatus::AwaitingAction { player } if player == p1),
         "expected p1 end-step priority, got {s:?}"
     );
     pass(engine, p1);
-    step_until_pause(engine)
+    drain(engine)
 }
 
 #[test]
@@ -322,18 +313,18 @@ fn a_filter_scoped_hand_size_modifier_is_purged_once_its_source_leaves_the_battl
             },
         })
         .expect("p0 holds priority, spell is in hand");
-    let status = step_until_pause(&mut engine);
+    let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }));
     engine
         .submit_payment(PaymentPlan {
             payments: Vec::new(),
         })
         .expect("empty plan pays a {0} cost");
-    step_until_pause(&mut engine);
+    drain(&mut engine);
     pass(&mut engine, p0);
-    step_until_pause(&mut engine);
+    drain(&mut engine);
     pass(&mut engine, p1);
-    step_until_pause(&mut engine);
+    drain(&mut engine);
 
     assert!(
         engine.state().object(source).is_none(),

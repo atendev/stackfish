@@ -7,7 +7,10 @@ use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
+use stackfish_testutil::{
+    assign_combat_damage, card_object, drain, no_filter, pass_to_declare_blockers,
+    put_on_battlefield, two_player_state as base_two_player_state, zones,
+};
 
 fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -46,15 +49,6 @@ fn permanent(
         controlled_since_turn,
         ..card_object(id, definition, owner, ZoneKind::Battlefield)
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn combat_state() -> GameState {
@@ -113,52 +107,6 @@ fn try_declare_blockers(
         kind: PlayerActionKind::DeclareBlockers { blocks },
     })?;
     Ok(drain(engine))
-}
-
-fn pass_to_declare_blockers(engine: &mut Engine) {
-    for _ in 0..10 {
-        if engine.state().step == Step::DeclareBlockers {
-            return;
-        }
-        let active = engine.state().priority_player;
-        engine
-            .submit_action(PlayerAction {
-                player: active,
-                kind: PlayerActionKind::PassPriority,
-            })
-            .expect("priority window");
-        drain(engine);
-    }
-    panic!(
-        "never reached DeclareBlockers - state.step = {:?}",
-        engine.state().step
-    );
-}
-
-fn assign_combat_damage(
-    engine: &mut Engine,
-    player: PlayerId,
-    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::AssignCombatDamage { assignments },
-        })
-        .expect("turn-based action, no priority required");
-    drain(engine)
-}
-
-fn no_filter() -> EffectFilter {
-    EffectFilter {
-        controller: None,
-        card_types: None,
-        self_only: false,
-        subtypes: None,
-        excluded_subtypes: None,
-        supertypes: None,
-        excluded_supertypes: None,
-    }
 }
 
 #[test]

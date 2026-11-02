@@ -7,7 +7,8 @@ use std::collections::{HashMap, VecDeque};
 use stackfish_engine::engine::{AttachChoiceError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    drain, hand_battlefield_graveyard_zones, pass_both_and_drain, pay_free_and_drain,
+    two_player_state as base_two_player_state,
 };
 
 fn aura_enchant_player_definition(id: u64, name: &str, filter: TargetFilter) -> CardDefinition {
@@ -115,37 +116,6 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
             },
         })
         .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
 }
 
 // Scripted-filter tests patch the real filter on after the fixture is built, because a `ScriptHandle` is valid only against its own runtime.

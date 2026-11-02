@@ -30,7 +30,8 @@ use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, player_state, two_player_state as base_two_player_state, zones,
+    card_object, drain, pass_both_and_drain, player_state,
+    two_player_state as base_two_player_state, zones,
 };
 
 /// "Test Buyback Bolt": `{1}{R}` instant, targets a creature, with a
@@ -208,23 +209,6 @@ fn stack_departure(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     panic!("expected a Stack-origin ZoneChange event in the ledger");
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 /// Casting without paying buyback is entirely unaffected - same mana cost,
 /// still lands in the graveyard on resolution.
 #[test]
@@ -270,7 +254,7 @@ fn cast_without_paying_buyback_resolves_to_graveyard_as_normal() {
         })
         .expect("{1}{R} paid with 1 red + 1 generic - buyback not paid, so no extra {2} owed");
     drain(&mut engine);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     let (new_id, from, to) = stack_departure(&engine);
     assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard));
@@ -335,7 +319,7 @@ fn cast_paying_buyback_returns_to_hand_on_resolution() {
         })
         .expect("the combined {3}{R} cost is payable with 1 red + 3 generic");
     drain(&mut engine);
-    pass_both(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1);
 
     assert_eq!(
         engine.state().player(p0).unwrap().life,
@@ -521,7 +505,7 @@ fn a_fizzled_bought_back_spell_still_goes_to_the_graveyard() {
         .remove(creature);
     engine.state_mut().objects.remove(&creature);
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     let fizzled = engine

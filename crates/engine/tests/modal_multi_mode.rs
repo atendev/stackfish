@@ -1,14 +1,13 @@
 //! CR 700.2d: choosing two or more modes. `CardDefinition.mode_choice` (`Exactly(n)`, `UpTo(n)`) names how many modes must be chosen, and 2 or more combine into one `TargetSpec::Multiple` and one `AbilityEffect::Modal`, resolved in card-print order.
 //! Only kinds accepted by `commands::is_modal_resolvable` can combine, and the rest are rejected at cast time.
 
-use std::collections::HashMap;
-
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::Engine;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    any_target_requirement, card_object, pass_both_and_drain, pay_free_and_drain,
+    two_player_main_phase_state,
 };
 
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
@@ -36,16 +35,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     }
-}
-
-fn any_target_requirement() -> TargetSpec {
-    TargetSpec::Primitive(TargetRequirement {
-        filter: TargetFilter::AnyTarget,
-        count: 1,
-        up_to: false,
-        at_least: false,
-        exclude_source: false,
-    })
 }
 
 fn choose_two_definition() -> CardDefinition {
@@ -121,16 +110,6 @@ fn choose_up_to_two_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
 fn cast_spell(
     engine: &mut Engine,
     player: PlayerId,
@@ -173,40 +152,9 @@ fn try_cast_spell(
     })
 }
 
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 #[test]
 fn choosing_modes_zero_and_one_resolves_both_effects_against_their_own_targets() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -239,7 +187,7 @@ fn choosing_modes_zero_and_one_resolves_both_effects_against_their_own_targets()
 
 #[test]
 fn chosen_mode_order_in_the_action_does_not_matter_resolution_is_card_print_order() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -272,7 +220,7 @@ fn chosen_mode_order_in_the_action_does_not_matter_resolution_is_card_print_orde
 
 #[test]
 fn choosing_the_same_mode_twice_is_rejected() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -300,7 +248,7 @@ fn choosing_the_same_mode_twice_is_rejected() {
 
 #[test]
 fn choosing_only_one_mode_when_exactly_two_are_required_is_rejected() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -328,7 +276,7 @@ fn choosing_only_one_mode_when_exactly_two_are_required_is_rejected() {
 
 #[test]
 fn choosing_all_three_modes_when_exactly_two_are_required_is_rejected() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let target = ObjectId(0);
     state.objects.insert(
@@ -377,7 +325,7 @@ fn choosing_all_three_modes_when_exactly_two_are_required_is_rejected() {
 
 #[test]
 fn combining_a_mode_with_an_unsupported_effect_kind_is_rejected_at_cast_time() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let target = ObjectId(0);
     state.objects.insert(
@@ -428,7 +376,7 @@ fn combining_a_mode_with_an_unsupported_effect_kind_is_rejected_at_cast_time() {
 
 #[test]
 fn up_to_two_allows_choosing_just_one_mode() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -455,7 +403,7 @@ fn up_to_two_allows_choosing_just_one_mode() {
 
 #[test]
 fn up_to_two_allows_choosing_both_modes() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -487,7 +435,7 @@ fn up_to_two_allows_choosing_both_modes() {
 
 #[test]
 fn up_to_two_rejects_choosing_zero_modes() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(
@@ -516,7 +464,7 @@ fn up_to_two_rejects_choosing_zero_modes() {
 
 #[test]
 fn a_target_illegal_for_its_own_mode_rejects_the_whole_cast() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let card = ObjectId(2);
     state.objects.insert(

@@ -7,7 +7,10 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::triggers::collect_triggers;
 use stackfish_engine::*;
-use stackfish_testutil::{card_object, drain, player_state, two_player_state, zones};
+use stackfish_testutil::{
+    card_object, drain, pass_both_and_drain, player_state, put_on_battlefield, two_player_state,
+    zones,
+};
 
 fn creature_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
@@ -60,15 +63,6 @@ fn base_state(p0_life: i32) -> GameState {
             ],
         ))
     }
-}
-
-fn put_on_battlefield(state: &mut GameState, object: GameObject) {
-    let id = object.object_id;
-    state
-        .zone_mut(ZoneKind::Battlefield, None)
-        .unwrap()
-        .push_bottom(id);
-    state.objects.insert(id, object);
 }
 
 fn zone_change_event(
@@ -508,23 +502,6 @@ fn intervening_if_state(p0_life: i32) -> GameState {
     state
 }
 
-fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
@@ -577,7 +554,7 @@ fn script_intervening_if_false_at_trigger_time_never_triggers_at_all() {
         .abilities
         .push(interveningif_upkeep_ability_script(permanent, handle));
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(
         engine.state().stack.is_empty(),
@@ -610,7 +587,7 @@ fn script_intervening_if_true_throughout_resolves_normally() {
         .abilities
         .push(interveningif_upkeep_ability_script(permanent, handle));
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().stack.len(),
@@ -618,7 +595,7 @@ fn script_intervening_if_true_throughout_resolves_normally() {
         "life 5 <= 5 - true at trigger time"
     );
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty(), "resolved");
     assert_eq!(
@@ -662,7 +639,7 @@ fn script_intervening_if_rechecked_fresh_at_resolution_fizzles() {
         .abilities
         .push(interveningif_upkeep_ability_script(permanent, handle));
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().stack.len(),
@@ -674,7 +651,7 @@ fn script_intervening_if_rechecked_fresh_at_resolution_fizzles() {
     pay_free_and_drain(&mut engine);
     assert_eq!(engine.state().stack.len(), 2);
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(
         engine.state().player(p0).unwrap().life,
@@ -683,7 +660,7 @@ fn script_intervening_if_rechecked_fresh_at_resolution_fizzles() {
     );
     assert_eq!(engine.state().stack.len(), 1);
 
-    let status = pass_both(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty());
     assert_eq!(

@@ -1,11 +1,10 @@
 //! `AbilityEffect::Damage` (`Game.Ops.Damage(n)`) emits a `DamageDealt` event through `ReplacementCheck` and `CommitEvents`, so prevention, replacement and lifelink apply. It covers a `Spell` and an `ActivatedAbility`, which share one `ResolveStackTop` arm.
 
-use std::collections::HashMap;
-
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, cast_spell, drain, pass_both_and_drain, pay_free_and_drain,
+    two_player_main_phase_state,
 };
 
 fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> CardDefinition {
@@ -68,64 +67,6 @@ fn shock_definition() -> CardDefinition {
     }
 }
 
-fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        step: Step::PreCombatMain,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
-    }
-}
-
-fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
-    engine
-        .submit_action(PlayerAction {
-            player,
-            kind: PlayerActionKind::CastSpell {
-                card,
-                modes: Vec::new(),
-                targets,
-                x_value: None,
-                alternative_cost: None,
-                pay_buyback: false,
-            },
-        })
-        .expect("player holds priority, spell is in hand");
-}
-
-fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
-    let status = drain(engine);
-    assert!(
-        matches!(status, StepStatus::AwaitingPayment { .. }),
-        "expected a pause for the cast's (free) cost, got {status:?}"
-    );
-    engine
-        .submit_payment(PaymentPlan {
-            payments: Vec::new(),
-        })
-        .expect("empty plan pays a {0} cost");
-    drain(engine)
-}
-
-// Paying a cost only settles the object on the stack (CR 601.2i), so both players must pass for ResolveStackTop to run it (CR 608.1).
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: p0,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine);
-    engine
-        .submit_action(PlayerAction {
-            player: p1,
-            kind: PlayerActionKind::PassPriority,
-        })
-        .unwrap();
-    drain(engine)
-}
-
 fn damage_dealt_events(engine: &Engine) -> Vec<(ObjectId, Target, u32)> {
     engine
         .state()
@@ -145,7 +86,7 @@ fn damage_dealt_events(engine: &Engine) -> Vec<(ObjectId, Target, u32)> {
 
 #[test]
 fn damage_spell_marks_damage_on_a_creature_target() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -188,7 +129,7 @@ fn damage_spell_marks_damage_on_a_creature_target() {
 
 #[test]
 fn damage_spell_reduces_a_players_life() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(2);
@@ -216,7 +157,7 @@ fn damage_spell_reduces_a_players_life() {
 
 #[test]
 fn damage_ability_with_lifelink_source_gains_its_controller_life() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let source = ObjectId(0);
@@ -294,7 +235,7 @@ fn damage_ability_with_lifelink_source_gains_its_controller_life() {
 
 #[test]
 fn prevent_damage_effect_stops_a_scripted_damage_spell() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
@@ -359,7 +300,7 @@ fn prevent_damage_effect_stops_a_scripted_damage_spell() {
 
 #[test]
 fn fizzled_damage_spell_deals_no_damage() {
-    let mut state = two_player_state();
+    let mut state = two_player_main_phase_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);

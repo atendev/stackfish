@@ -6,7 +6,7 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state,
 };
 
 const UNTIL_END_OF_TURN: &str = r#"
@@ -162,15 +162,6 @@ fn omitting_set_duration_still_defaults_to_permanent() {
     ));
 }
 
-fn step_until_pause(engine: &mut Engine) -> StepStatus {
-    loop {
-        let r = engine.step();
-        if !matches!(r.status, StepStatus::Progressed) {
-            return r.status;
-        }
-    }
-}
-
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine
         .submit_action(PlayerAction {
@@ -181,15 +172,15 @@ fn pass(engine: &mut Engine, player: PlayerId) {
 }
 
 fn pass_both_players(engine: &mut Engine, first: PlayerId, second: PlayerId) -> StepStatus {
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(matches!(s, StepStatus::AwaitingAction { player } if player == first));
     pass(engine, first);
 
-    let s = step_until_pause(engine);
+    let s = drain(engine);
     assert!(matches!(s, StepStatus::AwaitingAction { player } if player == second));
     pass(engine, second);
 
-    step_until_pause(engine)
+    drain(engine)
 }
 
 #[test]
