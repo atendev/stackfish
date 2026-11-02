@@ -22,6 +22,10 @@ _Avoid_: Observer, viewer, watcher
 A request from a Seat for the events it has not received yet and its view of the open Decision. The Session queues each Seat's copy of every event, and a response carries only the requesting Seat's copy.
 _Avoid_: Fetch, sync, subscribe
 
+**Snapshot**:
+A Seat's view of the current state, filtered by the same rule as its events and stamped with the last event it covers. A Seat that asks for one drops its queued events and resumes from the events after that point.
+_Avoid_: Dump, state sync, resync
+
 **Decision**:
 A point where the engine cannot continue until a specific player chooses, together with who must choose and what the choices are.
 _Avoid_: Prompt, pause, request, choice

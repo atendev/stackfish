@@ -28,6 +28,8 @@ Which encoding do messages use (JSON, MessagePack, or another), and what is the 
   - `setup` (no `seat`, since the host creating the Session is not a Seat): the 006 setup. Its fields are the player list in turn order, a decklist per player (card keys as `oracle_id` UUID strings), optional commanders, a format preset, optional setting overrides, and a seed. The seed is a decimal string.
   - `advance`: an optional `budget` integer. A missing budget uses the Session's default cap.
   - `answer`: the id of the open Decision (`decision`), plus the Answer as the tagged reply enum from 002. Candidates use `Object(ObjectId) | Player(PlayerId)` from 005.
+  - `poll` (added in 013, seat required, empty body): the Seat's queued events and its view of the open Decision.
+  - `snapshot` (added by 020 and built in 021, seat required, empty body): the `poll` response with a `snapshot` field. It drops the Seat's queued events. A new kind does not bump `v`.
 - Responses have one type, with `status` set to `created`, `decision_open`, `still_running`, `game_over`, or `error`.
   - `events` is a list. Each event has a `sequence_no`.
   - `decision` appears only when the status is `decision_open`.

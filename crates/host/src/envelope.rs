@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize, Serializer};
 
-use crate::wire::{WireDecision, WireEvent};
+use crate::wire::{WireDecision, WireEvent, WireSnapshot};
 
 /// The protocol version in every message. A breaking change to a field's name,
 /// type or meaning, or to a kind's required fields, bumps it.
@@ -95,6 +95,9 @@ pub(crate) struct Response {
     /// With `created` only: the Seat ids, one per player.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seats: Option<Vec<u32>>,
+    /// With a `snapshot` request only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<WireSnapshot>,
 }
 
 impl Response {
@@ -106,6 +109,7 @@ impl Response {
             error: None,
             winner: None,
             seats: None,
+            snapshot: None,
         }
     }
 

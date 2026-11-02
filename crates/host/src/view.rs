@@ -1,8 +1,6 @@
 //! The one visibility rule, applied to each ledger event and each open Decision. Hand
 //! and library are hidden, an omniscient Seat sees all, and hidden ids never reach a Seat
-//! that cannot see them. See `docs/DESIGN.md`.
-
-// TODO: a `(Seat, state)` snapshot equal to the fold of the events a Seat may see; it would reuse `sees_object` and `sees_identity`
+//! that cannot see them. The same rule builds a Seat's snapshot. See `docs/DESIGN.md`.
 
 use std::collections::HashMap;
 
@@ -12,8 +10,9 @@ use stackfish_engine::{
 };
 
 use crate::wire::{
-    U64, WireCardIdentity, WireDecision, WireEventKind, WireIdentity, WireObjectSummary,
-    WireRevealedCard, WireZone, offered_objects,
+    U64, WireCardIdentity, WireCommanderDamage, WireDecision, WireEventKind, WireIdentity,
+    WireObjectSummary, WireObjectView, WirePlayerView, WireRevealedCard, WireSnapshot,
+    WireStackEntry, WireZone, WireZoneView, counters, offered_objects,
 };
 
 /// One Seat's point of view.
@@ -396,6 +395,120 @@ impl Observer {
             | K::SpellCast { .. }
             | K::BecameTarget { .. } => Observed::Public(plain()),
         }
+    }
+}
+
+fn zone_count(state: &GameState, zone: ZoneKind, owner: PlayerId) -> u32 {
+    state
+        .zone(zone, Some(owner))
+        .map_or(0, |z| z.contents.len() as u32)
+}
+
+/// The state as `viewer` sees it, through the last ledger entry. `observer` must have
+/// read every entry, so a stack source that left a hand stays hidden.
+// TODO: keep the identity of a card a `revealed` event showed while it stays in a hidden zone
+pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observer) -> WireSnapshot {
+    let view_of = |object: &GameObject| {
+        let place = Place {
+            zone: object.zone,
+            owner: Some(object.owner),
+        };
+        WireObjectView::new(
+            object,
+            sees_identity(viewer, place, object.face_down, Some(object.controller)),
+        )
+    };
+    let visible = |id: ObjectId| {
+        observer
+            .hidden_place(state, id)
+            .is_none_or(|place| sees_object(viewer, place))
+    };
+    let players = state
+        .players
+        .iter()
+        .map(|p| WirePlayerView {
+            player: p.player_id.0,
+            life: p.life,
+            counters: counters(&p.counters),
+            commander_damage: p
+                .commander_damage_taken
+                .iter()
+                .map(|(name, amount)| WireCommanderDamage {
+                    commander: name.clone(),
+                    amount: *amount,
+                })
+                .collect(),
+            eliminated: p.eliminated,
+            hand_count: zone_count(state, ZoneKind::Hand, p.player_id),
+            library_count: zone_count(state, ZoneKind::Library, p.player_id),
+        })
+        .collect();
+    let zones = state
+        .zones
+        .iter()
+        .filter(|zone| {
+            sees_object(
+                viewer,
+                Place {
+                    zone: zone.kind,
+                    owner: zone.owner,
+                },
+            )
+        })
+        .map(|zone| {
+            let mut ids: Vec<ObjectId> = zone.contents.iter().copied().collect();
+            // CR 401.2
+            // Sorting by id hides the library order and how a hand was drawn.
+            if is_hidden(zone.kind) {
+                ids.sort();
+            }
+            WireZoneView {
+                zone: zone.kind.into(),
+                owner: zone.owner.map(|p| p.0),
+                objects: ids
+                    .into_iter()
+                    .filter_map(|id| state.object(id))
+                    .map(view_of)
+                    .collect(),
+            }
+        })
+        .collect();
+    let stack = state
+        .stack
+        .iter()
+        .map(|entry| WireStackEntry {
+            stack_id: entry.stack_id.into(),
+            kind: (&entry.kind).into(),
+            source: visible(entry.source).then_some(U64::from(entry.source)),
+            owner: entry.owner.0,
+            controller: entry.controller.0,
+            targets: entry
+                .targets
+                .iter()
+                .filter(|t| match t {
+                    Target::Object(id) => visible(*id),
+                    _ => true,
+                })
+                .map(|t| (*t).into())
+                .collect(),
+            chosen_modes: entry.chosen_modes.clone(),
+            x_value: entry.x_value,
+            card: state
+                .object(entry.stack_id)
+                .filter(|o| o.zone == ZoneKind::Stack)
+                .map(view_of),
+        })
+        .collect();
+    WireSnapshot {
+        through_sequence_no: state.ledger.last().map(|e| U64(e.sequence_no.0)),
+        turn_number: state.turn_number,
+        active_player: state.active_player.0,
+        phase: state.phase.into(),
+        step: state.step.into(),
+        priority: state.priority_player.0,
+        players,
+        zones,
+        stack,
     }
 }
 

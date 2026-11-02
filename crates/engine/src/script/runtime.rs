@@ -883,6 +883,7 @@ impl ScriptRuntime {
         for item in items {
             match item {
                 // `GainLife` mutates `GameState` directly. The pending kinds below need pipelines this layer can't reach.
+                // TODO: write a `LifeChanged` event, so a Seat can follow life from events CR 119.3
                 ResultItem::GainLife(amount) => {
                     if let Some(player) = state.player_mut(controller) {
                         player.gain_life(amount);
