@@ -68,21 +68,41 @@ impl CardDb {
     /// Loads the card whose `cards.oracle_id` (the primary key) is `oracle_id`.
     pub fn load_by_oracle_id(&self, oracle_id: &str) -> Result<CardDefinition, CardLoadError> {
         let row = self.fetch_row("oracle_id", oracle_id)?;
-        self.build_definition(row)
+        self.build_definition(&row)
+    }
+
+    /// The raw data `load_by_oracle_id` builds from, so a caller can fingerprint it. It
+    /// fails wherever `load_by_oracle_id` fails, with the same error.
+    pub fn record_by_oracle_id(&self, oracle_id: &str) -> Result<CardRecord, CardLoadError> {
+        let row = self.fetch_row("oracle_id", oracle_id)?;
+        self.build_definition(&row)?;
+        Ok(CardRecord {
+            keywords: self.keyword_names(&row.oracle_id)?,
+            script: self.active_script(&row.oracle_id)?,
+            oracle_id: row.oracle_id,
+            name: row.name,
+            mana_cost: row.mana_cost,
+            type_line: row.type_line,
+            oracle_text: row.oracle_text,
+            power: row.power,
+            toughness: row.toughness,
+            loyalty: row.loyalty,
+            defense: row.defense,
+        })
     }
 
     /// Loads the card named `cards.name`. Names are unique per oracle card in the source
     /// data, but the schema does not enforce it.
     pub fn load_by_name(&self, name: &str) -> Result<CardDefinition, CardLoadError> {
         let row = self.fetch_row("name", name)?;
-        self.build_definition(row)
+        self.build_definition(&row)
     }
 
     /// Loads the card whose `cards.script_id` slug (e.g. `"lightning_bolt"`) is `script_id`.
     /// Hand-written scenarios use it to avoid typing a name or UUID.
     pub fn load_by_script_id(&self, script_id: &str) -> Result<CardDefinition, CardLoadError> {
         let row = self.fetch_row("script_id", script_id)?;
-        self.build_definition(row)
+        self.build_definition(&row)
     }
 
     fn fetch_row(&self, column: &str, key: &str) -> Result<CardRow, CardLoadError> {
@@ -115,9 +135,9 @@ impl CardDb {
         Ok(row)
     }
 
-    fn build_definition(&self, row: CardRow) -> Result<CardDefinition, CardLoadError> {
+    fn build_definition(&self, row: &CardRow) -> Result<CardDefinition, CardLoadError> {
         if row.has_multiple_faces {
-            return Err(CardLoadError::MultiFace(row.name));
+            return Err(CardLoadError::MultiFace(row.name.clone()));
         }
 
         let mana_cost = match row.mana_cost.as_deref() {
@@ -138,13 +158,13 @@ impl CardDb {
 
         Ok(CardDefinition {
             definition_id: hash_oracle_id(&row.oracle_id),
-            name: row.name,
+            name: row.name.clone(),
             mana_cost,
             color_indicator: None,
             supertypes,
             card_types,
             subtypes,
-            oracle_text: row.oracle_text,
+            oracle_text: row.oracle_text.clone(),
             power: parse_pt(row.power.as_deref()),
             toughness: parse_pt(row.toughness.as_deref()),
             loyalty: parse_pt(row.loyalty.as_deref()),
@@ -162,34 +182,47 @@ impl CardDb {
     }
 
     fn load_keywords(&self, oracle_id: &str) -> Result<KeywordSet, CardLoadError> {
+        Ok(keywords::parse(&self.keyword_names(oracle_id)?))
+    }
+
+    fn keyword_names(&self, oracle_id: &str) -> Result<Vec<String>, CardLoadError> {
         let mut stmt = self.conn.prepare(
             "SELECT k.name FROM keywords k \
              JOIN card_keywords ck ON ck.keyword_id = k.id \
-             WHERE ck.oracle_id = ?1",
+             WHERE ck.oracle_id = ?1 ORDER BY k.name",
         )?;
         let names = stmt
             .query_map([oracle_id], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<String>, _>>()?;
-        Ok(keywords::parse(&names))
+        Ok(names)
     }
 
     // A card with no active `card_scripts` row gets a stub module, so `run_card_script`
     // does not fail on an empty string.
     fn load_script_ref(&self, oracle_id: &str) -> Result<ScriptReference, CardLoadError> {
-        use rusqlite::OptionalExtension;
-        let source: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT script_source FROM card_scripts \
-                 WHERE oracle_id = ?1 AND is_active = 1 \
-                 ORDER BY version DESC LIMIT 1",
-                [oracle_id],
-                |row| row.get(0),
-            )
-            .optional()?;
+        let source = self.active_script(oracle_id)?.map(|s| s.source);
         Ok(ScriptReference::Inline(
             source.unwrap_or_else(script::vanilla_stub),
         ))
+    }
+
+    fn active_script(&self, oracle_id: &str) -> Result<Option<ScriptRecord>, CardLoadError> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT version, script_source FROM card_scripts \
+                 WHERE oracle_id = ?1 AND is_active = 1 \
+                 ORDER BY version DESC LIMIT 1",
+                [oracle_id],
+                |row| {
+                    Ok(ScriptRecord {
+                        version: row.get(0)?,
+                        source: row.get(1)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// The highest active `version` of each `(oracle_id, test_name)` in `card_tests`,
@@ -231,6 +264,30 @@ pub struct CardTestRow {
     pub test_name: String,
     pub version: i64,
     pub test_source: String,
+}
+
+/// One card's `cards` columns, keyword names sorted by name, and its active script.
+/// `CardDb::record_by_oracle_id` returns it for fingerprinting.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CardRecord {
+    pub oracle_id: String,
+    pub name: String,
+    pub mana_cost: Option<String>,
+    pub type_line: String,
+    pub oracle_text: String,
+    pub power: Option<String>,
+    pub toughness: Option<String>,
+    pub loyalty: Option<String>,
+    pub defense: Option<String>,
+    pub keywords: Vec<String>,
+    pub script: Option<ScriptRecord>,
+}
+
+/// The highest active `card_scripts` row: the one the loader runs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptRecord {
+    pub version: i64,
+    pub source: String,
 }
 
 struct CardRow {

@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize, Serializer};
 
+use crate::replay::ReplayFile;
 use crate::wire::{WireDecision, WireEvent, WireSnapshot};
 
 /// The protocol version in every message. A breaking change to a field's name,
@@ -71,6 +72,7 @@ pub(crate) enum Status {
     DecisionOpen,
     StillRunning,
     GameOver,
+    Exported,
     Error,
 }
 
@@ -98,6 +100,9 @@ pub(crate) struct Response {
     /// With a `snapshot` request only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<WireSnapshot>,
+    /// With `exported` only. It holds every hidden choice, so it is for the host alone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ReplayFile>,
 }
 
 impl Response {
@@ -110,6 +115,7 @@ impl Response {
             winner: None,
             seats: None,
             snapshot: None,
+            replay: None,
         }
     }
 
@@ -117,6 +123,13 @@ impl Response {
         Response {
             seats: Some(seats),
             ..Response::empty(Status::Created)
+        }
+    }
+
+    pub(crate) fn exported(replay: ReplayFile) -> Self {
+        Response {
+            replay: Some(replay),
+            ..Response::empty(Status::Exported)
         }
     }
 

@@ -2,6 +2,7 @@
 //! Seat has an outbox of events filtered for its view. See `docs/DESIGN.md`.
 
 use std::any::Any;
+use std::collections::BTreeMap;
 use std::mem;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -12,6 +13,7 @@ use stackfish_engine::engine::{Engine, EngineSnapshot, StepStatus};
 
 use crate::card_source::CardSource;
 use crate::envelope::{ErrorCode, PROTOCOL_VERSION, Request, Response};
+use crate::replay::{REPLAY_VERSION, RecordedAnswer, Replay, ReplayFile, engine_build_id};
 use crate::setup::{self, SetupBody};
 use crate::view::{self, Observer, Viewer};
 use crate::wire::{AnswerBody, WireDecision, WireEvent};
@@ -68,7 +70,13 @@ pub struct Session {
     phase: Phase,
     /// Why the Session halted or died, for the host's log and never for a Seat.
     internal: Option<String>,
-    // TODO: keep the setup bytes and the accepted Answers in order, for replay export
+    /// The `setup` request bytes, kept verbatim for `export_replay`.
+    setup: Vec<u8>,
+    /// The fingerprint of every key the setup names, taken while the card source was at hand.
+    cards: BTreeMap<String, String>,
+    /// Accepted Answers in order. Refused Answers and `advance` budgets are not kept: a
+    /// replay runs to each Decision whatever budgets the host used.
+    answers: Vec<RecordedAnswer>,
     // TODO: bound a Seat's outbox; one that never sends a request grows without limit
 }
 
@@ -135,13 +143,88 @@ impl Session {
         }
     }
 
-    fn build_session(
-        request: &[u8],
+    /// Builds a Session from an exported replay and plays every recorded Answer. The
+    /// Session then runs on to the first Decision or the end after the last Answer, so a
+    /// replay exported mid-run loads further ahead. Every Seat's outbox holds the whole game.
+    ///
+    /// `Err` holds `setup_invalid` when the card data or engine build differs, or when the
+    /// game stops matching the recording, naming the first Answer that did not fit.
+    pub fn from_replay(
+        replay: &[u8],
         cards: &dyn CardSource,
     ) -> Result<(Session, Vec<u8>), Vec<u8>> {
-        let request = parse_request(request).map_err(|r| r.to_bytes())?;
+        let replay = Replay::parse(replay)?;
+        // A card source or script that panics must give an error response, as in `create`.
+        let loaded = catch_unwind(AssertUnwindSafe(|| {
+            let (mut session, created) = replay.start(cards)?;
+            session
+                .drive(replay.answers())
+                .map_err(|message| refuse_start(ErrorCode::SetupInvalid, message))?;
+            Ok((session, created))
+        }));
+        loaded.unwrap_or_else(|_| Err(refuse_start(ErrorCode::EnginePanic, INTERNAL_MESSAGE)))
+    }
+
+    // TODO: replay determinism also rests on the HashMap walk audit and on Lua pairs order
+    fn drive(&mut self, answers: &[RecordedAnswer]) -> Result<(), String> {
+        for (i, recorded) in answers.iter().enumerate() {
+            match self.run_to_pause() {
+                Outcome::Decision if self.engine.open_decision().is_some() => {}
+                _ => return Err(format!("answer {i} does not fit: no Decision is open")),
+            }
+            let body: AnswerBody = serde_json::from_value(serde_json::json!({
+                "decision": recorded.decision, "reply": recorded.reply,
+            }))
+            .map_err(|e| format!("answer {i} does not parse: {e}"))?;
+            if recorded.seat >= self.players {
+                return Err(format!(
+                    "answer {i} does not fit: seat {} cannot answer",
+                    recorded.seat
+                ));
+            }
+            let player = PlayerId(recorded.seat);
+            let answer = Answer {
+                decision: DecisionId(body.decision.0),
+                reply: body.reply.into_reply(player),
+            };
+            if let Err(rejection) = self.engine.answer(player, answer) {
+                return Err(format!("answer {i} does not fit: {}", rejection.message));
+            }
+            self.observe();
+            self.answers.push(recorded.clone());
+        }
+        match self.run_to_pause() {
+            Outcome::Decision if self.engine.open_decision().is_some() => {}
+            Outcome::Decision => {
+                self.internal = Some("the engine paused without opening a Decision".to_string());
+                self.phase = Phase::Halted;
+            }
+            Outcome::GameOver(winner) => self.phase = Phase::Over(winner),
+            Outcome::Fatal => self.phase = Phase::Halted,
+            Outcome::StillRunning => unreachable!("run_to_pause only stops at a pause"),
+        }
+        Ok(())
+    }
+
+    fn run_to_pause(&mut self) -> Outcome {
+        if !matches!(self.phase, Phase::Playing) {
+            return Outcome::Fatal;
+        }
+        loop {
+            match self.run(self.step_cap) {
+                Outcome::StillRunning => {}
+                outcome => return outcome,
+            }
+        }
+    }
+
+    /// Parses `setup` request bytes down to the body, refusing anything that is not a
+    /// seatless `setup` request.
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn setup_body(request: &[u8]) -> Result<SetupBody, Response> {
+        let request = parse_request(request)?;
         if request.kind != "setup" {
-            return Err(refuse_start(
+            return Err(Response::error(
                 ErrorCode::MalformedMessage,
                 format!(
                     "expected a setup request to create the Session, got {:?}",
@@ -150,14 +233,31 @@ impl Session {
             ));
         }
         if request.seat.is_some() {
-            return Err(refuse_start(
+            return Err(Response::error(
                 ErrorCode::MalformedMessage,
                 "setup comes from the host, so it has no seat",
             ));
         }
-        let body: SetupBody = parse_body(&request).map_err(|r| r.to_bytes())?;
+        parse_body(&request)
+    }
+
+    fn build_session(
+        request: &[u8],
+        cards: &dyn CardSource,
+    ) -> Result<(Session, Vec<u8>), Vec<u8>> {
+        let body = Self::setup_body(request).map_err(|r| r.to_bytes())?;
         let built =
             setup::build(&body, cards).map_err(|e| refuse_start(ErrorCode::SetupInvalid, e.0))?;
+        let fingerprints = setup::keys(&body)
+            .into_iter()
+            .map(|key| match cards.fingerprint(&key) {
+                Ok(print) => Ok((key, print)),
+                Err(e) => Err(refuse_start(
+                    ErrorCode::SetupInvalid,
+                    format!("card key {key:?} has no fingerprint: {e}"),
+                )),
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
         let players = built.config.players.len() as u32;
         let seats: Vec<Seat> = (0..players)
             .map(|i| Viewer::Player(PlayerId(i)))
@@ -179,6 +279,9 @@ impl Session {
             observer: Observer::default(),
             phase: Phase::Playing,
             internal: None,
+            setup: request.to_vec(),
+            cards: fingerprints,
+            answers: Vec::new(),
         };
         session.observe();
         Ok((session, Response::created(ids).to_bytes()))
@@ -189,7 +292,7 @@ impl Session {
         self.engine.snapshot()
     }
 
-    /// Handles one `advance`, `answer`, `poll` or `snapshot` request.
+    /// Handles one `advance`, `answer`, `poll`, `snapshot` or `export_replay` request.
     ///
     /// An engine panic is caught here. The Session marks itself dead and answers this
     /// request and every later one with `engine_panic`.
@@ -235,6 +338,7 @@ impl Session {
         match request.kind.as_str() {
             "poll" => return self.poll(&request),
             "snapshot" => return self.seat_snapshot(&request),
+            "export_replay" => return self.export_replay(&request),
             _ => {}
         }
         if matches!(self.phase, Phase::Halted) {
@@ -306,6 +410,11 @@ impl Session {
                 "a spectator Seat cannot answer",
             );
         }
+        let recorded = RecordedAnswer {
+            seat,
+            decision: request.body["decision"].clone(),
+            reply: request.body["reply"].clone(),
+        };
         let player = PlayerId(seat);
         let answer = Answer {
             decision: DecisionId(body.decision.0),
@@ -320,9 +429,32 @@ impl Session {
             }
             return self.refuse_with(Some(seat), rejection_code(code), message);
         }
+        self.answers.push(recorded);
         self.observe();
         let outcome = self.run(self.step_cap);
         self.finish(Some(seat), outcome)
+    }
+
+    // Allowed in every phase but `Dead`, so a halted game can still be filed as a bug.
+    fn export_replay(&mut self, request: &Request) -> Response {
+        if let Err(response) = parse_body::<EmptyBody>(request) {
+            return self.refuse(request.seat, response);
+        }
+        if request.seat.is_some() {
+            return self.refuse_with(
+                request.seat,
+                ErrorCode::MalformedMessage,
+                "export_replay comes from the host, so it has no seat",
+            );
+        }
+        Response::exported(ReplayFile {
+            replay_v: REPLAY_VERSION,
+            engine_build: engine_build_id(),
+            cards: self.cards.clone(),
+            setup: String::from_utf8(self.setup.clone())
+                .expect("the setup bytes parsed as JSON, so they are UTF-8"),
+            answers: self.answers.clone(),
+        })
     }
 
     fn poll(&mut self, request: &Request) -> Response {
@@ -531,6 +663,89 @@ mod tests {
     }
 
     #[test]
+    fn a_halted_session_still_exports_and_its_replay_loads() {
+        let (mut session, _) = Session::create(&started_setup(), &a_source()).unwrap();
+        session
+            .engine
+            .poison(stackfish_engine::commands::Internal::new("boom"));
+        let advance =
+            serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "body": {} })).unwrap();
+        let halted: Value = serde_json::from_slice(&session.handle(&advance)).unwrap();
+        assert_eq!(halted["body"]["error"]["code"], "pipeline_error");
+
+        let export =
+            serde_json::to_vec(&json!({ "v": 1, "kind": "export_replay", "body": {} })).unwrap();
+        let exported: Value = serde_json::from_slice(&session.handle(&export)).unwrap();
+        assert_eq!(exported["body"]["status"], "exported");
+        assert_eq!(exported["body"]["replay"]["answers"], json!([]));
+
+        // The halt came from outside the recorded inputs, so the replay plays on past it.
+        let replay = serde_json::to_vec(&exported["body"]["replay"]).unwrap();
+        let (mut loaded, _) = Session::from_replay(&replay, &a_source()).unwrap();
+        assert!(loaded.internal_error().is_none());
+        assert!(matches!(loaded.phase, Phase::Playing));
+        assert!(loaded.engine.open_decision().is_some());
+    }
+
+    #[test]
+    fn a_card_source_that_panics_during_a_replay_load_is_an_error_response() {
+        struct PanicsOnPrint(FixtureCardSource);
+        impl CardSource for PanicsOnPrint {
+            fn load(
+                &self,
+                key: &str,
+            ) -> Result<stackfish_engine::CardDefinition, crate::card_source::CardSourceError>
+            {
+                self.0.load(key)
+            }
+
+            fn fingerprint(
+                &self,
+                _key: &str,
+            ) -> Result<String, crate::card_source::CardSourceError> {
+                panic!("the card source broke");
+            }
+        }
+        let (mut session, _) = Session::create(&started_setup(), &a_source()).unwrap();
+        let export =
+            serde_json::to_vec(&json!({ "v": 1, "kind": "export_replay", "body": {} })).unwrap();
+        let exported: Value = serde_json::from_slice(&session.handle(&export)).unwrap();
+        let replay = serde_json::to_vec(&exported["body"]["replay"]).unwrap();
+        let refused = Session::from_replay(&replay, &PanicsOnPrint(a_source()))
+            .err()
+            .expect("the load fails");
+        let refused: Value = serde_json::from_slice(&refused).unwrap();
+        assert_eq!(refused["body"]["error"]["code"], "engine_panic");
+    }
+
+    #[test]
+    fn a_card_the_source_cannot_fingerprint_refuses_the_setup_naming_it() {
+        struct Unprintable(FixtureCardSource);
+        impl CardSource for Unprintable {
+            fn load(
+                &self,
+                key: &str,
+            ) -> Result<stackfish_engine::CardDefinition, crate::card_source::CardSourceError>
+            {
+                self.0.load(key)
+            }
+
+            fn fingerprint(
+                &self,
+                _key: &str,
+            ) -> Result<String, crate::card_source::CardSourceError> {
+                Err(crate::card_source::CardSourceError("no data".to_string()))
+            }
+        }
+        let refused = Session::create(&started_setup(), &Unprintable(a_source()))
+            .err()
+            .expect("create fails");
+        let refused: Value = serde_json::from_slice(&refused).unwrap();
+        assert_eq!(refused["body"]["error"]["code"], "setup_invalid");
+        assert!(refused.to_string().contains("\\\"a\\\""), "{refused}");
+    }
+
+    #[test]
     fn a_panic_in_the_engine_kills_the_session_with_a_stable_code_and_no_detail() {
         let mut session = started();
         let poll =
@@ -572,6 +787,13 @@ mod tests {
             {
                 panic!("the card source broke");
             }
+
+            fn fingerprint(
+                &self,
+                _key: &str,
+            ) -> Result<String, crate::card_source::CardSourceError> {
+                panic!("the card source broke");
+            }
         }
         let setup = json!({
             "v": 1, "kind": "setup",
@@ -584,7 +806,7 @@ mod tests {
         let refused: Value = serde_json::from_slice(&refused).unwrap();
         assert_eq!(refused["body"]["error"]["code"], "engine_panic");
     }
-    fn started() -> Session {
+    fn a_source() -> FixtureCardSource {
         let card = minimal_card_definition(
             1,
             "A",
@@ -594,14 +816,20 @@ mod tests {
             },
             CardTypeSet::CREATURE,
         );
-        let cards = FixtureCardSource::new().with("a", card);
-        let setup = json!({
+        FixtureCardSource::new().with("a", card)
+    }
+
+    fn started_setup() -> Vec<u8> {
+        serde_json::to_vec(&json!({
             "v": 1, "kind": "setup",
             "body": { "players": [{ "deck": [{ "card": "a", "count": 20 }] }, { "deck": [{ "card": "a", "count": 20 }] }],
                       "format": "standard", "seed": "1", "overrides": { "skip_mulligan": true } },
-        });
-        let (mut session, _) =
-            Session::create(&serde_json::to_vec(&setup).unwrap(), &cards).unwrap();
+        }))
+        .unwrap()
+    }
+
+    fn started() -> Session {
+        let (mut session, _) = Session::create(&started_setup(), &a_source()).unwrap();
         let advance =
             serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "body": {} })).unwrap();
         session.handle(&advance);

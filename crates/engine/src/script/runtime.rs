@@ -41,6 +41,23 @@ pub struct ScriptRuntime {
     registry: Rc<RefCell<ScriptRegistry>>,
 }
 
+// A replay reruns a game from its seed and Answers, so a script must not reach a clock,
+// an unseeded random source, or the file system.
+// TODO: Lua 5.4 seeds string hashes per state, so pairs order over string keys can differ between runs
+fn sandboxed_lua() -> Lua {
+    let libs = mlua::StdLib::TABLE
+        | mlua::StdLib::STRING
+        | mlua::StdLib::UTF8
+        | mlua::StdLib::MATH
+        | mlua::StdLib::COROUTINE;
+    let lua = Lua::new_with(libs, mlua::LuaOptions::default())
+        .expect("loading the safe standard libraries should never fail");
+    lua.load("math.random = nil math.randomseed = nil dofile = nil loadfile = nil")
+        .exec()
+        .expect("clearing globals should never fail");
+    lua
+}
+
 impl Default for ScriptRuntime {
     fn default() -> Self {
         Self::new()
@@ -49,7 +66,7 @@ impl Default for ScriptRuntime {
 
 impl ScriptRuntime {
     pub fn new() -> Self {
-        let lua = Lua::new();
+        let lua = sandboxed_lua();
         let registry = Rc::new(RefCell::new(ScriptRegistry::default()));
         bind_game_globals(&lua, Rc::clone(&registry)).expect(
             "binding the Game.Conditions/Game.Ops/Game.CreateTriggeredAbility sugar should never fail",
@@ -990,5 +1007,37 @@ impl ScriptRuntime {
         let handle = registry.next_script_handle();
         registry.suspended_threads.insert(handle, key);
         Ok(handle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_script_cannot_reach_a_clock_a_random_source_or_files() {
+        let runtime = ScriptRuntime::new();
+        for name in [
+            "os",
+            "io",
+            "require",
+            "package",
+            "debug",
+            "dofile",
+            "loadfile",
+            "math.random",
+            "math.randomseed",
+        ] {
+            let value: Value = runtime.lua.load(format!("return {name}")).eval().unwrap();
+            assert!(value.is_nil(), "{name} is reachable");
+        }
+        let floor: i64 = runtime.lua.load("return math.floor(1.5)").eval().unwrap();
+        assert_eq!(floor, 1);
+        let wrapped: i64 = runtime
+            .lua
+            .load("return coroutine.wrap(function() coroutine.yield(3) end)()")
+            .eval()
+            .unwrap();
+        assert_eq!(wrapped, 3);
     }
 }

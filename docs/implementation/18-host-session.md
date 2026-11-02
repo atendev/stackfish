@@ -8,16 +8,22 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 - `Session::create(request: &[u8], cards: &dyn CardSource) -> Result<(Session, Vec<u8>), Vec<u8>>` parses a `setup`
   request. `Ok` holds the Session and the `created` response. `Err` holds an error response. Nothing runs at
   creation, and the Session does not keep `cards`.
-- `Session::handle(&mut self, request: &[u8]) -> Vec<u8>` takes an `advance`, `answer`, `poll` or `snapshot` request
-  and returns one response.
-- `CardSource::load(key) -> Result<CardDefinition, CardSourceError>`. `FixtureCardSource` serves cards from a map built
-  in code.
+- `Session::handle(&mut self, request: &[u8]) -> Vec<u8>` takes an `advance`, `answer`, `poll`, `snapshot` or
+  `export_replay` request and returns one response.
+- `Session::from_replay(replay: &[u8], cards: &dyn CardSource) -> Result<(Session, Vec<u8>), Vec<u8>>` loads an exported
+  replay and plays every recorded Answer. `Replay::parse`, `verify`, `start` and `answer_request(i)` let a host step it.
+- `CardSource::load(key) -> Result<CardDefinition, CardSourceError>` and `CardSource::fingerprint(key) -> Result<String,
+  CardSourceError>`. `FixtureCardSource` serves cards from a map built in code. `CardDbCardSource` reads `CardDb`.
+- `REPLAY_VERSION` (1) and `engine_build_id()`.
 
 ## Module map
 
 - `setup.rs`: `SetupBody`, the two format presets, `SettingOverrides`, and `build`, which turns a body into a
   `GameConfig`. The source is asked once per distinct key. Library order is the decklist order.
 - `envelope.rs`: `Request`, `Response`, `ErrorCode`, `PROTOCOL_VERSION`.
+- `replay.rs`: `ReplayFile` (the `replay` field), `RecordedAnswer`, `Replay`, `REPLAY_VERSION`, `engine_build_id`.
+- `fingerprint.rs`: the canonical card encoding and FNV-1a, shared with the bot's transcript hash.
+  `CardDb::record_by_oracle_id` gives the raw row, sorted keywords and active script it hashes for a database card.
 - `session.rs`: the dispatch, the step loop, the per-Seat outboxes and the fatal state.
 - `view.rs`: the visibility rule (B4). `Viewer`, `Observer` (reads each ledger entry once into an `Observed` that
   knows every viewer's copy), `decision_for` and `snapshot_for`.
@@ -105,6 +111,24 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 - TODO: a card a `revealed` event showed keeps its identity in the events but not in a later snapshot while it stays
   in a hand or library. The fold tests do not fold identities.
 
+## Replay export (ticket 022)
+
+- `export_replay` (`{v, kind: "export_replay", body: {}}`, no `seat`) returns status `exported` with a `replay` field:
+  `{replay_v, engine_build, cards, setup, answers}`. `setup` is the setup request as a string, byte for byte.
+  `cards` maps every key the setup names to its fingerprint, taken at creation, so a source that cannot fingerprint a
+  key refuses the setup with `setup_invalid`. `answers` holds `{seat, decision, reply}` for each accepted Answer, the
+  body fields as sent. Export works after the game ends or halts. A dead Session answers `engine_panic`.
+- `Session::from_replay` checks `replay_v`, the build id and every fingerprint before any card loads, and names every
+  key that differs. It then runs to each Decision with `step_cap` batches and applies the next Answer. A recorded
+  Answer that does not fit (no Decision open, or the engine refuses it) gives `setup_invalid` naming its index. After
+  the last Answer it runs on to the next Decision or the end, so a replay exported mid-run loads further ahead. It
+  never drains an outbox, so every Seat can `poll` the whole game.
+- A database fingerprint covers the `cards` columns, sorted keyword names and the active script's version and source.
+  A fixture fingerprint covers the printed characteristics, mode choice and script source.
+- TODO: an omniscient stream digest in the file, so a loader catches an Answer swapped for another legal one.
+- TODO: the fixture fingerprint skips `effect`, `modes`, `alternative_costs`, `buyback_cost` and `target_requirement`.
+- Determinism also rests on the `HashMap` walk audit (ticket 028) and on Lua `pairs` order, which is not seeded.
+
 ## Engine changes
 
 - `CounterSet::totals()` returns the total per counter kind, so the wire can list counters.
@@ -122,8 +146,6 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 - The free-text rule (ticket 027) is in `DESIGN.md`, "Writing events". Every `script_error` message comes from
   `GameState::script_error_message`, which leaves out the id and detail of a library or hand source. Before this, a
   library card's broken script logged its id and Lua error text to every Seat at game start.
-- Replay export (the setup bytes and the accepted Answers in order, from 001) is not built.
-- The carddb-backed `CardSource` is not built. It wraps `CardDb::load_by_oracle_id`.
 - The Payment cost lists additional costs without their filters (`sacrifice`, `discard`, `tap_permanents`,
   `exile_from_graveyard`), because the engine does not list eligible objects for a Payment Decision.
 - Rejection messages are the engine's `Debug` text, passed through.
@@ -137,6 +159,10 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 `crates/host/tests/seat_visibility.rs` (16) drives a bot game over four Seats (two players, a spectator and an
 omniscient spectator): draws, a cast, the hidden-id scan, opaque Decisions, `poll`, spectators that cannot answer, and
 the snapshot (fold equality, hidden ids, the dropped outbox and request errors).
+`crates/host/tests/replay.rs` (13) replays bot games and compares an omniscient Seat's events, re-exports, loads with a
+Decision open and mid-run, refuses changed cards, a changed card list, another build, a dropped Answer and a wrong
+seat, checks refused Answers are not recorded, steps a started
+replay, and pins the proof-game hash to `BEHAVIOUR_REV`.
 Unit tests in `session.rs` (4) cover `revealed`, scry, surveil, `rng_drawn`, `cycled` and `trigger_queued`.
 `crates/host/tests/phase5_host_session.rs` (11) drives a real two-player game in bytes: creation failures,
 envelope and body rejection, the first priority Decision, mulligan order and the bottom-card choice, rejected

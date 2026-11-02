@@ -7,6 +7,7 @@ use stackfish_carddb::{CardDb, CardLoadError};
 use stackfish_engine::CardDefinition;
 
 use crate::card_source::{CardSource, CardSourceError};
+use crate::fingerprint;
 
 /// Loads definitions by `oracle_id`, the key decklists carry. A failure becomes a
 /// `CardSourceError` so the Session can name the key in its setup refusal.
@@ -21,12 +22,25 @@ impl CardDbCardSource {
     }
 }
 
+fn load_error(key: &str, e: CardLoadError) -> CardSourceError {
+    match e {
+        CardLoadError::NotFound(_) => CardSourceError(format!("no card found for key {key:?}")),
+        other => CardSourceError(format!("card {key:?} failed to load: {other}")),
+    }
+}
+
 impl CardSource for CardDbCardSource {
     fn load(&self, key: &str) -> Result<CardDefinition, CardSourceError> {
-        self.db.load_by_oracle_id(key).map_err(|e| match e {
-            CardLoadError::NotFound(_) => CardSourceError(format!("no card found for key {key:?}")),
-            other => CardSourceError(format!("card {key:?} failed to load: {other}")),
-        })
+        self.db
+            .load_by_oracle_id(key)
+            .map_err(|e| load_error(key, e))
+    }
+
+    fn fingerprint(&self, key: &str) -> Result<String, CardSourceError> {
+        self.db
+            .record_by_oracle_id(key)
+            .map(|record| fingerprint::of_record(&record))
+            .map_err(|e| load_error(key, e))
     }
 }
 
@@ -143,6 +157,76 @@ mod tests {
         let source = CardDbCardSource::open(fixture_db()).unwrap();
         let err = source.load("plane-1").unwrap_err();
         assert!(err.0.contains("plane-1"), "error names the key: {err}");
+    }
+
+    #[test]
+    fn a_fingerprint_is_stable_and_fails_where_load_fails() {
+        let source = CardDbCardSource::open(fixture_db()).unwrap();
+        assert_eq!(
+            source.fingerprint("beta-1").unwrap(),
+            source.fingerprint("beta-1").unwrap()
+        );
+        assert_ne!(
+            source.fingerprint("alpha-1").unwrap(),
+            source.fingerprint("beta-1").unwrap()
+        );
+        for key in ["no-such-card", "plane-1", "dfc-1"] {
+            let err = source.fingerprint(key).unwrap_err();
+            assert!(err.0.contains(key), "error names the key: {err}");
+        }
+    }
+
+    #[test]
+    fn a_fingerprint_does_not_depend_on_keyword_insertion_order() {
+        let print = |order: [&str; 2]| {
+            let path = fixture_db();
+            let conn = Connection::open(&path).unwrap();
+            for name in order {
+                conn.execute("INSERT OR IGNORE INTO keywords (name) VALUES (?1)", [name])
+                    .unwrap();
+                conn.execute(
+                    "INSERT INTO card_keywords (oracle_id, keyword_id)
+                     VALUES ('alpha-1', (SELECT id FROM keywords WHERE name = ?1))",
+                    [name],
+                )
+                .unwrap();
+            }
+            CardDbCardSource::open(&path)
+                .unwrap()
+                .fingerprint("alpha-1")
+                .unwrap()
+        };
+        assert_eq!(
+            print(["Vigilance", "Flying"]),
+            print(["Flying", "Vigilance"])
+        );
+    }
+
+    #[test]
+    fn a_fingerprint_follows_the_active_script_and_ignores_an_inactive_one() {
+        let path = fixture_db();
+        let before = CardDbCardSource::open(&path)
+            .unwrap()
+            .fingerprint("alpha-1")
+            .unwrap();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO card_scripts (oracle_id, version, script_source, is_active)
+             VALUES ('alpha-1', 9, 'return {}', 0);",
+        )
+        .unwrap();
+        let inactive = CardDbCardSource::open(&path)
+            .unwrap()
+            .fingerprint("alpha-1")
+            .unwrap();
+        assert_eq!(inactive, before);
+        conn.execute_batch("UPDATE card_scripts SET is_active = 1 WHERE version = 9;")
+            .unwrap();
+        let active = CardDbCardSource::open(&path)
+            .unwrap()
+            .fingerprint("alpha-1")
+            .unwrap();
+        assert_ne!(active, before);
     }
 
     #[test]

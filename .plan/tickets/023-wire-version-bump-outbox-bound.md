@@ -15,6 +15,7 @@ Apply 020's `v` decision and its bound or drain rule for the per-Seat outbox.
 ## Notes
 
 - Origin 013. The rules come from 020.
+- `Session::from_replay` never drains an outbox while it plays the recorded Answers, so the cap must not lapse a Seat during that drive (022).
 
 ## Resolution
 

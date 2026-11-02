@@ -19,6 +19,10 @@ name.
   "spend this mana only to cast [card type] spells" (Mishra's Workshop) only. Object-specific
   restrictions ("only to cast the exiled card") and ability-activation restrictions aren't modeled —
   see [mana-abilities.md](mana-abilities.md#restricted-mana).
+- **No clock, random source or files.** Scripts get only the `table`, `string`, `utf8`, `math` and
+  `coroutine` libraries. `os`, `io`, `require`, `dofile`, `loadfile`, `math.random` and
+  `math.randomseed` are absent, because a replay reruns a game from its seed and must play out the
+  same.
 - **No lookup-by-key script resolution.** A card's script always has to be the literal Lua source,
   not a key into an external registry.
 - **No script-backed costs.** `Game.Costs.*` covers every structured cost shape without needing a

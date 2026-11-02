@@ -30,7 +30,8 @@ Which encoding do messages use (JSON, MessagePack, or another), and what is the 
   - `answer`: the id of the open Decision (`decision`), plus the Answer as the tagged reply enum from 002. Candidates use `Object(ObjectId) | Player(PlayerId)` from 005.
   - `poll` (added in 013, seat required, empty body): the Seat's queued events and its view of the open Decision.
   - `snapshot` (added by 020 and built in 021, seat required, empty body): the `poll` response with a `snapshot` field. It drops the Seat's queued events. A new kind does not bump `v`.
-- Responses have one type, with `status` set to `created`, `decision_open`, `still_running`, `game_over`, or `error`.
+  - `export_replay` (added by 020 and built in 022, no `seat`, empty body): status `exported` with a `replay` field holding `replay_v`, the setup bytes, the accepted Answers, card fingerprints and the engine build. It holds every hidden choice, so it is for the host only. `replay_v` moves apart from `v`.
+- Responses have one type, with `status` set to `created`, `decision_open`, `still_running`, `game_over`, `exported` (022), or `error`.
   - `events` is a list. Each event has a `sequence_no`.
   - `decision` appears only when the status is `decision_open`.
   - `error` (a `code` and a `message`) appears on a rejected Answer or on a fatal pipeline error.
