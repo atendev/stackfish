@@ -18,7 +18,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 8. CR 601.2d division of damage or counters among targets, then subtype and exclusion keys on `DestroyAll` filters.
 9. Done on `phase5/revealed-face-down-producers` (awaiting review): ticket 027, `Revealed` from a revealing search and from amplify, the free-text event rule in `DESIGN.md`, and the `ScriptError` redaction. `face_down` has no producer, since face-down mechanics are a design non-goal (item 12).
 10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target, stun counters, Condescend's X, Echo's control check, and CR 104.4b loop detection (ticket 029).
-11. Housekeeping, alongside the above: ticket 017 (stale notes and the `.plan/` commit policy), 032 (rejection text and payment cost filters), 033 (Godot smoke test in CI, export and web builds), 034 (unconfirmed gdext items), the live `todo!()` body in `ScriptRuntime::invoke_cost` (not checked for reachability; the one in `commands/mod.rs` went away in ticket 035), and a stale-prose pass over `docs/lua/` (for example, "Protection from an attached Aura/Equipment" in `not-available-yet.md` may predate `14-protection-attach.md`).
+11. Housekeeping, alongside the above: ticket 017 (stale notes and the `.plan/` commit policy), 033 (Godot smoke test in CI, export and web builds), 034 (unconfirmed gdext items), the live `todo!()` body in `ScriptRuntime::invoke_cost` (not checked for reachability; the one in `commands/mod.rs` went away in ticket 035), and a stale-prose pass over `docs/lua/` (for example, "Protection from an attached Aura/Equipment" in `not-available-yet.md` may predate `14-protection-attach.md`).
 12. Design non-goals (planeswalkers, battles, double-faced, split and flip cards, sagas, face-down permanents, team rules). If the card database holds any of these, the loader should skip or reject them explicitly before then.
 
 ## Live TODOs / unresolved gaps
@@ -88,8 +88,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     modes: the entries carry `solo_only` and no longer list a card with no legal selection.
   - An unless-paid payment lists no mana abilities, because the engine cannot suspend it for one (CR 605.3a).
   - A script `SelectTarget` pick excludes only objects, so a pick repeated in one script can name the same ability twice.
-  - Rejection messages are the `Debug` text of the engine's error enum. B3 passes them through unchanged, so
-    friendlier wording is still open.
+  - Rejection messages use the `Display` text in `engine/error_text.rs`, but some `IllegalAction` strings still use
+    engine terms such as "actor" and method names.
   - The Decision id counter stays on `Engine` (B3 decided against moving it). Mixing `open_decision`/`answer` with
     direct `submit_*` calls on the same `Engine` leaves the counter out of step. The Session never does.
   - Unit tests cover the shapes, not every pause variant. The exhaustive match in `decision/open.rs` is what guards new

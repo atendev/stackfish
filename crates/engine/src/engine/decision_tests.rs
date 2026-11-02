@@ -36,9 +36,10 @@ fn answer(decision: DecisionId, reply: Reply) -> Answer {
     Answer { decision, reply }
 }
 
-fn reject(result: Result<(), Rejection>, code: RejectionCode) {
+fn reject(result: Result<(), Rejection>, code: RejectionCode) -> Rejection {
     let rejection = result.expect_err("the Answer should have been rejected");
     assert_eq!(rejection.code, code, "message was: {}", rejection.message);
+    rejection
 }
 
 fn legend_rule(candidates: &[u64]) -> ProcessState {
@@ -856,7 +857,7 @@ fn a_payment_plan_that_does_not_cover_the_cost_is_invalid_and_keeps_the_pause() 
     };
     let mut engine = engine_in(cast);
     let id = engine.open_decision().unwrap().id;
-    reject(
+    let rejection = reject(
         engine.answer(
             P0,
             answer(
@@ -868,6 +869,7 @@ fn a_payment_plan_that_does_not_cover_the_cost_is_invalid_and_keeps_the_pause() 
         ),
         RejectionCode::InvalidChoice,
     );
+    assert_eq!(rejection.message, "the payment does not cover the cost");
     assert!(matches!(
         engine.process_state,
         ProcessState::AwaitingPayment { .. }

@@ -56,6 +56,15 @@ pub enum Rejected {
     IllegalAction(String),
 }
 
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Rejected::InvalidTarget => f.write_str("a chosen target is not legal"),
+            Rejected::IllegalAction(reason) => f.write_str(reason),
+        }
+    }
+}
+
 /// A broken engine invariant found while carrying out a command that already
 /// passed validation, for example a zone or object that validation just
 /// confirmed is gone. Fatal: the state may be half-changed. The text is for the
