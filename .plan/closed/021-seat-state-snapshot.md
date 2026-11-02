@@ -3,9 +3,9 @@ id: 021
 title: Seat state snapshot
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: [020]
-claimed: true
+claimed: false
 ---
 
 ## Question
