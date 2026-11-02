@@ -106,6 +106,7 @@ pub(crate) fn apply_declare_attackers(
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -147,6 +148,12 @@ pub(crate) fn validate_declare_bands(
     let combat = state.combat.as_ref().ok_or_else(|| {
         Rejected::IllegalAction("no attackers have been declared this combat".to_string())
     })?;
+    // CR 702.22e
+    if combat.bands_declared {
+        return Err(Rejected::IllegalAction(
+            "bands were already declared this combat".to_string(),
+        ));
+    }
 
     let mut seen: Vec<ObjectId> = Vec::new();
     for band in &bands {
@@ -261,6 +268,7 @@ pub(crate) fn apply_declare_bands(
         .as_mut()
         .ok_or_else(|| Internal::new("declare bands: the validated combat is gone"))?;
     combat.bands = plan.bands;
+    combat.bands_declared = true;
 
     Ok(CommandOutcome {
         events: Vec::new(),

@@ -478,6 +478,7 @@ fn declare_blockers_rejects_wrong_step() {
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

@@ -648,6 +648,7 @@ fn a_creature_that_is_not_on_the_battlefield_never_blocks() {
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: HashMap::new(),
     });
@@ -690,6 +691,7 @@ fn a_flying_attacker_can_only_be_blocked_by_flying_or_reach() {
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: HashMap::new(),
     });
@@ -774,6 +776,7 @@ fn a_defending_player_declares_blockers_before_priority_and_may_declare_none() {
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: HashMap::new(),
     });
@@ -828,6 +831,7 @@ fn double_blocked_state() -> GameState {
         declared_defenders: vec![P1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: HashMap::new(),
     });

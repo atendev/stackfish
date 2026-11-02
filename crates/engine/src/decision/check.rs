@@ -1,6 +1,6 @@
-//! Structural checks of a priority, attack, block or damage Answer against the
-//! entries the Decision listed, run before the Answer reaches the engine. See
-//! `DESIGN.md` for the rest.
+//! Structural checks of a priority, attack, band, block, damage or mana ability
+//! Answer against the entries the Decision listed, run before the Answer reaches
+//! the engine. See `DESIGN.md` for the rest.
 
 // TODO: which mode pairs combine and how many blockers a menace attacker got are only checked when the action runs, so a bad Answer there fails during `step()` and not as a rejection
 
@@ -238,6 +238,43 @@ pub(super) fn check_attackers(
         return Err(invalid("a creature that must attack is not declared"));
     }
     Ok(())
+}
+
+/// Every band member is a listed attacker and no attacker is in two bands.
+/// The engine checks what makes a band legal.
+pub(super) fn check_bands(
+    attackers: &[ObjectId],
+    bands: &[Vec<ObjectId>],
+) -> Result<(), Rejection> {
+    let mut seen = HashSet::new();
+    for member in bands.iter().flatten() {
+        if !attackers.contains(member) {
+            return Err(invalid("that creature cannot join a band"));
+        }
+        if !seen.insert(*member) {
+            return Err(invalid("a creature is named in more than one band"));
+        }
+    }
+    Ok(())
+}
+
+/// A Payment Decision accepts only an activation of a listed mana ability
+/// (CR 605.3a). Passing priority is not a way to answer a payment.
+pub(super) fn check_mana_ability(
+    mana_abilities: &[ActivateEntry],
+    kind: &PlayerActionKind,
+) -> Result<(), Rejection> {
+    if !matches!(kind, PlayerActionKind::ActivateAbility { .. }) {
+        return Err(invalid(
+            "a Payment Decision accepts a plan, a refusal or a mana ability",
+        ));
+    }
+    let entries: Vec<Entry> = mana_abilities
+        .iter()
+        .cloned()
+        .map(Entry::Activate)
+        .collect();
+    check_action(&entries, kind)
 }
 
 pub(super) fn check_blockers(

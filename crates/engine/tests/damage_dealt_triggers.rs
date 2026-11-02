@@ -65,6 +65,7 @@ fn deals_damage_trigger_fires_when_the_attacker_connects() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -124,6 +125,7 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -171,6 +173,7 @@ fn is_dealt_damage_trigger_fires_on_the_creature_taking_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

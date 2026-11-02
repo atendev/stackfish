@@ -376,6 +376,7 @@ impl Bot {
             Some("action") => json!({ "kind": "action", "action": { "kind": "pass_priority" } }),
             Some("payment") => json!({ "kind": "payment", "plan": null }),
             Some("may_cast") => json!({ "kind": "may_cast", "cast": null }),
+            Some("declare_bands") => json!({ "kind": "declare_bands", "bands": [] }),
             _ => {
                 return Err(BotError::Rejected(format!(
                     "{message} (shape {}, reply {})",
@@ -498,10 +499,25 @@ impl Bot {
             "may_cast" => plain(self.may_cast(decision)),
             "action" => plain(self.action(seat, decision)),
             "declare_attackers" => plain(self.attackers(decision)),
+            "declare_bands" => plain(self.bands(decision)),
             "declare_blockers" => plain(self.blockers(decision)),
             "assign_damage" => plain(assign_damage(decision)),
             other => plain(json!({ "kind": other })),
         }
+    }
+
+    // Half the time bands a random pair. A pair the engine refuses falls back to
+    // no bands.
+    fn bands(&mut self, decision: &Value) -> Value {
+        let mut attackers: Vec<Value> = decision["attackers"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if attackers.len() < 2 || self.rng.below(2) == 0 {
+            return json!({ "kind": "declare_bands", "bands": [] });
+        }
+        self.shuffle(&mut attackers);
+        json!({ "kind": "declare_bands", "bands": [[attackers[0], attackers[1]]] })
     }
 
     fn shuffle<T>(&mut self, items: &mut [T]) {
@@ -941,6 +957,32 @@ mod tests {
             casts > 0 && declines > 0,
             "{casts} casts, {declines} declines"
         );
+    }
+
+    // CR 702.22c
+    #[test]
+    fn a_band_answer_is_no_bands_or_one_pair_of_listed_attackers() {
+        let decision = json!({ "shape": "declare_bands", "attackers": ["1", "2", "3"] });
+        let (mut pairs, mut none) = (0, 0);
+        for seed in 0..40 {
+            let reply = Bot::new(seed).bands(&decision);
+            assert_eq!(reply["kind"], "declare_bands");
+            match reply["bands"].as_array().unwrap().as_slice() {
+                [] => none += 1,
+                [band] => {
+                    let band = band.as_array().unwrap();
+                    assert_eq!(band.len(), 2);
+                    assert_ne!(band[0], band[1]);
+                    assert!(
+                        band.iter()
+                            .all(|id| decision["attackers"].as_array().unwrap().contains(id))
+                    );
+                    pairs += 1;
+                }
+                other => panic!("unexpected bands {other:?}"),
+            }
+        }
+        assert!(pairs > 0 && none > 0, "{pairs} pairs, {none} without bands");
     }
 
     #[test]

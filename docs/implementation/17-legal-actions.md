@@ -48,18 +48,23 @@ are in `crates/engine/src/decision/entry.rs`. The builders are in `commands/entr
 Combat declarations are not `ProcessState` pauses. They happen in a priority window. `open_decision` offers them first:
 
 1. `DeclareAttackers` for the active player while they hold priority, no combat exists and a creature can attack.
-2. `DeclareBlockers` for the first defending player, in turn order from the active player, who still owes a
+2. `DeclareBands` for the active player while they hold priority in the declare attackers step, bands are undeclared
+   this combat and `legal_bands()` is non-empty. An attacker is listed when it forms a legal two-member band, which
+   finds every member of every legal band. Attack triggers may already be on the stack (TODO, CR 508.1e). A second
+   declaration is refused (CR 702.22e), so `CombatState::bands_declared` closes the Decision even for an empty reply.
+3. `DeclareBlockers` for the first defending player, in turn order from the active player, who still owes a
    declaration and has a creature that may block. An empty reply declares no blockers.
-3. `AssignDamage` for the player who chooses a split in this damage step, with the splits that player chooses.
-4. Otherwise `Action`.
+4. `AssignDamage` for the player who chooses a split in this damage step, with the splits that player chooses.
+5. Otherwise `Action`.
 
 ## Answer checks
 
 `decision/check.rs` checks an Answer against the entries before it reaches the engine: the card or ability is listed,
 the cost route is offered, the mode count and X agree, every target is a candidate and the target count fits the slots.
-Combat replies are checked the same way. A rejected Answer changes nothing.
+Combat replies are checked the same way. A band reply names only listed attackers, each once, and the engine checks
+what makes a band legal. A Payment Decision's `Action` reply must activate one of its listed mana abilities. A rejected Answer changes nothing.
 
 ## Tests
 
-`crates/engine/tests/phase5_legal_actions.rs` (19 tests). One of them runs every entry of a mixed state through the
+`crates/engine/tests/legal_actions.rs`. One of them runs every entry of a mixed state through the
 facade and the engine and expects no error.

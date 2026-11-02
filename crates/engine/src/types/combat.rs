@@ -18,6 +18,9 @@ pub struct CombatState {
     /// CR 702.22f instead of pruning this list.
     // TODO: "bands with other [quality]" is not modeled (CR 702.22b)
     pub bands: Vec<Vec<ObjectId>>,
+    /// CR 702.22e: bands were announced, possibly as none. Separates
+    /// "declared no bands" from "not declared yet", like `declared_defenders`.
+    pub bands_declared: bool,
     /// CR 509.1h: attackers made blocked by an effect, with no specific
     /// blocker. `blocks` cannot say "blocked by nothing". Blocked attackers
     /// with no living blocker deal no damage unless they trample (CR 510.1c).

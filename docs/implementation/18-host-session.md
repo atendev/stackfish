@@ -47,8 +47,10 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   without a budget. `outbox_cap` in setup (default 4096, at least 1) bounds each Seat's outbox, as described under
   "Outbox cap" below.
 - Replies are tagged by `kind`, matching the Decision's `shape`: `pick`, `yes_no`, `order`, `modes`, `partition`,
-  `payment`, `targets`, `may_cast`, `action`, `declare_attackers`, `declare_blockers`, `assign_damage`. An `action`
-  reply carries only the four priority actions, because every other `PlayerActionKind` has a shape of its own.
+  `payment`, `targets`, `may_cast`, `action`, `declare_attackers`, `declare_bands`, `declare_blockers`, `assign_damage`.
+  An `action` reply carries only the four priority actions, because every other `PlayerActionKind` has a shape of its
+  own. A `payment` Decision also takes an `action` reply that activates one of its `mana_abilities`. A `declare_bands`
+  reply is `bands`, one list of attacker ids per band.
 - `ZoneChange`, `Cycled` and `MadnessExiled` carry last known information as `WireObjectSummary`: printed
   characteristics from the definition plus tapped, token, commander and counters. Layer effects are not applied.
 - Format presets: `standard` (20 life) and `commander` (40 life, 1 free mulligan, commander slots). Setup overrides

@@ -252,6 +252,7 @@ fn deals_damage_and_dies_triggers_both_fire_from_the_same_combat_damage_step() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

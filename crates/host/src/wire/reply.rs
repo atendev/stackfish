@@ -232,6 +232,10 @@ pub(crate) enum WireReply {
     DeclareAttackers {
         attackers: Vec<WireAttack>,
     },
+    /// One list of attacker ids per band.
+    DeclareBands {
+        bands: Vec<Vec<U64>>,
+    },
     DeclareBlockers {
         blocks: Vec<WireBlock>,
     },
@@ -272,6 +276,9 @@ impl WireReply {
                     .map(|a| (a.attacker.into(), a.defender.into()))
                     .collect(),
             ),
+            WireReply::DeclareBands { bands } => {
+                Reply::DeclareBands(bands.into_iter().map(objects).collect())
+            }
             WireReply::DeclareBlockers { blocks } => Reply::DeclareBlockers(
                 blocks
                     .into_iter()
@@ -293,5 +300,31 @@ impl WireReply {
                     .collect(),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stackfish_engine::PlayerId;
+
+    // CR 508.1e
+    #[test]
+    fn a_band_reply_becomes_one_id_list_per_band() {
+        let wire: WireReply = serde_json::from_value(serde_json::json!({
+            "kind": "declare_bands",
+            "bands": [["1", "2"], ["4", "5"]],
+        }))
+        .unwrap();
+        let Reply::DeclareBands(bands) = wire.into_reply(PlayerId(0)) else {
+            panic!("expected a DeclareBands reply");
+        };
+        assert_eq!(
+            bands,
+            vec![
+                vec![ObjectId(1), ObjectId(2)],
+                vec![ObjectId(4), ObjectId(5)]
+            ]
+        );
     }
 }

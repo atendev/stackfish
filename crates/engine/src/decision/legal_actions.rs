@@ -4,7 +4,7 @@
 
 use crate::commands;
 use crate::engine::Engine;
-use crate::types::ids::PlayerId;
+use crate::types::ids::{ObjectId, PlayerId};
 
 use super::{AttackerEntry, BlockerEntry, DamageSplitEntry, Entry};
 
@@ -21,6 +21,12 @@ impl Engine {
     /// declared, each with the defenders it may attack. Empty otherwise.
     pub fn legal_attackers(&self) -> Vec<AttackerEntry> {
         commands::attacker_entries(self.state(), self.script_runtime())
+    }
+
+    /// The attackers that may join a band while the active player has yet to
+    /// declare bands this combat. Empty otherwise.
+    pub fn legal_bands(&self) -> Vec<ObjectId> {
+        commands::band_entries(self.state(), self.script_runtime())
     }
 
     /// `player`'s possible blockers while they still owe a declaration, each

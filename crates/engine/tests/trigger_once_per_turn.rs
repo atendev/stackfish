@@ -116,6 +116,7 @@ fn once_per_turn_dealsdamage_trigger_fires_only_once_from_two_events_in_the_same
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -190,6 +191,7 @@ fn without_the_cap_the_same_two_events_fire_the_trigger_twice() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -245,6 +247,7 @@ fn once_per_turn_trigger_resets_after_a_new_turn_begins() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

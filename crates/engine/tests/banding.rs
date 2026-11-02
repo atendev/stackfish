@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::commands::Rejected;
+use stackfish_engine::decision::{Answer, Rejection, RejectionCode, Reply, ReplyShape};
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -970,5 +971,187 @@ fn an_actor_cannot_submit_only_part_of_their_own_share() {
         &mut engine,
         p0,
         vec![(attacker_a, vec![(blocker_a1, 2), (blocker_a2, 2)])],
+    ));
+}
+
+fn band_fixture() -> (Engine, [ObjectId; 3]) {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let [a, b, c] = [ObjectId(0), ObjectId(1), ObjectId(2)];
+    let mut state = combat_state();
+    for (id, keywords) in [
+        (a, KeywordSet::BANDING),
+        (b, KeywordSet::empty()),
+        (c, KeywordSet::empty()),
+    ] {
+        put_on_battlefield(
+            &mut state,
+            permanent(
+                id,
+                creature_definition(id.0 + 1, "Soldier", 1, 1, keywords),
+                p0,
+            ),
+        );
+    }
+    let mut engine = Engine::new(state);
+    declare_attackers(
+        &mut engine,
+        p0,
+        vec![
+            (a, Target::Player(p1)),
+            (b, Target::Player(p1)),
+            (c, Target::Player(p1)),
+        ],
+    )
+    .unwrap();
+    (engine, [a, b, c])
+}
+
+fn answer_bands(engine: &mut Engine, bands: Vec<Vec<ObjectId>>) -> Result<(), Rejection> {
+    let id = engine.open_decision().unwrap().id;
+    engine.answer(
+        PlayerId(0),
+        Answer {
+            decision: id,
+            reply: Reply::DeclareBands(bands),
+        },
+    )
+}
+
+// CR 508.1e
+#[test]
+fn a_band_decision_lists_every_attacker_that_can_join_a_band() {
+    let (mut engine, [a, b, c]) = band_fixture();
+    let decision = engine.open_decision().unwrap();
+    assert_eq!(decision.player, PlayerId(0));
+    let ReplyShape::DeclareBands { attackers } = decision.shape else {
+        panic!("expected a DeclareBands Decision, got {:?}", decision.shape);
+    };
+    // b and c cannot band with each other, but each can band with a.
+    assert_eq!(attackers, vec![a, b, c]);
+}
+
+// CR 702.22c
+#[test]
+fn no_band_decision_opens_when_no_attacker_has_banding() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let [a, b] = [ObjectId(0), ObjectId(1)];
+    let mut state = combat_state();
+    for id in [a, b] {
+        put_on_battlefield(
+            &mut state,
+            permanent(
+                id,
+                creature_definition(id.0 + 1, "Soldier", 1, 1, KeywordSet::empty()),
+                p0,
+            ),
+        );
+    }
+    let mut engine = Engine::new(state);
+    declare_attackers(
+        &mut engine,
+        p0,
+        vec![(a, Target::Player(p1)), (b, Target::Player(p1))],
+    )
+    .unwrap();
+    assert!(engine.legal_bands().is_empty());
+    assert!(matches!(
+        engine.open_decision().unwrap().shape,
+        ReplyShape::Action { .. }
+    ));
+}
+
+// CR 702.22e
+#[test]
+fn an_answered_band_decision_lasts_the_rest_of_combat() {
+    let (mut engine, [a, b, c]) = band_fixture();
+    answer_bands(&mut engine, vec![vec![a, b]]).unwrap();
+    drain(&mut engine);
+
+    let combat = engine.state().combat.clone().unwrap();
+    assert_eq!(combat.bands, vec![vec![a, b]]);
+    assert!(combat.bands_declared);
+    assert!(matches!(
+        engine.open_decision().unwrap().shape,
+        ReplyShape::Action { .. }
+    ));
+
+    let before = engine.state().clone();
+    assert_illegal(declare_bands(&mut engine, PlayerId(0), vec![vec![a, c]]));
+    assert_eq!(engine.state(), &before);
+}
+
+// CR 508.1e
+#[test]
+fn an_empty_band_answer_declares_no_bands() {
+    let (mut engine, _) = band_fixture();
+    answer_bands(&mut engine, Vec::new()).unwrap();
+    drain(&mut engine);
+    let combat = engine.state().combat.as_ref().unwrap();
+    assert!(combat.bands.is_empty() && combat.bands_declared);
+    assert!(matches!(
+        engine.open_decision().unwrap().shape,
+        ReplyShape::Action { .. }
+    ));
+}
+
+// CR 702.22c
+#[test]
+fn a_bad_band_answer_changes_nothing() {
+    let (mut engine, [a, b, c]) = band_fixture();
+    let before = engine.state().clone();
+    let id = engine.open_decision().unwrap().id;
+    for bands in [
+        vec![vec![a, ObjectId(99)]],
+        vec![vec![a, b], vec![a, c]],
+        vec![vec![b, c]],
+    ] {
+        let rejection = answer_bands(&mut engine, bands).unwrap_err();
+        assert_eq!(rejection.code, RejectionCode::InvalidChoice);
+        assert_eq!(engine.state(), &before);
+        assert_eq!(engine.open_decision().unwrap().id, id);
+    }
+}
+
+// CR 702.22d
+#[test]
+fn an_attacker_with_no_legal_bandmate_opens_no_band_decision() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let [a, b, walker] = [ObjectId(0), ObjectId(1), ObjectId(2)];
+    let mut state = combat_state();
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            a,
+            creature_definition(1, "Bander", 1, 1, KeywordSet::BANDING),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(
+            b,
+            creature_definition(2, "Soldier", 1, 1, KeywordSet::empty()),
+            p0,
+        ),
+    );
+    put_on_battlefield(
+        &mut state,
+        permanent(walker, planeswalker_definition(3, "Walker"), p1),
+    );
+    let mut engine = Engine::new(state);
+    // The two attackers attack different things, so no band can hold both.
+    declare_attackers(
+        &mut engine,
+        p0,
+        vec![(a, Target::Player(p1)), (b, Target::Object(walker))],
+    )
+    .unwrap();
+    assert!(engine.legal_bands().is_empty());
+    assert!(matches!(
+        engine.open_decision().unwrap().shape,
+        ReplyShape::Action { .. }
     ));
 }

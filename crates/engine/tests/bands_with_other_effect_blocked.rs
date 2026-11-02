@@ -472,6 +472,7 @@ fn effect_blocked_attacker_with_no_trample_deals_no_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: vec![attacker],
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -508,6 +509,7 @@ fn effect_blocked_trampler_deals_full_power_per_702_19d() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: vec![attacker],
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

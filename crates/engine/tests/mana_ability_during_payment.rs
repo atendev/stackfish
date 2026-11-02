@@ -484,3 +484,105 @@ fn submit_payment_while_not_awaiting_is_still_rejected() {
         .unwrap_err();
     assert!(matches!(err, PaymentError::NotAwaitingPayment));
 }
+
+fn decision_answer(
+    engine: &mut Engine,
+    player: PlayerId,
+    reply: decision::Reply,
+) -> Result<(), decision::Rejection> {
+    let id = engine.open_decision().expect("a Decision is open").id;
+    engine.answer(
+        player,
+        decision::Answer {
+            decision: id,
+            reply,
+        },
+    )
+}
+
+fn activate_reply(player: PlayerId, source: ObjectId) -> decision::Reply {
+    decision::Reply::Action(PlayerAction {
+        player,
+        kind: PlayerActionKind::ActivateAbility {
+            source,
+            ability_index: 0,
+            targets: Vec::new(),
+            chosen_colors: Vec::new(),
+            x_value: None,
+        },
+    })
+}
+
+// CR 605.3a
+#[test]
+fn a_payment_decision_lists_only_the_payers_mana_abilities() {
+    let p0 = PlayerId(0);
+    let (state, spell, land1, land2, _, _, treasure) = state_with_fixtures();
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, spell);
+    drain(&mut engine);
+
+    let decision::ReplyShape::Payment { mana_abilities, .. } =
+        engine.open_decision().unwrap().shape
+    else {
+        panic!("expected a Payment Decision");
+    };
+    let sources: Vec<ObjectId> = mana_abilities.iter().map(|e| e.source).collect();
+    assert_eq!(sources, vec![land1, land2, treasure]);
+    assert!(mana_abilities.iter().all(|e| e.mana_ability));
+}
+
+// CR 605.3a
+#[test]
+fn an_action_answer_activates_a_mana_ability_and_reopens_the_payment() {
+    let p0 = PlayerId(0);
+    let (state, spell, land1, ..) = state_with_fixtures();
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, spell);
+    drain(&mut engine);
+    let first = engine.open_decision().unwrap().id;
+
+    decision_answer(&mut engine, p0, activate_reply(p0, land1))
+        .expect("a listed mana ability is accepted");
+    drain(&mut engine);
+
+    let reopened = engine.open_decision().unwrap();
+    assert!(matches!(
+        reopened.shape,
+        decision::ReplyShape::Payment { .. }
+    ));
+    assert!(reopened.id.0 > first.0);
+    assert!(engine.state().object(land1).unwrap().tapped);
+    assert_eq!(engine.state().player(p0).unwrap().mana_pool.red, 1);
+}
+
+#[test]
+fn a_payment_decision_refuses_any_action_but_a_listed_mana_ability() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let (state, spell, _, _, cleric, opponent_land, _) = state_with_fixtures();
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, spell);
+    drain(&mut engine);
+    let before = engine.state().clone();
+    let id = engine.open_decision().unwrap().id;
+
+    let pass = decision::Reply::Action(PlayerAction {
+        player: p0,
+        kind: PlayerActionKind::PassPriority,
+    });
+    for reply in [
+        pass,
+        activate_reply(p0, cleric),
+        activate_reply(p0, opponent_land),
+    ] {
+        let rejection = decision_answer(&mut engine, p0, reply).unwrap_err();
+        assert_eq!(rejection.code, decision::RejectionCode::InvalidChoice);
+        assert_eq!(engine.state(), &before);
+        assert_eq!(engine.open_decision().unwrap().id, id);
+    }
+    let rejection =
+        decision_answer(&mut engine, p0, activate_reply(p1, opponent_land)).unwrap_err();
+    assert_eq!(rejection.code, decision::RejectionCode::WrongSeat);
+    assert_eq!(engine.state(), &before);
+}

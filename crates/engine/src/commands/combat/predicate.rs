@@ -330,6 +330,7 @@ mod tests {
             declared_defenders: Vec::new(),
             bands: Vec::new(),
             effect_blocked: Vec::new(),
+            bands_declared: false,
             damage_assigned_this_step: false,
             pending_damage_splits: HashMap::new(),
         }

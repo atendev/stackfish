@@ -46,6 +46,7 @@ pub(crate) enum Route {
     BottomCards,
     Priority,
     DeclareAttackers,
+    DeclareBands,
     DeclareBlockers,
     AssignDamage,
 }
@@ -89,10 +90,9 @@ fn pick(candidates: Vec<Candidate>, min: usize, max: usize) -> ReplyShape {
     }
 }
 
-/// Every object and player a `Game.SelectTargets` ask may legally pick,
-/// objects first in id order. `ScriptChoiceRequest::SelectTarget` carries a
-/// filter rather than a list, so the facade evaluates it here.
-/// TODO: abilities on the stack are legal `Target::Ability` candidates for a filter that asks for them, but they are not enumerated
+/// Every object, player and ability on the stack a `Game.SelectTargets` ask
+/// may legally pick, in that order, objects by id. `ScriptChoiceRequest::SelectTarget`
+/// carries a filter rather than a list, so the facade evaluates it here.
 fn script_select_candidates(
     engine: &Engine,
     filter: &crate::types::target::TargetFilter,
@@ -110,8 +110,15 @@ fn script_select_candidates(
     ids.sort();
     let objects = ids.into_iter().map(Target::Object);
     let players = state.players.iter().map(|p| Target::Player(p.player_id));
+    // CR 113.9
+    let abilities = state
+        .stack
+        .iter()
+        .filter(|so| commands::is_ability_stack_entry(&so.kind))
+        .map(|so| Target::Ability(so.stack_id));
     objects
         .chain(players)
+        .chain(abilities)
         .filter(|&t| {
             commands::target_is_legal(
                 state,
@@ -281,7 +288,8 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
             (
                 payer,
                 "Unless paid",
-                payment(engine, payer, cost),
+                // TODO: an unless-paid payment cannot be interrupted by a mana ability CR 605.3a
+                payment(engine, payer, cost, false),
                 Route::UnlessPaid,
             )
         }
@@ -405,7 +413,7 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
         ProcessState::AwaitingPayment { payer, cost, .. } => (
             *payer,
             "Payment",
-            payment(engine, *payer, cost),
+            payment(engine, *payer, cost, true),
             Route::Payment,
         ),
         ProcessState::AwaitingModeChoice {
@@ -490,6 +498,18 @@ fn priority_window(engine: &Engine) -> (PlayerId, &'static str, ReplyShape, Rout
             );
         }
     }
+    // TODO: bands are chosen after attack triggers are put on the stack, not during the declaration CR 508.1e
+    if state.priority_player == state.active_player {
+        let attackers = engine.legal_bands();
+        if !attackers.is_empty() {
+            return (
+                state.active_player,
+                "Declare bands",
+                ReplyShape::DeclareBands { attackers },
+                Route::DeclareBands,
+            );
+        }
+    }
     if let Some(player) = commands::next_blocking_player(state, engine.script_runtime()) {
         let blockers = engine.legal_blockers(player);
         return (
@@ -517,7 +537,20 @@ fn priority_window(engine: &Engine) -> (PlayerId, &'static str, ReplyShape, Rout
     )
 }
 
-fn payment(engine: &Engine, payer: PlayerId, cost: &CostSpec) -> ReplyShape {
+/// `with_mana_abilities` is false for an unless-paid cost, which the engine
+/// cannot interrupt.
+fn payment(
+    engine: &Engine,
+    payer: PlayerId,
+    cost: &CostSpec,
+    with_mana_abilities: bool,
+) -> ReplyShape {
+    // `submit_action` takes the nested activation only from the priority player.
+    let mana_abilities = if with_mana_abilities && engine.state().priority_player == payer {
+        commands::mana_ability_entries(engine.state(), engine.script_runtime(), payer)
+    } else {
+        Vec::new()
+    };
     let eligible = cost
         .additional
         .iter()
@@ -526,5 +559,6 @@ fn payment(engine: &Engine, payer: PlayerId, cost: &CostSpec) -> ReplyShape {
     ReplyShape::Payment {
         cost: cost.clone(),
         eligible,
+        mana_abilities,
     }
 }
