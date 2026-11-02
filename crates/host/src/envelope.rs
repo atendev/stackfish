@@ -7,7 +7,9 @@ use crate::replay::ReplayFile;
 use crate::wire::{WireDecision, WireEvent, WireSnapshot};
 
 /// The protocol version in every message. A breaking change to a field's name,
-/// type or meaning, or to a kind's required fields, bumps it.
+/// type or meaning, or to a kind's required fields, bumps it. Before the first release
+/// (the first tagged `crates/host` release or the first host outside this repository) it
+/// stays 1 and breaking changes land without a bump.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -103,6 +105,10 @@ pub(crate) struct Response {
     /// With `exported` only. It holds every hidden choice, so it is for the host alone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replay: Option<ReplayFile>,
+    /// Set when the requesting Seat's outbox overflowed. Its events stop until it sends
+    /// `snapshot`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub resync: bool,
 }
 
 impl Response {
@@ -116,6 +122,7 @@ impl Response {
             seats: None,
             snapshot: None,
             replay: None,
+            resync: false,
         }
     }
 

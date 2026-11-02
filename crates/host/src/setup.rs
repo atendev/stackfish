@@ -14,6 +14,10 @@ use crate::wire::U64;
 // TODO: loop detection; the cap does not detect a draw. CR 104.4b
 pub const DEFAULT_STEP_CAP: u64 = 100_000;
 
+/// Events a Seat's outbox may hold when the setup sets no `outbox_cap`. Full bot games
+/// queued at most 108 events per Seat between requests, with six players.
+pub const DEFAULT_OUTBOX_CAP: u64 = 4096;
+
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DeckEntry {
@@ -106,6 +110,7 @@ pub(crate) struct SetupBody {
     pub overrides: SettingOverrides,
     pub seed: U64,
     pub step_cap: Option<u64>,
+    pub outbox_cap: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -139,6 +144,7 @@ fn format_preset(name: &str) -> Option<Format> {
 pub(crate) struct Built {
     pub config: GameConfig,
     pub step_cap: u64,
+    pub outbox_cap: u64,
 }
 
 struct Resolver<'a> {
@@ -194,6 +200,10 @@ pub(crate) fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, 
     if step_cap == 0 {
         return Err(SetupError("step_cap must be at least 1".to_string()));
     }
+    let outbox_cap = body.outbox_cap.unwrap_or(DEFAULT_OUTBOX_CAP);
+    if outbox_cap == 0 {
+        return Err(SetupError("outbox_cap must be at least 1".to_string()));
+    }
 
     let mut settings = format.settings;
     body.overrides.apply(&mut settings);
@@ -232,6 +242,7 @@ pub(crate) fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, 
             rng_seed: body.seed.0,
         },
         step_cap,
+        outbox_cap,
     })
 }
 
@@ -287,6 +298,7 @@ mod tests {
         assert!(settings.shuffle_libraries && !settings.skip_mulligan);
         assert_eq!(built.config.rng_seed, 7);
         assert_eq!(built.step_cap, DEFAULT_STEP_CAP);
+        assert_eq!(built.outbox_cap, DEFAULT_OUTBOX_CAP);
     }
 
     #[test]
@@ -314,7 +326,7 @@ mod tests {
     #[test]
     fn overrides_replace_single_preset_fields() {
         let setup = body(json!({
-            "players": [{ "deck": [] }, { "deck": [] }], "format": "commander", "seed": "1", "step_cap": 50,
+            "players": [{ "deck": [] }, { "deck": [] }], "format": "commander", "seed": "1", "step_cap": 50, "outbox_cap": 8,
             "overrides": { "starting_life": 25, "skip_mulligan": true, "max_mulligans": 2 },
         }));
         let built = build(&setup, &source()).unwrap();
@@ -326,7 +338,7 @@ mod tests {
         );
         assert!(settings.skip_mulligan);
         assert_eq!(settings.max_mulligans, Some(2));
-        assert_eq!(built.step_cap, 50);
+        assert_eq!((built.step_cap, built.outbox_cap), (50, 8));
     }
 
     #[test]

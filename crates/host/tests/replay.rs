@@ -13,10 +13,12 @@ use stackfish_host::{
 const ANSWER_LIMIT: usize = 50_000;
 const WATCHER: u32 = 2;
 
-// Seat 2 is an omniscient spectator nobody polls, so its outbox keeps the whole game.
+// Seat 2 is an omniscient spectator nobody polls, so its outbox keeps the whole game. The
+// cap is raised so the comparison never rests on how long a game runs.
 fn watched_setup(seed: u64) -> Vec<u8> {
     let mut setup: Value = serde_json::from_slice(&proof_setup_request(2, seed)).unwrap();
     setup["body"]["spectators"] = json!([{ "omniscient": true }]);
+    setup["body"]["outbox_cap"] = json!(u64::MAX);
     serde_json::to_vec(&setup).unwrap()
 }
 

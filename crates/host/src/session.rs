@@ -55,6 +55,24 @@ const INTERNAL_MESSAGE: &str = "the engine hit an internal error and the game ca
 struct Seat {
     viewer: Viewer,
     outbox: Vec<WireEvent>,
+    /// The outbox overflowed, so nothing is queued until the Seat sends `snapshot`.
+    lapsed: bool,
+}
+
+impl Seat {
+    // A push past the cap drops the whole outbox: a Seat that missed events must take a
+    // snapshot, so keeping the oldest ones would not help it.
+    fn queue(&mut self, event: WireEvent, cap: Option<usize>) {
+        if self.lapsed {
+            return;
+        }
+        if cap.is_some_and(|cap| self.outbox.len() >= cap) {
+            self.outbox = Vec::new();
+            self.lapsed = true;
+            return;
+        }
+        self.outbox.push(event);
+    }
 }
 
 pub struct Session {
@@ -64,6 +82,8 @@ pub struct Session {
     seats: Vec<Seat>,
     players: u32,
     step_cap: u64,
+    /// `None` while `from_replay` plays the recording, which no Seat can poll during.
+    outbox_cap: Option<usize>,
     /// Ledger entries already turned into outbox events.
     observed: usize,
     observer: Observer,
@@ -77,7 +97,6 @@ pub struct Session {
     /// Accepted Answers in order. Refused Answers and `advance` budgets are not kept: a
     /// replay runs to each Decision whatever budgets the host used.
     answers: Vec<RecordedAnswer>,
-    // TODO: bound a Seat's outbox; one that never sends a request grows without limit
 }
 
 fn refuse_start(code: ErrorCode, message: impl Into<String>) -> Vec<u8> {
@@ -145,7 +164,8 @@ impl Session {
 
     /// Builds a Session from an exported replay and plays every recorded Answer. The
     /// Session then runs on to the first Decision or the end after the last Answer, so a
-    /// replay exported mid-run loads further ahead. Every Seat's outbox holds the whole game.
+    /// replay exported mid-run loads further ahead. Every Seat's outbox holds the whole game,
+    /// past `outbox_cap` if need be, and the cap applies from the next event on.
     ///
     /// `Err` holds `setup_invalid` when the card data or engine build differs, or when the
     /// game stops matching the recording, naming the first Answer that did not fit.
@@ -157,9 +177,11 @@ impl Session {
         // A card source or script that panics must give an error response, as in `create`.
         let loaded = catch_unwind(AssertUnwindSafe(|| {
             let (mut session, created) = replay.start(cards)?;
+            let cap = session.outbox_cap.take();
             session
                 .drive(replay.answers())
                 .map_err(|message| refuse_start(ErrorCode::SetupInvalid, message))?;
+            session.outbox_cap = cap;
             Ok((session, created))
         }));
         loaded.unwrap_or_else(|_| Err(refuse_start(ErrorCode::EnginePanic, INTERNAL_MESSAGE)))
@@ -267,6 +289,7 @@ impl Session {
             .map(|viewer| Seat {
                 viewer,
                 outbox: Vec::new(),
+                lapsed: false,
             })
             .collect();
         let ids = (0..seats.len() as u32).collect();
@@ -275,6 +298,7 @@ impl Session {
             seats,
             players,
             step_cap: built.step_cap,
+            outbox_cap: Some(usize::try_from(built.outbox_cap).unwrap_or(usize::MAX)),
             observed: 0,
             observer: Observer::default(),
             phase: Phase::Playing,
@@ -300,7 +324,15 @@ impl Session {
         if matches!(self.phase, Phase::Dead) {
             return Response::error(ErrorCode::EnginePanic, INTERNAL_MESSAGE).to_bytes();
         }
-        self.guarded(|session| session.dispatch(request))
+        self.guarded(|session| {
+            let (seat, mut response) = session.dispatch(request);
+            if let Some(seat) = seat
+                && session.seats[seat as usize].lapsed
+            {
+                response.resync = true;
+            }
+            response
+        })
     }
 
     fn guarded(&mut self, f: impl FnOnce(&mut Session) -> Response) -> Vec<u8> {
@@ -320,25 +352,31 @@ impl Session {
         self.internal.as_deref()
     }
 
-    fn dispatch(&mut self, bytes: &[u8]) -> Response {
+    // Returns the request's Seat alongside the response, once the Seat is known to exist.
+    fn dispatch(&mut self, bytes: &[u8]) -> (Option<u32>, Response) {
         let request = match parse_request(bytes) {
             Ok(request) => request,
-            Err(response) => return self.refuse(None, response),
+            Err(response) => return (None, self.refuse(None, response)),
         };
         if let Some(seat) = request.seat
             && seat as usize >= self.seats.len()
         {
-            return self.refuse_with(
+            let response = self.refuse_with(
                 None,
                 ErrorCode::UnknownSeat,
                 format!("seat {seat} does not exist"),
             );
+            return (None, response);
         }
+        (request.seat, self.route(&request))
+    }
+
+    fn route(&mut self, request: &Request) -> Response {
         // A halted Session still lets a Seat collect its last events or its view.
         match request.kind.as_str() {
-            "poll" => return self.poll(&request),
-            "snapshot" => return self.seat_snapshot(&request),
-            "export_replay" => return self.export_replay(&request),
+            "poll" => return self.poll(request),
+            "snapshot" => return self.seat_snapshot(request),
+            "export_replay" => return self.export_replay(request),
             _ => {}
         }
         if matches!(self.phase, Phase::Halted) {
@@ -348,8 +386,8 @@ impl Session {
             );
         }
         match request.kind.as_str() {
-            "advance" => self.advance(&request),
-            "answer" => self.answer(&request),
+            "advance" => self.advance(request),
+            "answer" => self.answer(request),
             "setup" => self.refuse_with(
                 request.seat,
                 ErrorCode::MalformedMessage,
@@ -474,6 +512,7 @@ impl Session {
             Err(response) => return response,
         };
         self.take_events(Some(seat));
+        self.seats[seat as usize].lapsed = false;
         let viewer = self.seats[seat as usize].viewer;
         let snapshot = view::snapshot_for(viewer, self.engine.state(), &self.observer);
         Response {
@@ -558,7 +597,7 @@ impl Session {
             let observed = self.observer.observe(state, event);
             for seat in &mut self.seats {
                 if let Some(kind) = observed.kind_for(seat.viewer) {
-                    seat.outbox.push(WireEvent::with_kind(event, kind));
+                    seat.queue(WireEvent::with_kind(event, kind), self.outbox_cap);
                 }
             }
         }
@@ -858,6 +897,51 @@ mod tests {
         observed
             .kind_for(viewer)
             .map(|kind| serde_json::to_value(kind).unwrap())
+    }
+
+    fn queued(seat: &mut Seat, cap: Option<usize>, n: u64) {
+        for i in 0..n {
+            let event = GameEvent::new(
+                EventId(i),
+                SequenceNo(i),
+                GameEventKind::LifeChanged {
+                    player: PlayerId(0),
+                    delta: -1,
+                },
+            );
+            let kind = crate::wire::WireEventKind::plain(&event.kind).unwrap();
+            seat.queue(WireEvent::with_kind(&event, kind), cap);
+        }
+    }
+
+    fn fresh_seat() -> Seat {
+        Seat {
+            viewer: Viewer::Player(PlayerId(0)),
+            outbox: Vec::new(),
+            lapsed: false,
+        }
+    }
+
+    #[test]
+    fn a_seat_holding_exactly_the_cap_keeps_its_events_and_the_next_event_lapses_it() {
+        for cap in [1, 3] {
+            let mut seat = fresh_seat();
+            queued(&mut seat, Some(cap), cap as u64);
+            assert_eq!((seat.outbox.len(), seat.lapsed), (cap, false), "cap {cap}");
+            queued(&mut seat, Some(cap), 1);
+            assert!(seat.outbox.is_empty() && seat.lapsed, "cap {cap}");
+            queued(&mut seat, Some(cap), 1);
+            assert!(seat.outbox.is_empty(), "a lapsed Seat queues nothing");
+        }
+    }
+
+    #[test]
+    fn a_seat_with_no_cap_queues_everything() {
+        let mut seat = fresh_seat();
+        queued(&mut seat, None, 50);
+        assert_eq!((seat.outbox.len(), seat.lapsed), (50, false));
+        queued(&mut seat, Some(10), 1);
+        assert!(seat.lapsed, "an over-cap outbox lapses on the next event");
     }
 
     fn observe(session: &mut Session, kind: GameEventKind) -> view::Observed {
