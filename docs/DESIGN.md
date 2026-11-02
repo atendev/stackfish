@@ -127,7 +127,8 @@ original monolithic files into submodules by subsystem; see `docs/implementation
     `docs/implementation/16-decision-facade.md` and `docs/implementation/17-legal-actions.md`.
 12. **Protocol Emitter** — `crates/host`. A `Session` wraps one engine and talks only in bytes (JSON
     over direct calls): a `setup` request creates it, `advance` and `answer` requests drive it, and
-    each response carries a batch of events plus the open Decision. A `CardSource` handed in at
+    each response carries a batch of events plus the open Decision. A Seat collects missed events with
+    `poll` or joins late with `snapshot`, its filtered view of the current state. A `CardSource` handed in at
     creation turns `oracle_id` keys into `CardDefinition`s. See `docs/implementation/18-host-session.md`.
     The crate also ships a 25-card fixture set (`proof_cards`) and a random `Bot` that plays whole games
     through the byte interface, which is how the protocol is tested end to end. See

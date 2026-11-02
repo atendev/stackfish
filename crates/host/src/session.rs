@@ -24,7 +24,7 @@ struct AdvanceBody {
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-struct PollBody {}
+struct EmptyBody {}
 
 /// How a run of engine steps ended.
 enum Outcome {
@@ -189,7 +189,7 @@ impl Session {
         self.engine.snapshot()
     }
 
-    /// Handles one `advance`, `answer` or `poll` request.
+    /// Handles one `advance`, `answer`, `poll` or `snapshot` request.
     ///
     /// An engine panic is caught here. The Session marks itself dead and answers this
     /// request and every later one with `engine_panic`.
@@ -231,9 +231,11 @@ impl Session {
                 format!("seat {seat} does not exist"),
             );
         }
-        // A halted Session still lets a Seat collect its last events.
-        if request.kind == "poll" {
-            return self.poll(&request);
+        // A halted Session still lets a Seat collect its last events or its view.
+        match request.kind.as_str() {
+            "poll" => return self.poll(&request),
+            "snapshot" => return self.seat_snapshot(&request),
+            _ => {}
         }
         if matches!(self.phase, Phase::Halted) {
             return Response::error(
@@ -324,14 +326,45 @@ impl Session {
     }
 
     fn poll(&mut self, request: &Request) -> Response {
-        let _: PollBody = match parse_body(request) {
-            Ok(body) => body,
-            Err(response) => return self.refuse(request.seat, response),
+        match self.seat_of(request) {
+            Ok(seat) => {
+                let events = self.take_events(Some(seat));
+                self.status_for(seat, events)
+            }
+            Err(response) => response,
+        }
+    }
+
+    // The outbox is dropped: the snapshot already holds what its events would tell.
+    fn seat_snapshot(&mut self, request: &Request) -> Response {
+        let seat = match self.seat_of(request) {
+            Ok(seat) => seat,
+            Err(response) => return response,
         };
-        let Some(seat) = request.seat else {
-            return self.refuse_with(None, ErrorCode::MalformedMessage, "a poll needs a seat");
-        };
-        let events = self.take_events(Some(seat));
+        self.take_events(Some(seat));
+        let viewer = self.seats[seat as usize].viewer;
+        let snapshot = view::snapshot_for(viewer, self.engine.state(), &self.observer);
+        Response {
+            snapshot: Some(snapshot),
+            ..self.status_for(seat, Vec::new())
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn seat_of(&mut self, request: &Request) -> Result<u32, Response> {
+        if let Err(response) = parse_body::<EmptyBody>(request) {
+            return Err(self.refuse(request.seat, response));
+        }
+        request.seat.ok_or_else(|| {
+            self.refuse_with(
+                None,
+                ErrorCode::MalformedMessage,
+                format!("a {} needs a seat", request.kind),
+            )
+        })
+    }
+
+    fn status_for(&mut self, seat: u32, events: Vec<WireEvent>) -> Response {
         if let Phase::Over(winner) = &self.phase {
             return Response::game_over(events, winner.map(|p| p.0));
         }
@@ -442,7 +475,7 @@ mod tests {
     use serde_json::{Value, json};
     use stackfish_engine::{
         CardTypeSet, EventId, GameEvent, GameEventKind, ManaCost, ObjectId, RevealedCard,
-        SequenceNo, ZoneKind,
+        ScriptHandle, SequenceNo, StackEntryKind, StackObject, Target, ZoneKind,
     };
     use stackfish_testutil::minimal_card_definition;
 
@@ -487,6 +520,14 @@ mod tests {
         let later: Value = serde_json::from_slice(&session.handle(&advance)).unwrap();
         assert_eq!(later["body"]["error"]["code"], "pipeline_error");
         assert!(!later.to_string().contains("Black Lotus"), "{later}");
+
+        // A halted Session still hands a Seat its view.
+        let snapshot =
+            serde_json::to_vec(&json!({ "v": 1, "kind": "snapshot", "seat": 1, "body": {} }))
+                .unwrap();
+        let view: Value = serde_json::from_slice(&session.handle(&snapshot)).unwrap();
+        assert_eq!(view["body"]["error"]["code"], "pipeline_error");
+        assert!(view["body"]["snapshot"]["players"].is_array(), "{view}");
     }
 
     #[test]
@@ -787,6 +828,55 @@ mod tests {
         );
         for viewer in VIEWERS {
             assert!(ceased.kind_for(viewer).is_some(), "{viewer:?}");
+        }
+    }
+
+    #[test]
+    fn a_snapshot_hides_a_stack_source_in_a_hand_and_a_target_in_a_library() {
+        let mut session = started();
+        let source = a_card_in_player_zero_s_hand(&session).object_id;
+        let target = *session
+            .engine
+            .state()
+            .zone(ZoneKind::Library, Some(PlayerId(1)))
+            .unwrap()
+            .contents
+            .front()
+            .unwrap();
+        session.engine.state_mut().stack.push(StackObject::new(
+            ObjectId(9003),
+            StackEntryKind::TriggeredAbility,
+            source,
+            PlayerId(0),
+            PlayerId(0),
+            Vec::new(),
+            vec![Target::Object(target), Target::Player(PlayerId(1))],
+            None,
+            None,
+            false,
+            false,
+            false,
+            ScriptHandle(0),
+            None,
+            None,
+            None,
+            None,
+        ));
+        // Indexes follow VIEWERS.
+        let sees_source = [true, false, false, true];
+        let sees_target = [false, false, false, true];
+        for (i, viewer) in VIEWERS.into_iter().enumerate() {
+            let snapshot = serde_json::to_value(view::snapshot_for(
+                viewer,
+                session.engine.state(),
+                &session.observer,
+            ))
+            .unwrap();
+            let entry = &snapshot["stack"][0];
+            assert_eq!(entry.get("source").is_some(), sees_source[i], "{viewer:?}");
+            let targets = entry["targets"].as_array().unwrap();
+            assert_eq!(targets.len(), 1 + usize::from(sees_target[i]), "{viewer:?}");
+            assert!(entry.get("card").is_none(), "an ability has no card");
         }
     }
 

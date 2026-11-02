@@ -301,6 +301,7 @@ pub(crate) fn apply_damage_event(
                 }
             }
             // CR 702.90b
+            // TODO: write an event for poison counters on a player, so a Seat can follow them from events CR 122.1
             if is_infect {
                 let timestamp = state.allocate_sequence_no();
                 if let Some(player) = state.player_mut(pid) {
@@ -338,6 +339,7 @@ pub(crate) fn apply_damage_event(
     // CR 702.15b
     // Lifelink's gain is in addition to any other result of the damage, to a player
     // or an object alike.
+    // TODO: write a `LifeChanged` event for the gain, so a Seat can follow life from events CR 119.3
     if has_lifelink
         && amount > 0
         && let Some(controller) = source_controller

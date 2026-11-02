@@ -6,12 +6,17 @@ mod decision;
 mod event;
 mod mana;
 mod reply;
+mod snapshot;
 
 pub(crate) use decision::{WireCardIdentity, WireDecision, offered_objects};
 pub(crate) use event::{
     WireEvent, WireEventKind, WireIdentity, WireObjectSummary, WireRevealedCard,
 };
 pub(crate) use reply::AnswerBody;
+pub(crate) use snapshot::{
+    WireCommanderDamage, WireObjectView, WirePlayerView, WireSnapshot, WireStackEntry,
+    WireZoneView, counters,
+};
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

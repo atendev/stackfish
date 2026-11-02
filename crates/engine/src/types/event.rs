@@ -68,6 +68,7 @@ pub enum GameEventKind {
         stack_id: ObjectId,
         payer: PlayerId,
     },
+    // TODO: write `PrioritySet` on every change of `priority_player`; nothing writes it, so a Seat cannot follow priority from events CR 117.3
     PrioritySet {
         player: PlayerId,
     },

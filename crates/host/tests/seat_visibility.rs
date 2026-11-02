@@ -1,11 +1,11 @@
 //! Per-Seat visibility over bytes. Seats 0 and 1 are players, Seat 2 is a spectator and
 //! Seat 3 is an omniscient spectator.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde_json::{Value, json};
 use stackfish_engine::{CardTypeSet, ManaCost, ScriptReference};
-use stackfish_host::{FixtureCardSource, Session};
+use stackfish_host::{Bot, FixtureCardSource, Progress, Session, proof_cards, proof_setup_request};
 use stackfish_testutil::minimal_card_definition;
 
 const OMNISCIENT: u32 = 3;
@@ -204,6 +204,15 @@ impl Table {
         &self.seen[seat as usize]
     }
 
+    fn snapshot(&mut self, seat: u32) -> Value {
+        let response = send(
+            &mut self.session,
+            json!({ "v": 1, "kind": "snapshot", "seat": seat, "body": {} }),
+        );
+        assert_eq!(body(&response)["events"], json!([]), "{response}");
+        body(&response)["snapshot"].clone()
+    }
+
     fn hidden_moves(&self, seat: u32) -> Vec<&Value> {
         self.events(seat)
             .iter()
@@ -220,9 +229,10 @@ impl Table {
 // The ledger's own numbers are not object ids.
 fn ids_in(events: &[Value]) -> HashSet<String> {
     fn walk(value: &Value, key: &str, found: &mut HashSet<String>) {
-        const NOT_IDS: [&str; 6] = [
+        const NOT_IDS: [&str; 7] = [
             "event_id",
             "sequence_no",
+            "through_sequence_no",
             "caused_by_command",
             "parent_event",
             "original_event",
@@ -674,6 +684,329 @@ fn a_broken_script_on_a_hidden_card_reaches_no_seat_with_its_id_or_detail() {
                 !text.contains("ObjectId") && !text.contains("Nope"),
                 "seat {seat}: {text}"
             );
+        }
+    }
+}
+
+fn seq(value: &Value) -> u64 {
+    value.as_str().unwrap().parse().unwrap()
+}
+
+// Priority is left out because no engine path writes `priority_set`.
+#[derive(Debug, PartialEq)]
+struct Folded {
+    turn_number: Value,
+    active_player: Value,
+    phase: Value,
+    step: Value,
+    life: Vec<i64>,
+    hand_count: Vec<i64>,
+    library_count: Vec<i64>,
+    zone_of: BTreeMap<String, String>,
+    tapped: BTreeSet<String>,
+}
+
+impl Folded {
+    fn from_snapshot(snapshot: &Value) -> Folded {
+        let players = snapshot["players"].as_array().unwrap();
+        let per_player = |key: &str| players.iter().map(|p| p[key].as_i64().unwrap()).collect();
+        let mut folded = Folded {
+            turn_number: snapshot["turn_number"].clone(),
+            active_player: snapshot["active_player"].clone(),
+            phase: snapshot["phase"].clone(),
+            step: snapshot["step"].clone(),
+            life: per_player("life"),
+            hand_count: per_player("hand_count"),
+            library_count: per_player("library_count"),
+            zone_of: BTreeMap::new(),
+            tapped: BTreeSet::new(),
+        };
+        let mut place = |object: &Value, zone: &str| {
+            let id = object["object"].as_str().unwrap().to_string();
+            if object["tapped"] == true {
+                folded.tapped.insert(id.clone());
+            }
+            folded.zone_of.insert(id, zone.to_string());
+        };
+        for zone in snapshot["zones"].as_array().unwrap() {
+            for object in zone["objects"].as_array().unwrap() {
+                place(object, zone["zone"].as_str().unwrap());
+            }
+        }
+        for entry in snapshot["stack"].as_array().unwrap() {
+            if let Some(card) = entry.get("card") {
+                place(card, "stack");
+            }
+        }
+        folded
+    }
+
+    fn count(&mut self, zone: &Value, owner: usize, delta: i64) {
+        match zone.as_str() {
+            Some("hand") => self.hand_count[owner] += delta,
+            Some("library") => self.library_count[owner] += delta,
+            _ => {}
+        }
+    }
+
+    fn apply(&mut self, event: &Value) {
+        let id = |key: &str| event[key].as_str().map(str::to_string);
+        match event["kind"].as_str().unwrap() {
+            "zone_change" => {
+                if let Some(previous) = id("previous") {
+                    self.zone_of.remove(&previous);
+                    self.tapped.remove(&previous);
+                }
+                if let Some(object) = id("object") {
+                    self.zone_of
+                        .insert(object, event["to"].as_str().unwrap().to_string());
+                }
+                if let Some(owner) = event["owner"].as_u64() {
+                    self.count(&event["from"], owner as usize, -1);
+                    self.count(&event["to"], owner as usize, 1);
+                }
+            }
+            "token_ceased" => {
+                let object = id("object").unwrap();
+                self.zone_of.remove(&object);
+                self.tapped.remove(&object);
+            }
+            "life_changed" => {
+                self.life[event["player"].as_u64().unwrap() as usize] +=
+                    event["delta"].as_i64().unwrap()
+            }
+            // Damage to a player is not a `life_changed` event.
+            "damage_dealt" if event["target"]["kind"] == "player" => {
+                self.life[event["target"]["id"].as_u64().unwrap() as usize] -=
+                    event["amount"].as_i64().unwrap()
+            }
+            "turn_started" => {
+                self.turn_number = event["turn_number"].clone();
+                self.active_player = event["player"].clone();
+            }
+            "phase_started" => self.phase = event["phase"].clone(),
+            "step_started" => self.step = event["step"].clone(),
+            "tapped" => {
+                self.tapped.insert(id("object").unwrap());
+            }
+            "untapped" => {
+                self.tapped.remove(&id("object").unwrap());
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn every_seat_s_snapshot_equals_its_first_snapshot_folded_with_its_events() {
+    let mut table = Table::new(setup(json!({ "skip_mulligan": true })));
+    let first: Vec<Value> = (0..4).map(|seat| table.snapshot(seat)).collect();
+    let decision = table.advance();
+    table.bot(decision, 120);
+    table.sync();
+    assert!(
+        table.events(OMNISCIENT).len() > 100,
+        "the game ran for a while"
+    );
+
+    for seat in 0..4u32 {
+        let last = table.snapshot(seat);
+        let mut folded = Folded::from_snapshot(&first[seat as usize]);
+        for event in table.events(seat) {
+            folded.apply(event);
+        }
+        assert_eq!(
+            folded,
+            Folded::from_snapshot(&last),
+            "seat {seat}'s events do not add up to its snapshot"
+        );
+        // Holds only while the last ledger entry is one every Seat receives.
+        assert_eq!(
+            last["through_sequence_no"],
+            table.events(seat).last().unwrap()["sequence_no"],
+            "seat {seat}"
+        );
+    }
+}
+
+#[test]
+fn a_snapshot_shows_each_seat_only_the_ids_it_may_see() {
+    let mut table = Table::new(setup(json!({ "skip_mulligan": true })));
+    let decision = table.advance();
+    table.bot(decision, 40);
+    let omniscient = table.snapshot(OMNISCIENT);
+    let ids_of = |zone: &str, owner: u64| -> HashSet<String> {
+        omniscient["zones"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|z| z["zone"] == zone && z["owner"] == owner)
+            .flat_map(|z| z["objects"].as_array().unwrap())
+            .map(|o| o["object"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let libraries: HashSet<String> = ids_of("library", 0)
+        .union(&ids_of("library", 1))
+        .cloned()
+        .collect();
+    let hands = [ids_of("hand", 0), ids_of("hand", 1)];
+    assert!(!libraries.is_empty() && !hands[0].is_empty() && !hands[1].is_empty());
+
+    for zone in omniscient["zones"].as_array().unwrap() {
+        if zone["zone"] == "hand" || zone["zone"] == "library" {
+            let ids: Vec<u64> = zone["objects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|o| seq(&o["object"]))
+                .collect();
+            assert!(ids.is_sorted(), "a hidden zone is listed by id: {zone}");
+        }
+    }
+
+    for seat in [0u32, 1, 2] {
+        let snapshot = table.snapshot(seat);
+        let seen = ids_in(std::slice::from_ref(&snapshot));
+        assert!(
+            seen.is_disjoint(&libraries),
+            "seat {seat} received a library id"
+        );
+        for owner in 0..2u32 {
+            let hand = &hands[owner as usize];
+            if seat == owner {
+                assert!(hand.is_subset(&seen), "seat {seat} sees its own hand");
+            } else {
+                assert!(
+                    seen.is_disjoint(hand),
+                    "seat {seat} received an id from player {owner}'s hand"
+                );
+            }
+        }
+        for (player, view) in snapshot["players"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(
+                view["hand_count"].as_u64().unwrap() as usize,
+                hands[player].len(),
+                "every Seat counts every hand"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_snapshot_drops_the_outbox_and_the_seat_resumes_after_it() {
+    let mut table = Table::new(setup(quick()));
+    send(
+        &mut table.session,
+        json!({ "v": 1, "kind": "advance", "body": {} }),
+    );
+    let response = send(
+        &mut table.session,
+        json!({ "v": 1, "kind": "snapshot", "seat": 2, "body": {} }),
+    );
+    let response = body(&response);
+    assert_eq!(response["status"], "decision_open");
+    assert_eq!(
+        response["events"],
+        json!([]),
+        "the queued events are dropped"
+    );
+    assert_eq!(
+        response["decision"]["shape"], "opaque",
+        "the poll shape, in the Seat's view"
+    );
+    let through = seq(&response["snapshot"]["through_sequence_no"]);
+
+    let polled = send(
+        &mut table.session,
+        json!({ "v": 1, "kind": "poll", "seat": 2, "body": {} }),
+    );
+    assert_eq!(body(&polled)["events"], json!([]));
+
+    let decision = table.sync();
+    table.pass(&decision);
+    let later = table.events(2);
+    assert!(!later.is_empty());
+    assert!(later.iter().all(|e| seq(&e["sequence_no"]) > through));
+}
+
+#[test]
+fn a_snapshot_needs_an_existing_seat_and_an_empty_body() {
+    let mut table = Table::new(setup(quick()));
+    let code = |table: &mut Table, request: Value| {
+        body(&send(&mut table.session, request))["error"]["code"].clone()
+    };
+    assert_eq!(
+        code(
+            &mut table,
+            json!({ "v": 1, "kind": "snapshot", "body": {} })
+        ),
+        "malformed_message"
+    );
+    assert_eq!(
+        code(
+            &mut table,
+            json!({ "v": 1, "kind": "snapshot", "seat": 9, "body": {} })
+        ),
+        "unknown_seat"
+    );
+    assert_eq!(
+        code(
+            &mut table,
+            json!({ "v": 1, "kind": "snapshot", "seat": 0, "body": { "x": 1 } })
+        ),
+        "malformed_message"
+    );
+}
+
+// The proof cards tap lands, attack and change life, which the bear deck never does. The
+// game stops short of an elimination, whose object removal sends no events.
+#[test]
+fn a_proof_game_folds_to_each_player_s_snapshot() {
+    for seed in 0..5 {
+        let (mut session, _) =
+            Session::create(&proof_setup_request(2, seed), &proof_cards()).unwrap();
+        let first = [0, 1].map(|seat| {
+            body(&send(
+                &mut session,
+                json!({ "v": 1, "kind": "snapshot", "seat": seat, "body": {} }),
+            ))["snapshot"]
+                .clone()
+        });
+        let mut bot = Bot::new(seed).recording(&[]);
+        for _ in 0..400 {
+            let progress = bot
+                .step(&mut session)
+                .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+            assert_eq!(
+                progress,
+                Progress::Answered,
+                "seed {seed}: the game must still run"
+            );
+        }
+        for seat in 0..2u32 {
+            let polled = send(
+                &mut session,
+                json!({ "v": 1, "kind": "poll", "seat": seat, "body": {} }),
+            );
+            let last = body(&send(
+                &mut session,
+                json!({ "v": 1, "kind": "snapshot", "seat": seat, "body": {} }),
+            ))["snapshot"]
+                .clone();
+            let mut folded = Folded::from_snapshot(&first[seat as usize]);
+            bot.events(seat)
+                .iter()
+                .chain(body(&polled)["events"].as_array().unwrap())
+                .for_each(|e| folded.apply(e));
+            let mut expected = Folded::from_snapshot(&last);
+            assert!(
+                !expected.tapped.is_empty(),
+                "seed {seed}: lands were tapped"
+            );
+            // TODO: compare life once every life gain writes a `life_changed` event
+            folded.life.clear();
+            expected.life.clear();
+            assert_eq!(folded, expected, "seed {seed}, seat {seat}");
         }
     }
 }

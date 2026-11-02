@@ -40,6 +40,7 @@ impl Engine {
         amount: i32,
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        // TODO: write a `LifeChanged` event, so a Seat can follow life from events CR 119.3
         if let Some(player) = self.state.player_mut(top.controller) {
             player.gain_life(amount);
         }

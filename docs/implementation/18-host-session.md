@@ -8,8 +8,8 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 - `Session::create(request: &[u8], cards: &dyn CardSource) -> Result<(Session, Vec<u8>), Vec<u8>>` parses a `setup`
   request. `Ok` holds the Session and the `created` response. `Err` holds an error response. Nothing runs at
   creation, and the Session does not keep `cards`.
-- `Session::handle(&mut self, request: &[u8]) -> Vec<u8>` takes an `advance`, `answer` or `poll` request and returns
-  one response.
+- `Session::handle(&mut self, request: &[u8]) -> Vec<u8>` takes an `advance`, `answer`, `poll` or `snapshot` request
+  and returns one response.
 - `CardSource::load(key) -> Result<CardDefinition, CardSourceError>`. `FixtureCardSource` serves cards from a map built
   in code.
 
@@ -20,10 +20,10 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 - `envelope.rs`: `Request`, `Response`, `ErrorCode`, `PROTOCOL_VERSION`.
 - `session.rs`: the dispatch, the step loop, the per-Seat outboxes and the fatal state.
 - `view.rs`: the visibility rule (B4). `Viewer`, `Observer` (reads each ledger entry once into an `Observed` that
-  knows every viewer's copy) and `decision_for`.
+  knows every viewer's copy), `decision_for` and `snapshot_for`.
 - `wire/`: mirror types. `event.rs` has one variant per `GameEventKind`, with no wildcard arm, so a new engine event
   fails to compile until it is mirrored. `decision.rs` mirrors the twelve `ReplyShape`s and the `Entry` types.
-  `reply.rs` parses Answers. `mod.rs` holds `U64` (a decimal string), `WireTarget` and `WireCandidate`.
+  `reply.rs` parses Answers. `snapshot.rs` holds the snapshot types. `mod.rs` holds `U64` (a decimal string), `WireTarget` and `WireCandidate`.
 
 ## Wire details settled in B3
 
@@ -80,6 +80,31 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   zones. A refusal shows the Decision in the sender's view.
 - Search Decisions list candidates sorted by `ObjectId` (`decision/open.rs`), never in library order.
 
+## Seat snapshot (ticket 021)
+
+- `snapshot` (`{v, kind: "snapshot", seat, body: {}}`, seat required) returns the `poll` response for that Seat with
+  an empty `events` list and a `snapshot` field. It drops the Seat's outbox, because the snapshot already holds what
+  those events said, and the Seat resumes from events after `through_sequence_no`. It works after the game ends or
+  halts, like `poll`. A late spectator is a spectator Seat declared at setup that has not polled yet.
+- The snapshot holds `through_sequence_no` (`null` before the first event), `turn_number`, `active_player`, `phase`,
+  `step`, `priority`, and `players` (life, counters, commander damage by name, `eliminated`, `hand_count`,
+  `library_count`). `zones` lists every zone the Seat may look into in engine order, each object as `{object, owner,
+  controller, tapped, face_down, counters, attached_to?, attached_to_player?, identity?}`. `identity` is absent for a
+  face-down object the Seat may not identify. Hands and libraries are sorted by id, and only an omniscient Seat gets
+  libraries. `stack` lists the
+  entries, top last, with `kind`, `owner`, `controller`, `targets`, `chosen_modes`, `x_value`, the spell's `card` and a
+  `source` that is absent where the Seat cannot see it. The open Decision is the response's `decision`, built by
+  `decision_for`.
+- The fold tests in `seat_visibility.rs` rebuild zones, counts, tapped, turn, phase and step from a first snapshot plus
+  the Seat's events and compare them with a later snapshot, over a bear game for all four Seats and 400 answers of five
+  proof games. Damage to a player is a `damage_dealt` event, not `life_changed`.
+- The fold found event gaps, each a TODO in the engine: life gain (the `GainLife` effect, the script `GainLife` result
+  and lifelink) writes no `life_changed`, poison from infect damage to a player writes no event, nothing writes
+  `priority_set`, and CR 800.4a removes a leaving player's objects without events. The proof-game fold skips life and
+  stops before an elimination until those land.
+- TODO: a card a `revealed` event showed keeps its identity in the events but not in a later snapshot while it stays
+  in a hand or library. The fold tests do not fold identities.
+
 ## Engine changes
 
 - `CounterSet::totals()` returns the total per counter kind, so the wire can list counters.
@@ -87,8 +112,6 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 
 ## Open items
 
-- TODO(snapshot): ticket 004's `(Seat, state)` view is not built, and no request asks for a snapshot. A Seat that
-  joins late has no way to learn the current state. `view.rs` is written so a snapshot can reuse its rule.
 - `Revealed` producers (ticket 027): `Game.Ops.Search` with `reveal = true` (CR 701.23e) and both amplify answers
   (CR 702.38a), through `Engine::reveal_event`. The host tests still use constructed events.
 - TODO: nothing sets `face_down`, because face-down mechanics are a design non-goal, so that rule is only tested with
@@ -111,8 +134,9 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 
 ## Tests
 
-`crates/host/tests/phase5_seat_visibility.rs` (10) drives a bot game over four Seats (two players, a spectator and an
-omniscient spectator): draws, a cast, the hidden-id scan, opaque Decisions, `poll`, and spectators that cannot answer.
+`crates/host/tests/seat_visibility.rs` (16) drives a bot game over four Seats (two players, a spectator and an
+omniscient spectator): draws, a cast, the hidden-id scan, opaque Decisions, `poll`, spectators that cannot answer, and
+the snapshot (fold equality, hidden ids, the dropped outbox and request errors).
 Unit tests in `session.rs` (4) cover `revealed`, scry, surveil, `rng_drawn`, `cycled` and `trigger_queued`.
 `crates/host/tests/phase5_host_session.rs` (11) drives a real two-player game in bytes: creation failures,
 envelope and body rejection, the first priority Decision, mulligan order and the bottom-card choice, rejected

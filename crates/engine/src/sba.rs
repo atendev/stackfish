@@ -201,6 +201,7 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
 ///
 /// Per-owner zones drain outright and shared zones keep other players' objects.
 /// Stack entries go by owner for spells and by controller for abilities.
+// TODO: write an event per object removed, so a Seat's events still add up to its snapshot CR 800.4a
 fn remove_players_objects(state: &mut GameState, player: PlayerId) {
     let owned_zone_ids: Vec<ObjectId> = state
         .zones
