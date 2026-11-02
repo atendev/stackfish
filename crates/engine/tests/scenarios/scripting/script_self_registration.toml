@@ -90,7 +90,6 @@ equals = "battlefield"
 
 [[assertions]]
 type = "ledger_len"
-# +1 vs. before phase5/cascade: CR 601.2i's new SpellCast marker event, now
-# logged once every real cast's cost fully commits (Engine::
+# Counts CR 601.2i's SpellCast marker event, logged once every real cast's cost fully commits (Engine::
 # continue_cost_zone_moves's own tail).
 equals = 21

@@ -40,7 +40,7 @@ player = 0
 zone = "battlefield"
 card = "bear"
 # No real combat-damage step exercised here - pre-seed 2 damage marked, same
-# as phase5_sba_basics.toml. Lethal against the printed 2 toughness, but
+# as sba/sba_basics.toml. Lethal against the printed 2 toughness, but
 # sub-lethal against the anthem-boosted effective 3 toughness.
 damage_marked = 2
 

@@ -39,8 +39,8 @@ zone = "battlefield"
 card = "wastes"
 
 # Reach a real priority window before casting (CR 601.2a) - same solo-player
-# PreGame -> Main prelude phase5_cast_spell_payment.toml walks by hand;
-# phase5_scenario_shortcuts_advance.toml covers advance_to_phase itself.
+# PreGame -> Main prelude costs/cast_spell_payment.toml walks by hand;
+# shortcuts/scenario_shortcuts_advance.toml covers advance_to_phase itself.
 [[steps]]
 type = "advance_to_phase"
 phase = "main"

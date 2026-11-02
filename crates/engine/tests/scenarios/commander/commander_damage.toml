@@ -32,7 +32,7 @@ is_commander = true
 
 # Two players, so every step transition needs both to pass in a row
 # (CR 117.4) - 4 step transitions to reach the declare attackers step, same
-# sequence phase5_combat_damage.toml's own comment documents.
+# sequence combat/combat_damage.toml's own comment documents.
 [[steps]]
 type = "pass_priority"
 player = 0

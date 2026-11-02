@@ -6,7 +6,7 @@
 # via direct CardDefinition struct literals; this fixture only proves the
 # TOML -> CardSpec.modes -> CardDefinition.modes wiring connects for real,
 # same "prove the pipeline, not the logic" convention
-# phase5_targeting_basics.toml already establishes.
+# targeting/targeting_basics.toml already establishes.
 seed = 1
 
 [[players]]

@@ -20,7 +20,7 @@ card = "bear"
 
 # Solo player: one pass_priority always counts as "everyone passed" (CR
 # 500-514), so advance_to_phase should walk PreGame -> Untap -> Upkeep ->
-# Draw -> Main in one call, same ground `phase5_cast_spell_payment.toml`
+# Draw -> Main in one call, same ground `costs/cast_spell_payment.toml`
 # covers with four explicit pass_priority actions.
 [[steps]]
 type = "advance_to_phase"

@@ -5,7 +5,7 @@
 # (99-backlog.md's Targeting note; ActivatedAbilityBuilder::SetTarget already
 # had this via Game.CreateActivatedAbility, spells had no TOML/scenario path
 # at all). TargetFilter::Script itself was already real engine-side
-# (phase5/scripted-target-filter) - this only proves the TOML -> real
+# - this only proves the TOML -> real
 # ScriptHandle wiring (register_target_script) end to end, for both a legal
 # and an illegal candidate.
 seed = 1

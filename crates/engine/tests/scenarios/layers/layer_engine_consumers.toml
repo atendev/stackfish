@@ -29,7 +29,7 @@ zone = "battlefield"
 card = "bear"
 
 # Two players, so every step transition needs both to pass in a row
-# (CR 117.4) - see phase5_combat_damage.toml for the full step-by-step
+# (CR 117.4) - see combat/combat_damage.toml for the full step-by-step
 # breakdown this mirrors.
 [[steps]]
 type = "pass_priority"

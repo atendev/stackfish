@@ -8,7 +8,7 @@ A scenario is a TOML file describing a game setup and a sequence of actions to r
 plus assertions to check afterward. Used by:
 
 - `cargo test --workspace` — runs every `.toml` file under `crates/engine/tests/scenarios/`
-  automatically, including subdirectories like `phase5/` and `card_tests/` (see
+  automatically, including subdirectories like `combat/` and `mechanics/banding/` (see
   `crates/engine/tests/scenarios.rs`).
 - `cargo run -p stackfish-cli -- path/to/scenario.toml` — runs one scenario file and prints a
   report. Use this for one-off manual or AI-driven testing.
@@ -259,7 +259,7 @@ its mana cost (`generic_cost`/`colors` still express the rest of the cost as usu
 (see `[[actions]]` below) to announce a value; `ManaCost::resolve_x` substitutes that value in as a
 generic amount before `PaymentPlan::validate` sees the cost, so `submit_payment`'s `mana.units` pays
 the resolved total exactly like any other generic amount — no special X handling on the payment
-side. See `crates/engine/tests/scenarios/phase5/phase5_x_costs.toml` for a full worked example
+side. See `crates/engine/tests/scenarios/costs/x_costs.toml` for a full worked example
 (an `{X}{R}` sorcery cast with `x_value = 3`, paid with 3 generic + 1 red).
 
 `activate_ability` takes the same `x_value` field (CR 107.3a/107.3k/602.2b — an ability's own X is
@@ -268,7 +268,7 @@ on the stack), for an ability whose own activation cost has an `{X}` in it. Ther
 shortcut that produces one, though — `mana_ability` only ever builds a bare-tap, no-cost ability, so
 an `{X}`-costed activated ability needs a real self-registering Lua `script` (`Game.Costs.Mana`
 allows `{X}` too — see [docs/lua/game-constants.md](lua/game-constants.md#gamecosts)), not a
-`[[cards]]` field. See `crates/engine/tests/phase5_x_costs_activated_ability.rs` for the direct-
+`[[cards]]` field. See `crates/engine/tests/x_costs_activated_ability.rs` for the direct-
 engine equivalent of the worked example above, driven without TOML.
 
 **`power_script`/`toughness_script` (CR 604.3/208.2a, characteristic-defining values):** if set,
@@ -280,7 +280,7 @@ source evaluating to `function(source, controller) -> integer`, same convention
 state-query bindings exist yet, so a real "count cards in your graveyard"-style CDA isn't
 expressible in a scenario file yet — only a constant or something derived from `source`/`controller`
 alone. A card with neither field set keeps the plain `power = N` shape as before. See
-`crates/engine/tests/scenarios/phase5_layer_engine_cda.toml` for a worked example (a creature with
+`crates/engine/tests/scenarios/layers/layer_engine_cda.toml` for a worked example (a creature with
 scripted toughness dying to CR 704.5g's lethal-damage SBA).
 
 **`keywords` (CR 702):** printed keyword abilities, by name, parsed into a `KeywordSet` bitmask —
@@ -339,7 +339,7 @@ return s
 
 `Game.CreateStaticAbility(c)` self-registers a real `ContinuousEffect` the same way (CR 604/611)
 — see [docs/lua/static-abilities.md](lua/static-abilities.md) and
-`crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml` for a worked example
+`crates/engine/tests/scenarios/scripting/static_ability_self_registration.toml` for a worked example
 (an anthem land whose own script buffs "creatures you control" the moment it's played).
 `Game.CreateActivatedAbility(c)`/`Game.CreateReplacementEffect(c)`/`Game.CreateCostModifier(c)` are
 real too — see [docs/lua/index.md](lua/index.md) for the full set. Nothing stops a card from
@@ -386,7 +386,7 @@ a real query path so far (CR 613's other layers — copy/control/text, plus 7a's
 characteristic-defining values and 7d/7e — aren't wired to the layer engine yet; see `layers.rs`'s
 own doc comment). Ordering *within* a layer is by registration timestamp, which a scenario file
 can't control (always `0`) — write a direct Rust integration test
-(`crates/engine/tests/phase5_layer_engine_basics.rs`) instead if a fixture needs to exercise
+(`crates/engine/tests/layer_engine_basics.rs`) instead if a fixture needs to exercise
 timestamp ordering between two effects in the same layer.
 
 Example — an anthem enchantment giving `+1/+1` to creatures its controller controls:
@@ -405,12 +405,12 @@ filter_controller = "you"
 filter_card_types = ["Creature"]
 ```
 
-See `crates/engine/tests/scenarios/phase5_layer_engine_basics.toml` for a full worked example
+See `crates/engine/tests/scenarios/layers/layer_engine_basics.toml` for a full worked example
 (the anthem above keeping a lethally-damaged bear alive through CR 704.5g's state-based action).
-`phase5_layer_engine_consumers.toml` shows the same `power_toughness_modifying` primitive changing
+`layers/layer_engine_consumers.toml` shows the same `power_toughness_modifying` primitive changing
 real combat damage dealt (`assign_combat_damage`), not just an SBA — see
 `docs/implementation/09-layers.md`'s layer-engine-consumers slice notes.
-`phase5_layer_engine_types_colors.toml` shows `type_changing` (CR 613 layer 4, additive only) —
+`layers/layer_engine_types_colors.toml` shows `type_changing` (CR 613 layer 4, additive only) —
 pairing an `AddCardType(Creature)` effect with a `power_toughness_setting` effect animates a Land
 into a creature that's then actually subject to CR 704.5g's lethal-damage SBA (two separate
 `[[cards]]` sources, since one `ContinuousEffect` is one layer — see `docs/implementation/09-layers.md`'s
@@ -458,11 +458,11 @@ exclude_source = false   # optional, default false - CR 115.4 "another target": 
                          # spell/ability's own source from ever being a legal candidate
 ```
 
-See `crates/engine/tests/scenarios/phase5_targeting_basics.toml` for a worked example (an "any
+See `crates/engine/tests/scenarios/targeting/targeting_basics.toml` for a worked example (an "any
 target" instant cast targeting a battlefield creature, resolving normally since the target is
 still legal) — the reject/fizzle paths (wrong count, filter mismatch, duplicate targets, a target
 becoming illegal before resolution) are exercised exhaustively in
-`crates/engine/tests/phase5_targeting_basics.rs` instead, not via TOML.
+`crates/engine/tests/targeting_basics.rs` instead, not via TOML.
 
 **`modes` (CR 700.2, modal spells):** if non-empty, this card is modal — casting it requires
 `PlayerActionKind::CastSpell::modes` to supply `mode_count` valid indices into this list
@@ -507,8 +507,8 @@ count = 1
 No TOML field for a mode's own effect yet (same pre-existing gap as `CardSpec` itself having no
 field for a Rust-native `AbilityEffect` — only reachable via direct `CardDefinition`/`SpellMode`
 struct literals in a Rust integration test, e.g.
-`crates/engine/tests/phase5_script_modal_spells.rs`). See
-`crates/engine/tests/scenarios/phase5_modal_spell_toml.toml` for a worked example proving the
+`crates/engine/tests/script_modal_spells.rs`). See
+`crates/engine/tests/scenarios/modal/modal_spell_toml.toml` for a worked example proving the
 TOML → `CardDefinition.modes` → `CastSpell` mode-selection pipeline, one cast per mode.
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
@@ -687,7 +687,7 @@ skips the normal priority check: tapping a land mid-payment to cover the very co
 instead of requiring every mana source to be pre-tapped before the `cast_spell`/`activate_ability`
 action that needs it. Nothing else is legal in that window (a second spell, a non-mana ability, or
 any other player's ability still get the ordinary "not waiting for a player action" rejection).
-See `crates/engine/tests/phase5_mana_ability_during_payment.rs` for worked examples, including a
+See `crates/engine/tests/mana_ability_during_payment.rs` for worked examples, including a
 real-cost (Treasure-style) mana ability nesting its own payment pause inside the outer one.
 
 #### `auto_pay`: pay the pending cost inline, no separate `submit_payment` step
@@ -730,7 +730,7 @@ by hand (`activate_ability`/`tap_for_mana`) before the `cast_spell`/`activate_ab
 `auto_pay` and drive `submit_payment` manually. Land selection is a simple first-match greedy pick,
 not optimized to preserve any particular color for a later cost in the same scenario — a test that
 cares which lands get tapped should keep doing that step by hand too. See
-`crates/engine/tests/scenarios/phase5/phase5_scenario_shortcuts_auto_pay_from_pool.toml`,
+`crates/engine/tests/scenarios/shortcuts/scenario_shortcuts_auto_pay_from_pool.toml`,
 `..._auto_pay_taps_lands.toml`, and `..._auto_pay_insufficient.toml` for worked examples of all
 three outcomes (pool alone covers it, lands get tapped, and a clean rejection when neither covers
 the cost).
@@ -767,7 +767,7 @@ priority window (a payment, a discard, a script choice, `GameOver`, an engine er
 immediately and reports that instead of guessing an answer — handle the pending decision explicitly,
 then resume with another `advance_to_phase`/`advance_to_step` if still needed. Capped at 2000 passes
 (dozens of turns' worth) so a target that's never reached fails loudly instead of hanging the run.
-See `crates/engine/tests/scenarios/phase5/phase5_scenario_shortcuts_advance.toml` (solo player) and
+See `crates/engine/tests/scenarios/shortcuts/scenario_shortcuts_advance.toml` (solo player) and
 `..._advance_two_player.toml` (both players' passes driven automatically) for worked examples.
 
 ```toml
@@ -822,7 +822,7 @@ defending player (or their planeswalker/battle).
 actions that explicitly don't use the stack, so they're exempt from the priority check every other
 action goes through (`Engine::submit_action`). `execute_command`'s own active-player/
 defending-player checks are the real gate. See
-`crates/engine/tests/scenarios/phase5_combat_declarations.toml` for a full worked example, including
+`crates/engine/tests/scenarios/combat/combat_declarations.toml` for a full worked example, including
 the pass-priority sequence needed to reach the declare attackers/blockers steps with two players
 (every step transition needs *both* players to pass in a row, not just one, unlike the solo-player
 examples elsewhere in this doc).
@@ -863,7 +863,7 @@ set of chooser-flip cases. Damage is marked on creature targets and converted to
 targets in the same pass - no damage prevention/replacement check yet (CR 615/616), and damage to a
 planeswalker/battle target doesn't do anything yet (no loyalty/defense-damage path wired up - only
 player and creature targets are functional this slice). See
-`crates/engine/tests/scenarios/phase5_combat_damage.toml` for a full worked example (attack, double
+`crates/engine/tests/scenarios/combat/combat_damage.toml` for a full worked example (attack, double
 block, explicit split, lethal/non-lethal outcomes).
 
 ```toml
@@ -966,7 +966,7 @@ answers either). `target` is checked against the request's own filter the same w
 already picked earlier in the same `Game.ChooseN` batch) is rejected and reported as `Errored`. Same
 "own entry point" design as `submit_payment`/`submit_discard` — not routed through `submit_action`;
 `player` is documentation only (matches the pending request's own controller), not validated against
-it. See `crates/engine/tests/scenarios/phase5/phase5_mass_choice_balance.toml` for a full worked
+it. See `crates/engine/tests/scenarios/scripting/mass_choice_balance.toml` for a full worked
 example (Balance, CR 701.8 — one `submit_script_choice` per `Game.ChooseN` pick across a two-player
 `Game.Ops.ForEachPlayer` resolution). `Game.MayChoose`'s sibling boolean-answer pause
 (`ScriptChoiceRequest::MayChoose`, `Engine::submit_script_may_choice`) has no TOML action yet — no
@@ -1146,7 +1146,7 @@ equals = true
 ```
 
 Checks `PlayerState.eliminated` — the way to confirm CR 704.5a's state-based action actually fired
-for a player at 0 or less life. See `crates/engine/tests/scenarios/phase5_sba_basics.toml` for a
+for a player at 0 or less life. See `crates/engine/tests/scenarios/sba/sba_basics.toml` for a
 full worked example of both this and the `damage_marked` setup field above, covering CR 704.5a/f/g
 in one scenario.
 
@@ -1170,7 +1170,7 @@ equals = 3
 ```
 
 Checks `PlayerState.counters` — the way to confirm Infect gave a player poison counters instead of
-life loss. See `crates/engine/tests/scenarios/phase5_keyword_primitives.toml` for a full worked
+life loss. See `crates/engine/tests/scenarios/combat/keyword_primitives.toml` for a full worked
 example of both alongside the other keyword primitives.
 
 ```toml
@@ -1282,7 +1282,7 @@ A solo player's first `pass_priority` always counts as "everyone passed" (1 play
 `Untap → Upkeep → Draw → Main`. `cast_spell`'s non-instant branch needs `Phase::Main` (sorcery
 speed), so reaching it from the game's `PreGame` start takes 4 passes; one more pass after paying
 resolves the spell off the stack (CR 608.2m). See
-`crates/engine/tests/scenarios/phase5_cast_spell_payment.toml` for this exact file, runnable as-is.
+`crates/engine/tests/scenarios/costs/cast_spell_payment.toml` for this exact file, runnable as-is.
 
 ```toml
 seed = 1

@@ -53,7 +53,7 @@ player = 0
 zone = "battlefield"
 card = "land"
 # No real combat-damage step exercised here - pre-seed 3 damage marked, same
-# trick phase5_layer_engine_basics.toml uses. Sub-lethal against a plain
+# trick layers/layer_engine_basics.toml uses. Sub-lethal against a plain
 # land (which isn't a creature at all - CR 704.5g doesn't apply), lethal
 # once layer 4 makes it an effective 3-toughness creature.
 damage_marked = 3
