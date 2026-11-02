@@ -22,9 +22,9 @@ methods. Those methods and the typed `ProcessState` pauses are unchanged. The de
 | `Order { items }` | `Order(Vec<usize>)` | trigger order |
 | `Modes { mode_count, min, max, repeatable, solo_only }` | `Modes(Vec<u32>)` | spell mode choice, trigger mode choice |
 | `Partition { cards, rest }` | `Partition { top, rest }` | Scry, Surveil |
-| `Payment { cost }` | `Payment(Option<PaymentPlan>)` | cast payment (`None` unwinds), unless-paid (`None` declines) |
+| `Payment { cost, eligible }` | `Payment(Option<PaymentPlan>)` | cast payment (`None` unwinds), unless-paid (`None` declines). `eligible` lists, per additional cost, the objects a filtered cost may name |
 | `Targets { spec, candidates }` | `Targets(Vec<Vec<Target>>)` | trigger targets, one list per target word |
-| `MayCast { card }` | `MayCast(Option<CastAnnouncement>)` | Madness, Cascade |
+| `MayCast { card, options }` | `MayCast(Option<CastAnnouncement>)` | Madness, Cascade. `options` holds the mode range, target slots and X flag, or `None` when only a decline can succeed |
 | `Action { entries }` | `Action(PlayerAction)` | priority, checked against the entries (see `17-legal-actions.md`) |
 | `DeclareAttackers { attackers }` | `DeclareAttackers(Vec<(ObjectId, Target)>)` | declare attackers step |
 | `DeclareBlockers { blockers }` | `DeclareBlockers(Vec<(ObjectId, ObjectId)>)` | declare blockers step, one defending player at a time |

@@ -9,8 +9,8 @@ mod legal_actions;
 mod open;
 
 pub use entry::{
-    ActivateEntry, AttackerEntry, BlockerEntry, CastEntry, ColorChoice, DamageSplitEntry, Entry,
-    EntryTargets, ModeRange, TargetSlot,
+    ActivateEntry, AttackerEntry, BlockerEntry, CastEntry, CastOptions, ColorChoice,
+    DamageSplitEntry, Entry, EntryTargets, ModeRange, TargetSlot,
 };
 
 use crate::replacement::ReplacementCandidate;
@@ -82,7 +82,12 @@ pub enum ReplyShape {
     /// Pay `cost` with a `PaymentPlan`. A `None` reply means the player
     /// cannot pay (CR 601.6 unwinds the cast) or declines to pay an
     /// unless-paid cost (CR 118.12).
-    Payment { cost: CostSpec },
+    Payment {
+        cost: CostSpec,
+        /// One list per `cost.additional` entry: the ids a filtered cost may
+        /// name, ascending. Every other cost kind has an empty list.
+        eligible: Vec<Vec<ObjectId>>,
+    },
     /// Choose targets for a trigger: one candidate list per target word of
     /// `spec`, in order. The reply is one list per word.
     Targets {
@@ -92,7 +97,12 @@ pub enum ReplyShape {
     /// Cast `card` as the resolving ability allows (Madness CR 702.35a,
     /// Cascade CR 702.85a), or decline with `None`. Cascade with no
     /// qualifying card has `card: None` and only accepts a decline.
-    MayCast { card: Option<ObjectId> },
+    /// `options` lists what the cast announces. It is `None` when there is no
+    /// card or no legal announcement, so only a decline can succeed.
+    MayCast {
+        card: Option<ObjectId>,
+        options: Option<CastOptions>,
+    },
     /// The priority decision. The reply is a `PlayerAction` that matches one
     /// of `entries`: pass, a land play, a cast or an activation.
     Action { entries: Vec<Entry> },

@@ -59,6 +59,15 @@ pub(crate) fn illegal_replies(decision: &Value, legal: &Value) -> Vec<Value> {
             extend(
                 json!({ "kind": "payment", "plan": { "payments": [{ "kind": "mana", "units": units }] } }),
             );
+            // The legal plan with one named object swapped for one no cost lists.
+            let mut reply = legal.clone();
+            if let Some(object) = reply["plan"]["payments"]
+                .as_array_mut()
+                .and_then(|payments| payments.iter_mut().find_map(|p| p.get_mut("object")))
+            {
+                *object = json!(BOGUS);
+                extend(reply);
+            }
         }
         "targets" => {
             let mut reply = legal.clone();

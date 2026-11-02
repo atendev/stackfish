@@ -1,8 +1,6 @@
 //! The proof card set and two 40-card decks, used to play the protocol without a card
 //! database. CI relies on it, so nothing here reads `../stackfish-db`. See `docs/DESIGN.md`.
 
-// TODO: add cards that ask for a sacrifice, discard, tap or graveyard-exile payment; a Payment Decision lists no eligible objects
-
 use serde_json::{Value, json};
 use stackfish_engine::{
     AbilityEffect, AtomicManaSymbol, CardDefinition, CardTypeSet, Color, KeywordSet, ManaCost,

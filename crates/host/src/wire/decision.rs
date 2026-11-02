@@ -1,7 +1,8 @@
 use serde::Serialize;
 use stackfish_engine::decision::{
-    ActivateEntry, AttackerEntry, BlockerEntry, Candidate, CastEntry, DamageSplitEntry, Decision,
-    Entry, EntryTargets, ModeRange, PartitionRest, ReplyShape, TargetSlot,
+    ActivateEntry, AttackerEntry, BlockerEntry, Candidate, CastEntry, CastOptions,
+    DamageSplitEntry, Decision, Entry, EntryTargets, ModeRange, PartitionRest, ReplyShape,
+    TargetSlot,
 };
 use stackfish_engine::triggers::PendingTrigger;
 use stackfish_engine::{AdditionalCost, CostSpec, ObjectId, Target, TargetRequirement, TargetSpec};
@@ -47,34 +48,43 @@ impl From<PartitionRest> for WireRest {
 }
 
 /// An additional cost the payer still has to meet. The plan names the objects.
-// TODO: `sacrifice`, `discard`, `tap_permanents` and `exile_from_graveyard` carry no filter; the engine does not list eligible objects for a Payment Decision
+/// A filtered cost lists the objects that may pay it in `candidates`.
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum WireAdditionalCost {
     TapSelf,
-    Sacrifice,
+    Sacrifice { candidates: Vec<U64> },
     SacrificeSelf,
-    Discard,
+    Discard { candidates: Vec<U64> },
     DiscardSelf,
-    TapPermanents { count: u32 },
-    ExileFromGraveyard { count: u32 },
+    TapPermanents { count: u32, candidates: Vec<U64> },
+    ExileFromGraveyard { count: u32, candidates: Vec<U64> },
     LifePayment { amount: u32 },
     Other { description: String },
 }
 
-impl From<&AdditionalCost> for WireAdditionalCost {
-    fn from(cost: &AdditionalCost) -> Self {
+impl WireAdditionalCost {
+    fn new(cost: &AdditionalCost, eligible: &[ObjectId]) -> Self {
+        let candidates = || eligible.iter().map(|id| (*id).into()).collect();
         match cost {
             AdditionalCost::TapSelf => WireAdditionalCost::TapSelf,
-            AdditionalCost::Sacrifice { .. } => WireAdditionalCost::Sacrifice,
+            AdditionalCost::Sacrifice { .. } => WireAdditionalCost::Sacrifice {
+                candidates: candidates(),
+            },
             AdditionalCost::SacrificeSelf => WireAdditionalCost::SacrificeSelf,
-            AdditionalCost::Discard { .. } => WireAdditionalCost::Discard,
+            AdditionalCost::Discard { .. } => WireAdditionalCost::Discard {
+                candidates: candidates(),
+            },
             AdditionalCost::DiscardSelf => WireAdditionalCost::DiscardSelf,
-            AdditionalCost::TapPermanents { count, .. } => {
-                WireAdditionalCost::TapPermanents { count: *count }
-            }
+            AdditionalCost::TapPermanents { count, .. } => WireAdditionalCost::TapPermanents {
+                count: *count,
+                candidates: candidates(),
+            },
             AdditionalCost::ExileFromGraveyard { count, .. } => {
-                WireAdditionalCost::ExileFromGraveyard { count: *count }
+                WireAdditionalCost::ExileFromGraveyard {
+                    count: *count,
+                    candidates: candidates(),
+                }
             }
             AdditionalCost::LifePayment { amount } => {
                 WireAdditionalCost::LifePayment { amount: *amount }
@@ -94,15 +104,39 @@ pub(crate) struct WireCost {
     pub additional: Vec<WireAdditionalCost>,
 }
 
-impl From<&CostSpec> for WireCost {
-    fn from(cost: &CostSpec) -> Self {
+impl WireCost {
+    /// `eligible` holds one list per additional cost, as `ReplyShape::Payment` gives it.
+    fn new(cost: &CostSpec, eligible: &[Vec<ObjectId>]) -> Self {
         WireCost {
             mana: cost.mana.as_ref().map(mana_cost_string).unwrap_or_default(),
             additional: cost
                 .additional
                 .iter()
-                .map(WireAdditionalCost::from)
+                .enumerate()
+                .map(|(i, additional)| {
+                    WireAdditionalCost::new(additional, eligible.get(i).map_or(&[], Vec::as_slice))
+                })
                 .collect(),
+        }
+    }
+}
+
+/// What a cast offered by a `may_cast` Decision announces. `x` asks for an X
+/// value, and 0 is the only legal one.
+#[derive(Serialize, Clone, Debug)]
+pub(crate) struct WireCastOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modes: Option<WireModeRange>,
+    pub targets: WireEntryTargets,
+    pub x: bool,
+}
+
+impl From<&CastOptions> for WireCastOptions {
+    fn from(options: &CastOptions) -> Self {
+        WireCastOptions {
+            modes: options.modes.as_ref().map(WireModeRange::from),
+            targets: (&options.targets).into(),
+            x: options.x,
         }
     }
 }
@@ -390,6 +424,8 @@ pub(crate) enum WireShape {
     MayCast {
         #[serde(skip_serializing_if = "Option::is_none")]
         card: Option<U64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        options: Option<WireCastOptions>,
     },
     Action {
         entries: Vec<WireEntry>,
@@ -446,12 +482,15 @@ impl From<&ReplyShape> for WireShape {
                 cards: cards.iter().map(|c| (*c).into()).collect(),
                 rest: (*rest).into(),
             },
-            ReplyShape::Payment { cost } => WireShape::Payment { cost: cost.into() },
+            ReplyShape::Payment { cost, eligible } => WireShape::Payment {
+                cost: WireCost::new(cost, eligible),
+            },
             ReplyShape::Targets { spec, candidates } => WireShape::Targets {
                 words: target_words(spec, candidates),
             },
-            ReplyShape::MayCast { card } => WireShape::MayCast {
+            ReplyShape::MayCast { card, options } => WireShape::MayCast {
                 card: card.map(U64::from),
+                options: options.as_ref().map(WireCastOptions::from),
             },
             ReplyShape::Action { entries } => WireShape::Action {
                 entries: entries.iter().map(WireEntry::from).collect(),
@@ -640,5 +679,79 @@ mod tests {
         let json = serde_json::to_value(WireShape::from(&shape)).unwrap();
         assert_eq!(json["shape"], "modes");
         assert_eq!(json["solo_only"], serde_json::json!([1]));
+    }
+
+    fn any_filter() -> stackfish_engine::FilterSpec {
+        stackfish_engine::FilterSpec {
+            card_types: None,
+            supertypes: None,
+            subtypes: None,
+            controller: None,
+            random: false,
+            extra: None,
+        }
+    }
+
+    #[test]
+    fn a_payment_shape_lists_candidates_on_each_filtered_cost() {
+        let cost = CostSpec {
+            mana: None,
+            additional: vec![
+                AdditionalCost::Sacrifice {
+                    filter: any_filter(),
+                },
+                AdditionalCost::TapPermanents {
+                    filter: any_filter(),
+                    count: 2,
+                },
+                AdditionalCost::LifePayment { amount: 2 },
+            ],
+            alternative: Vec::new(),
+        };
+        let shape = ReplyShape::Payment {
+            cost,
+            eligible: vec![
+                vec![ObjectId(3), ObjectId(9)],
+                vec![ObjectId(4)],
+                Vec::new(),
+            ],
+        };
+        let json = serde_json::to_value(WireShape::from(&shape)).unwrap();
+        let additional = &json["cost"]["additional"];
+        assert_eq!(additional[0]["kind"], "sacrifice");
+        assert_eq!(additional[0]["candidates"], serde_json::json!(["3", "9"]));
+        assert_eq!(additional[1]["count"], 2);
+        assert_eq!(additional[1]["candidates"], serde_json::json!(["4"]));
+        assert!(additional[2].get("candidates").is_none(), "{json}");
+    }
+
+    #[test]
+    fn a_may_cast_shape_carries_its_options() {
+        let shape = ReplyShape::MayCast {
+            card: Some(ObjectId(5)),
+            options: Some(CastOptions {
+                modes: None,
+                targets: EntryTargets::Fixed(vec![TargetSlot {
+                    candidates: vec![Target::Player(PlayerId(1))],
+                    min: 1,
+                    max: Some(1),
+                    x_dependent: false,
+                }]),
+                x: true,
+            }),
+        };
+        let json = serde_json::to_value(WireShape::from(&shape)).unwrap();
+        assert_eq!(json["shape"], "may_cast");
+        assert_eq!(json["card"], "5");
+        assert_eq!(json["options"]["x"], true);
+        assert_eq!(json["options"]["targets"]["kind"], "fixed");
+        assert!(json["options"].get("modes").is_none(), "{json}");
+
+        let declined = ReplyShape::MayCast {
+            card: None,
+            options: None,
+        };
+        let json = serde_json::to_value(WireShape::from(&declined)).unwrap();
+        assert!(json.get("options").is_none(), "{json}");
     }
 }

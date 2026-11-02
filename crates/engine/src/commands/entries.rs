@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use crate::decision::{
-    ActivateEntry, CastEntry, ColorChoice, Entry, EntryTargets, ModeRange, TargetSlot,
+    ActivateEntry, CastEntry, CastOptions, ColorChoice, Entry, EntryTargets, ModeRange, TargetSlot,
 };
 use crate::script::ScriptRuntime;
 use crate::types::ability::{AbilityEffect, AbilityKind};
@@ -120,6 +120,25 @@ fn cast_entries(
             buyback: definition.buyback_cost.is_some(),
         }));
     }
+}
+
+/// What `player` announces to cast `card` as a resolving ability allows, or
+/// `None` when no legal announcement exists. `free` is a cast without paying
+/// the mana cost, the only kind where X must be announced (CR 107.3b).
+pub(crate) fn cast_options(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    player: PlayerId,
+    card: ObjectId,
+    free: bool,
+) -> Option<CastOptions> {
+    let definition = &state.object(card)?.definition;
+    let (modes, targets) = cast_modes_and_targets(state, script_runtime, player, card, definition)?;
+    Some(CastOptions {
+        modes,
+        targets,
+        x: free && definition.mana_cost.has_x(),
+    })
 }
 
 /// The mode range and target slots a cast announces, or `None` when no

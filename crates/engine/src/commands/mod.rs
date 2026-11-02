@@ -34,7 +34,7 @@ pub(crate) use combat::{
     attacker_entries, blocker_entries, damage_split_entries, execute_assign_combat_damage,
     mark_effect_blocked, next_blocking_player,
 };
-pub(crate) use entries::priority_entries;
+pub(crate) use entries::{cast_options, priority_entries};
 pub(crate) use legality::{
     attachment_target_is_legal, combine_chosen_modes, effective_keywords, effective_power,
     is_ability_stack_entry, is_modal_placeholder_requirement, is_modal_resolvable,

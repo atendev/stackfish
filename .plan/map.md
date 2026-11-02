@@ -35,6 +35,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 036 Mode-combination predicate. `mode_can_join_others` in `commands/legality.rs` is the shared rule for the cast, the modal entries, modal triggers and the opponent's mode choice. `ModeRange` and `ReplyShape::Modes` carry `solo_only`, and the entries refuse a solo-only mode beside another. [closed/036-mode-combination-predicate.md]
 - 048 Add unit tests for pure engine helpers. Added local `#[cfg(test)]` coverage for deterministic helpers in `color_identity.rs` and `types/{zone,object,player,counter,card,mana,cost}.rs`. [closed/048-add-unit-tests-pure-helpers.md]
 - 029 CR 104.4b infinite-loop detection. A forced pass with a non-empty stack fingerprints the state, and a repeat ends the game as a draw. Ids are relabeled by rank and the ledger values read at priority are folded in. Persist and Undying returns no longer leave a stale graveyard object. `BEHAVIOUR_REV` is 2. [closed/029-infinite-loop-detection.md]
+- 030 Bot coverage. Payment Decisions list candidate ids for object costs through one rule shared with validation, `may_cast` carries the cast's options, and a free cast takes only X = 0. The bot pays object costs and accepts casts. Phyrexian life and a byte-level `may_cast` game stay open. [closed/030-bot-coverage.md]
 - 049 Add unit tests for engine helpers that need a small GameState or layer stubs. Added `#[cfg(test)]` coverage for `layers.rs`, `commands/legality.rs` and `commands/combat/predicate.rs` with minimal state fixtures. [closed/049-add-unit-tests-stubbed-helpers.md]
 
 ## Not yet specified
@@ -55,7 +56,6 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 030 Bot coverage
 - 031 Remaining legal_actions gaps
 - 032 Host rejection text and payment cost filters
 - 033 Run the Godot smoke test in CI

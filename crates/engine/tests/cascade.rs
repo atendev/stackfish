@@ -585,3 +585,100 @@ fn ordinary_priority_actions_are_rejected_while_awaiting_the_cascade_choice() {
         "expected rejection while mid-pipeline, got {result:?}"
     );
 }
+
+fn x_creature(definition_id: u64) -> CardDefinition {
+    CardDefinition {
+        mana_cost: ManaCost {
+            symbols: vec![
+                ManaSymbol::X,
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
+            ],
+        },
+        ..filler_creature(definition_id, "X Candidate", 0)
+    }
+}
+
+fn engine_at_cascade_choice(candidate: CardDefinition) -> Engine {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let card = ObjectId(0);
+    let mut state = two_player_state(ManaPool {
+        red: 1,
+        colorless: 3,
+        ..ManaPool::default()
+    });
+    state.objects.insert(
+        card,
+        card_object(card, cascade_spell_definition(), p0, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
+    library_top_to_bottom(&mut state, p0, vec![(13, candidate)]);
+    state
+        .abilities
+        .push(cascade_trigger(PREDICTED_STACK_ID, p0));
+    let mut engine = Engine::new(state);
+    cast_cascade_spell_and_await_trigger(&mut engine, p0, card);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    assert!(
+        matches!(
+            status,
+            StepStatus::AwaitingCascadeChoice {
+                candidate: Some(_),
+                ..
+            }
+        ),
+        "got {status:?}"
+    );
+    engine
+}
+
+// CR 107.3b
+#[test]
+fn a_cascade_decision_asks_for_x_and_only_zero_is_legal() {
+    let mut engine = engine_at_cascade_choice(x_creature(13));
+    let decision = engine.open_decision().expect("a cascade choice is open");
+    let stackfish_engine::decision::ReplyShape::MayCast {
+        card: Some(_),
+        options: Some(options),
+    } = decision.shape
+    else {
+        panic!("expected a MayCast with options, got {:?}", decision.shape)
+    };
+    assert!(options.x);
+    assert!(options.modes.is_none());
+
+    let before = engine.snapshot();
+    let err = engine
+        .submit_cascade_cast(Vec::new(), Vec::new(), Some(2))
+        .unwrap_err();
+    assert!(
+        matches!(err, CascadeChoiceError::IllegalCast(_)),
+        "got {err:?}"
+    );
+    stackfish_testutil::assert_unchanged(&before, &engine, "a nonzero X on a free cast");
+
+    engine
+        .submit_cascade_cast(Vec::new(), Vec::new(), Some(0))
+        .expect("X = 0 is the legal announcement");
+}
+
+#[test]
+fn a_cascade_decision_without_x_does_not_ask_for_one() {
+    let mut engine = engine_at_cascade_choice(filler_creature(13, "Candidate", 2));
+    let decision = engine.open_decision().expect("a cascade choice is open");
+    let stackfish_engine::decision::ReplyShape::MayCast {
+        options: Some(options),
+        ..
+    } = decision.shape
+    else {
+        panic!("expected a MayCast with options, got {:?}", decision.shape)
+    };
+    assert!(!options.x);
+    assert_eq!(
+        options.targets,
+        stackfish_engine::decision::EntryTargets::Fixed(Vec::new())
+    );
+}

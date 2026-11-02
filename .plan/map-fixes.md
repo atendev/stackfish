@@ -101,7 +101,7 @@ Ticket types and modes follow `README.md`.
   - 014 fixed three. The 500-seed run found no more, but the proof cards cover only part of the engine.
 - 029 CR 104.4b infinite-loop detection. Type task, HITL. Origin 001.
   - The step budget only stops a runaway from freezing the host. The requirements report must choose how a mandatory loop is detected.
-- 030 Bot coverage. Type task, HITL. Origin 014.
+- 030 Bot coverage. Type task, HITL. Origin 014. Closed.
   - The bot declines `may_cast` Decisions. It cannot pay sacrifice, discard, tap or graveyard-exile costs, or hybrid, Phyrexian, snow and `{X}` costs.
 - 031 Remaining `legal_actions` gaps. Type task, HITL. Origin 010, 011.
   - Target candidates ignore X.
@@ -131,7 +131,7 @@ Ticket types and modes follow `README.md`.
 
 Open tickets, unblocked and unclaimed. 034 is research, so a subagent can take it alone.
 
-- 029, 030, 031, 032, 033, 034, 072, 073
+- 031, 032, 033, 034, 072, 073
 
 Blocked:
 

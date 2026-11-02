@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use super::tests::{minimal_state, trigger};
+use super::tests::{dummy_object, minimal_state, trigger};
 use super::*;
 use crate::commands::PaymentResolution;
 use crate::decision::{
@@ -344,6 +344,200 @@ fn payment_pauses_name_the_payer() {
     assert!(matches!(decision.shape, ReplyShape::Payment { .. }));
 }
 
+use crate::types::card::CardTypeSet;
+use crate::types::cost::{AdditionalCost, CostPayment, FilterController, FilterSpec};
+use crate::types::player::PlayerState;
+use crate::types::zone::ZoneKind;
+
+fn filter(card_types: Option<CardTypeSet>) -> FilterSpec {
+    FilterSpec {
+        card_types,
+        supertypes: None,
+        subtypes: None,
+        controller: None,
+        random: false,
+        extra: None,
+    }
+}
+
+// Objects 1 to 8 cover each zone, controller, tapped state and type a filtered cost checks.
+fn cost_state() -> GameState {
+    let mut state = minimal_state();
+    state.players.push(PlayerState::new(P1, 20));
+    let objects = [
+        (1, P0, ZoneKind::Battlefield, CardTypeSet::CREATURE, false),
+        (2, P0, ZoneKind::Battlefield, CardTypeSet::CREATURE, true),
+        (3, P1, ZoneKind::Battlefield, CardTypeSet::CREATURE, false),
+        (4, P0, ZoneKind::Battlefield, CardTypeSet::ARTIFACT, false),
+        (5, P0, ZoneKind::Hand, CardTypeSet::CREATURE, false),
+        (6, P1, ZoneKind::Hand, CardTypeSet::CREATURE, false),
+        (7, P0, ZoneKind::Graveyard, CardTypeSet::SORCERY, false),
+        (8, P1, ZoneKind::Graveyard, CardTypeSet::SORCERY, false),
+    ];
+    for (id, controller, zone, card_types, tapped) in objects {
+        let mut object = dummy_object(ObjectId(id), controller);
+        object.zone = zone;
+        object.tapped = tapped;
+        object.definition.card_types = card_types;
+        state.objects.insert(ObjectId(id), object);
+    }
+    state
+}
+
+fn filtered_costs() -> Vec<AdditionalCost> {
+    vec![
+        AdditionalCost::Sacrifice {
+            filter: filter(Some(CardTypeSet::CREATURE)),
+        },
+        AdditionalCost::Discard {
+            filter: filter(None),
+        },
+        AdditionalCost::TapPermanents {
+            filter: FilterSpec {
+                controller: Some(FilterController::You),
+                ..filter(Some(CardTypeSet::CREATURE))
+            },
+            count: 1,
+        },
+        AdditionalCost::ExileFromGraveyard {
+            filter: filter(None),
+            count: 1,
+        },
+    ]
+}
+
+fn cost_with(additional: Vec<AdditionalCost>) -> CostSpec {
+    CostSpec {
+        additional,
+        ..free_cost()
+    }
+}
+
+#[test]
+fn payment_lists_the_objects_each_filtered_cost_may_name() {
+    let mut additional = filtered_costs();
+    additional.push(AdditionalCost::TapSelf);
+    additional.push(AdditionalCost::LifePayment { amount: 2 });
+    let mut engine = Engine::new(cost_state());
+    engine.process_state = ProcessState::AwaitingPayment {
+        stack_id: ObjectId(50),
+        payer: P0,
+        cost: cost_with(additional),
+        source: ObjectId(1),
+        on_paid: PaymentResolution::StackObject,
+    };
+    let ReplyShape::Payment { cost, eligible } = engine.open_decision().unwrap().shape else {
+        panic!("expected Payment")
+    };
+    let ids = |list: &[u64]| list.iter().map(|&i| ObjectId(i)).collect::<Vec<_>>();
+    assert_eq!(eligible.len(), cost.additional.len());
+    assert_eq!(
+        eligible,
+        vec![
+            ids(&[1, 2]),
+            ids(&[5]),
+            ids(&[1]),
+            ids(&[7]),
+            Vec::new(),
+            Vec::new()
+        ]
+    );
+}
+
+#[test]
+fn an_unless_paid_payment_lists_objects_for_the_payer_at_the_front() {
+    let mut engine = Engine::new(cost_state());
+    engine.process_state = ProcessState::AwaitingUnlessPaidChoice {
+        payer_queue: VecDeque::from([P1, P0]),
+        cost: cost_with(filtered_costs()),
+        otherwise: UnlessPaidConsequence::SacrificeSelf,
+        target_id: None,
+        source: ObjectId(1),
+        stack_id: ObjectId(50),
+        events_so_far: Vec::new(),
+    };
+    let ReplyShape::Payment { eligible, .. } = engine.open_decision().unwrap().shape else {
+        panic!("expected Payment")
+    };
+    assert_eq!(
+        eligible,
+        vec![
+            vec![ObjectId(3)],
+            vec![ObjectId(6)],
+            vec![ObjectId(3)],
+            vec![ObjectId(8)]
+        ]
+    );
+}
+
+// A one-object plan for each filtered cost validates exactly when the Decision lists the object.
+#[test]
+fn every_listed_object_pays_and_no_other_object_does() {
+    let engine = Engine::new(cost_state());
+    for additional in filtered_costs() {
+        let listed = additional.eligible(engine.state(), engine.script_runtime(), P0);
+        for id in (1..=8).map(ObjectId) {
+            let payment = match additional {
+                AdditionalCost::Sacrifice { .. } => CostPayment::Sacrifice(id),
+                AdditionalCost::Discard { .. } => CostPayment::Discard(id),
+                AdditionalCost::TapPermanents { .. } => CostPayment::Tap(id),
+                _ => CostPayment::Exile(id),
+            };
+            let plan = PaymentPlan {
+                payments: vec![payment],
+            };
+            let paid = plan.validate(
+                &cost_with(vec![additional.clone()]),
+                engine.state(),
+                engine.script_runtime(),
+                P0,
+                ObjectId(99),
+            );
+            assert_eq!(
+                paid,
+                listed.contains(&id),
+                "{additional:?} with object {id:?}"
+            );
+        }
+    }
+}
+
+// CR 702.35a
+#[test]
+fn a_madness_decision_lists_the_cast_announcement() {
+    let mut state = minimal_state();
+    let mut card = dummy_object(ObjectId(4), P0);
+    card.zone = ZoneKind::Exile;
+    card.definition.card_types = CardTypeSet::SORCERY;
+    card.definition.mana_cost = crate::types::mana::ManaCost {
+        symbols: vec![crate::types::mana::ManaSymbol::X],
+    };
+    state.objects.insert(ObjectId(4), card);
+    let mut engine = Engine::new(state);
+    engine.process_state = ProcessState::AwaitingMadnessChoice {
+        player: P0,
+        card: ObjectId(4),
+        stack_id: ObjectId(50),
+        events_so_far: Vec::new(),
+    };
+    let ReplyShape::MayCast {
+        options: Some(options),
+        ..
+    } = engine.open_decision().unwrap().shape
+    else {
+        panic!("expected MayCast with options")
+    };
+    assert_eq!(
+        options.targets,
+        crate::decision::EntryTargets::Fixed(Vec::new())
+    );
+    assert!(options.modes.is_none());
+    assert!(
+        !options.x,
+        "madness pays an alternative cost, so X is not announced"
+    );
+}
+
 #[test]
 fn madness_and_cascade_offer_a_cast() {
     let madness = ProcessState::AwaitingMadnessChoice {
@@ -355,7 +549,8 @@ fn madness_and_cascade_offer_a_cast() {
     assert!(matches!(
         engine_in(madness).open_decision().unwrap().shape,
         ReplyShape::MayCast {
-            card: Some(ObjectId(4))
+            card: Some(ObjectId(4)),
+            ..
         }
     ));
 
@@ -368,7 +563,10 @@ fn madness_and_cascade_offer_a_cast() {
     };
     assert!(matches!(
         engine_in(cascade).open_decision().unwrap().shape,
-        ReplyShape::MayCast { card: None }
+        ReplyShape::MayCast {
+            card: None,
+            options: None
+        }
     ));
 }
 

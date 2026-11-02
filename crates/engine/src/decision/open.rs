@@ -6,6 +6,7 @@ use crate::commands;
 use crate::engine::{Engine, ProcessState};
 use crate::script::ScriptChoiceRequest;
 use crate::triggers::PendingTrigger;
+use crate::types::cost::CostSpec;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -240,7 +241,16 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
         ProcessState::AwaitingMadnessChoice { player, card, .. } => (
             *player,
             "Madness",
-            MayCast { card: Some(*card) },
+            MayCast {
+                card: Some(*card),
+                options: commands::cast_options(
+                    engine.state(),
+                    engine.script_runtime(),
+                    *player,
+                    *card,
+                    false,
+                ),
+            },
             Route::Madness,
         ),
         ProcessState::AwaitingCascadeChoice {
@@ -248,7 +258,18 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
         } => (
             *player,
             "Cascade",
-            MayCast { card: *candidate },
+            MayCast {
+                card: *candidate,
+                options: candidate.and_then(|card| {
+                    commands::cast_options(
+                        engine.state(),
+                        engine.script_runtime(),
+                        *player,
+                        card,
+                        true,
+                    )
+                }),
+            },
             Route::Cascade,
         ),
         ProcessState::AwaitingUnlessPaidChoice {
@@ -260,7 +281,7 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
             (
                 payer,
                 "Unless paid",
-                Payment { cost: cost.clone() },
+                payment(engine, payer, cost),
                 Route::UnlessPaid,
             )
         }
@@ -384,7 +405,7 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
         ProcessState::AwaitingPayment { payer, cost, .. } => (
             *payer,
             "Payment",
-            Payment { cost: cost.clone() },
+            payment(engine, *payer, cost),
             Route::Payment,
         ),
         ProcessState::AwaitingModeChoice {
@@ -494,4 +515,16 @@ fn priority_window(engine: &Engine) -> (PlayerId, &'static str, ReplyShape, Rout
         },
         Route::Priority,
     )
+}
+
+fn payment(engine: &Engine, payer: PlayerId, cost: &CostSpec) -> ReplyShape {
+    let eligible = cost
+        .additional
+        .iter()
+        .map(|additional| additional.eligible(engine.state(), engine.script_runtime(), payer))
+        .collect();
+    ReplyShape::Payment {
+        cost: cost.clone(),
+        eligible,
+    }
 }

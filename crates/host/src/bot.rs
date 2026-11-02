@@ -2,8 +2,6 @@
 //! candidates each Decision lists. It biases toward passing and playing lands so games end.
 //! See `docs/DESIGN.md`.
 
-// TODO: accept `may_cast` Decisions; they do not list the cast's modes or targets
-// TODO: pay costs that name a sacrifice, discard, tap or graveyard exile; the Payment Decision lists no eligible objects
 // TODO: spend more than life minus one on a Phyrexian symbol, and learn the starting life instead of assuming 20
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -377,6 +375,7 @@ impl Bot {
         let fallback = match decision["shape"].as_str() {
             Some("action") => json!({ "kind": "action", "action": { "kind": "pass_priority" } }),
             Some("payment") => json!({ "kind": "payment", "plan": null }),
+            Some("may_cast") => json!({ "kind": "may_cast", "cast": null }),
             _ => {
                 return Err(BotError::Rejected(format!(
                     "{message} (shape {}, reply {})",
@@ -496,7 +495,7 @@ impl Bot {
             "partition" => plain(self.partition(decision)),
             "payment" => self.payment(seat, decision),
             "targets" => plain(self.targets(decision)),
-            "may_cast" => plain(json!({ "kind": "may_cast", "cast": null })),
+            "may_cast" => plain(self.may_cast(decision)),
             "action" => plain(self.action(seat, decision)),
             "declare_attackers" => plain(self.attackers(decision)),
             "declare_blockers" => plain(self.blockers(decision)),
@@ -635,6 +634,21 @@ impl Bot {
         } else {
             entry["alternative_costs"].get(0)?.clone()
         };
+        let (modes, targets) = self.announce(entry)?;
+        Some(json!({
+            "kind": "cast_spell",
+            "card": entry["card"],
+            "modes": modes,
+            "targets": targets,
+            "x_value": x_value,
+            "alternative_cost": alternative,
+            "pay_buyback": false,
+        }))
+    }
+
+    /// Modes and targets for a cast entry or `may_cast` options: both carry
+    /// `modes` (absent when not modal) and `targets` in the same form.
+    fn announce(&mut self, entry: &Value) -> Option<(Vec<u64>, Vec<Value>)> {
         let (modes, slots): (Vec<u64>, Vec<Value>) = match entry["modes"].as_object() {
             None => (
                 Vec::new(),
@@ -665,15 +679,26 @@ impl Bot {
         };
         // TODO: pick X and targets together; an `x_dependent` slot lists targets legal for some X, so the engine can reject the pair
         let targets = self.slot_targets(&slots)?;
-        Some(json!({
-            "kind": "cast_spell",
-            "card": entry["card"],
-            "modes": modes,
-            "targets": targets,
-            "x_value": x_value,
-            "alternative_cost": alternative,
-            "pay_buyback": false,
-        }))
+        Some((modes, targets))
+    }
+
+    // CR 702.35a, CR 702.85a
+    // Casting is optional, so the bot sometimes declines. CR 107.3b makes 0 the only X.
+    fn may_cast(&mut self, decision: &Value) -> Value {
+        let options = &decision["options"];
+        let cast = if options.is_object() && self.rng.chance(3, 4) {
+            self.announce(options).map(|(modes, targets)| {
+                let x_value = if options["x"] == true {
+                    json!(0)
+                } else {
+                    Value::Null
+                };
+                json!({ "modes": modes, "targets": targets, "x_value": x_value })
+            })
+        } else {
+            None
+        };
+        json!({ "kind": "may_cast", "cast": cast })
     }
 
     fn activate(&mut self, entry: &Value) -> Option<Value> {
@@ -879,4 +904,50 @@ fn assign_damage(decision: &Value) -> Value {
         })
         .collect();
     json!({ "kind": "assign_damage", "assignments": assignments })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // CR 702.85a
+    #[test]
+    fn a_may_cast_with_options_casts_with_their_targets_or_declines() {
+        let target = json!({ "kind": "player", "id": 1 });
+        let decision = json!({
+            "shape": "may_cast",
+            "card": "5",
+            "options": {
+                "targets": { "kind": "fixed", "slots": [
+                    { "candidates": [target], "min": 1, "max": 1, "x_dependent": false }
+                ] },
+                "x": true,
+            },
+        });
+        let (mut casts, mut declines) = (0, 0);
+        for seed in 0..40 {
+            let reply = Bot::new(seed).may_cast(&decision);
+            assert_eq!(reply["kind"], "may_cast");
+            match reply["cast"].as_object() {
+                Some(cast) => {
+                    casts += 1;
+                    assert_eq!(cast["targets"], json!([target]));
+                    assert_eq!(cast["x_value"], 0, "CR 107.3b allows only 0");
+                }
+                None => declines += 1,
+            }
+        }
+        assert!(
+            casts > 0 && declines > 0,
+            "{casts} casts, {declines} declines"
+        );
+    }
+
+    #[test]
+    fn a_may_cast_without_options_declines() {
+        let decision = json!({ "shape": "may_cast" });
+        for seed in 0..10 {
+            assert_eq!(Bot::new(seed).may_cast(&decision)["cast"], Value::Null);
+        }
+    }
 }
