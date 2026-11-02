@@ -38,7 +38,10 @@ process. `SAFEGUARDS_OFF=1` repeats the run with gdext's own thread check compil
 - `drop` must pass. It frees the last reference on a second `Thread` and reads `off_thread_drops()`.
 - `thread_owned` is recorded only. It makes and uses a session on a second `Thread`.
 
-Results on Godot 4.7.2, Linux, gdext 0.5.5 with `api-4-2`:
+CI runs both modes in the `godot-smoke` job of `.github/workflows/ci.yml`, on Godot 4.2.2 and 4.7.2. Each download is
+checked against the SHA-512 that Godot publishes for it.
+
+Results on Godot 4.2.2 and 4.7.2, Linux, gdext 0.5.5 with `api-4-2`:
 
 | | safeguards on (default) | safeguards off |
 |---|---|---|
@@ -82,5 +85,4 @@ would make a wrong-thread call return `null` in debug builds and an empty array 
   `.framework`.
 - TODO(web): mlua's vendored Lua on emscripten is untested, and panics abort on Web.
 - TODO(hot-reload): `reloadable` is false in the smoke project. What a reload does to live Sessions is unconfirmed.
-- The smoke test needs a Godot binary, so CI does not run it. `cargo test --workspace` runs the seven `Core` tests and builds the
-  `cdylib`.
+- `cargo test --workspace` runs the seven `Core` tests and builds the `cdylib`. Only the `godot-smoke` job loads it in Godot.

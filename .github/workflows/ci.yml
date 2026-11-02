@@ -27,3 +27,39 @@ jobs:
 
       - name: Checks
         run: tools/check.sh --full
+
+  godot-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # 4.2.2 is the adapter's compatibility_minimum and API level. 4.7.2 is the newest Godot gdext 0.5.5 supports.
+      matrix:
+        include:
+          - godot: 4.2.2
+            sha512: 4c0294f437b97cf14f848d921ed028cb6e100ebbfcf6480f2d50292d001221cf29cda73f0a96a8c0e80b145b65cdbf7e422252dbbe17e79d883753e500306276
+          - godot: 4.7.2
+            sha512: 9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Godot ${{ matrix.godot }}
+        run: |
+          name="Godot_v${{ matrix.godot }}-stable_linux.x86_64"
+          curl -fsSL -o "$RUNNER_TEMP/$name.zip" \
+            "https://github.com/godotengine/godot/releases/download/${{ matrix.godot }}-stable/$name.zip"
+          echo "${{ matrix.sha512 }}  $RUNNER_TEMP/$name.zip" | sha512sum -c -
+          unzip -q "$RUNNER_TEMP/$name.zip" -d "$RUNNER_TEMP"
+          echo "GODOT=$RUNNER_TEMP/$name" >> "$GITHUB_ENV"
+
+      - name: Smoke test
+        run: crates/godot/smoke/run.sh
+
+      - name: Smoke test with gdext safeguards off
+        run: crates/godot/smoke/run.sh
+        env:
+          SAFEGUARDS_OFF: "1"
