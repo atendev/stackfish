@@ -211,6 +211,14 @@ original plan:
   `math.random`, `math.randomseed`, `dofile` and `loadfile` removed, so no script reads a clock, an
   unseeded random source or a file. Lua 5.4 still seeds string hashes per state, so `pairs` order over
   string keys can differ between runs (TODO).
+- CR 104.4b loop draws live in `crates/engine/src/engine/loop_watch.rs`. A priority pass is forced
+  when the passer has nothing but `Pass` and mana abilities whose whole cost is `{T}`. Each forced
+  pass with a non-empty stack fingerprints the state, and a fingerprint seen before ends the game as
+  `GameOver { winner: None }`. Any other accepted action, and any pause other than priority, clears
+  the watch, because a real choice sits between the two states. The fingerprint is the state's
+  `Debug` text without the ledger and id counters, with object, ability, event, sequence and script
+  ids replaced by their rank and hash collections sorted. Values the engine reads from the ledger at
+  priority are folded in. Details in `docs/implementation/30-loop-detection.md`.
 - Any code that walks a `HashMap` and produces events or ids must sort first. `GameState::objects` is
   one. The state-based action collectors sort by `ObjectId` for this reason.
 

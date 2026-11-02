@@ -76,6 +76,9 @@ impl Engine {
             action.kind.clone(),
         )
         .map_err(ActionError::Rejected)?;
+        if self.watch_for_loop(matches!(action.kind, PlayerActionKind::PassPriority)) {
+            return Ok(());
+        }
         if suspend_payment {
             self.suspend_current_payment();
         }

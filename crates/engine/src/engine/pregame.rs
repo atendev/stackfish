@@ -201,6 +201,7 @@ impl Engine {
             pregame_setup_done: false,
             script_runtime: ScriptRuntime::new(),
             decisions: crate::decision::DecisionTracker::new(),
+            loop_watch: Vec::new(),
         };
         engine.load_script_declarations();
         engine
