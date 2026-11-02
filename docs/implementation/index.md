@@ -21,7 +21,7 @@ Compact reference for my own use. Each file covers one subsystem.
 - [15-card-database-loader](15-card-database-loader.md) — `stackfish-carddb`: SQLite external-card-DB connector, `ManaCost::parse`/type_line/keyword mapping, CDA script gap
 - [16-decision-facade](16-decision-facade.md) — `decision` module: `Engine::open_decision`/`answer`, reply shapes, rejection codes, Decision ids
 - [17-legal-actions](17-legal-actions.md) — `Engine::legal_actions`/`legal_attackers`/`legal_blockers`/`pending_damage_splits`, entry types, combat Decisions, Answer checks
-- [18-host-session](18-host-session.md) — `crates/host`: `Session` over JSON bytes, `CardSource`, setup/format presets, wire mirror types, error codes
+- [18-host-session](18-host-session.md) — `crates/host`: `Session` over JSON bytes, `CardSource`, setup/format presets, wire mirror types, error codes, rejection text (ticket 032)
 - [19-proof-game](19-proof-game.md) — `proof_cards`, the random `Bot`, the full-game byte tests, and the three engine bugs it found
 - [20-godot-adapter](20-godot-adapter.md): `crates/godot`, `StackfishSession` over the Session, the main-thread guard, panic handling, the headless smoke test and its thread findings
 - [21-atomicity](21-atomicity.md) — ticket 025: a rejected input changes nothing, `Engine::snapshot`, the audit of every command arm and `submit_*` method, the bugs it found, the proof-game injection test

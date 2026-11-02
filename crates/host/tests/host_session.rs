@@ -350,6 +350,36 @@ fn a_rejected_answer_returns_the_same_decision_with_no_events() {
     assert_eq!(body(&response)["decision"]["id"], "2");
 }
 
+// The facade passes a mulligan Answer through, so the engine's own refusal is what reaches the Seat.
+#[test]
+fn an_engine_refusal_reaches_the_seat_as_plain_text() {
+    let mut session = create(standard(
+        json!({ "shuffle_libraries": false, "max_mulligans": 0 }),
+    ));
+    let opened = advance(&mut session, None);
+    let id = body(&opened)["decision"]["id"].clone();
+    let rejected = answer(
+        &mut session,
+        0,
+        &id,
+        json!({ "kind": "yes_no", "value": true }),
+    );
+    assert_eq!(error_code(&rejected), "invalid_answer");
+    let message = body(&rejected)["error"]["message"].as_str().unwrap();
+    assert_eq!(
+        message,
+        "you have taken the most mulligans allowed and must keep"
+    );
+    for debug_text in [
+        "Rejected(",
+        "IllegalAction(",
+        "InvalidPlan",
+        "MaxMulligansReached",
+    ] {
+        assert!(!message.contains(debug_text), "{message}");
+    }
+}
+
 #[test]
 fn a_bottom_choice_that_is_not_a_candidate_is_invalid() {
     let mut session = create(standard(json!({ "shuffle_libraries": false })));

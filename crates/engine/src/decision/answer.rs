@@ -2,7 +2,7 @@
 //! routing of it to the engine's `submit_*` methods. See `DESIGN.md` for the
 //! rest.
 
-use std::fmt::Debug;
+use std::fmt::Display;
 
 use crate::engine::Engine;
 use crate::engine::{ActionError, CascadeChoiceError, MadnessChoiceError};
@@ -354,11 +354,8 @@ fn cascade_error(error: CascadeChoiceError) -> Rejection {
 // Every typed engine error that gets past the checks in `answer` is an invalid
 // choice. The `NotAwaiting*`, `NotCurrentPlayer` and `WrongPlayer` variants
 // cannot occur because the open pause and the player were already confirmed.
-fn invalid<E: Debug>(error: E) -> Rejection {
-    Rejection::new(
-        RejectionCode::InvalidChoice,
-        format!("the engine rejected the answer: {error:?}"),
-    )
+fn invalid<E: Display>(error: E) -> Rejection {
+    Rejection::new(RejectionCode::InvalidChoice, error.to_string())
 }
 
 fn not_a_candidate() -> Rejection {

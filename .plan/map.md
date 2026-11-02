@@ -38,6 +38,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 030 Bot coverage. Payment Decisions list candidate ids for object costs through one rule shared with validation, `may_cast` carries the cast's options, and a free cast takes only X = 0. The bot pays object costs and accepts casts. Phyrexian life and a byte-level `may_cast` game stay open. [closed/030-bot-coverage.md]
 - 031 Remaining legal_actions gaps. A `DeclareBands` Decision lists attackers that can band and closes once per combat. A Payment Decision lists the payer's mana abilities and accepts an `Action` for one. Script picks list abilities on the stack. Timing grants moved to 076. [closed/031-legal-actions-gaps.md]
 - 049 Add unit tests for engine helpers that need a small GameState or layer stubs. Added `#[cfg(test)]` coverage for `layers.rs`, `commands/legality.rs` and `commands/combat/predicate.rs` with minimal state fixtures. [closed/049-add-unit-tests-stubbed-helpers.md]
+- 032 Host rejection text and payment cost filters. Engine answer errors have `Display` text in `engine/error_text.rs`, and a Seat gets that sentence in place of Debug output. 030's payment `candidates` closed the cost filter gap, so the filter stays off the wire. Engine terms in some `IllegalAction` strings are still a TODO. [closed/032-host-rejection-text-cost-filters.md]
 
 ## Not yet specified
 
@@ -57,7 +58,6 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 032 Host rejection text and payment cost filters
 - 033 Run the Godot smoke test in CI
 - 034 Unconfirmed gdext items
 - 072 Ledger events the snapshot fold needs

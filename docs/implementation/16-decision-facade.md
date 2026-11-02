@@ -40,7 +40,7 @@ players.
 Checks run in this order: a Decision is open (`not_open`), the id matches (`stale_decision`), the player matches
 (`wrong_seat`), the reply variant matches the shape (`wrong_answer_shape`), then the choice is legal
 (`invalid_choice`). The facade checks Pick membership, bounds and duplicates itself. Every other typed engine error maps
-to `invalid_choice` with its `Debug` text in the message. The engine's `submit_*` methods leave the pause untouched when
+to `invalid_choice` with its `Display` text (`engine/error_text.rs`) as the message. The engine's `submit_*` methods leave the pause untouched when
 they fail, so a rejected Answer changes nothing and the Decision keeps its id. A priority, attack, block or damage Answer
 now also goes through `validate_command` inside `submit_action` (ticket 035), so a reply the entries list but the
 engine's rules refuse comes back here as `invalid_choice` instead of failing in `step()`. The one exception is

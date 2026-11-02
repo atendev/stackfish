@@ -21,6 +21,7 @@ mod atomicity_tests;
 mod choice_answers;
 #[cfg(test)]
 mod decision_tests;
+mod error_text;
 mod event_pipeline;
 mod library_choices;
 mod loop_watch;
