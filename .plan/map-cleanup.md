@@ -48,6 +48,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 068: Moved the 39 `tests/scenarios/phase5/` files into ten feature folders without the prefix and pointed every TOML comment and `docs/scenario_format.md` path at them, fixing the paths that were already stale. Branch-name comments name the rule instead. [closed/068-rename-phase5-scenarios.md]
 - 069: Added 18 shared helpers to `stackfish_testutil` (priority, cast, payment and combat drivers, battlefield placement, a vanilla 2/2, the main-phase two-player state and three ability fixtures) and deleted 448 identical local copies from 171 engine test files. Variant helpers such as `vanilla_creature` and `bolt_definition` stay local. [closed/069-shared-test-helpers.md]
 - 070: The scenario test runs every file, then fails once with each failing file and its failed entries (`expected X, got Y`, the engine error, or a load panic message). One collected report won over a generated `#[test]` per file. [closed/070-per-file-scenario-failures.md]
+- 071: Only 4 of the 32 targeting and layer tests fit the scenario schema. The zero-target "up to" cast and the granted Indestructible SBA moved to TOML, and two SBA tests that existing scenarios already cover were deleted. The other 28 need assertions the schema lacks; the backlog lists them. [closed/071-migrate-fitting-tests-to-toml.md]
 - 053 split: the original 053 was too large for one slice, so it became 053, 061, 062 and 063, ordered so the filter schema settles before strict key sets are written. 054 and 058 now wait on 063.
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
@@ -78,7 +79,7 @@ Stop the test binary sprawl, drop the `phase5_` prefix, and fill in missing modu
 - 068 Rename the phase5 TOML scenarios into feature folders and fix their references. Type task, HITL. Follows 060. Closed.
 - 069 Move duplicated engine test helpers into `stackfish_testutil`. Type task, HITL. Follows 060. Optional. Closed.
 - 070 Report scenario failures per file instead of stopping at the first. Type task, HITL. Follows 060. Optional. Closed.
-- 071 Move the targeting and layer tests the scenario schema can express to TOML. Type task, HITL. Blocked by 070. Optional.
+- 071 Move the targeting and layer tests the scenario schema can express to TOML. Type task, HITL. Blocked by 070. Optional. Closed.
 
 ### C. Lua API audit and cleanup
 
@@ -115,7 +116,7 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 071
+- none
 
 Blocked: none.
 
