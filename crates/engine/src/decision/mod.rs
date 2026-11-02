@@ -82,11 +82,10 @@ pub enum ReplyShape {
     /// Pay `cost` with a `PaymentPlan`. A `None` reply means the player
     /// cannot pay (CR 601.6 unwinds the cast) or declines to pay an
     /// unless-paid cost (CR 118.12).
-    /// `eligible` has one list per entry of `cost.additional`, in order: the
-    /// objects a filtered cost (sacrifice, discard, tap, graveyard exile) may
-    /// name, ascending. Every other cost kind has an empty list.
     Payment {
         cost: CostSpec,
+        /// One list per `cost.additional` entry: the ids a filtered cost may
+        /// name, ascending. Every other cost kind has an empty list.
         eligible: Vec<Vec<ObjectId>>,
     },
     /// Choose targets for a trigger: one candidate list per target word of
