@@ -1,7 +1,7 @@
 //! The `setup` message and the checks that turn it into a `GameConfig`. Only structure is
 //! validated; deck legality stays with the deck builder. See `docs/DESIGN.md`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use serde::{Deserialize, Deserializer};
 use stackfish_engine::{CardDefinition, GameConfig, GameSettings, PlayerConfig, PlayerId};
@@ -158,6 +158,15 @@ impl Resolver<'_> {
         self.loaded.insert(key.to_string(), card.clone());
         Ok(card)
     }
+}
+
+/// Every distinct card key the setup names, in decks and command zones.
+pub(crate) fn keys(body: &SetupBody) -> BTreeSet<String> {
+    body.players
+        .iter()
+        .flat_map(|p| p.deck.iter().map(|e| &e.card).chain(&p.commanders))
+        .cloned()
+        .collect()
 }
 
 pub(crate) fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, SetupError> {
@@ -389,6 +398,13 @@ mod tests {
             ) -> Result<CardDefinition, crate::card_source::CardSourceError> {
                 self.1.set(self.1.get() + 1);
                 self.0.load(key)
+            }
+
+            fn fingerprint(
+                &self,
+                key: &str,
+            ) -> Result<String, crate::card_source::CardSourceError> {
+                self.0.fingerprint(key)
             }
         }
         let counting = Counting(source(), Cell::new(0));

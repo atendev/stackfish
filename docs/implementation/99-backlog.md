@@ -55,7 +55,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     `CardDefinition`s without `new_game` gets neither.
 
 - **Host Session (`phase5/host-session`, B3)**: see `18-host-session.md`. Open items:
-  - No replay export and no carddb-backed `CardSource`.
+  - Replay export and the carddb-backed `CardSource` are built (`18-host-session.md`). Lua `pairs` order over string
+    keys is not seeded, and the replay file has no stream digest.
   - A Payment Decision lists additional costs without their filters.
   - Done in tickets 025 and 035: an input rejection changes nothing, the `Session` catches a panic and marks itself
     dead (`engine_panic`), an engine `Internal` error halts it, and script errors keep logging and continuing.

@@ -5,7 +5,7 @@ type: task
 mode: HITL
 status: open
 blocked_by: [020]
-claimed: false
+claimed: true
 ---
 
 ## Question

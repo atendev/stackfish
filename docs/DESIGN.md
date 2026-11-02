@@ -198,6 +198,18 @@ original plan:
   mutates, and a rejection does not use up a command id, an object id or a sequence number. So a replay
   of only the accepted inputs gives the same stream. `Engine::snapshot` and the tests in
   `docs/implementation/21-atomicity.md` hold this.
+- A host exports a replay with `export_replay`: the `setup` bytes verbatim (the seed is inside),
+  the accepted Answers in order, a fingerprint per card key and the engine build id. Advance budgets
+  and refused Answers are left out. `Session::from_replay` refuses with `setup_invalid` before any
+  card loads if the build or a card's fingerprint differs, then plays the Answers. The file holds
+  every hidden choice, so it is for the host only. Details in `docs/implementation/18-host-session.md`.
+- The engine build id carries `BEHAVIOUR_REV` (`crates/engine/src/lib.rs`), bumped by hand whenever
+  the same setup and Answers would play out differently. A pinned proof-game hash in
+  `crates/host/tests/replay.rs` fails until it is bumped.
+- Lua scripts get only the `table`, `string`, `utf8`, `math` and `coroutine` libraries, with
+  `math.random`, `math.randomseed`, `dofile` and `loadfile` removed, so no script reads a clock, an
+  unseeded random source or a file. Lua 5.4 still seeds string hashes per state, so `pairs` order over
+  string keys can differ between runs (TODO).
 - Any code that walks a `HashMap` and produces events or ids must sort first. `GameState::objects` is
   one. The state-based action collectors sort by `ObjectId` for this reason.
 

@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use crate::bot_payment::{Pool, mana_value, plan_payment, resolve_x};
 use crate::envelope::PROTOCOL_VERSION;
+use crate::fingerprint::{FNV_OFFSET, fnv};
 use crate::illegal::illegal_replies;
 use crate::session::Session;
 
@@ -120,16 +121,6 @@ pub struct Bot {
     record: bool,
     watchers: Vec<u32>,
     events: HashMap<u32, Vec<Value>>,
-}
-
-const FNV_OFFSET: u64 = 0xCBF2_9CE4_8422_2325;
-
-fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
-    }
-    hash
 }
 
 fn id_number(id: &Value) -> Option<u64> {
