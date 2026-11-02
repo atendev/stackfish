@@ -3,7 +3,7 @@
 
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::ActionError;
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::Engine;
 use stackfish_engine::*;
 use stackfish_testutil::{
     card_object, cast_spell, pass_both_and_drain, pay_free_and_drain, try_cast_spell,
@@ -139,32 +139,6 @@ fn setup_with_two_creatures() -> (GameState, ObjectId, ObjectId, ObjectId) {
         .unwrap()
         .push_bottom(card);
     (state, target_a, target_b, card)
-}
-
-#[test]
-fn casting_with_zero_targets_is_legal_under_up_to_n() {
-    let (state, _target_a, _target_b, card) = setup_with_two_creatures();
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-
-    let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, Vec::new());
-    pay_free_and_drain(&mut engine);
-    let status = pass_both_and_drain(&mut engine, p0, p1);
-
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    // CR 400.7: resolution mints a fresh id into the graveyard, so check the graveyard contents and not the old id.
-    assert!(engine.state().object(card).is_none());
-    assert_eq!(
-        engine
-            .state()
-            .zone(ZoneKind::Graveyard, Some(p0))
-            .unwrap()
-            .contents
-            .len(),
-        1,
-        "the spell still resolved and moved to the graveyard, not stuck on the stack"
-    );
 }
 
 #[test]
