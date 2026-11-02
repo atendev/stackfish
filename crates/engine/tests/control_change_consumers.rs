@@ -160,6 +160,7 @@ fn only_the_new_controller_can_declare_it_as_a_blocker() {
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

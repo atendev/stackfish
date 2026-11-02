@@ -248,6 +248,7 @@ fn combat_damage_from_an_opponent_controlled_source_is_prevented_by_protection()
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -295,6 +296,7 @@ fn combat_damage_from_a_source_the_protected_controller_owns_still_lands() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

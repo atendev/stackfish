@@ -415,8 +415,12 @@ pub(crate) enum WireShape {
         cards: Vec<U64>,
         rest: WireRest,
     },
+    /// `mana_abilities` are activate entries an `action` reply may name before
+    /// paying (CR 605.3a).
     Payment {
         cost: WireCost,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        mana_abilities: Vec<WireEntry>,
     },
     Targets {
         words: Vec<WireTargetWord>,
@@ -432,6 +436,9 @@ pub(crate) enum WireShape {
     },
     DeclareAttackers {
         attackers: Vec<WireAttacker>,
+    },
+    DeclareBands {
+        attackers: Vec<U64>,
     },
     DeclareBlockers {
         blockers: Vec<WireBlocker>,
@@ -482,8 +489,16 @@ impl From<&ReplyShape> for WireShape {
                 cards: cards.iter().map(|c| (*c).into()).collect(),
                 rest: (*rest).into(),
             },
-            ReplyShape::Payment { cost, eligible } => WireShape::Payment {
+            ReplyShape::Payment {
+                cost,
+                eligible,
+                mana_abilities,
+            } => WireShape::Payment {
                 cost: WireCost::new(cost, eligible),
+                mana_abilities: mana_abilities
+                    .iter()
+                    .map(|entry| WireEntry::from(&Entry::Activate(entry.clone())))
+                    .collect(),
             },
             ReplyShape::Targets { spec, candidates } => WireShape::Targets {
                 words: target_words(spec, candidates),
@@ -497,6 +512,9 @@ impl From<&ReplyShape> for WireShape {
             },
             ReplyShape::DeclareAttackers { attackers } => WireShape::DeclareAttackers {
                 attackers: attackers.iter().map(WireAttacker::from).collect(),
+            },
+            ReplyShape::DeclareBands { attackers } => WireShape::DeclareBands {
+                attackers: attackers.iter().map(|a| (*a).into()).collect(),
             },
             ReplyShape::DeclareBlockers { blockers } => WireShape::DeclareBlockers {
                 blockers: blockers.iter().map(WireBlocker::from).collect(),
@@ -578,6 +596,7 @@ fn reply_kind(shape: &ReplyShape) -> &'static str {
         ReplyShape::MayCast { .. } => "may_cast",
         ReplyShape::Action { .. } => "action",
         ReplyShape::DeclareAttackers { .. } => "declare_attackers",
+        ReplyShape::DeclareBands { .. } => "declare_bands",
         ReplyShape::DeclareBlockers { .. } => "declare_blockers",
         ReplyShape::AssignDamage { .. } => "assign_damage",
     }
@@ -592,6 +611,7 @@ fn option_count(shape: &ReplyShape) -> usize {
         ReplyShape::Targets { candidates, .. } => candidates.iter().map(Vec::len).sum(),
         ReplyShape::Action { entries } => entries.len(),
         ReplyShape::DeclareAttackers { attackers } => attackers.len(),
+        ReplyShape::DeclareBands { attackers } => attackers.len(),
         ReplyShape::DeclareBlockers { blockers } => blockers.len(),
         ReplyShape::AssignDamage { splits } => splits.len(),
         ReplyShape::YesNo
@@ -648,6 +668,47 @@ mod tests {
         let json = serde_json::to_value(WireAttacker::from(&entry)).unwrap();
         assert_eq!(json["required"], true);
         assert_eq!(json["attacker"], "7");
+    }
+
+    // CR 508.1e
+    #[test]
+    fn a_band_decision_lists_attacker_ids() {
+        let shape = ReplyShape::DeclareBands {
+            attackers: vec![ObjectId(2), ObjectId(5)],
+        };
+        let json = serde_json::to_value(WireShape::from(&shape)).unwrap();
+        assert_eq!(json["shape"], "declare_bands");
+        assert_eq!(json["attackers"], serde_json::json!(["2", "5"]));
+        assert_eq!(reply_kind(&shape), "declare_bands");
+        assert_eq!(option_count(&shape), 2);
+    }
+
+    // CR 605.3a
+    #[test]
+    fn a_payment_lists_its_mana_abilities_as_activate_entries() {
+        let cost = CostSpec {
+            mana: None,
+            additional: Vec::new(),
+            alternative: Vec::new(),
+        };
+        let shape = |mana_abilities| ReplyShape::Payment {
+            cost: cost.clone(),
+            eligible: Vec::new(),
+            mana_abilities,
+        };
+        let entry = ActivateEntry {
+            source: ObjectId(4),
+            ability_index: 0,
+            targets: Vec::new(),
+            x: false,
+            mana_ability: true,
+            color_choice: None,
+        };
+        let json = serde_json::to_value(WireShape::from(&shape(vec![entry]))).unwrap();
+        assert_eq!(json["mana_abilities"][0]["kind"], "activate");
+        assert_eq!(json["mana_abilities"][0]["source"], "4");
+        let json = serde_json::to_value(WireShape::from(&shape(Vec::new()))).unwrap();
+        assert!(json.get("mana_abilities").is_none(), "{json}");
     }
 
     #[test]
@@ -715,6 +776,7 @@ mod tests {
                 vec![ObjectId(4)],
                 Vec::new(),
             ],
+            mana_abilities: Vec::new(),
         };
         let json = serde_json::to_value(WireShape::from(&shape)).unwrap();
         let additional = &json["cost"]["additional"];

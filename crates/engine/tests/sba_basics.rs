@@ -368,6 +368,7 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

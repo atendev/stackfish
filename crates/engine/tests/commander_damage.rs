@@ -89,6 +89,7 @@ fn unblocked_commander_attacker_accumulates_commander_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -130,6 +131,7 @@ fn two_commanders_attacking_the_same_player_track_independently() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -177,6 +179,7 @@ fn non_commander_creatures_combat_damage_never_counts() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -217,6 +220,7 @@ fn commander_combat_damage_still_accumulates_under_infect() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -258,6 +262,7 @@ fn a_commanders_non_combat_damage_does_not_count() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -366,6 +371,7 @@ fn commander_damage_reaching_21_ends_the_game() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -420,6 +426,7 @@ fn commander_damage_survives_a_death_return_and_recast() {
             declared_defenders: vec![p1],
             bands: Vec::new(),
             effect_blocked: Vec::new(),
+            bands_declared: false,
             damage_assigned_this_step: false,
             pending_damage_splits: std::collections::HashMap::new(),
         }),
@@ -568,6 +575,7 @@ fn commander_damage_survives_a_death_return_and_recast() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

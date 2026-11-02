@@ -136,6 +136,7 @@ fn protection_vs_redirect_state() -> (GameState, ObjectId, ObjectId, ObjectId) {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -257,6 +258,7 @@ fn protection_alone_still_resolves_synchronously_with_no_pause() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -305,6 +307,7 @@ fn protected_with_own_registered_effect_state() -> (GameState, ObjectId, ObjectI
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

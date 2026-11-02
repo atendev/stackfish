@@ -814,6 +814,7 @@ fn deathtouch_source_kills_a_bigger_creature_with_one_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -856,6 +857,7 @@ fn indestructible_creature_survives_lethal_marked_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -895,6 +897,7 @@ fn indestructible_creature_still_dies_to_zero_toughness() {
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -929,6 +932,7 @@ fn lifelink_source_gains_its_controller_life_on_combat_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -964,6 +968,7 @@ fn wither_damage_becomes_counters_not_marked_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -1011,6 +1016,7 @@ fn infect_damage_to_a_player_becomes_poison_counters() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -1054,6 +1060,7 @@ fn infect_damage_to_a_creature_becomes_minus_counters() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

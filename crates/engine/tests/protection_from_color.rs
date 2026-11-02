@@ -241,6 +241,7 @@ fn combat_damage_from_a_matching_color_is_prevented_by_protection() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -286,6 +287,7 @@ fn combat_damage_from_a_different_color_still_lands() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

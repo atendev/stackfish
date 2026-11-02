@@ -2,8 +2,6 @@
 //! matching command, and the whole-declaration rules come from `predicate`. See
 //! `DESIGN.md` for the rest.
 
-// TODO: `DeclareBands` (CR 702.22) is not offered and stays a direct `submit_action`
-
 use std::collections::HashSet;
 
 use crate::decision::{AttackerEntry, BlockerEntry, DamageSplitEntry};
@@ -15,7 +13,7 @@ use crate::types::turn::{Phase, Step};
 
 use super::super::legality::{effective_keywords, effective_power};
 use super::damage::plan_damage_splits;
-use super::declare::{attacker_can_attack, is_defending_player};
+use super::declare::{attacker_can_attack, is_defending_player, validate_declare_bands};
 use super::predicate::{blockable_attackers, legal_defenders, required_attackers};
 
 /// The active player's attackers while attackers can still be declared, or
@@ -45,6 +43,41 @@ pub(crate) fn attacker_entries(
             attacker,
             defenders: defenders.clone(),
             required: required.contains(&attacker),
+        })
+        .collect()
+}
+
+/// The attackers that may join a band while bands are still undeclared, in id
+/// order, or an empty list. An attacker is listed when it forms a legal band
+/// with one other attacker. That is complete: every member of a legal band
+/// pairs legally with a bandmate that has banding or the shared quality
+/// (CR 702.22c).
+pub(crate) fn band_entries(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
+    if state.phase != Phase::Combat || state.step != Step::DeclareAttackers {
+        return Vec::new();
+    }
+    let Some(combat) = state.combat.as_ref() else {
+        return Vec::new();
+    };
+    if combat.bands_declared {
+        return Vec::new();
+    }
+    let mut attackers: Vec<ObjectId> = combat.attackers.iter().map(|(id, _)| *id).collect();
+    attackers.sort();
+    attackers
+        .iter()
+        .copied()
+        .filter(|&a| {
+            attackers.iter().any(|&b| {
+                a != b
+                    && validate_declare_bands(
+                        state,
+                        script_runtime,
+                        state.active_player,
+                        vec![vec![a, b]],
+                    )
+                    .is_ok()
+            })
         })
         .collect()
 }

@@ -110,6 +110,17 @@ impl Engine {
                 ))
                 .map_err(invalid)
             }
+            (Route::DeclareBands, Reply::DeclareBands(bands)) => {
+                let ReplyShape::DeclareBands { attackers } = &shape else {
+                    unreachable!("route and shape come from the same pause");
+                };
+                check::check_bands(attackers, &bands)?;
+                self.submit_action(PlayerAction::new(
+                    player,
+                    PlayerActionKind::DeclareBands { bands },
+                ))
+                .map_err(invalid)
+            }
             (Route::DeclareBlockers, Reply::DeclareBlockers(blocks)) => {
                 let ReplyShape::DeclareBlockers { blockers } = &shape else {
                     unreachable!("route and shape come from the same pause");
@@ -159,6 +170,24 @@ impl Engine {
                 self.submit_payment(plan).map_err(invalid)
             }
             (Route::Payment, Reply::Payment(None)) => self.unwind_payment().map_err(invalid),
+            (Route::Payment | Route::UnlessPaid, Reply::Action(action)) => {
+                if action.player != player {
+                    return Err(Rejection::new(
+                        RejectionCode::WrongSeat,
+                        "the action names a different player",
+                    ));
+                }
+                let ReplyShape::Payment { mana_abilities, .. } = &shape else {
+                    unreachable!("route and shape come from the same pause");
+                };
+                check::check_mana_ability(mana_abilities, &action.kind)?;
+                self.submit_action(action).map_err(|e| match e {
+                    ActionError::NotYourTurn => {
+                        Rejection::new(RejectionCode::WrongSeat, "it is not your priority")
+                    }
+                    other => invalid(other),
+                })
+            }
             (Route::UnlessPaid, Reply::Payment(Some(plan))) => self
                 .submit_unless_paid_payment(player, plan)
                 .map_err(invalid),
@@ -288,10 +317,12 @@ fn shape_matches(shape: &ReplyShape, reply: &Reply) -> bool {
             | (ReplyShape::Targets { .. }, Reply::Targets(_))
             | (ReplyShape::MayCast { .. }, Reply::MayCast(_))
             | (ReplyShape::Action { .. }, Reply::Action(_))
+            | (ReplyShape::Payment { .. }, Reply::Action(_))
             | (
                 ReplyShape::DeclareAttackers { .. },
                 Reply::DeclareAttackers(_)
             )
+            | (ReplyShape::DeclareBands { .. }, Reply::DeclareBands(_))
             | (
                 ReplyShape::DeclareBlockers { .. },
                 Reply::DeclareBlockers(_)

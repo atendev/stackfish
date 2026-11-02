@@ -17,6 +17,6 @@ pub(crate) use declare::{
     validate_declare_blockers,
 };
 pub(crate) use entries::{
-    attacker_entries, blocker_entries, damage_split_entries, next_blocking_player,
+    attacker_entries, band_entries, blocker_entries, damage_split_entries, next_blocking_player,
 };
 pub(crate) use predicate::pass_would_skip_a_required_attack;

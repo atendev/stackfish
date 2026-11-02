@@ -87,6 +87,10 @@ pub enum ReplyShape {
         /// One list per `cost.additional` entry: the ids a filtered cost may
         /// name, ascending. Every other cost kind has an empty list.
         eligible: Vec<Vec<ObjectId>>,
+        /// The payer's mana abilities, which an `Action` reply may activate
+        /// before paying (CR 605.3a). The payment then opens again under a
+        /// fresh Decision id.
+        mana_abilities: Vec<ActivateEntry>,
     },
     /// Choose targets for a trigger: one candidate list per target word of
     /// `spec`, in order. The reply is one list per word.
@@ -108,6 +112,9 @@ pub enum ReplyShape {
     Action { entries: Vec<Entry> },
     /// The active player declares attackers (CR 508.1). The reply may be empty.
     DeclareAttackers { attackers: Vec<AttackerEntry> },
+    /// The active player groups attackers into bands (CR 508.1e, 702.22c).
+    /// `attackers` lists those that can join some band. The reply may be empty.
+    DeclareBands { attackers: Vec<ObjectId> },
     /// A defending player declares blockers (CR 509.1). The reply may be empty.
     DeclareBlockers { blockers: Vec<BlockerEntry> },
     /// Split combat damage (CR 510.1c). The reply covers every entry.
@@ -133,7 +140,8 @@ pub struct CastAnnouncement {
     pub x_value: Option<u32>,
 }
 
-/// One variant per `ReplyShape`.
+/// One variant per `ReplyShape`. A Payment shape also takes `Action`, for a
+/// mana ability.
 pub enum Reply {
     Pick(Vec<Candidate>),
     YesNo(bool),
@@ -148,6 +156,7 @@ pub enum Reply {
     MayCast(Option<CastAnnouncement>),
     Action(PlayerAction),
     DeclareAttackers(Vec<(ObjectId, Target)>),
+    DeclareBands(Vec<Vec<ObjectId>>),
     DeclareBlockers(Vec<(ObjectId, ObjectId)>),
     AssignDamage(Vec<(ObjectId, Vec<(ObjectId, u32)>)>),
 }

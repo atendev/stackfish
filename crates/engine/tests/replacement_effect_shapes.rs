@@ -245,6 +245,7 @@ fn lua_registered_prevent_damage_stops_real_combat_damage_from_landing() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });
@@ -339,6 +340,7 @@ fn lua_registered_limited_uses_one_shield_stops_protecting_after_first_use() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

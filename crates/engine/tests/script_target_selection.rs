@@ -612,3 +612,120 @@ fn invoke_operation_finishes_synchronously_when_the_script_never_yields() {
     );
     assert_eq!(state.player(PlayerId(0)).unwrap().life, 21);
 }
+
+const SELF_REGISTERING_SELECT_ABILITY_THEN_GAIN_LIFE: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:SetOperation(function(source, controller)
+        local target = Game.SelectTargets({ type = "ability" })
+        if target.kind == "ability" then
+            return Game.Ops.GainLife(target.id)
+        end
+        return Game.Ops.GainLife(0)
+    end)
+    e:Register()
+end
+return s
+"#;
+
+fn activate_and_pay(engine: &mut Engine, player: PlayerId, land: ObjectId) {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility {
+                source: land,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+                x_value: None,
+            },
+        })
+        .expect("player controls the land and holds priority");
+    drain(engine);
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
+    drain(engine);
+}
+
+// CR 113.9
+#[test]
+fn a_script_pick_through_the_facade_can_name_an_ability_on_the_stack() {
+    use stackfish_engine::decision::{Answer, Candidate, Reply, ReplyShape};
+    let p0 = PlayerId(0);
+    let land = ObjectId(0);
+    let mut state = base_state();
+    state.objects.insert(
+        land,
+        card_object(
+            land,
+            land_definition(SELF_REGISTERING_SELECT_ABILITY_THEN_GAIN_LIFE),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(land);
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card: land },
+        })
+        .unwrap();
+    drain(&mut engine);
+    let land = *engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .back()
+        .unwrap();
+
+    activate_and_pay(&mut engine, p0, land);
+    let lower = engine.state().stack[0].stack_id;
+    activate_and_pay(&mut engine, p0, land);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .unwrap();
+    drain(&mut engine);
+
+    let decision = engine
+        .open_decision()
+        .expect("the script asks for a target");
+    let ReplyShape::Pick { candidates, .. } = &decision.shape else {
+        panic!("expected a Pick, got {:?}", decision.shape);
+    };
+    let wanted = Candidate::Target(Target::Ability(lower));
+    assert!(candidates.contains(&wanted), "{candidates:?}");
+    assert!(
+        candidates
+            .iter()
+            .all(|c| matches!(c, Candidate::Target(Target::Ability(_)))),
+        "{candidates:?}"
+    );
+
+    let life = engine.state().player(p0).unwrap().life;
+    engine
+        .answer(
+            p0,
+            Answer {
+                decision: decision.id,
+                reply: Reply::Pick(vec![wanted]),
+            },
+        )
+        .expect("a listed ability is accepted");
+    drain(&mut engine);
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        life + lower.0 as i32
+    );
+}

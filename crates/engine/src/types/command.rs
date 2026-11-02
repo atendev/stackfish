@@ -47,8 +47,9 @@ pub enum PlayerActionKind {
     },
     /// CR 508.1e, 702.22c: groups just-declared attackers into bands. A
     /// separate action so ordinary `DeclareAttackers` calls carry no empty
-    /// field. Legal in `Step::DeclareAttackers` once attackers are declared,
-    /// and each call replaces `CombatState::bands`. Empty is legal.
+    /// field. Legal in `Step::DeclareAttackers` after attackers are declared,
+    /// and refused once bands are declared, since a band lasts the rest of
+    /// combat (CR 702.22e). Empty is legal.
     DeclareBands {
         bands: Vec<Vec<ObjectId>>,
     },

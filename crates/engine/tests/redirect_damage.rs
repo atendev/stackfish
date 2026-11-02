@@ -160,6 +160,7 @@ fn lua_registered_redirect_damage_sends_combat_damage_to_shield_instead_of_playe
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: Vec::new(),
+        bands_declared: false,
         damage_assigned_this_step: false,
         pending_damage_splits: std::collections::HashMap::new(),
     });

@@ -426,7 +426,7 @@ fn payment_lists_the_objects_each_filtered_cost_may_name() {
         source: ObjectId(1),
         on_paid: PaymentResolution::StackObject,
     };
-    let ReplyShape::Payment { cost, eligible } = engine.open_decision().unwrap().shape else {
+    let ReplyShape::Payment { cost, eligible, .. } = engine.open_decision().unwrap().shape else {
         panic!("expected Payment")
     };
     let ids = |list: &[u64]| list.iter().map(|&i| ObjectId(i)).collect::<Vec<_>>();
@@ -872,4 +872,161 @@ fn a_payment_plan_that_does_not_cover_the_cost_is_invalid_and_keeps_the_pause() 
         engine.process_state,
         ProcessState::AwaitingPayment { .. }
     ));
+}
+
+fn stack_entry(
+    stack_id: u64,
+    kind: crate::types::stack::StackEntryKind,
+) -> crate::types::stack::StackObject {
+    crate::types::stack::StackObject::new(
+        ObjectId(stack_id),
+        kind,
+        ObjectId(1),
+        P0,
+        P0,
+        Vec::new(),
+        Vec::new(),
+        None,
+        None,
+        false,
+        false,
+        false,
+        ScriptHandle(0),
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+// CR 113.9
+#[test]
+fn a_script_pick_lists_abilities_on_the_stack_but_not_spells() {
+    use crate::types::stack::StackEntryKind;
+    let mut state = minimal_state();
+    state
+        .objects
+        .insert(ObjectId(1), dummy_object(ObjectId(1), P0));
+    state
+        .stack
+        .push(stack_entry(60, StackEntryKind::TriggeredAbility));
+    state.stack.push(stack_entry(61, StackEntryKind::Spell));
+    let mut engine = Engine::new(state);
+    engine.process_state = ProcessState::AwaitingScriptChoice {
+        thread: ScriptHandle(0),
+        request: ScriptChoiceRequest::SelectTarget {
+            filter: crate::types::target::TargetFilter::Ability,
+            exclude_ids: Vec::new(),
+        },
+        stack_id: ObjectId(50),
+        source: ObjectId(1),
+        controller: P0,
+        events_so_far: Vec::new(),
+        each_player: None,
+    };
+    let decision = engine.open_decision().unwrap();
+    let ReplyShape::Pick { candidates, .. } = decision.shape else {
+        panic!("expected a Pick");
+    };
+    assert_eq!(
+        candidates,
+        vec![Candidate::Target(Target::Ability(ObjectId(60)))]
+    );
+
+    let before = engine.state().clone();
+    for unlisted in [ObjectId(61), ObjectId(62)] {
+        reject(
+            engine.answer(
+                P0,
+                answer(
+                    decision.id,
+                    Reply::Pick(vec![Candidate::Target(Target::Ability(unlisted))]),
+                ),
+            ),
+            RejectionCode::InvalidChoice,
+        );
+        assert_eq!(engine.state(), &before);
+    }
+}
+
+// CR 605.3a
+#[test]
+fn a_payment_lists_mana_abilities_only_while_the_payer_holds_priority() {
+    use crate::types::ability::{AbilityEffect, AbilityKind, RegisteredAbility};
+    use crate::types::ids::AbilityId;
+    use crate::types::mana::{Color, ManaUnit};
+    let mut state = minimal_state();
+    state.players.push(PlayerState::new(P1, 20));
+    let mut land = dummy_object(ObjectId(1), P1);
+    land.zone = ZoneKind::Battlefield;
+    land.definition.card_types = CardTypeSet::LAND;
+    state.objects.insert(ObjectId(1), land);
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
+        source: ObjectId(1),
+        kind: AbilityKind::Activated,
+        condition: None,
+        cost: None,
+        target: None,
+        operation: ScriptHandle(0),
+        effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Red)])),
+        intervening_if: None,
+    });
+    let mut engine = Engine::new(state);
+    engine.process_state = ProcessState::AwaitingPayment {
+        stack_id: ObjectId(50),
+        payer: P1,
+        cost: free_cost(),
+        source: ObjectId(1),
+        on_paid: PaymentResolution::StackObject,
+    };
+    let mana_abilities = |engine: &mut Engine| match engine.open_decision().unwrap().shape {
+        ReplyShape::Payment { mana_abilities, .. } => mana_abilities,
+        other => panic!("expected Payment, got {other:?}"),
+    };
+    engine.state.priority_player = P0;
+    assert!(mana_abilities(&mut engine).is_empty());
+    engine.state.priority_player = P1;
+    let listed = mana_abilities(&mut engine);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].source, ObjectId(1));
+}
+
+// CR 605.3a
+#[test]
+fn an_unless_paid_payment_lists_no_mana_abilities_and_refuses_an_action() {
+    let unless_paid = ProcessState::AwaitingUnlessPaidChoice {
+        payer_queue: VecDeque::from([P0]),
+        cost: free_cost(),
+        otherwise: UnlessPaidConsequence::SacrificeSelf,
+        target_id: None,
+        source: ObjectId(1),
+        stack_id: ObjectId(50),
+        events_so_far: Vec::new(),
+    };
+    let mut engine = engine_in(unless_paid);
+    let decision = engine.open_decision().unwrap();
+    let ReplyShape::Payment { mana_abilities, .. } = &decision.shape else {
+        panic!("expected Payment");
+    };
+    assert!(mana_abilities.is_empty());
+    let before = engine.state().clone();
+    let activate = Reply::Action(PlayerAction::new(
+        P0,
+        PlayerActionKind::ActivateAbility {
+            source: ObjectId(1),
+            ability_index: 0,
+            targets: Vec::new(),
+            chosen_colors: Vec::new(),
+            x_value: None,
+        },
+    ));
+    reject(
+        engine.answer(P0, answer(decision.id, activate)),
+        RejectionCode::InvalidChoice,
+    );
+    assert_eq!(engine.state(), &before);
+    assert_eq!(engine.open_decision().unwrap().id, decision.id);
 }

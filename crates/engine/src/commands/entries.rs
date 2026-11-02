@@ -237,6 +237,24 @@ fn mode_range(definition: &CardDefinition) -> ModeRange {
     }
 }
 
+/// `player`'s mana abilities whose timing, zone and tap checks pass, as
+/// activate entries.
+pub(crate) fn mana_ability_entries(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    player: PlayerId,
+) -> Vec<ActivateEntry> {
+    let mut entries = Vec::new();
+    activate_entries(state, script_runtime, player, &mut entries);
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Entry::Activate(activate) if activate.mana_ability => Some(activate),
+            _ => None,
+        })
+        .collect()
+}
+
 fn activate_entries(
     state: &GameState,
     script_runtime: &ScriptRuntime,
