@@ -11,7 +11,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
    4. Done on `phase5/mode-combination` (awaiting review): 036 mode-combination predicate, shared by the cast, the modal entries, modal triggers and the opponent's mode choice. See `24-mode-combination.md`.
 2. 019 carddb-backed `CardSource` and 037 real-card proof bot. Done on `phase5/carddb-card-source` and `phase5/real-card-proof-bot`: `CardDbCardSource` loads real cards, `crates/host/tests/real_card_bot.rs` runs the bot against two curated 40-card decks, and `docs/real_card_set.md` lists the chosen cards. The six nonland spells now have active scripts in the database. The test skips if `../stackfish-db/stackfish.db` is absent so CI stays independent.
 3. Done on `phase5/special-mana-payment` (awaiting review): ticket 030, hybrid, Phyrexian, `{C}`, snow and `{X}` payment, the bot's matching gaps, and snow mana from snow sources. See `26-special-mana-payment.md`. Still open: real cards that use these symbols have no scripts in the database yet (Dismember, Deathrite Shaman, Glaring Fleshraker are examples).
-4. Remaining `legal_actions` gaps (ticket 031). Done on `phase5/x-aware-target-candidates` (awaiting review): target candidates that mention X (see `17-legal-actions.md`). Still open: timing grants from continuous effects ("as though it had flash"), nested mana abilities through `Answer`, `DeclareBands`, and `Target::Ability` candidates for script picks.
+4. Remaining `legal_actions` gaps (ticket 031). Done: target candidates that mention X, a `DeclareBands` Decision, mana abilities through a Payment Decision, and `Target::Ability` candidates for script picks (see `17-legal-actions.md`). Still open: timing grants from continuous effects ("as though it had flash"), moved to ticket 076.
 5. Late join, replay and wire versioning. Decide in 020, then build 021 (Seat snapshot), 022 (replay export and card-data version) and 023 (`v` bump and outbox bound). Do the `HashMap` ordering audit (028) in this step, because replay determinism depends on it.
 6. Lua event visibility. Let conditions see damage, life, tap/untap and mill events, and make `GainLife` and combat damage emit `LifeChanged`. This unblocks the most card scripts for the least work.
 7. Modal builders in Lua for spells and triggered abilities, then modal activated abilities in `commands/activate.rs` (its CR 700.2b TODO).
@@ -72,7 +72,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Legal actions (`phase5/legal-actions`, B2)**: see `17-legal-actions.md`. Open items:
   - Done in `phase5/x-aware-target-candidates`: a `mana_value` filter that mentions X lists every candidate legal for
     some X (`x_dependent`), and the engine checks the announced pair. The bot still picks X and targets apart.
-  - `DeclareBands` is not offered at a declare attackers Decision. It stays a direct `submit_action`.
+  - The `DeclareBands` Decision opens in the first priority window after attackers, so attack triggers may already be
+    on the stack and can change the attackers before bands are chosen (CR 508.1e).
   - A modal spell is listed when enough single modes are usable. Two modes that cannot combine are rejected only when
     the engine runs the cast.
   - Timing and zone permissions granted by continuous effects ("as though it had flash") are missing from the
@@ -85,9 +86,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     the Decision still open, not in `step()`. Ticket 026 removed menace and must-attack from the entries (a lone
     blocker for a menace attacker is no longer listed, and a required attacker is marked). Ticket 036 did the same for
     modes: the entries carry `solo_only` and no longer list a card with no legal selection.
-  - A nested mana ability activated during a Payment Decision (CR 605.3a) is not accepted through `Answer`. It still
-    works through `submit_action`.
-  - `Target::Ability` candidates are not enumerated for a script `SelectTarget` filter.
+  - An unless-paid payment lists no mana abilities, because the engine cannot suspend it for one (CR 605.3a).
+  - A script `SelectTarget` pick excludes only objects, so a pick repeated in one script can name the same ability twice.
   - Rejection messages are the `Debug` text of the engine's error enum. B3 passes them through unchanged, so
     friendlier wording is still open.
   - The Decision id counter stays on `Engine` (B3 decided against moving it). Mixing `open_decision`/`answer` with

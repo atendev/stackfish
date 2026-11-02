@@ -22,16 +22,18 @@ methods. Those methods and the typed `ProcessState` pauses are unchanged. The de
 | `Order { items }` | `Order(Vec<usize>)` | trigger order |
 | `Modes { mode_count, min, max, repeatable, solo_only }` | `Modes(Vec<u32>)` | spell mode choice, trigger mode choice |
 | `Partition { cards, rest }` | `Partition { top, rest }` | Scry, Surveil |
-| `Payment { cost, eligible }` | `Payment(Option<PaymentPlan>)` | cast payment (`None` unwinds), unless-paid (`None` declines). `eligible` lists, per additional cost, the objects a filtered cost may name |
+| `Payment { cost, eligible, mana_abilities }` | `Payment(Option<PaymentPlan>)`, or `Action` for a listed mana ability | cast payment (`None` unwinds), unless-paid (`None` declines). `eligible` lists, per additional cost, the objects a filtered cost may name. `mana_abilities` lists the payer's mana abilities while the payer holds priority (CR 605.3a). An `Action` naming one suspends the payment, and the payment opens again as a new Decision. Unless-paid lists none |
 | `Targets { spec, candidates }` | `Targets(Vec<Vec<Target>>)` | trigger targets, one list per target word |
 | `MayCast { card, options }` | `MayCast(Option<CastAnnouncement>)` | Madness, Cascade. `options` holds the mode range, target slots and X flag, or `None` when only a decline can succeed |
 | `Action { entries }` | `Action(PlayerAction)` | priority, checked against the entries (see `17-legal-actions.md`) |
 | `DeclareAttackers { attackers }` | `DeclareAttackers(Vec<(ObjectId, Target)>)` | declare attackers step |
+| `DeclareBands { attackers }` | `DeclareBands(Vec<Vec<ObjectId>>)` | declare attackers step, once per combat, when some attacker can band (CR 508.1e, 702.22c). An empty reply declares no bands |
 | `DeclareBlockers { blockers }` | `DeclareBlockers(Vec<(ObjectId, ObjectId)>)` | declare blockers step, one defending player at a time |
 | `AssignDamage { splits }` | `AssignDamage(Vec<(ObjectId, Vec<(ObjectId, u32)>)>)` | combat damage splits |
 
 `Candidate` is `Target(Target) | Replacement(ReplacementCandidate)`. It reuses the engine's `Target`, so it also covers
-`Target::Ability`.
+`Target::Ability`. A script `SelectTarget` pick lists the abilities on the stack its filter accepts, after objects and
+players.
 
 ## Rejections
 
