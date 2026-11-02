@@ -11,7 +11,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Use the vocabulary in `CONTEXT.md` (Session, Seat, Decision, Answer). Grilling tickets use the `grilling` and `domain-modeling` skills. Update `CONTEXT.md` as terms settle.
 - The protocol supports any number of players from the start. Exactly one Decision is open at a time, answered in APNAP order, even for secret choices.
 - Proof-game cards are a fixture set inside this repo, gathered from the inline Lua test scripts. CI must not depend on `../stackfish-db`.
-- `.plan/` is local only (git-ignored), so it is not committed.
+- `.plan/` is committed, as `README.md` says. Only `.agent-state.md` stays out of git.
 
 ## Decisions so far
 

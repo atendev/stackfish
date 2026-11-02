@@ -21,7 +21,7 @@ Build `Engine::legal_actions()`, which builds the entries for priority, combat a
 
 ## Resolution
 
-Built on `phase5/legal-actions`, merged to master as 272891e (commits 52fd374 and 1087d52). Not pushed yet.
+Built on `phase5/legal-actions`, merged to master as 272891e (commits 52fd374 and 1087d52). Master is pushed. The branch was deleted after the merge, as the slice workflow says, so the merge commit is the record.
 
 - `Engine::legal_actions()` lists the priority player's land plays, casts, activations and pass (always last). `legal_attackers()`, `legal_blockers(player)` and `pending_damage_splits()` list the combat options. Builders live in `commands/entries.rs` and `commands/combat/entries.rs`, types in `decision/entry.rs`. No entry checks affordability. See `docs/implementation/17-legal-actions.md`.
 - Combat Decisions (the user chose the typed shapes): `open_decision` offers `DeclareAttackers`, `DeclareBlockers` (one defending player at a time) and `AssignDamage` ahead of priority, each with its own `Reply` variant. An empty declaration is allowed.

@@ -29,4 +29,4 @@ Both areas are done in two commits on master (merge 6dae011). `tools/comment_dif
 - `TODO` mentions rose from 70 to 103. 33 are new one-line TODOs made from "not modeled yet" notes, listed in the commit messages for veto. One stands in for a mention of a finished item.
 - Rule gap settled: a doc comment keeps a short description beside the CR number, and labels such as `IMPORTANT` go.
 - Mis-attached doc blocks were fixed (EffectPrimitive in effect.rs, decode_affected_value in decode.rs).
-- The branch was deleted locally and on origin. `master` is 3 commits ahead of origin and not pushed.
+- The branch was deleted locally and on origin. Master was pushed later, and 017 found it matching `origin/master`.
