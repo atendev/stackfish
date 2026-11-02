@@ -6,7 +6,7 @@
 # unlike triggered abilities). Proven via real combat damage: the vanilla
 # bear's effective power (layer 7c) reflects the boost, dealing 3 damage
 # instead of its printed 2 (same real-consumer proof
-# phase5_layer_engine_consumers.toml uses for a hand-built ContinuousEffect).
+# layers/layer_engine_consumers.toml uses for a hand-built ContinuousEffect).
 seed = 1
 
 [[players]]

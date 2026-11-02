@@ -58,7 +58,7 @@ card = "filler"
 # A solo player's first PassPriority always counts as "everyone passed", so
 # each of these advances one turn/phase/step (CR 500-514) - PreGame -> Untap
 # (no priority window) -> Upkeep -> Draw -> Main. Same prelude as
-# phase5_cast_spell_payment.toml.
+# costs/cast_spell_payment.toml.
 [[steps]]
 type = "pass_priority"
 player = 0
@@ -99,6 +99,6 @@ equals = "battlefield"
 
 [[steps]]
 type = "assert_ledger_len"
-# +1 vs. before phase5/cascade: CR 601.2i's new SpellCast marker event.
-# +1 vs. before phase5/ward: BecameTarget for the bear the bolt targets.
+# Counts CR 601.2i's SpellCast marker event and the BecameTarget event
+# for the bear the bolt targets.
 equals = 19

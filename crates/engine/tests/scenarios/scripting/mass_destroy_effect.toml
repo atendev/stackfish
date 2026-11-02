@@ -1,5 +1,5 @@
 # Mass destruction (CR 701.8/601.2c): a script-declared Armageddon,
-# combining s.operation() (phase5/register-abilities-and-script-operation)
+# combining its s.operation()
 # with the new Game.Ops.DestroyAll primitive - proving the whole real card
 # end to end, through the scenario crate's own wiring.
 seed = 1

@@ -1,5 +1,5 @@
 #title: Unblocked combat damage is dealt automatically, no assign_combat_damage step needed
-# phase5/automatic-combat-damage, CR 510.1/510.2: a combat damage step with
+# CR 510.1/510.2: a combat damage step with
 # no real split to choose (here, a single unblocked attacker) resolves on
 # its own as the step opens - unlike every pre-existing combat-damage
 # scenario in this repo, this one deliberately has NO assign_combat_damage

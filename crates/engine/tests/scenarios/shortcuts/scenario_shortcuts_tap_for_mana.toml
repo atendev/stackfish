@@ -16,7 +16,7 @@ zone = "battlefield"
 card = "forest"
 
 # Shortcut for activate_ability { ability_index: 0, targets: [], chosen_colors: [] }
-# - same ground phase5_activate_ability_mana.toml covers spelled out by hand.
+# - same ground costs/activate_ability_mana.toml covers spelled out by hand.
 [[steps]]
 type = "tap_for_mana"
 player = 0

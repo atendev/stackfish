@@ -35,7 +35,7 @@ types = ["Land"]
 # Two separate card keys sharing the same script text - each gets its own
 # freshly-built CardDefinition (register_script_target_requirement has no
 # cross-instance caching), same "duplicate card_ids key would only track the
-# last instance" reason phase5_spell_target_script.toml's own bolt_a/bolt_b
+# last instance" reason targeting/spell_target_script.toml's own bolt_a/bolt_b
 # split already documents.
 [[cards]]
 key = "aura_a"

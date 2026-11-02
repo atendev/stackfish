@@ -1,11 +1,9 @@
 # Mass-choice effects (CR 701.8/601.2c) end to end through the scenario
 # crate, proving the new generic `submit_script_choice` action: Balance
 # itself, built entirely out of `Game.ChooseN`/`Game.Ops.SacrificeChosen`/
-# `Game.Ops.DiscardChosen`/`Game.Ops.ForEachPlayer` (phase5/mass-choice-
-# effects) - no card-specific engine code at all. Same fixture as
-# `crates/engine/tests/balance.rs`, ported to TOML now that a
-# scenario can answer a `Game.SelectTargets`/`Game.ChooseN` mid-resolution
-# pick. Each battlefield/hand card gets its own `[[cards]]` key (rather than
+# `Game.Ops.DiscardChosen`/`Game.Ops.ForEachPlayer` - no card-specific
+# engine code at all. The scenario answers each `Game.ChooseN`
+# mid-resolution pick. Each battlefield/hand card gets its own `[[cards]]` key (rather than
 # reusing one land/bear key across multiple `[[setup]]` entries) since
 # `card_ids` tracks only the last object instance minted for a given key -
 # every card here needs to stay individually addressable by
@@ -194,7 +192,7 @@ card = "p1_card"
 # Two players, so every step transition needs both to pass in a row (CR
 # 117.4) - PreGame -> Upkeep (Untap auto-chains, no priority) -> PreCombatMain
 # (Draw skipped turn 1, CR 103.8a/500.7), 2 passes each - see
-# phase5_combat_declarations.toml's own comment for the fuller derivation.
+# combat/combat_declarations.toml's own comment for the fuller derivation.
 [[steps]]
 type = "pass_priority"
 player = 0

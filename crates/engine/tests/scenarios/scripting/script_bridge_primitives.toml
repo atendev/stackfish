@@ -82,5 +82,5 @@ equals = "battlefield"
 
 [[assertions]]
 type = "ledger_len"
-# +1 vs. before phase5/cascade: CR 601.2i's new SpellCast marker event.
+# Counts CR 601.2i's SpellCast marker event.
 equals = 21

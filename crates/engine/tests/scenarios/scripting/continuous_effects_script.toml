@@ -1,6 +1,6 @@
 # Script-backed continuous effects slice (backlog item 3a): AffectedFilter::Script/
 # EffectPayload::Script are real now. The anthem land below self-registers via
-# Game.CreateStaticAbility, same as phase5_static_ability_self_registration.toml,
+# Game.CreateStaticAbility, same as scripting/static_ability_self_registration.toml,
 # except :SetEffect is a custom function returning a Game.Effects.ModifyPT
 # value instead of passing the tag directly. Proven via real combat damage: the vanilla bear's effective power
 # (layer 7c) reflects the script-decoded boost, dealing 3 damage instead of

@@ -17,7 +17,7 @@ types = ["Enchantment"]
 # 2 or more artifacts - see ContinuousEffectSpec::condition_count's own doc
 # comment. Only 1 artifact is on the battlefield in this fixture's setup, so
 # the condition never holds and the bear below gets no boost at all -
-# contrast with phase5_layer_engine_basics.toml's unconditional anthem,
+# contrast with layers/layer_engine_basics.toml's unconditional anthem,
 # which always boosts.
 [cards.continuous_effect]
 layer = "power_toughness_modifying"
