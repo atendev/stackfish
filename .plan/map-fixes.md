@@ -32,8 +32,12 @@ Every item left open by the closed Host protocol tickets (001 to 015) is either 
 - 022 Replay export and card data version. `export_replay` returns the setup bytes, accepted Answers, card fingerprints and engine build id. `Session::from_replay` refuses changed cards or another build before any card loads, then plays the Answers. Lua scripts lose `os`, `io` and `math.random`. [closed/022-replay-export-card-data-version.md]
 - 023 Wire version bump and outbox bound. `v` stays 1 under a pre-release rule in 007 that lasts until the first tagged `crates/host` release or the first external host. Setup `outbox_cap` (default 4096) drops a whole overflowing outbox and sends `resync: true` until the Seat takes a snapshot. `from_replay` lifts the cap while it plays. [closed/023-wire-version-bump-outbox-bound.md]
 
+- 028 Audit of `HashMap` walks. 26 walks over `GameState::objects`, 4 reach a Decision candidate list unsorted (devour, amplify, copy, entry-attach candidates), and no other hash walk reaches a host. Decision: make `objects` a `BTreeMap` (073), prove it with new proof cards (074) and decide a lint separately (075). Lua `pairs` order stays deferred. [closed/028-audit-hashmap-walks.md]
+
 ## Not yet specified
 
+- Lua `pairs` order and `script_error` text for invalid scripts (found by 028). Keep the existing TODOs at `docs/DESIGN.md:212` and `crates/host/src/session.rs:190`.
+- A cross-process proof test for hash order (found by 028). Low value, since two maps in one process already hash differently.
 - Whether the Lua API needs changes for any item below. Check at each requirements report.
 
 ## Tickets
@@ -90,7 +94,10 @@ Ticket types and modes follow `README.md`.
 - 027 Revealed and face-down producers, and the event-writing rule. Type task, HITL. Origin 004, 013. Closed.
   - The engine never emits `Revealed` or `face_down`.
   - Write the rule "never put a hidden identity in a free-text event field" into the engine's event-writing guidelines (`ScriptError`, `StateBasedActionApplied`, `RngDrawn`).
-- 028 Audit unordered `HashMap` walks over game state. Type task, HITL. Origin 014.
+- 028 Audit unordered `HashMap` walks over game state. Closed.
+- 073 Make GameState objects a BTreeMap. Type task, HITL. Origin 028.
+- 074 Proof cards for ordered choices. Type task, HITL. Origin 028. Blocked by 073.
+- 075 Decide a lint against hash-ordered walks. Type grilling, HITL. Origin 028. Blocked by 073.
   - 014 fixed three. The 500-seed run found no more, but the proof cards cover only part of the engine.
 - 029 CR 104.4b infinite-loop detection. Type task, HITL. Origin 001.
   - The step budget only stops a runaway from freezing the host. The requirements report must choose how a mandatory loop is detected.
@@ -124,8 +131,8 @@ Ticket types and modes follow `README.md`.
 
 Open tickets, unblocked and unclaimed. 034 is research, so a subagent can take it alone.
 
-- 028, 029, 030, 031, 032, 033, 034, 072
+- 029, 030, 031, 032, 033, 034, 072, 073
 
 Blocked:
 
-- none
+- 074, 075 (by 073)
