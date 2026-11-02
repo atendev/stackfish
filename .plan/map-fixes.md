@@ -29,6 +29,7 @@ Every item left open by the closed Host protocol tickets (001 to 015) is either 
 - 017 Reconcile stale notes and policy conflicts. `.plan/` is committed. The user confirmed 007's rejected-Answer shape, the `seat`-less `setup`, and the deleted 010 to 015 branches. 009, 010 and 011 now match what 015 and the repo show. [closed/017-reconcile-stale-notes.md]
 - 027 Revealed producers and the free-text event rule. A revealing `Game.Ops.Search` and amplify log `Revealed`. `face_down` has no producer, since face-down mechanics are a non-goal. `GameState::script_error_message` keeps a hidden card's id and script text out of `ScriptError`, and `DESIGN.md` holds the rule. [closed/027-revealed-face-down-producers.md]
 - 021 Seat state snapshot. A `snapshot` request returns the poll response plus the Seat's filtered view of current state and drops its outbox. Fold tests found engine changes that write no event, moved to 072. [closed/021-seat-state-snapshot.md]
+- 022 Replay export and card data version. `export_replay` returns the setup bytes, accepted Answers, card fingerprints and engine build id. `Session::from_replay` refuses changed cards or another build before any card loads, then plays the Answers. Lua scripts lose `os`, `io` and `math.random`. [closed/022-replay-export-card-data-version.md]
 
 ## Not yet specified
 
@@ -68,7 +69,7 @@ Ticket types and modes follow `README.md`.
 - 019 Carddb-backed CardSource. Type task, HITL. Origin 006, 015. Closed.
   - A thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. 006 says it needs no new decision. The Godot `create` serves only the proof cards until it exists. CI must still not depend on `../stackfish-db`.
 - 021 Seat state snapshot. Type task, HITL. Origin 013, 015. Closed.
-- 022 Replay export and card data version. Type task, HITL. Blocked by 020. Origin 001, 006, 012.
+- 022 Replay export and card data version. Type task, HITL. Origin 001, 006, 012. Closed.
 - 023 Wire version bump and outbox bound. Type task, HITL. Origin 013.
 - 072 Ledger events the snapshot fold needs. Type task, HITL. Origin 021.
 - 025 Atomicity harness and audit. Type task, HITL. Origin 001, 010. Decided in 024. Closed.
@@ -123,7 +124,7 @@ Ticket types and modes follow `README.md`.
 
 Open tickets, unblocked and unclaimed. 034 is research, so a subagent can take it alone.
 
-- 022, 023, 028, 029, 030, 031, 032, 033, 034, 072
+- 023, 028, 029, 030, 031, 032, 033, 034, 072
 
 Blocked:
 
