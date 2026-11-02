@@ -52,6 +52,26 @@ impl ScenarioReport {
     pub fn has_hard_failures(&self) -> bool {
         self.entries.iter().any(EntryReport::is_hard_failure)
     }
+
+    /// One line per hard failure: the entry index, its description and why it failed.
+    /// Empty exactly when `has_hard_failures` is false.
+    pub fn hard_failure_lines(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.is_hard_failure())
+            .map(|(i, entry)| {
+                let reason = match &entry.outcome {
+                    EntryOutcome::Assertion(AssertionOutcome::Failed { expected, actual }) => {
+                        format!("expected {expected}, got {actual}")
+                    }
+                    EntryOutcome::Action(StepOutcome::Errored(msg)) => format!("errored: {msg}"),
+                    _ => "ran, but expect_error was set".to_string(),
+                };
+                format!("[{i}] {}: {reason}", entry.description)
+            })
+            .collect()
+    }
 }
 
 /// Follows each `ZoneChange` in `new_events` from the old id (in `last_known_info`) to the new
@@ -240,4 +260,94 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
 
 pub fn run_path(path: &std::path::Path) -> ScenarioReport {
     run(&load(path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(description: &str, outcome: EntryOutcome, expect_error: bool) -> EntryReport {
+        EntryReport {
+            description: description.to_string(),
+            outcome,
+            expect_error,
+        }
+    }
+
+    fn report(entries: Vec<EntryReport>) -> ScenarioReport {
+        ScenarioReport { entries }
+    }
+
+    #[test]
+    fn failed_assertion_lists_expected_and_actual() {
+        let report = report(vec![
+            entry(
+                "life(0)",
+                EntryOutcome::Assertion(AssertionOutcome::Passed),
+                false,
+            ),
+            entry(
+                "life(1)",
+                EntryOutcome::Assertion(AssertionOutcome::Failed {
+                    expected: "20".to_string(),
+                    actual: "17".to_string(),
+                }),
+                false,
+            ),
+        ]);
+        assert_eq!(
+            report.hard_failure_lines(),
+            vec!["[1] life(1): expected 20, got 17"]
+        );
+    }
+
+    #[test]
+    fn unexpected_error_lists_the_engine_message() {
+        let report = report(vec![entry(
+            "cast_spell",
+            EntryOutcome::Action(StepOutcome::Errored("not enough mana".to_string())),
+            false,
+        )]);
+        assert_eq!(
+            report.hard_failure_lines(),
+            vec!["[0] cast_spell: errored: not enough mana"]
+        );
+    }
+
+    #[test]
+    fn accepted_action_with_expect_error_is_listed() {
+        let report = report(vec![entry(
+            "cast_spell",
+            EntryOutcome::Action(StepOutcome::Ran),
+            true,
+        )]);
+        assert_eq!(
+            report.hard_failure_lines(),
+            vec!["[0] cast_spell: ran, but expect_error was set"]
+        );
+    }
+
+    #[test]
+    fn non_failures_produce_no_lines() {
+        let report = report(vec![
+            entry(
+                "life(0)",
+                EntryOutcome::Assertion(AssertionOutcome::Passed),
+                false,
+            ),
+            entry("pass", EntryOutcome::Action(StepOutcome::Ran), false),
+            entry(
+                "cascade",
+                EntryOutcome::Action(StepOutcome::NotImplemented("cascade".to_string())),
+                false,
+            ),
+            entry(
+                "cast_spell",
+                EntryOutcome::Action(StepOutcome::Errored("illegal target".to_string())),
+                true,
+            ),
+        ]);
+        assert!(report.hard_failure_lines().is_empty());
+        assert!(!report.has_hard_failures());
+    }
 }
