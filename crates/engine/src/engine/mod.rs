@@ -23,6 +23,9 @@ mod choice_answers;
 mod decision_tests;
 mod event_pipeline;
 mod library_choices;
+mod loop_watch;
+#[cfg(test)]
+mod loop_watch_tests;
 mod payment;
 mod pregame;
 mod process_state;
@@ -381,6 +384,9 @@ pub struct Engine {
     /// Decision id counter for the `decision` facade.
     // TODO: move into the Session
     pub(crate) decisions: crate::decision::DecisionTracker,
+    /// CR 104.4b: fingerprints of the state at each forced pass since the last
+    /// real choice. A repeat means the loop has no way out.
+    loop_watch: Vec<String>,
 }
 
 /// What a rejected input must leave unchanged. `state` is compared structurally and
@@ -437,6 +443,7 @@ impl Engine {
             pregame_setup_done: true,
             script_runtime: ScriptRuntime::new(),
             decisions: crate::decision::DecisionTracker::new(),
+            loop_watch: Vec::new(),
         }
     }
 
@@ -636,6 +643,14 @@ impl Engine {
             };
         }
         let status = self.advance();
+        // A player choice between two equal states means the stretch was not mandatory.
+        // TODO: a choice with one candidate is still mandatory, so a loop through one is missed (CR 732.4)
+        if !matches!(
+            status,
+            StepStatus::Progressed | StepStatus::AwaitingAction { .. }
+        ) {
+            self.loop_watch.clear();
+        }
         StepResult { status }
     }
 

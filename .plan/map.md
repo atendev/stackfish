@@ -34,6 +34,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 026 Whole-declaration combat predicates. Menace and "attacks each combat if able" are one module, `commands/combat/predicate.rs`, called by `validate_declare_attackers`, `validate_declare_blockers`, `validate_pass_priority` and the two entry builders. Must-attack is the `ATTACKS_EACH_COMBAT` keyword bit, and `AttackerEntry` has `required`. [closed/026-whole-declaration-predicates.md]
 - 036 Mode-combination predicate. `mode_can_join_others` in `commands/legality.rs` is the shared rule for the cast, the modal entries, modal triggers and the opponent's mode choice. `ModeRange` and `ReplyShape::Modes` carry `solo_only`, and the entries refuse a solo-only mode beside another. [closed/036-mode-combination-predicate.md]
 - 048 Add unit tests for pure engine helpers. Added local `#[cfg(test)]` coverage for deterministic helpers in `color_identity.rs` and `types/{zone,object,player,counter,card,mana,cost}.rs`. [closed/048-add-unit-tests-pure-helpers.md]
+- 029 CR 104.4b infinite-loop detection. A forced pass with a non-empty stack fingerprints the state, and a repeat ends the game as a draw. Ids are relabeled by rank and the ledger values read at priority are folded in. Persist and Undying returns no longer leave a stale graveyard object. `BEHAVIOUR_REV` is 2. [closed/029-infinite-loop-detection.md]
 - 049 Add unit tests for engine helpers that need a small GameState or layer stubs. Added `#[cfg(test)]` coverage for `layers.rs`, `commands/legality.rs` and `commands/combat/predicate.rs` with minimal state fixtures. [closed/049-add-unit-tests-stubbed-helpers.md]
 
 ## Not yet specified
@@ -44,8 +45,6 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 - Audit of unordered `HashMap` walks over game state that can reach a host (found by 014, which fixed three). The 500-seed proof run found no more, but the proof set covers only part of the engine.
 
-- CR 104.4b infinite-loop detection. The step budget from 001 only stops a runaway from freezing the host.
-
 ## Out of scope
 
 - A playable Godot UI (scenes, card art, input handling). This is a separate effort after this map.
@@ -54,10 +53,17 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 ## Frontier
 
-Open build tickets, unblocked and unclaimed:
+Open tickets, unblocked and unclaimed:
 
-- none
+- 030 Bot coverage
+- 031 Remaining legal_actions gaps
+- 032 Host rejection text and payment cost filters
+- 033 Run the Godot smoke test in CI
+- 034 Unconfirmed gdext items
+- 072 Ledger events the snapshot fold needs
+- 073 Make GameState objects a BTreeMap
 
 Blocked:
 
-- none
+- 074 Proof cards for ordered choices, by 073
+- 075 Decide a lint against hash-ordered walks, by 073

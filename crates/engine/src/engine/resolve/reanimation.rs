@@ -48,6 +48,9 @@ impl Engine {
         if let Some(zone) = self.state.zone_mut(ZoneKind::Graveyard, Some(owner)) {
             zone.remove(graveyard_id);
         }
+        // CR 400.7: the graveyard card is a different object.
+        // TODO: stash its departed abilities once a condition watches a card leaving a graveyard (CR 603.10a)
+        crate::commands::retire_object(&mut self.state, graveyard_id);
         if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
             zone.push_bottom(new_id);
             self.state.objects.insert(new_id, new_object);

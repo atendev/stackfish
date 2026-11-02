@@ -327,3 +327,28 @@ fn persist_is_a_clean_no_op_if_the_card_left_the_graveyard_before_it_resolves() 
         "nothing to return - the card was already gone"
     );
 }
+
+#[test]
+fn persist_retires_the_graveyard_object_it_returns() {
+    // CR 400.7
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let bear = ObjectId(0);
+    let mut state = base_state();
+    put_on_battlefield(&mut state, creature(bear, p0, p0, 2, 2));
+    state
+        .abilities
+        .push(persist_undying_ability(bear, CounterKind::MinusOneMinusOne));
+
+    let mut engine = Engine::new(state);
+    run_death_and_resolution(&mut engine, p0, p1);
+
+    let state = engine.state();
+    assert!(
+        state
+            .objects
+            .values()
+            .all(|o| o.zone != ZoneKind::Graveyard),
+        "a returned card left its graveyard object behind"
+    );
+}

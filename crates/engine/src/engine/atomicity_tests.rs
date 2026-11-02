@@ -53,7 +53,7 @@ fn ids(list: &[u64]) -> Vec<ObjectId> {
     list.iter().map(|&n| ObjectId(n)).collect()
 }
 
-fn definition(modes: Vec<SpellMode>, mode_choice: ModeChoice) -> CardDefinition {
+pub(super) fn definition(modes: Vec<SpellMode>, mode_choice: ModeChoice) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
         name: "Charm".to_string(),
@@ -80,7 +80,7 @@ fn definition(modes: Vec<SpellMode>, mode_choice: ModeChoice) -> CardDefinition 
     }
 }
 
-fn object(id: ObjectId, definition: CardDefinition) -> GameObject {
+pub(super) fn object(id: ObjectId, definition: CardDefinition) -> GameObject {
     GameObject {
         object_id: id,
         copiable_override: None,
