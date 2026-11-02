@@ -110,13 +110,17 @@ pub enum GameEventKind {
         source: ObjectId,
         original_event: EventId,
     },
+    /// `description` is free text that every Seat reads, so it never names a
+    /// card in a hidden zone or carries its id (see `DESIGN.md`).
+    // TODO: nothing produces this event
     StateBasedActionApplied {
         description: String,
     },
     /// A Lua call failed mid-resolution and the engine used the no-effect or
     /// "condition false" default. A free-text diagnostic, not a gameplay fact.
     /// The pure query path in `layers.rs` cannot log it, since it holds no
-    /// `&mut Engine`.
+    /// `&mut Engine`. Build `message` with `GameState::script_error_message`,
+    /// which leaves out a hidden source's id and detail (see `DESIGN.md`).
     ScriptError {
         message: String,
     },
@@ -133,6 +137,8 @@ pub enum GameEventKind {
     PlayerEliminated {
         player: PlayerId,
     },
+    /// `purpose` is a fixed label such as `"shuffle"`, never text about the
+    /// cards the draw picks among (see `DESIGN.md`).
     RngDrawn {
         purpose: String,
         value: u64,
@@ -259,8 +265,9 @@ pub enum GameEventKind {
     /// they are, so this is not a `ZoneChange`. Each card carries a snapshot,
     /// because a host decides per Seat whether it may also see the card's id
     /// (a card revealed from a hand or library is still hidden afterwards).
-    /// TODO: no effect produces this yet. Reveal effects such as Wheel of Sun
-    /// and Moon's replacement are unmodeled, so only tests build it.
+    /// Produced by `Engine::reveal_event` for a `Search` with `reveal` set
+    /// (CR 701.23e) and for an amplify answer (CR 702.38a).
+    // TODO: other reveal effects such as Wheel of Sun and Moon's replacement are unmodeled (CR 701.20a)
     Revealed {
         player: PlayerId,
         zone: ZoneKind,

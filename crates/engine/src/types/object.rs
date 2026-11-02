@@ -49,6 +49,7 @@ pub struct GameObject {
     pub zone: ZoneKind,
     pub tapped: bool,
     pub flipped: bool,
+    // TODO: no producer sets face_down; morph, manifest, disguise and face-down exile are unmodeled (CR 708.2)
     pub face_down: bool,
     pub phased_out: bool,
     pub damage_marked: u32,

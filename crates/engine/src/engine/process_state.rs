@@ -679,6 +679,7 @@ pub(crate) enum ProcessState {
         count: u32,
         destination: SearchDestination,
         shuffle_after: bool,
+        reveal: bool,
     },
     CommitEvents {
         checked: Vec<GameEventKind>,

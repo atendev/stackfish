@@ -123,11 +123,11 @@
 - Verify: 2 unit + 10 integration tests, 0 failed.
 - Key changes:
   - `FilterSpec` gained `supertypes`/`subtypes` fields (shared benefit for costs too).
-  - `AbilityEffect::Search { filter, count, destination, shuffle_after }`.
+  - `AbilityEffect::Search { filter, count, destination, shuffle_after, reveal }`. `reveal` logs one `Revealed` from the library before the found cards move (CR 701.23e).
   - `SearchDestination::{Hand, Battlefield { tapped }}`.
   - `ProcessState::AwaitingSearchChoice`; `Engine::submit_search_choice`.
 - Unresolved:
-  - Mandatory quantity with no quality filter; reveal; top-N redirection; multiplayer APNAP; graveyard/exile destinations.
+  - Mandatory quantity with no quality filter; top-N redirection; multiplayer APNAP; graveyard/exile destinations.
 
 ## Slice: mass-destroy-effect (merged)
 

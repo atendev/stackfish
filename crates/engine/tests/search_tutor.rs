@@ -110,6 +110,7 @@ fn search_spell_definition(
             count,
             destination,
             shuffle_after,
+            reveal: false,
         }),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -671,6 +672,7 @@ fn game_ops_search_lua_binding_decodes_correctly() {
         count,
         destination,
         shuffle_after,
+        reveal: false,
     }) = effect
     else {
         panic!("expected Some(AbilityEffect::Search {{ .. }}), got {effect:?}")
@@ -709,4 +711,162 @@ fn game_ops_search_defaults_to_hand_and_shuffle_true() {
         shuffle_after,
         "no opts table - defaults to shuffling after (CR 701.24a convention)"
     );
+}
+
+fn revealing_search_engine(count: u32) -> (Engine, ObjectId, ObjectId) {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let forest = ObjectId(10);
+    let mountain = ObjectId(11);
+    let card = ObjectId(2);
+    let mut state = two_player_state(vec![forest, mountain]);
+    for (id, name) in [(forest, "Forest"), (mountain, "Mountain")] {
+        state.objects.insert(
+            id,
+            card_object(
+                id,
+                basic_land_definition(id.0, name, name),
+                p0,
+                ZoneKind::Library,
+            ),
+        );
+    }
+    let mut definition = search_spell_definition(count, SearchDestination::Hand, true);
+    if let Some(AbilityEffect::Search { reveal, .. }) = &mut definition.effect {
+        *reveal = true;
+    }
+    state
+        .objects
+        .insert(card, card_object(card, definition, p0, ZoneKind::Hand));
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    assert!(matches!(status, StepStatus::AwaitingSearchChoice { .. }));
+    (engine, forest, mountain)
+}
+
+fn revealed_events(engine: &Engine) -> Vec<(usize, PlayerId, ZoneKind, Vec<RevealedCard>)> {
+    engine
+        .state()
+        .ledger
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| match &e.kind {
+            GameEventKind::Revealed {
+                player,
+                zone,
+                cards,
+            } => Some((i, *player, *zone, cards.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+// CR 701.23e
+#[test]
+fn search_with_reveal_logs_revealed_before_the_found_cards_move() {
+    let (mut engine, forest, mountain) = revealing_search_engine(2);
+    engine
+        .submit_search_choice(vec![forest, mountain])
+        .expect("both are candidates");
+    drain(&mut engine);
+
+    let revealed = revealed_events(&engine);
+    assert_eq!(revealed.len(), 1);
+    let (index, player, zone, cards) = &revealed[0];
+    assert_eq!((*player, *zone), (PlayerId(0), ZoneKind::Library));
+    let ids: Vec<ObjectId> = cards.iter().map(|c| c.object).collect();
+    assert_eq!(ids, vec![forest, mountain]);
+    assert_eq!(cards[0].snapshot.definition.name, "Forest");
+    assert_eq!(cards[0].snapshot.zone, ZoneKind::Library);
+    let first_move = engine
+        .state()
+        .ledger
+        .iter()
+        .position(|e| {
+            matches!(
+                e.kind,
+                GameEventKind::ZoneChange {
+                    from: ZoneKind::Library,
+                    to: ZoneKind::Hand,
+                    ..
+                }
+            )
+        })
+        .expect("the forest moved");
+    assert!(
+        *index < first_move,
+        "the reveal happens while the cards are in the library"
+    );
+}
+
+// CR 701.23e
+#[test]
+fn search_with_reveal_choosing_zero_logs_no_revealed() {
+    let (mut engine, _, _) = revealing_search_engine(1);
+    engine
+        .submit_search_choice(Vec::new())
+        .expect("zero is legal");
+    drain(&mut engine);
+    assert!(revealed_events(&engine).is_empty());
+}
+
+// CR 701.23e
+#[test]
+fn search_without_reveal_logs_no_revealed() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let forest = ObjectId(10);
+    let card = ObjectId(2);
+    let mut state = two_player_state(vec![forest]);
+    state.objects.insert(
+        forest,
+        card_object(
+            forest,
+            basic_land_definition(1, "Forest", "Forest"),
+            p0,
+            ZoneKind::Library,
+        ),
+    );
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            search_spell_definition(1, SearchDestination::Hand, true),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p0))
+        .unwrap()
+        .push_bottom(card);
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+    engine
+        .submit_search_choice(vec![forest])
+        .expect("candidate");
+    drain(&mut engine);
+    assert!(revealed_events(&engine).is_empty());
+}
+
+#[test]
+fn game_ops_search_lua_reveal_option_decodes() {
+    let mut runtime = ScriptRuntime::new();
+    let (effect, _handle) = runtime
+        .load_operation(
+            r#"return Game.Ops.Search({ supertypes = { "Basic" } }, 1, { reveal = true })"#,
+        )
+        .expect("primitive loads");
+    assert!(matches!(
+        effect,
+        Some(AbilityEffect::Search { reveal: true, .. })
+    ));
 }

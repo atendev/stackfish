@@ -232,7 +232,7 @@ Game.Ops.Scry(n)
 Game.Ops.Surveil(n)
 ```
 
-`Search` `opts`: `{ destination = "Hand" | "Battlefield", tapped = bool, enters_attached = bool, shuffle = bool }`, default `{ destination = "Hand", shuffle = true }`.
+`Search` `opts`: `{ destination = "Hand" | "Battlefield", tapped = bool, enters_attached = bool, shuffle = bool, reveal = bool }`, default `{ destination = "Hand", shuffle = true, reveal = false }`.
 
 ### Countering and copying
 

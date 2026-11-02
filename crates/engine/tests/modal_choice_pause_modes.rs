@@ -87,6 +87,7 @@ fn search(card_types: CardTypeSet, destination: SearchDestination) -> AbilityEff
         count: 1,
         destination,
         shuffle_after: true,
+        reveal: false,
     }
 }
 

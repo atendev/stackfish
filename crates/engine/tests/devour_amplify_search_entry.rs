@@ -157,6 +157,7 @@ fn search_spell_definition(destination: SearchDestination) -> CardDefinition {
             count: 1,
             destination,
             shuffle_after: true,
+            reveal: false,
         }),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),

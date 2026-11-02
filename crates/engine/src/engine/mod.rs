@@ -563,7 +563,9 @@ impl Engine {
         let has_real_script = matches!(script_ref, ScriptReference::Inline(s) if !s.is_empty());
         if has_real_script && let Err(e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
-                message: format!("card script error on source {source:?}: {e:?}"),
+                message: self
+                    .state
+                    .script_error_message("card script error", source, &e),
             }]);
         }
     }
@@ -1129,6 +1131,7 @@ impl Engine {
                 count,
                 destination,
                 shuffle_after,
+                reveal,
             } => {
                 let status = StepStatus::AwaitingSearchChoice {
                     player: controller,
@@ -1143,6 +1146,7 @@ impl Engine {
                     count,
                     destination,
                     shuffle_after,
+                    reveal,
                 };
                 status
             }

@@ -187,6 +187,26 @@ impl GameState {
         self.objects.get(&id)
     }
 
+    /// The text of a `ScriptError` about `source`. Every Seat reads it, so a
+    /// source in a hidden zone (CR 400.2) gets neither its id nor `detail`, which
+    /// can quote the card's script.
+    // TODO: only the library and the hand count as hidden; a face-down source would leak once one exists (CR 708.2)
+    pub(crate) fn script_error_message(
+        &self,
+        label: &str,
+        source: ObjectId,
+        detail: &dyn std::fmt::Debug,
+    ) -> String {
+        let hidden = self
+            .object(source)
+            .is_some_and(|o| matches!(o.zone, ZoneKind::Library | ZoneKind::Hand));
+        if hidden {
+            format!("{label} on a hidden source")
+        } else {
+            format!("{label} on source {source:?}: {detail:?}")
+        }
+    }
+
     pub fn object_mut(&mut self, id: ObjectId) -> Option<&mut GameObject> {
         self.objects.get_mut(&id)
     }

@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
-use stackfish_engine::{CardTypeSet, ManaCost};
+use stackfish_engine::{CardTypeSet, ManaCost, ScriptReference};
 use stackfish_host::{FixtureCardSource, Session};
 use stackfish_testutil::minimal_card_definition;
 
@@ -25,6 +25,11 @@ fn cards() -> FixtureCardSource {
     FixtureCardSource::new()
         .with("bear", card(1, "Bear", CardTypeSet::CREATURE))
         .with("land", card(2, "Land", CardTypeSet::LAND))
+        .with("broken", {
+            let mut broken = card(3, "Secret Broken", CardTypeSet::CREATURE);
+            broken.script_ref = ScriptReference::Inline("return Game.Ops.Nope(".to_string());
+            broken
+        })
 }
 
 // Alternating cards, so any seven-card hand holds both kinds.
@@ -637,4 +642,38 @@ fn the_game_over_state_is_still_pollable() {
         !body(&polled)["events"].as_array().unwrap().is_empty(),
         "Seat 1 collects its events after the end"
     );
+}
+
+// CR 400.2
+#[test]
+fn a_broken_script_on_a_hidden_card_reaches_no_seat_with_its_id_or_detail() {
+    let deck = json!({ "deck": [
+        { "card": "broken", "count": 10 },
+        { "card": "land", "count": 10 },
+    ] });
+    let mut table = Table::new(json!({
+        "players": [deck.clone(), deck],
+        "spectators": [{}, { "omniscient": true }],
+        "format": "standard",
+        "overrides": { "shuffle_libraries": false, "skip_mulligan": true },
+        "seed": "7",
+    }));
+    table.sync();
+    table.advance();
+    for seat in 0..4u32 {
+        let errors: Vec<&Value> = table
+            .events(seat)
+            .iter()
+            .filter(|e| e["kind"] == "script_error")
+            .collect();
+        assert!(!errors.is_empty(), "seat {seat} gets the script errors");
+        for error in errors {
+            let text = error.to_string();
+            assert!(text.contains("hidden source"), "seat {seat}: {text}");
+            assert!(
+                !text.contains("ObjectId") && !text.contains("Nope"),
+                "seat {seat}: {text}"
+            );
+        }
+    }
 }

@@ -7,7 +7,7 @@ use crate::commands;
 use crate::replacement;
 use crate::types::ability::SearchDestination;
 use crate::types::counter::CounterKind;
-use crate::types::event::GameEventKind;
+use crate::types::event::{GameEventKind, RevealedCard};
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, Target};
 use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
@@ -173,15 +173,20 @@ impl Engine {
         let ProcessState::AwaitingSearchChoice {
             stack_id,
             controller,
-            events_so_far,
+            mut events_so_far,
             destination,
             shuffle_after,
+            reveal,
             ..
         } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
 
+        // CR 701.23e, 701.20b: shown while still in the library, so it precedes the moves.
+        if reveal {
+            events_so_far.extend(self.reveal_event(controller, ZoneKind::Library, &chosen));
+        }
         self.process_state = self.continue_search_battlefield_entry(
             chosen.into(),
             destination,
@@ -563,6 +568,7 @@ impl Engine {
             last_known_info: None,
         };
         replacement::apply_one_replacement(&mut self.state, object, candidate_event);
+        events_so_far.extend(self.reveal_event(controller, ZoneKind::Hand, &revealed));
         let amount = per_card * revealed.len() as i32;
         if amount > 0 {
             events_so_far.push(GameEventKind::CounterAdded {
@@ -580,5 +586,31 @@ impl Engine {
             events_so_far,
         );
         Ok(())
+    }
+
+    /// CR 701.20a, 701.20b: one `Revealed` for `cards` as they sit in `zone`, or
+    /// `None` when nothing is revealed. The cards do not move.
+    // TODO: a revealed card is not tracked as staying revealed until its effect completes (CR 701.20a)
+    pub(in crate::engine) fn reveal_event(
+        &self,
+        player: PlayerId,
+        zone: ZoneKind,
+        cards: &[ObjectId],
+    ) -> Option<GameEventKind> {
+        if cards.is_empty() {
+            return None;
+        }
+        let cards = cards
+            .iter()
+            .filter_map(|&object| {
+                let snapshot = self.state.object(object)?.clone();
+                Some(RevealedCard { object, snapshot })
+            })
+            .collect();
+        Some(GameEventKind::Revealed {
+            player,
+            zone,
+            cards,
+        })
     }
 }

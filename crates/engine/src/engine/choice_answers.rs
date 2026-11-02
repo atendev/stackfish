@@ -189,7 +189,9 @@ impl Engine {
         );
         if let Err(ref e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
-                message: format!("operation script error on source {stack_id:?}: {e:?}"),
+                message: self
+                    .state
+                    .script_error_message("operation script error", stack_id, &e),
             }]);
         }
         let outcome = result.unwrap_or(OperationOutcome::Finished);
@@ -235,7 +237,9 @@ impl Engine {
         );
         if let Err(ref e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
-                message: format!("operation script error on source {stack_id:?}: {e:?}"),
+                message: self
+                    .state
+                    .script_error_message("operation script error", stack_id, &e),
             }]);
         }
         let outcome = result.unwrap_or(OperationOutcome::Finished);
@@ -322,6 +326,7 @@ impl Engine {
         }
         let ProcessState::AwaitingAmplifyChoice {
             object,
+            controller,
             per_card,
             stack_id,
             mut events_so_far,
@@ -338,6 +343,7 @@ impl Engine {
             last_known_info: None,
         };
         replacement::apply_one_replacement(&mut self.state, object, candidate_event);
+        events_so_far.extend(self.reveal_event(controller, ZoneKind::Hand, &revealed));
         let amount = per_card * revealed.len() as i32;
         if amount > 0 {
             events_so_far.push(GameEventKind::CounterAdded {

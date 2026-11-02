@@ -119,9 +119,10 @@ pub fn collect_triggers(
                 let matched = match runtime.invoke_condition(*handle, &ctx) {
                     Ok(v) => v,
                     Err(e) => {
-                        errors.push(format!(
-                            "condition script error on source {:?}: {e:?}",
-                            ability.source
+                        errors.push(state.script_error_message(
+                            "condition script error",
+                            ability.source,
+                            &e,
                         ));
                         false
                     }
@@ -139,9 +140,10 @@ pub fn collect_triggers(
                 match runtime.invoke_intervening_if(*handle, state, ability.source, controller) {
                     Ok(v) => v,
                     Err(e) => {
-                        errors.push(format!(
-                            "intervening-if script error on source {:?}: {e:?}",
-                            ability.source
+                        errors.push(state.script_error_message(
+                            "intervening-if script error",
+                            ability.source,
+                            &e,
                         ));
                         false
                     }
@@ -213,9 +215,10 @@ pub fn collect_triggers(
                 {
                     Ok(v) => v,
                     Err(e) => {
-                        errors.push(format!(
-                            "intervening-if script error on departed source {:?}: {e:?}",
-                            ability.source
+                        errors.push(state.script_error_message(
+                            "intervening-if script error (departed)",
+                            ability.source,
+                            &e,
                         ));
                         false
                     }

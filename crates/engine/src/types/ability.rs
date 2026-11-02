@@ -431,7 +431,9 @@ pub enum AbilityEffect {
     /// controller as `viewer`), and `Engine::submit_search_choice` only checks
     /// that the answer is a subset of `candidates` of size at most `count`.
     // TODO: a search for an undefined quality or a bare quantity, a mandatory find (CR 701.23d); this variant is quality-search only
-    // TODO: reveal the found card (CR 701.23e); there is no reveal concept yet
+    ///
+    /// CR 701.23e: `reveal` logs one `Revealed` for the found cards before they
+    /// move. Without it the found cards stay hidden.
     // TODO: an effect that redirects "search" to "the top N instead" (CR 701.23f); it needs its own `EventFilter::Search`
     // TODO: simultaneous multiplayer search in APNAP order (CR 701.23i)
     Search {
@@ -439,6 +441,7 @@ pub enum AbilityEffect {
         count: u32,
         destination: SearchDestination,
         shuffle_after: bool,
+        reveal: bool,
     },
     /// `Game.Ops.BecomeCopy()` (CR 707.2, 707.3, layer 1): the source becomes
     /// a copy of its first chosen target's current copiable values (Vesuvan

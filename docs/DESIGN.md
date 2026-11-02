@@ -84,6 +84,18 @@ default filtering/grouping over the same underlying stream, not two separate log
 First-pass event taxonomy lives in `crates/engine/src/types/event.rs`; expect additions as later phases
 surface gaps.
 
+### Writing events
+
+- A free-text event field never names a hidden card or carries the id of an object in a hidden zone
+  (CR 400.2). The host filters events by their typed fields, so it cannot scrub free text, and every
+  Seat reads that text. The fields are `ScriptError.message`, `StateBasedActionApplied.description`
+  and `RngDrawn.purpose`.
+- Build every `ScriptError` message with `GameState::script_error_message`. A source in a library or
+  a hand gets a fixed message with no id and no Lua detail, since the detail can quote the script.
+- `RngDrawn.purpose` is a fixed label. `StateBasedActionApplied` has no producer.
+- Showing a hidden card is a typed `Revealed` event, never text. The host then shows the card's
+  identity to every Seat and its id only where the Seat can see the zone.
+
 ## Core modules
 
 (From the adaptation doc, adjusted for N-player + step-able core. The cleanup map split the

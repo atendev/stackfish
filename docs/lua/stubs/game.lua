@@ -762,10 +762,10 @@ function GameOpsTable.Scry(n) end
 ---@return GameOpsValue
 function GameOpsTable.Surveil(n) end
 
---- destination default "Hand"; shuffle default true.
+--- destination default "Hand"; shuffle default true; reveal default false.
 ---@param filter FilterTable
 ---@param count integer
----@param opts? { destination?: "Hand"|"Battlefield", tapped?: boolean, enters_attached?: boolean, shuffle?: boolean }
+---@param opts? { destination?: "Hand"|"Battlefield", tapped?: boolean, enters_attached?: boolean, shuffle?: boolean, reveal?: boolean }
 ---@return GameOpsValue
 function GameOpsTable.Search(filter, count, opts) end
 
