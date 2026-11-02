@@ -39,6 +39,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 031 Remaining legal_actions gaps. A `DeclareBands` Decision lists attackers that can band and closes once per combat. A Payment Decision lists the payer's mana abilities and accepts an `Action` for one. Script picks list abilities on the stack. Timing grants moved to 076. [closed/031-legal-actions-gaps.md]
 - 049 Add unit tests for engine helpers that need a small GameState or layer stubs. Added `#[cfg(test)]` coverage for `layers.rs`, `commands/legality.rs` and `commands/combat/predicate.rs` with minimal state fixtures. [closed/049-add-unit-tests-stubbed-helpers.md]
 - 032 Host rejection text and payment cost filters. Engine answer errors have `Display` text in `engine/error_text.rs`, and a Seat gets that sentence in place of Debug output. 030's payment `candidates` closed the cost filter gap, so the filter stays off the wire. Engine terms in some `IllegalAction` strings are still a TODO. [closed/032-host-rejection-text-cost-filters.md]
+- 033 Run the Godot smoke test in CI. The `godot-smoke` CI job runs `run.sh` in both safeguard modes on Godot 4.2.2 and 4.7.2, each download checked against its published SHA-512. Export and web builds were ruled out of scope. [closed/033-godot-smoke-test-ci.md]
 
 ## Not yet specified
 
@@ -53,12 +54,12 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - A playable Godot UI (scenes, card art, input handling). This is a separate effort after this map.
 - Netcode, matchmaking and lobbies. These belong to the host application, per DESIGN.md.
 - Answering several Decisions in parallel (for example, simultaneous mulligans). Ruled out in favour of one Decision at a time.
+- Godot export and web builds (a copy step into `res://`, a macOS `.framework`, an emscripten target). The destination only needs the adapter to load and step a game, so these go with the Godot UI effort. [closed/033-godot-smoke-test-ci.md]
 
 ## Frontier
 
 Open tickets, unblocked and unclaimed:
 
-- 033 Run the Godot smoke test in CI
 - 034 Unconfirmed gdext items
 - 072 Ledger events the snapshot fold needs
 - 073 Make GameState objects a BTreeMap
