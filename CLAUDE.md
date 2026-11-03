@@ -43,6 +43,7 @@ End every ticket, of either type, with a summary of the changes in five sentence
 ## Checks
 - Run `tools/install-hooks.sh` once per clone. The pre-commit hook runs `tools/check.sh` with no arguments: `cargo fmt --check` and `cargo clippy -D warnings`.
 - `tools/check.sh --full` adds `cargo test --workspace` and the `tools` unittests. CI runs it on every push to `master`.
+- CI's `godot-smoke` job runs `crates/godot/smoke/run.sh` on Godot 4.2.2 and 4.7.2. Locally, set `GODOT` to a Godot binary and run the same script.
 - CI has no `stackfish-db`, so `db_scripts_smoke.rs` skips there. `comment_diff.py` is not automatic; run it after comment-only passes.
 - `rust-toolchain.toml` pins the compiler. Move the pin in its own commit.
 
