@@ -551,6 +551,7 @@ pub fn pending_amplify_choice(
     if object_subtypes.is_empty() {
         return None;
     }
+    // TODO: Amplify matches any shared subtype, not only creature types CR 702.38a
     let candidates: Vec<ObjectId> = state
         .objects
         .values()
