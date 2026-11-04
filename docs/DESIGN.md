@@ -219,8 +219,8 @@ original plan:
   `Debug` text without the ledger and id counters, with object, ability, event, sequence and script
   ids replaced by their rank and hash collections sorted. Values the engine reads from the ledger at
   priority are folded in. Details in `docs/implementation/30-loop-detection.md`.
-- Any code that walks a `HashMap` and produces events or ids must sort first. `GameState::objects` is
-  one. The state-based action collectors sort by `ObjectId` for this reason.
+- `GameState::objects` is a `BTreeMap`, so every walk over it is in `ObjectId` order. Any code that
+  walks a `HashMap` and produces events or ids must still sort first.
 
 ## Open questions
 

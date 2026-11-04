@@ -42,6 +42,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 033 Run the Godot smoke test in CI. The `godot-smoke` CI job runs `run.sh` in both safeguard modes on Godot 4.2.2 and 4.7.2, each download checked against its published SHA-512. Export and web builds were ruled out of scope. [closed/033-godot-smoke-test-ci.md]
 - 034 Unconfirmed gdext items. Research in `docs/research/gdext-unconfirmed.md`. mlua on emscripten is unverified for this repo, and gdext web export is experimental. A `#[func]` `Result` with `Unexpected` logs and fails the call with code 1337, so the byte-level error envelope stays. Editor hot reload drops the Session and its Lua state. [closed/034-unconfirmed-gdext-items.md]
 - 072 Ledger events the snapshot fold needs. Every life change writes `LifeChanged`, damage included, so life folds from `life_changed` alone. Infect writes `PlayerCounterAdded`, priority changes write `PrioritySet`, and CR 800.4a writes one `LeftGame` per object and passes priority on. A snapshot drops a revealed identity. `BEHAVIOUR_REV` is 3. [closed/072-ledger-events-for-snapshot-fold.md]
+- 073 Make GameState objects a BTreeMap. Every walk over `objects` is in `ObjectId` order, which puts the Devour, Amplify, copy and entry-attach candidates in id order. The replay pin did not move. [closed/073-objects-btreemap.md]
 
 ## Not yet specified
 
@@ -49,7 +50,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
 
-- Audit of unordered `HashMap` walks over game state that can reach a host (found by 014, which fixed three). The 500-seed proof run found no more, but the proof set covers only part of the engine.
+- Audit of unordered `HashMap` walks over game state that can reach a host (found by 014, which fixed three). `objects` is settled by 073. A lint for the rest is 075.
 
 ## Out of scope
 
@@ -62,10 +63,10 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 073 Make GameState objects a BTreeMap
+- 074 Proof cards for ordered choices
+- 075 Decide a lint against hash-ordered walks
 - 076 Timing permissions granted by effects
 
 Blocked:
 
-- 074 Proof cards for ordered choices, by 073
-- 075 Decide a lint against hash-ordered walks, by 073
+- none

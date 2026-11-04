@@ -84,7 +84,7 @@ fn state_with_cost(
     let fodder = ObjectId(1);
     let hand_card = ObjectId(2);
 
-    let mut objects = HashMap::new();
+    let mut objects = std::collections::BTreeMap::new();
     objects.insert(
         source,
         object(

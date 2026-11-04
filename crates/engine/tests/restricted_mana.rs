@@ -295,7 +295,7 @@ fn restricted_mana_cannot_fund_an_activated_ability_cost() {
         mode_choice: ModeChoice::Exactly(1),
     };
 
-    let mut objects = HashMap::new();
+    let mut objects = std::collections::BTreeMap::new();
     objects.insert(
         source,
         card_object(source, source_definition, p0, ZoneKind::Battlefield),

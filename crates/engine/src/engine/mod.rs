@@ -513,7 +513,7 @@ impl Engine {
     /// graveyard or exile that hasn't had it run, so `SetFunctionsFrom` abilities
     /// register. A sweep at trigger collection covers every zone-move path.
     pub(in crate::engine) fn sync_off_battlefield_scripts(&mut self) {
-        // Sorted because `objects` order isn't deterministic and each run allocates ability ids.
+        // Sorted by id because each run allocates ability ids.
         let mut pending: Vec<ObjectId> = self
             .state
             .objects

@@ -45,9 +45,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - Done in ticket 030 (`30-payment-candidates.md`): the bot accepts `may_cast` and pays sacrifice, discard, tap and
     graveyard-exile costs from the Payment candidates. No byte-level game offers `may_cast` yet (no Lua constructor
     for madness or cascade). Phyrexian stays partly open: the bot keeps 1 life and assumes 20 starting life.
-  - Other unordered `HashMap` walks may still decide an order a host sees. Grep `objects.values()` before trusting a
-    new replay test. Ticket 025 sorted the five state-based action collectors that walked `objects` (the same seed
-    sometimes ordered `Unattached` events differently); 8 more `objects` walks outside `sba.rs` are unchecked (ticket 028).
+  - `GameState::objects` is a `BTreeMap`, so its walks are in `ObjectId` order (`32-objects-btreemap.md`). Other
+    `HashMap` fields are keyed lookups. A lint against hash-ordered walks is ticket 075.
   - No main proof card uses a sacrifice or discard cost (`cost_proof_game.rs` has its own set), menace or a must-attack rule (the keyword exists since ticket
     026, but no proof card has it), so the engine atomicity item (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it, and
     `Bot::injecting_illegal_answers` now sends illegal Answers at every Decision (see `21-atomicity.md`).

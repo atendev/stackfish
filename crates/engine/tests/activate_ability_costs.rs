@@ -1,7 +1,7 @@
 //! CR 602: activated-ability additional costs (`Sacrifice`, `Discard`, `TapPermanents`, `LifePayment`) validate and commit.
 //! A combined `TapSelf` plus `Sacrifice` cost needs both parts. CR 118.3, 118.8, 118.10.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
@@ -48,7 +48,7 @@ fn state_with_cost(
     let tappable_a = ObjectId(3);
     let tappable_b = ObjectId(4);
 
-    let mut objects = HashMap::new();
+    let mut objects = BTreeMap::new();
     objects.insert(
         source,
         object(

@@ -298,9 +298,8 @@ fn collect_dying_creatures(
     state: &GameState,
     script_runtime: &ScriptRuntime,
 ) -> Vec<DyingCandidate> {
-    // `state.objects` is a `HashMap`, so the order is fixed by id. Creatures
-    // that die together move to the graveyard in this order and take their new
-    // ids in it, so an unordered walk would give a replay different ids.
+    // Creatures that die together move to the graveyard in id order and take
+    // their new ids in it, so a replay depends on this order.
     let mut candidates: Vec<ObjectId> = state
         .objects
         .values()
@@ -345,8 +344,8 @@ fn collect_dying_creatures(
 
 /// CR 704.5j: the first group of two or more legendary permanents sharing a
 /// controller and effective name, for `Engine::submit_legend_rule_choice`. Applies
-/// to any permanent type. Candidates and groups are sorted by id because
-/// `state.objects` is a `HashMap`.
+/// to any permanent type. Candidates and groups are sorted by id because a
+/// host sees them.
 fn find_legend_rule_group(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -424,7 +423,7 @@ fn collect_world_rule_losers(
     if world_objects.len() < 2 {
         return Vec::new();
     }
-    // `state.objects` is a `HashMap`, so sort for a replay-stable death order.
+    // Sorted by id for a replay-stable death order.
     world_objects.sort_by_key(|(id, _)| *id);
     let max_timestamp = world_objects
         .iter()

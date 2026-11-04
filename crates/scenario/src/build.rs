@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use stackfish_carddb::CardDb;
 use stackfish_engine::engine::Engine;
@@ -527,7 +527,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> InitialState {
     let card_specs: HashMap<&str, &CardSpec> =
         file.cards.iter().map(|c| (c.key.as_str(), c)).collect();
 
-    let mut objects: HashMap<ObjectId, GameObject> = HashMap::new();
+    let mut objects: BTreeMap<ObjectId, GameObject> = BTreeMap::new();
     let mut abilities: Vec<RegisteredAbility> = Vec::new();
     let mut continuous_effects: Vec<ContinuousEffect> = Vec::new();
 

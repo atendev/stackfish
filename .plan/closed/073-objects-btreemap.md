@@ -3,7 +3,7 @@ id: 073
 title: Make GameState objects a BTreeMap
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: []
 claimed: false
 ---
@@ -23,4 +23,4 @@ Change `GameState::objects` from `HashMap<ObjectId, GameObject>` to `BTreeMap<Ob
 
 ## Resolution
 
-<Filled in at close: the decision and the reason for it.>
+`GameState::objects` is a `BTreeMap<ObjectId, GameObject>`, so every walk over it is in ascending `ObjectId` order. The four unsorted candidate walks (Devour, Amplify, copy, entry attach) need no code of their own. `candidate_order.rs` and a `legality.rs` unit test pin their order with 24 scattered ids, through `open_decision` for Devour and entry attach. The existing sorts stay, with comments that give a reason still true. The proof game reaches none of the four walks, so the replay pin did not move and `BEHAVIOUR_REV` stays 3. The compiler found 5 integration-test sites the ticket did not list. Notes in `docs/implementation/32-objects-btreemap.md`.

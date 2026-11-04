@@ -162,7 +162,7 @@ impl Engine {
             })
             .map(|(id, _)| *id)
             .collect();
-        // HashMap order is unstable; sort so the ledger is deterministic.
+        // Sorted so the ledger order is pinned by id.
         ids.sort_by_key(|id| id.0);
 
         let mut events = Vec::with_capacity(ids.len());

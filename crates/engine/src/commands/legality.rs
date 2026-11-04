@@ -643,8 +643,7 @@ pub(crate) fn legal_target_candidates_for_x(
     } else {
         requirement
     };
-    // Sorted by id: `state.objects` is a `HashMap`, and a candidate list that
-    // follows its order differs from run to run.
+    // Sorted by id: a host sees this candidate list, so its order is pinned.
     let mut object_ids: Vec<ObjectId> = state.objects.keys().copied().collect();
     object_ids.sort();
     let object_candidates = object_ids.into_iter().map(Target::Object);
@@ -1711,5 +1710,37 @@ mod tests {
             Color::White,
         )]));
         assert!(combine_chosen_modes(&[m1, m2], &[0, 1]).is_err());
+    }
+
+    // CR 301.5e
+    #[test]
+    fn entry_attach_candidates_come_in_ascending_id_order() {
+        let p0 = PlayerId(0);
+        let creatures: Vec<GameObject> = (0..24)
+            .map(|i| creature_with_pt(ObjectId(100 + (i * 37) % 97 * 3), p0, 1, 1))
+            .collect();
+        let state = state_with(creatures);
+        let mut sword = object(ObjectId(5), p0, CardTypeSet::ARTIFACT, ZoneKind::Hand).definition;
+        sword.subtypes = vec![crate::types::card::Subtype("Equipment".to_string())];
+
+        let candidates = crate::commands::attach::legal_entry_attach_candidates(
+            &state,
+            &ScriptRuntime::new(),
+            &sword,
+            p0,
+            ObjectId(5),
+        )
+        .expect("Equipment is attach-capable");
+        let ids: Vec<ObjectId> = candidates
+            .iter()
+            .map(|t| match t {
+                Target::Object(id) => *id,
+                other => panic!("expected an object candidate, got {other:?}"),
+            })
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids.len(), 24);
+        assert_eq!(ids, sorted);
     }
 }

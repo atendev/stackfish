@@ -1,4 +1,5 @@
-//! An SBA pass touching several objects must do so in the same order every run, since `GameState::objects` is a `HashMap`. An unsorted collector would write different ledgers for one seed.
+//! An SBA pass touching several objects must do so in `ObjectId` order every run.
+//! Any other order would write different ledgers for one seed.
 
 use stackfish_engine::sba::{SbaOutcome, check_state_based_actions};
 use stackfish_engine::script::ScriptRuntime;

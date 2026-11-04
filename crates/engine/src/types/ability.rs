@@ -2074,7 +2074,7 @@ mod tests {
             lands_played_this_turn: HashMap::new(),
             combat: None,
             last_active_turn_number: HashMap::new(),
-            objects: HashMap::new(),
+            objects: std::collections::BTreeMap::new(),
             zones: Vec::new(),
             stack: Vec::new(),
             continuous_effects: Vec::new(),

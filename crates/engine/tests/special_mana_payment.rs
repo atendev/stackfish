@@ -246,7 +246,7 @@ fn snow_land(id: ObjectId, supertypes: SupertypeSet) -> GameObject {
 
 fn engine_with_land(land: GameObject) -> Engine {
     let id = land.object_id;
-    let mut objects = HashMap::new();
+    let mut objects = std::collections::BTreeMap::new();
     objects.insert(id, land);
     Engine::new(GameState {
         objects,

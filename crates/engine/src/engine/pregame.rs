@@ -1,7 +1,7 @@
 //! Pregame setup: building an `Engine` from a `GameConfig`, opening hands and
 //! the mulligan loop. See `DESIGN.md`.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::commands;
 use crate::engine_context::PipelineExit;
@@ -32,7 +32,7 @@ impl Engine {
 
         let mut players: Vec<PlayerState> = Vec::new();
         let mut zones: Vec<Zone> = Vec::new();
-        let mut objects: HashMap<ObjectId, GameObject> = HashMap::new();
+        let mut objects: BTreeMap<ObjectId, GameObject> = BTreeMap::new();
         let mut next_object_id: u64 = 0;
         let mut next_sequence_no: u64 = 0;
 
@@ -213,7 +213,7 @@ impl Engine {
     /// this engine's runtime because a custom-function `ScriptHandle` is only valid there.
     // TODO: load `alternative_costs()` and `buyback_cost()` script declarations
     fn load_script_declarations(&mut self) {
-        // Sorted: `objects` is a `HashMap`, and a failing script logs an event.
+        // Sorted by id: a failing script logs an event.
         let mut ids: Vec<ObjectId> = self.state.objects.keys().copied().collect();
         ids.sort();
         let mut loaded: HashMap<String, (Option<AbilityEffect>, Option<TargetSpec>)> =

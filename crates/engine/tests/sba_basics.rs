@@ -169,7 +169,8 @@ fn two_lethally_damaged_creatures_die_in_the_same_pass() {
     );
 }
 
-// Creatures that die together get new ids in ascending order of their old ids, since an unordered walk of the objects HashMap would fail this about 11 times in 12.
+// CR 704.3
+// Simultaneous deaths still need one order, so they take new ids in ascending order of their old ids.
 #[test]
 fn creatures_that_die_together_leave_in_id_order() {
     let mut state = base_state();
