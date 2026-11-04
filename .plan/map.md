@@ -43,6 +43,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 034 Unconfirmed gdext items. Research in `docs/research/gdext-unconfirmed.md`. mlua on emscripten is unverified for this repo, and gdext web export is experimental. A `#[func]` `Result` with `Unexpected` logs and fails the call with code 1337, so the byte-level error envelope stays. Editor hot reload drops the Session and its Lua state. [closed/034-unconfirmed-gdext-items.md]
 - 072 Ledger events the snapshot fold needs. Every life change writes `LifeChanged`, damage included, so life folds from `life_changed` alone. Infect writes `PlayerCounterAdded`, priority changes write `PrioritySet`, and CR 800.4a writes one `LeftGame` per object and passes priority on. A snapshot drops a revealed identity. `BEHAVIOUR_REV` is 3. [closed/072-ledger-events-for-snapshot-fold.md]
 - 073 Make GameState objects a BTreeMap. Every walk over `objects` is in `ObjectId` order, which puts the Devour, Amplify, copy and entry-attach candidates in id order. The replay pin did not move. [closed/073-objects-btreemap.md]
+- 074 Proof cards for ordered choices. Ravenous Ooze, Rat Herald, Mimic Pool and Armory Call put Devour, Amplify, Copy and Attach on entry into the proof decks, and the seed loop asserts all four open. They found a Devour creature offered as its own sacrifice, now excluded (CR 614.12). `BEHAVIOUR_REV` is 4. [closed/074-proof-cards-for-ordered-choices.md]
 
 ## Not yet specified
 
@@ -63,9 +64,9 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 074 Proof cards for ordered choices
 - 075 Decide a lint against hash-ordered walks
 - 076 Timing permissions granted by effects
+- 077 A Clone offered as a copy of itself
 
 Blocked:
 
