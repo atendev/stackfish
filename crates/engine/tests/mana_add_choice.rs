@@ -27,7 +27,7 @@ fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -
 }
 
 fn state_with_ability(source: ObjectId, controller: PlayerId, effect: AbilityEffect) -> GameState {
-    let mut objects = std::collections::HashMap::new();
+    let mut objects = std::collections::BTreeMap::new();
     objects.insert(
         source,
         permanent_object(source, land_definition(), controller),

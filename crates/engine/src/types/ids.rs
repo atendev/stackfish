@@ -4,8 +4,8 @@
 pub struct PlayerId(pub u32);
 
 /// Unique per `GameObject`. A zone change that makes a new object (CR 400.7)
-/// mints a new id. `Ord` gives a stable tiebreak where `HashMap` iteration
-/// order is undefined.
+/// mints a new id. `Ord` is the order `GameState::objects` walks in and the
+/// tiebreak for any list a host or the ledger sees.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ObjectId(pub u64);
 

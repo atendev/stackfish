@@ -172,7 +172,7 @@ fn become_copy_ability_with_exceptions(
 
 fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>) -> GameState {
     let p0 = PlayerId(0);
-    let mut objects_map = HashMap::new();
+    let mut objects_map = std::collections::BTreeMap::new();
     let mut bf_contents = VecDeque::new();
     for obj in objects {
         bf_contents.push_back(obj.object_id);

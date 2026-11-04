@@ -88,5 +88,4 @@ Until the atomicity work (see `21-atomicity.md`), every spell in the set resolve
 - The bot tracks each Seat's life as the sum of its `life_changed` deltas. Damage, lifelink and life gain each write
   one, so it does not read `damage_dealt` (`31-snapshot-fold-events.md`). The fold test in `seat_visibility.rs` plays
   five proof games to the end, elimination included.
-- Other `HashMap` walks over `state.objects` may still decide an order that reaches a host. The 500-seed run found
-  none, but the proof set covers only part of the engine.
+- `state.objects` is a `BTreeMap`, so its walks are in id order (`32-objects-btreemap.md`).

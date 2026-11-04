@@ -42,7 +42,7 @@ Example: `GameState { step: Step::PreCombatMain, ..two_player_state(hand_battlef
 - `GameObject.zone` is only `ZoneKind`, never a full `Zone`.
 - No `zone_position` on object; ordering lives solely in `Zone.contents`.
 - Stack is separate `GameState.stack: Vec<StackObject>`, not a generic zone.
-- `GameState.objects: HashMap<ObjectId, GameObject>`.
+- `GameState.objects: BTreeMap<ObjectId, GameObject>`, so walks are in id order.
 - `GameEventKind::ZoneChange { object, from, to, last_known_info }` carries an LKI snapshot.
 
 ### Visibility

@@ -215,8 +215,7 @@ pub(crate) fn legal_aura_entry_candidates(
     let Some(TargetSpec::Primitive(req)) = &aura_definition.target_requirement else {
         return Vec::new();
     };
-    // Sorted by id: `state.objects` is a `HashMap`, and a candidate list that
-    // follows its order differs from run to run.
+    // Sorted by id: a host sees this candidate list, so its order is pinned.
     let mut object_ids: Vec<ObjectId> = state.objects.keys().copied().collect();
     object_ids.sort();
     let object_candidates = object_ids.into_iter().map(Target::Object);

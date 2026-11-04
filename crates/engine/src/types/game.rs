@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::types::ability::RegisteredAbility;
 use crate::types::combat::CombatState;
@@ -60,9 +60,9 @@ pub struct GameState {
     /// once for the first turn. `commands::has_summoning_sickness` compares it
     /// with `GameObject.controlled_since_turn`.
     pub last_active_turn_number: HashMap<PlayerId, u32>,
-    /// Single source of truth for object data. `zones` holds only ids, so it
-    /// alone owns order.
-    pub objects: HashMap<ObjectId, GameObject>,
+    /// Single source of truth for object data. `zones` holds only ids and owns
+    /// zone order. Keyed by `ObjectId` so every walk is in id order.
+    pub objects: BTreeMap<ObjectId, GameObject>,
     /// Every per-player zone plus the shared battlefield and exile, flat,
     /// because `Zone.owner` says whose it is. The stack is separate in `stack`
     /// because it needs `StackObject` metadata.
@@ -273,7 +273,7 @@ mod tests {
             lands_played_this_turn: HashMap::new(),
             combat: None,
             last_active_turn_number: HashMap::new(),
-            objects: HashMap::new(),
+            objects: BTreeMap::new(),
             zones: vec![
                 Zone {
                     kind: ZoneKind::Hand,

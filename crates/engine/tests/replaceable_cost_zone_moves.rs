@@ -1,6 +1,6 @@
 //! CR 601.2h, 616.1: `Sacrifice` and `Discard` cost payments are replaceable zone-change proposals. `submit_payment` drives them through `continue_cost_zone_moves` (propose, replacement-check, commit), using `EventFilter::WouldMoveZone` to match the Hand from-zone that `WouldDie` cannot express.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -76,7 +76,7 @@ fn state_with_cost_and_ward(
     let hand_card = ObjectId(2);
     let ward = ObjectId(3);
 
-    let mut objects = HashMap::new();
+    let mut objects = BTreeMap::new();
     objects.insert(
         source,
         object(

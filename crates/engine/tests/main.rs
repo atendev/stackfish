@@ -23,6 +23,7 @@ mod bands_with_other_keyword_loss;
 mod beginning_phase;
 mod bloodthirst;
 mod buyback;
+mod candidate_order;
 mod cascade;
 mod cast_spell;
 mod cast_spell_payment;
