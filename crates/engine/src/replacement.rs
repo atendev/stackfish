@@ -456,7 +456,8 @@ pub fn apply_enters_battlefield_modifiers(
 /// grants no counters.
 ///
 /// Returns `Some((per_creature, candidates))`: the creatures `controller`
-/// controls, narrowed to `quality` if set (CR 702.82c), `object` included.
+/// controls, narrowed to `quality` if set (CR 702.82c). `object` is never one,
+/// since it is still entering and is not on the battlefield to sacrifice (CR 614.12).
 /// `None` if no such effect is registered or there is no candidate, since zero
 /// is a legal choice that needs no pause (CR 702.82a).
 pub fn pending_devour_choice(
@@ -492,7 +493,10 @@ pub fn pending_devour_choice(
         .objects
         .values()
         .filter(|obj| {
-            if obj.zone != ZoneKind::Battlefield || obj.controller != controller {
+            if obj.object_id == object
+                || obj.zone != ZoneKind::Battlefield
+                || obj.controller != controller
+            {
                 return false;
             }
             let effective =

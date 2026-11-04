@@ -296,11 +296,11 @@ fn search_fetches_a_devour_creature_and_pauses_for_the_search_devour_choice() {
     assert_eq!(per_creature, 2);
     let mut sorted = candidates.clone();
     sorted.sort_by_key(|id| id.0);
-    let mut expected = vec![object, bear_a, bear_b];
+    let mut expected = vec![bear_a, bear_b];
     expected.sort_by_key(|id| id.0);
     assert_eq!(
         sorted, expected,
-        "the entrant itself plus both bears are all legal candidates"
+        "both bears are candidates and the entrant is not"
     );
 
     engine
@@ -343,6 +343,16 @@ fn search_devour_choosing_nothing_still_resolves_the_search_with_no_counters() {
     let devour_creature = ObjectId(10);
     let card = ObjectId(3);
     let mut state = base_state(vec![devour_creature]);
+    // The entrant is never its own candidate, so a bear makes the pause open.
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            ObjectId(1),
+            creature_definition(2, "Bear", Vec::new(), ""),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
     state.objects.insert(
         devour_creature,
         card_object(
@@ -563,6 +573,16 @@ fn search_devour_choice_rejects_a_candidate_not_offered() {
     let devour_creature = ObjectId(10);
     let card = ObjectId(3);
     let mut state = base_state(vec![devour_creature]);
+    // The entrant is never its own candidate, so a bear makes the pause open.
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            ObjectId(1),
+            creature_definition(2, "Bear", Vec::new(), ""),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
     state.objects.insert(
         devour_creature,
         card_object(
