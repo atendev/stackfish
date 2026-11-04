@@ -83,6 +83,6 @@ would make a wrong-thread call return `null` in debug builds and an empty array 
 - TODO(snapshot): a late-joining Seat has no request that returns the current state (from B4).
 - TODO(export): the `.gdextension` paths point at the workspace `target/`. Shipping needs a copy step into `res://` and a macOS
   `.framework`.
-- TODO(web): mlua's vendored Lua on emscripten is untested, and panics abort on Web.
-- TODO(hot-reload): `reloadable` is false in the smoke project. What a reload does to live Sessions is unconfirmed.
+- TODO(web): mlua's vendored Lua on emscripten is untested for this repo, and panics abort on Web (`docs/research/gdext-unconfirmed.md`).
+- TODO(hot-reload): `reloadable` is false in the smoke project. A reload drops live Sessions (`docs/research/gdext-unconfirmed.md`, section 3), and restoring one needs the snapshot request in TODO(snapshot).
 - `cargo test --workspace` runs the seven `Core` tests and builds the `cdylib`. Only the `godot-smoke` job loads it in Godot.

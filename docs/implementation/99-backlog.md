@@ -18,7 +18,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 8. CR 601.2d division of damage or counters among targets, then subtype and exclusion keys on `DestroyAll` filters.
 9. Done on `phase5/revealed-face-down-producers` (awaiting review): ticket 027, `Revealed` from a revealing search and from amplify, the free-text event rule in `DESIGN.md`, and the `ScriptError` redaction. `face_down` has no producer, since face-down mechanics are a design non-goal (item 12).
 10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target, stun counters, Condescend's X, Echo's control check, and CR 104.4b loop detection (ticket 029).
-11. Housekeeping, alongside the above: ticket 017 (stale notes and the `.plan/` commit policy), 034 (unconfirmed gdext items), the live `todo!()` body in `ScriptRuntime::invoke_cost` (not checked for reachability; the one in `commands/mod.rs` went away in ticket 035), and a stale-prose pass over `docs/lua/` (for example, "Protection from an attached Aura/Equipment" in `not-available-yet.md` may predate `14-protection-attach.md`).
+11. Housekeeping, alongside the above: ticket 017 (stale notes and the `.plan/` commit policy), the live `todo!()` body in `ScriptRuntime::invoke_cost` (not checked for reachability; the one in `commands/mod.rs` went away in ticket 035), and a stale-prose pass over `docs/lua/` (for example, "Protection from an attached Aura/Equipment" in `not-available-yet.md` may predate `14-protection-attach.md`).
 12. Design non-goals (planeswalkers, battles, double-faced, split and flip cards, sagas, face-down permanents, team rules). If the card database holds any of these, the loader should skip or reject them explicitly before then.
 
 ## Live TODOs / unresolved gaps
@@ -38,7 +38,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Godot adapter (`phase5/godot-adapter`, B6)**: see `20-godot-adapter.md`. Open items:
   - `create` serves only the proof card set until the carddb-backed `CardSource` exists.
   - Export (copy step into `res://`, macOS `.framework`), web, hot reload and the late-join snapshot are untouched.
-  - The smoke test needs a Godot binary, so CI does not run it.
+  - The `godot-smoke` CI job runs the smoke test on Godot 4.2.2 and 4.7.2.
 - **Proof game (`phase5/proof-game-bot`, B5)**: see `19-proof-game.md`. Fixed on the way: creatures outside the
   battlefield could attack and block, simultaneous deaths took ids in `HashMap` order, and a script with no
   `register_abilities` raised a `script_error`. Open items:
