@@ -343,7 +343,8 @@ fn search_devour_choosing_nothing_still_resolves_the_search_with_no_counters() {
     let devour_creature = ObjectId(10);
     let card = ObjectId(3);
     let mut state = base_state(vec![devour_creature]);
-    // The entrant is never its own candidate, so a bear makes the pause open.
+    // CR 614.12
+    // The entrant is not its own candidate, so the pause needs a bear.
     put_on_battlefield(
         &mut state,
         card_object(
@@ -573,7 +574,8 @@ fn search_devour_choice_rejects_a_candidate_not_offered() {
     let devour_creature = ObjectId(10);
     let card = ObjectId(3);
     let mut state = base_state(vec![devour_creature]);
-    // The entrant is never its own candidate, so a bear makes the pause open.
+    // CR 614.12
+    // The entrant is not its own candidate, so the pause needs a bear.
     put_on_battlefield(
         &mut state,
         card_object(

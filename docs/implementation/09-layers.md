@@ -303,8 +303,7 @@
   under a single freshly-shared source id.
 - Unresolved: Search doesn't offer this choice either, same "no real producer reaches this yet"
   posture `pending_devour_choice`'s own doc comment already takes. Self-copy (the entrant choosing
-  itself) isn't special-cased away, untested as its own scenario (same posture Devour's own
-  self-sacrifice case takes).
+  itself) isn't special-cased away, untested as its own scenario.
 
 ## Slice: script-effect-dependency (branch open)
 

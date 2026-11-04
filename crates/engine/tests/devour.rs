@@ -801,7 +801,8 @@ fn devour_choice_rejects_a_candidate_not_offered() {
         .zone_mut(ZoneKind::Hand, Some(p0))
         .unwrap()
         .push_bottom(card);
-    // The entrant is never its own candidate, so a bear makes the pause open.
+    // CR 614.12
+    // The entrant is not its own candidate, so the pause needs a bear.
     put_on_battlefield(
         &mut state,
         card_object(
