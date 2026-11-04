@@ -16,11 +16,15 @@ Four proof cards make bot games open the four Decisions whose candidates come fr
 - Cuts to keep 40 cards: red-green Grizzly Bear 4 to 2, Stone Giant 2 to 1, Cinder Duelist 4 to 3, Shock 3 to 2. Blue-black Wind Drake 4 to 3, Counterspell, Bounce and Divination 2 to 1.
 - The search opens Attach on entry only with two or more creatures on the battlefield. One candidate attaches with no pause, so this Decision is the rarest. With one Armory Call, 1 seed in 40 reached it; with two, 3 in 30 do.
 
+## Engine bug the cards found
+
+- `pending_devour_choice` listed the entering creature as one of its own candidates. A bot game where Ravenous Ooze devoured itself wrote the sacrifice before the Ooze's own entry, and the snapshot fold in `seat_visibility.rs` caught it. The entrant is still entering and not on the battlefield (CR 614.12), so it is no longer a candidate. A lone Devour creature enters with no choice.
+
 ## Tests
 
 - `the_same_seeds_give_a_byte_identical_game` plays seeds 0 to 10 twice each and asserts `Bot::mechanics_seen` holds all four labels across them. Seeds 8 and 9 open Amplify, and seed 10 opens Attach on entry.
 - `the_games_cast_every_card_of_the_set_and_play_every_land` lists the four new spells.
-- The proof game moved, so `BEHAVIOUR_REV` is 4 and the pin in `crates/host/tests/replay.rs` changed in a separate commit.
+- The proof game moved, so `BEHAVIOUR_REV` is 4 and the pin in `crates/host/tests/replay.rs` changed in commits of their own.
 - The ignored 500-seed run finishes with no rejected Answer.
 
 ## Not covered
