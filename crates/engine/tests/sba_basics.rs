@@ -9,6 +9,7 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{
     card_object, drain, player_state, progressed, put_on_battlefield, single_player_state,
+    two_player_state, zones,
 };
 
 fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
@@ -222,6 +223,65 @@ fn player_at_zero_life_is_eliminated() {
     assert!(state.player(p0).unwrap().eliminated);
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0].kind, GameEventKind::PlayerEliminated { player } if player == p0));
+}
+
+// CR 800.4a
+#[test]
+fn a_player_who_leaves_takes_their_objects_with_an_event_each_and_passes_priority_on() {
+    let (p0, p1, p2) = (PlayerId(0), PlayerId(1), PlayerId(2));
+    let mut state = two_player_state(zones(
+        p0,
+        p1,
+        &[ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield],
+    ));
+    state.players.push(player_state(p2));
+    state.turn_order.push(p2);
+    state.zones.push(Zone::new(ZoneKind::Hand, Some(p2)));
+    state.zones.push(Zone::new(ZoneKind::Library, Some(p2)));
+    state.priority_player = p1;
+    state.player_mut(p1).unwrap().life = 0;
+    let in_hand = ObjectId(1);
+    state.objects.insert(
+        in_hand,
+        card_object(in_hand, creature_definition(2, 2), p1, ZoneKind::Hand),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(p1))
+        .unwrap()
+        .push_bottom(in_hand);
+    let permanent = ObjectId(2);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            permanent,
+            creature_definition(2, 2),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
+
+    let kinds: Vec<GameEventKind> = events.into_iter().map(|e| e.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            GameEventKind::LeftGame {
+                object: in_hand,
+                zone: ZoneKind::Hand,
+                owner: p1,
+            },
+            GameEventKind::LeftGame {
+                object: permanent,
+                zone: ZoneKind::Battlefield,
+                owner: p1,
+            },
+            GameEventKind::PlayerEliminated { player: p1 },
+            GameEventKind::PrioritySet { player: p2 },
+        ]
+    );
+    assert_eq!(state.priority_player, p2);
+    assert!(state.object(in_hand).is_none() && state.object(permanent).is_none());
 }
 
 #[test]

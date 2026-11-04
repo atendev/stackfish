@@ -47,6 +47,7 @@ local s = {}
 function s.register_abilities(c)
     local t = Game.CreateTriggeredAbility(c)
     t:SetFunctionsFrom("Graveyard")
+    t:SetCondition(Game.Conditions.EachUpkeep)
     t:SetOperation(Game.Ops.GainLife(1))
     t:Register()
 
@@ -353,18 +354,23 @@ fn a_declared_trigger_only_fires_while_its_source_is_in_the_zone() {
         Some(&ZoneKind::Graveyard)
     );
 
-    // Defensive check in collect_triggers: pretend the card is somewhere else.
-    engine.state_mut().object_mut(card).unwrap().zone = ZoneKind::Hand;
     let event = GameEvent {
         event_id: EventId(900),
         sequence_no: SequenceNo(900),
-        kind: GameEventKind::TurnStarted {
-            player: PlayerId(0),
-            turn_number: 1,
-        },
+        kind: GameEventKind::StepStarted { step: Step::Upkeep },
         caused_by_command: None,
         parent_event: None,
     };
+    let (matches, _) = stackfish_engine::triggers::collect_triggers(
+        engine.state(),
+        &event,
+        &ScriptRuntime::new(),
+        &[],
+    );
+    assert_eq!(matches.len(), 1, "fires from the graveyard");
+
+    // Defensive check in collect_triggers: pretend the card is somewhere else.
+    engine.state_mut().object_mut(card).unwrap().zone = ZoneKind::Hand;
     let (matches, _) = stackfish_engine::triggers::collect_triggers(
         engine.state(),
         &event,

@@ -203,8 +203,9 @@ impl Engine {
         self.set_pending_payment(outcome.requires_payment);
 
         // Only the engine writes `priority_player`; commands just report intent.
+        // Appended so the ledger shows the pass before the handoff.
         if let PriorityHandoff::To(player) = outcome.priority_handoff {
-            self.state.priority_player = player;
+            outcome.events.extend(self.set_priority(player));
         }
 
         // One place decides what "everyone just passed" means, so no command arm

@@ -263,6 +263,11 @@ pub(crate) enum WireEventKind {
         counter: WireCounterKind,
         amount: i32,
     },
+    PlayerCounterAdded {
+        player: u32,
+        counter: WireCounterKind,
+        amount: i32,
+    },
     Tapped {
         object: U64,
     },
@@ -336,6 +341,13 @@ pub(crate) enum WireEventKind {
     },
     PlayerEliminated {
         player: u32,
+    },
+    /// CR 800.4a: `object` is left out for a Seat that could not see it where it was.
+    LeftGame {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        object: Option<U64>,
+        zone: WireZone,
+        owner: u32,
     },
     RngDrawn {
         purpose: String,
@@ -424,7 +436,7 @@ fn player(player: PlayerId) -> u32 {
 
 impl WireEventKind {
     /// The wire form of an event whose fields do not depend on who is looking.
-    /// `None` for the four events that carry objects the viewer may not see:
+    /// `None` for the five events that carry objects the viewer may not see:
     /// `crate::view` builds those per Seat. There is no wildcard arm, so a new
     /// engine event fails to compile here until it is mirrored.
     pub(crate) fn plain(kind: &GameEventKind) -> Option<Self> {
@@ -433,7 +445,8 @@ impl WireEventKind {
             GameEventKind::ZoneChange { .. }
             | GameEventKind::Cycled { .. }
             | GameEventKind::MadnessExiled { .. }
-            | GameEventKind::Revealed { .. } => return None,
+            | GameEventKind::Revealed { .. }
+            | GameEventKind::LeftGame { .. } => return None,
             GameEventKind::LifeChanged { player: p, delta } => W::LifeChanged {
                 player: player(*p),
                 delta: *delta,
@@ -455,6 +468,15 @@ impl WireEventKind {
                 amount,
             } => W::CounterAdded {
                 object: (*object).into(),
+                counter: kind.into(),
+                amount: *amount,
+            },
+            GameEventKind::PlayerCounterAdded {
+                player: p,
+                kind,
+                amount,
+            } => W::PlayerCounterAdded {
+                player: player(*p),
                 counter: kind.into(),
                 amount: *amount,
             },

@@ -38,11 +38,17 @@ impl Engine {
         &mut self,
         top: &StackObject,
         amount: i32,
-        events: Vec<GameEventKind>,
+        mut events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        // TODO: write a `LifeChanged` event, so a Seat can follow life from events CR 119.3
-        if let Some(player) = self.state.player_mut(top.controller) {
+        // CR 119.3
+        if amount != 0
+            && let Some(player) = self.state.player_mut(top.controller)
+        {
             player.gain_life(amount);
+            events.push(GameEventKind::LifeChanged {
+                player: top.controller,
+                delta: amount,
+            });
         }
         ControlFlow::Continue(events)
     }

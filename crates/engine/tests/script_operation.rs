@@ -138,6 +138,36 @@ fn chain_applies_gain_life_with_one_pending_request() {
     );
 }
 
+// CR 119.3
+#[test]
+fn a_returned_gain_life_writes_its_life_changed_and_keeps_the_pending_kind() {
+    let runtime = ScriptRuntime::new();
+    let source = "local s = {}\nfunction s.operation()\n  return function(source, controller)\n\
+        return Game.Ops.Chain(Game.Ops.GainLife(2), Game.Ops.DealDamageTo({ kind = \"player\", id = 1 }, 3))\n  end\nend\nreturn s";
+    let (_, handle) = runtime
+        .build_operation(source)
+        .expect("script should load")
+        .expect("declares an operation");
+    let mut state = two_player_state(Vec::new());
+    let outcome = runtime
+        .invoke_operation(handle, &mut state, ObjectId(0), PlayerId(0))
+        .expect("a gain and one pending kind combine");
+
+    assert!(
+        matches!(outcome, OperationOutcome::PendingEvents(ref events) if events.len() == 1),
+        "got {outcome:?}"
+    );
+    assert_eq!(state.player(PlayerId(0)).unwrap().life, 22);
+    let kinds: Vec<_> = state.ledger.iter().map(|e| e.kind.clone()).collect();
+    assert_eq!(
+        kinds,
+        vec![GameEventKind::LifeChanged {
+            player: PlayerId(0),
+            delta: 2
+        }]
+    );
+}
+
 #[test]
 fn chain_mixing_two_pending_kinds_is_an_error_and_not_a_silent_drop() {
     let error = run_custom_operation(

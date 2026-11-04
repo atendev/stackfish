@@ -104,7 +104,8 @@ impl Engine {
                 // a trigger placed earlier in cleanup, before `since_ledger` was taken.
                 // Either one opens priority (CR 514.3a).
                 if self.state.ledger.len() > since_ledger || !self.state.stack.is_empty() {
-                    self.state.priority_player = self.state.active_player;
+                    let priority = self.set_priority(self.state.active_player);
+                    self.log_events(priority.into_iter().collect());
                     ProcessState::PriorityWindow
                 } else {
                     ProcessState::AdvanceTurnStep

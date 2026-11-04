@@ -13,7 +13,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 3. Done on `phase5/special-mana-payment` (awaiting review): ticket 030, hybrid, Phyrexian, `{C}`, snow and `{X}` payment, the bot's matching gaps, and snow mana from snow sources. See `26-special-mana-payment.md`. Still open: real cards that use these symbols have no scripts in the database yet (Dismember, Deathrite Shaman, Glaring Fleshraker are examples).
 4. Remaining `legal_actions` gaps (ticket 031). Done: target candidates that mention X, a `DeclareBands` Decision, mana abilities through a Payment Decision, and `Target::Ability` candidates for script picks (see `17-legal-actions.md`). Still open: timing grants from continuous effects ("as though it had flash"), moved to ticket 076.
 5. Late join, replay and wire versioning. Decide in 020, then build 021 (Seat snapshot), 022 (replay export and card-data version) and 023 (`v` bump and outbox bound). Do the `HashMap` ordering audit (028) in this step, because replay determinism depends on it.
-6. Lua event visibility. Let conditions see damage, life, tap/untap and mill events, and make `GainLife` and combat damage emit `LifeChanged`. This unblocks the most card scripts for the least work.
+6. Lua event visibility. Let conditions see damage, life, tap/untap and mill events. `GainLife`, lifelink and damage to a player already write `LifeChanged` (`31-snapshot-fold-events.md`). This unblocks the most card scripts for the least work.
 7. Modal builders in Lua for spells and triggered abilities, then modal activated abilities in `commands/activate.rs` (its CR 700.2b TODO).
 8. CR 601.2d division of damage or counters among targets, then subtype and exclusion keys on `DestroyAll` filters.
 9. Done on `phase5/revealed-face-down-producers` (awaiting review): ticket 027, `Revealed` from a revealing search and from amplify, the free-text event rule in `DESIGN.md`, and the `ScriptError` redaction. `face_down` has no producer, since face-down mechanics are a design non-goal (item 12).
@@ -328,7 +328,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   `game-constants.md` row and the stub only. Tests: `phase5_mill_lose_life_sacrifice_self.rs` (32). Left open:
   no "whenever a card is milled" or "whenever you lose life" condition (nothing consumes `LifeChanged`); no
   "would lose life" replacement and no "can't lose life" (CR 119.8); `GainLife`, damage to a player and lifelink
-  still push no `LifeChanged`; no "the milled card" follow-up (CR 701.17c/d), mill as a cost, dredge or rad
+  push `LifeChanged` too (`31-snapshot-fold-events.md`), but no condition matches a gain (CR 119.9); no "the milled card" follow-up (CR 701.17c/d), mill as a cost, dredge or rad
   counters; a replacement that changes how many cards a mill moves isn't modeled (the batch is fixed first); no
   computed "lose life equal to X"; no team life (CR 119.4a); not usable as a mode of a multi-mode spell
   (`is_modal_resolvable` unchanged). Echo's `UnlessPaidConsequence::SacrificeSelf` still goes through

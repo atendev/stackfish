@@ -692,14 +692,15 @@ fn seq(value: &Value) -> u64 {
     value.as_str().unwrap().parse().unwrap()
 }
 
-// Priority is left out because no engine path writes `priority_set`.
 #[derive(Debug, PartialEq)]
 struct Folded {
     turn_number: Value,
     active_player: Value,
     phase: Value,
     step: Value,
+    priority: Value,
     life: Vec<i64>,
+    poison: Vec<i64>,
     hand_count: Vec<i64>,
     library_count: Vec<i64>,
     zone_of: BTreeMap<String, String>,
@@ -715,7 +716,20 @@ impl Folded {
             active_player: snapshot["active_player"].clone(),
             phase: snapshot["phase"].clone(),
             step: snapshot["step"].clone(),
+            priority: snapshot["priority"].clone(),
             life: per_player("life"),
+            poison: players
+                .iter()
+                .map(|p| {
+                    p["counters"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|c| c["counter"]["kind"] == "poison")
+                        .map(|c| c["amount"].as_i64().unwrap())
+                        .sum()
+                })
+                .collect(),
             hand_count: per_player("hand_count"),
             library_count: per_player("library_count"),
             zone_of: BTreeMap::new(),
@@ -771,15 +785,26 @@ impl Folded {
                 self.zone_of.remove(&object);
                 self.tapped.remove(&object);
             }
+            "left_game" => {
+                if let Some(object) = id("object") {
+                    self.zone_of.remove(&object);
+                    self.tapped.remove(&object);
+                }
+                self.count(
+                    &event["zone"],
+                    event["owner"].as_u64().unwrap() as usize,
+                    -1,
+                );
+            }
             "life_changed" => {
                 self.life[event["player"].as_u64().unwrap() as usize] +=
                     event["delta"].as_i64().unwrap()
             }
-            // Damage to a player is not a `life_changed` event.
-            "damage_dealt" if event["target"]["kind"] == "player" => {
-                self.life[event["target"]["id"].as_u64().unwrap() as usize] -=
+            "player_counter_added" if event["counter"]["kind"] == "poison" => {
+                self.poison[event["player"].as_u64().unwrap() as usize] +=
                     event["amount"].as_i64().unwrap()
             }
+            "priority_set" => self.priority = event["player"].clone(),
             "turn_started" => {
                 self.turn_number = event["turn_number"].clone();
                 self.active_player = event["player"].clone();
@@ -958,10 +983,11 @@ fn a_snapshot_needs_an_existing_seat_and_an_empty_body() {
     );
 }
 
-// The proof cards tap lands, attack and change life, which the bear deck never does. The
-// game stops short of an elimination, whose object removal sends no events.
+// The proof cards tap lands, attack and change life, which the bear deck never does.
+// CR 800.4a
 #[test]
 fn a_proof_game_folds_to_each_player_s_snapshot() {
+    let mut ended = 0;
     for seed in 0..5 {
         let (mut session, _) =
             Session::create(&proof_setup_request(2, seed), &proof_cards()).unwrap();
@@ -973,15 +999,18 @@ fn a_proof_game_folds_to_each_player_s_snapshot() {
                 .clone()
         });
         let mut bot = Bot::new(seed).recording(&[]);
-        for _ in 0..400 {
-            let progress = bot
+        for _ in 0..3000 {
+            match bot
                 .step(&mut session)
-                .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
-            assert_eq!(
-                progress,
-                Progress::Answered,
-                "seed {seed}: the game must still run"
-            );
+                .unwrap_or_else(|e| panic!("seed {seed}: {e}"))
+            {
+                Progress::Answered => {}
+                Progress::GameOver(_) => {
+                    ended += 1;
+                    break;
+                }
+                Progress::Running => panic!("seed {seed}: the engine hit its step cap"),
+            }
         }
         for seat in 0..2u32 {
             let polled = send(
@@ -998,15 +1027,12 @@ fn a_proof_game_folds_to_each_player_s_snapshot() {
                 .iter()
                 .chain(body(&polled)["events"].as_array().unwrap())
                 .for_each(|e| folded.apply(e));
-            let mut expected = Folded::from_snapshot(&last);
-            assert!(
-                !expected.tapped.is_empty(),
-                "seed {seed}: lands were tapped"
+            assert_eq!(
+                folded,
+                Folded::from_snapshot(&last),
+                "seed {seed}, seat {seat}"
             );
-            // TODO: compare life once every life gain writes a `life_changed` event
-            folded.life.clear();
-            expected.life.clear();
-            assert_eq!(folded, expected, "seed {seed}, seat {seat}");
         }
     }
+    assert!(ended > 0, "no proof game reached an elimination");
 }
