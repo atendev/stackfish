@@ -85,5 +85,8 @@ Until the atomicity work (see `21-atomicity.md`), every spell in the set resolve
 - TODO(proof bot): a pawprint mode budget (CR 700.2i) is read as a plain mode count, and attackers and blockers are
   chosen at random with no regard for the board.
 - The bot never spends its last point of life on a Phyrexian symbol and assumes 20 starting life unless told.
+- The bot tracks each Seat's life as the sum of its `life_changed` deltas. Damage, lifelink and life gain each write
+  one, so it does not read `damage_dealt` (`31-snapshot-fold-events.md`). The fold test in `seat_visibility.rs` plays
+  five proof games to the end, elimination included.
 - Other `HashMap` walks over `state.objects` may still decide an order that reaches a host. The 500-seed run found
   none, but the proof set covers only part of the engine.

@@ -11,7 +11,7 @@ use crate::types::config::GameSettings;
 use crate::types::cost::CostSpec;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, ScriptHandle, Target};
+use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::turn::Phase;
 use crate::types::zone::ZoneKind;
 
@@ -653,6 +653,15 @@ impl Engine {
             self.loop_watch.clear();
         }
         StepResult { status }
+    }
+
+    /// CR 117.3: sets `priority_player`, returning the `PrioritySet` to log when it changed.
+    #[must_use]
+    pub(in crate::engine) fn set_priority(&mut self, player: PlayerId) -> Option<GameEventKind> {
+        (self.state.priority_player != player).then(|| {
+            self.state.priority_player = player;
+            GameEventKind::PrioritySet { player }
+        })
     }
 
     /// Wraps each kind in a `GameEvent`, allocating its ids, and pushes it to the ledger.

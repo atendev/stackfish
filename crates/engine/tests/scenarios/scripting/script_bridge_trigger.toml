@@ -91,4 +91,4 @@ equals = "battlefield"
 [[assertions]]
 type = "ledger_len"
 # Counts CR 601.2i's SpellCast marker event.
-equals = 21
+equals = 22

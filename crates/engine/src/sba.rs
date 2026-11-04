@@ -180,18 +180,31 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
         }
         // CR 800.4a: needs an opponent to continue against, so a single-player fixture keeps its
         // objects, as `Engine::game_over_check` does.
+        let mut kinds = Vec::new();
         if state.turn_order.len() >= 2 {
-            remove_players_objects(state, player);
+            kinds = remove_players_objects(state, player);
         }
-        let event_id = state.allocate_event_id();
-        let sequence_no = state.allocate_sequence_no();
-        events.push(GameEvent {
-            event_id,
-            sequence_no,
-            kind: GameEventKind::PlayerEliminated { player },
-            caused_by_command: None,
-            parent_event: None,
-        });
+        kinds.push(GameEventKind::PlayerEliminated { player });
+        // CR 800.4a
+        // Leaving is not a pass, so the pass chain is untouched.
+        if state.turn_order.len() >= 2 && state.priority_player == player {
+            let next = commands::next_active_player(state, player);
+            if next != player {
+                state.priority_player = next;
+                kinds.push(GameEventKind::PrioritySet { player: next });
+            }
+        }
+        for kind in kinds {
+            let event_id = state.allocate_event_id();
+            let sequence_no = state.allocate_sequence_no();
+            events.push(GameEvent {
+                event_id,
+                sequence_no,
+                kind,
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
     }
 }
 
@@ -200,31 +213,43 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
 /// `retire_object` returns are discarded because their controller left (CR 800.4d).
 ///
 /// Per-owner zones drain outright and shared zones keep other players' objects.
-/// Stack entries go by owner for spells and by controller for abilities.
-// TODO: write an event per object removed, so a Seat's events still add up to its snapshot CR 800.4a
-fn remove_players_objects(state: &mut GameState, player: PlayerId) {
-    let owned_zone_ids: Vec<ObjectId> = state
+/// Stack entries go by owner for spells and by controller for abilities. Returns
+/// one `LeftGame` per object removed, so a Seat's events still add up to its snapshot.
+// TODO: effects that give the leaving player control of other players' objects do not end, and objects they still control are not exiled CR 800.4a
+fn remove_players_objects(state: &mut GameState, player: PlayerId) -> Vec<GameEventKind> {
+    let owned_zone_ids: Vec<(ObjectId, ZoneKind)> = state
         .zones
         .iter_mut()
         .filter(|z| z.owner == Some(player))
-        .flat_map(|z| std::mem::take(&mut z.contents))
+        .flat_map(|z| {
+            let kind = z.kind;
+            std::mem::take(&mut z.contents)
+                .into_iter()
+                .map(move |id| (id, kind))
+        })
         .collect();
 
-    let shared_zone_ids: Vec<ObjectId> = state
+    let shared_zone_ids: Vec<(ObjectId, ZoneKind)> = state
         .zones
         .iter()
         .filter(|z| z.owner.is_none())
-        .flat_map(|z| z.contents.iter().copied())
-        .filter(|id| state.objects.get(id).is_some_and(|o| o.owner == player))
+        .flat_map(|z| z.contents.iter().map(|id| (*id, z.kind)))
+        .filter(|(id, _)| state.objects.get(id).is_some_and(|o| o.owner == player))
         .collect();
-    for &id in &shared_zone_ids {
+    for &(id, _) in &shared_zone_ids {
         for zone in state.zones.iter_mut().filter(|z| z.owner.is_none()) {
             zone.remove(id);
         }
     }
 
-    for id in owned_zone_ids.into_iter().chain(shared_zone_ids) {
-        commands::retire_object(state, id);
+    let mut left = Vec::new();
+    for (object, zone) in owned_zone_ids.into_iter().chain(shared_zone_ids) {
+        commands::retire_object(state, object);
+        left.push(GameEventKind::LeftGame {
+            object,
+            zone,
+            owner: player,
+        });
     }
 
     // CR 800.4a: a spell goes with its owner; stack objects not represented by cards
@@ -239,9 +264,22 @@ fn remove_players_objects(state: &mut GameState, player: PlayerId) {
         .map(|so| so.stack_id)
         .collect();
     state.stack.retain(|so| !stack_ids.contains(&so.stack_id));
-    for id in stack_ids {
-        commands::retire_object(state, id);
+    for object in stack_ids {
+        commands::retire_object(state, object);
+        // A spell also sits in the shared stack zone, which the pass above already drained.
+        if left
+            .iter()
+            .any(|e| matches!(e, GameEventKind::LeftGame { object: o, .. } if *o == object))
+        {
+            continue;
+        }
+        left.push(GameEventKind::LeftGame {
+            object,
+            zone: ZoneKind::Stack,
+            owner: player,
+        });
     }
+    left
 }
 
 /// One `resolve_deaths` candidate. `is_destroy` marks genuine destruction

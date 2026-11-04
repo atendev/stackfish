@@ -256,7 +256,11 @@ pub(crate) fn apply_damage_event(
     target: Target,
     amount: u32,
     is_combat_damage: bool,
-) {
+) -> Vec<GameEventKind> {
+    let mut applied = Vec::new();
+    if amount == 0 {
+        return applied;
+    }
     // CR 702.15/702.80/702.90
     // Looked up once up front so the borrow ends before the target mutations below.
     let source_keywords = effective_keywords(state, script_runtime, source);
@@ -300,17 +304,25 @@ pub(crate) fn apply_damage_event(
                     None => player.commander_damage_taken.push((name, amount)),
                 }
             }
-            // CR 702.90b
-            // TODO: write an event for poison counters on a player, so a Seat can follow them from events CR 122.1
+            // CR 702.90b, 120.3a
             if is_infect {
                 let timestamp = state.allocate_sequence_no();
                 if let Some(player) = state.player_mut(pid) {
                     player
                         .counters
                         .add(CounterKind::Poison, amount as i32, timestamp);
+                    applied.push(GameEventKind::PlayerCounterAdded {
+                        player: pid,
+                        kind: CounterKind::Poison,
+                        amount: amount as i32,
+                    });
                 }
             } else if let Some(player) = state.player_mut(pid) {
                 player.lose_life(amount as i32);
+                applied.push(GameEventKind::LifeChanged {
+                    player: pid,
+                    delta: -(amount as i32),
+                });
             }
         }
         Target::Object(id) => {
@@ -339,12 +351,15 @@ pub(crate) fn apply_damage_event(
     // CR 702.15b
     // Lifelink's gain is in addition to any other result of the damage, to a player
     // or an object alike.
-    // TODO: write a `LifeChanged` event for the gain, so a Seat can follow life from events CR 119.3
     if has_lifelink
-        && amount > 0
         && let Some(controller) = source_controller
         && let Some(player) = state.player_mut(controller)
     {
-        player.lose_life(-(amount as i32));
+        player.gain_life(amount as i32);
+        applied.push(GameEventKind::LifeChanged {
+            player: controller,
+            delta: amount as i32,
+        });
     }
+    applied
 }

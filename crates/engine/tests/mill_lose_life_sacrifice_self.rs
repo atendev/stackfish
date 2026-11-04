@@ -859,16 +859,29 @@ fn an_activated_targeted_lose_life_ability_resolves_end_to_end() {
 }
 
 #[test]
-fn signed_gain_life_still_loses_life_and_pushes_no_event() {
+fn signed_gain_life_loses_life_and_pushes_its_delta() {
     let mut engine = engine_with(Vec::new(), Some(spell(AbilityEffect::GainLife(-2), None)));
     let before = life(&engine, P0);
     cast_and_resolve(&mut engine, Vec::new());
 
     assert_eq!(life(&engine, P0), before - 2);
-    assert!(
-        life_changes(&engine).is_empty(),
-        "GainLife does not push LifeChanged (left as a TODO)"
-    );
+    assert_eq!(life_changes(&engine), vec![(P0, -2)]);
+}
+
+// CR 119.3
+#[test]
+fn gain_life_pushes_one_life_changed_and_a_zero_gain_pushes_none() {
+    for (amount, expected) in [(3, vec![(P0, 3)]), (0, Vec::new())] {
+        let mut engine = engine_with(
+            Vec::new(),
+            Some(spell(AbilityEffect::GainLife(amount), None)),
+        );
+        let before = life(&engine, P0);
+        cast_and_resolve(&mut engine, Vec::new());
+
+        assert_eq!(life(&engine, P0), before + amount);
+        assert_eq!(life_changes(&engine), expected, "gain {amount}");
+    }
 }
 
 #[test]

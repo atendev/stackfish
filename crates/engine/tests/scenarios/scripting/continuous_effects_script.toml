@@ -82,7 +82,7 @@ card = "anthem_land"
 
 [[steps]]
 type = "assert_ledger_len"
-equals = 12
+equals = 16
 
 [[steps]]
 type = "pass_priority"

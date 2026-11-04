@@ -67,8 +67,8 @@ pub enum AbilityEffect {
     AddManaChoice { count: u32, choices: ColorSet },
     /// `Game.Ops.GainLife(n)`: the controller gains `n` life. A negative `n`
     /// loses life (CR 119.3), but `LoseLife` is the intended spelling, since
-    /// it can target a player and pushes a `LifeChanged` event.
-    /// TODO: `GainLife` pushes no `LifeChanged` event, so CR 119.9's "gains life" trigger and CR 119.10's replacement have nothing to listen to
+    /// it can target a player. Both push a `LifeChanged` event.
+    /// TODO: no condition matches a life gain and no replacement listens for one CR 119.9, 119.10
     GainLife(i32),
     /// `Game.Ops.Damage(n)`: deals `n` damage to the resolving object's first
     /// chosen target (CR 608.2m). It emits a real `DamageDealt` event through
@@ -171,11 +171,10 @@ pub enum AbilityEffect {
     /// chosen as in `Mill`. `Player::lose_life` subtracts without clamping,
     /// leaving 0 or less to the CR 704.5a SBA. `n == 0` changes nothing and
     /// pushes no event. It pushes `LifeChanged { player, delta: -n }`, already
-    /// applied to state like `Tapped`, and is the first resolution-time
-    /// producer of that event (cost payment is the other).
+    /// applied to state like `Tapped`. Damage, lifelink, `GainLife` and cost
+    /// payment push it too.
     // TODO: nothing consumes `LifeChanged`: no "whenever you lose life" condition and no "would lose life" replacement event (CR 614)
     // TODO: no "can't lose life" restriction (CR 119.8)
-    // TODO: damage to a player (CR 120.3a), `GainLife` and lifelink do not push `LifeChanged`
     // TODO: no "lose life equal to X" amount and no Two-Headed Giant team life total (CR 119.4a)
     LoseLife(u32),
     /// `Game.Ops.Sacrifice()` (CR 701.21a): sacrifices the first chosen

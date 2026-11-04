@@ -12,7 +12,7 @@ use crate::types::ability::{
 use crate::types::card::{CardDefinition, ScriptReference};
 use crate::types::cost::{AlternativeCost, CostModifier};
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
-use crate::types::event::GameEventKind;
+use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ManaCost;
@@ -900,10 +900,22 @@ impl ScriptRuntime {
         for item in items {
             match item {
                 // `GainLife` mutates `GameState` directly. The pending kinds below need pipelines this layer can't reach.
-                // TODO: write a `LifeChanged` event, so a Seat can follow life from events CR 119.3
+                // CR 119.3: its `LifeChanged` goes straight to the ledger, so it does not count as a pending kind.
                 ResultItem::GainLife(amount) => {
-                    if let Some(player) = state.player_mut(controller) {
+                    if amount != 0
+                        && let Some(player) = state.player_mut(controller)
+                    {
                         player.gain_life(amount);
+                        let event_id = state.allocate_event_id();
+                        let sequence_no = state.allocate_sequence_no();
+                        state.ledger.push(GameEvent::new(
+                            event_id,
+                            sequence_no,
+                            GameEventKind::LifeChanged {
+                                player: controller,
+                                delta: amount,
+                            },
+                        ));
                     }
                 }
                 ResultItem::DrawCards(amount) => draw = Some(amount),

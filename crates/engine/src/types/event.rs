@@ -36,6 +36,13 @@ pub enum GameEventKind {
         kind: CounterKind,
         amount: i32,
     },
+    /// CR 122.1: the player twin of `CounterAdded`, such as poison from infect
+    /// damage (CR 702.90b). A record of a change already made.
+    PlayerCounterAdded {
+        player: PlayerId,
+        kind: CounterKind,
+        amount: i32,
+    },
     /// Produced by a tap cost such as a mana ability (CR 602.5a).
     Tapped {
         object: ObjectId,
@@ -68,7 +75,8 @@ pub enum GameEventKind {
         stack_id: ObjectId,
         payer: PlayerId,
     },
-    // TODO: write `PrioritySet` on every change of `priority_player`; nothing writes it, so a Seat cannot follow priority from events CR 117.3
+    /// CR 117.3: written on every change of `priority_player`, so a Seat can
+    /// follow priority from events.
     PrioritySet {
         player: PlayerId,
     },
@@ -137,6 +145,15 @@ pub enum GameEventKind {
     },
     PlayerEliminated {
         player: PlayerId,
+    },
+    /// CR 800.4a: `object` left the game with the player who left it. Not a
+    /// `ZoneChange`, since there is nowhere to move it. It carries `zone` and
+    /// `owner` because the object is gone once a host reads the event. For an
+    /// ability on the stack, `owner` is its controller.
+    LeftGame {
+        object: ObjectId,
+        zone: ZoneKind,
+        owner: PlayerId,
     },
     /// `purpose` is a fixed label such as `"shuffle"`, never text about the
     /// cards the draw picks among (see `DESIGN.md`).

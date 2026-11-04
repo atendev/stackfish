@@ -41,6 +41,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 032 Host rejection text and payment cost filters. Engine answer errors have `Display` text in `engine/error_text.rs`, and a Seat gets that sentence in place of Debug output. 030's payment `candidates` closed the cost filter gap, so the filter stays off the wire. Engine terms in some `IllegalAction` strings are still a TODO. [closed/032-host-rejection-text-cost-filters.md]
 - 033 Run the Godot smoke test in CI. The `godot-smoke` CI job runs `run.sh` in both safeguard modes on Godot 4.2.2 and 4.7.2, each download checked against its published SHA-512. Export and web builds were ruled out of scope. [closed/033-godot-smoke-test-ci.md]
 - 034 Unconfirmed gdext items. Research in `docs/research/gdext-unconfirmed.md`. mlua on emscripten is unverified for this repo, and gdext web export is experimental. A `#[func]` `Result` with `Unexpected` logs and fails the call with code 1337, so the byte-level error envelope stays. Editor hot reload drops the Session and its Lua state. [closed/034-unconfirmed-gdext-items.md]
+- 072 Ledger events the snapshot fold needs. Every life change writes `LifeChanged`, damage included, so life folds from `life_changed` alone. Infect writes `PlayerCounterAdded`, priority changes write `PrioritySet`, and CR 800.4a writes one `LeftGame` per object and passes priority on. A snapshot drops a revealed identity. `BEHAVIOUR_REV` is 3. [closed/072-ledger-events-for-snapshot-fold.md]
 
 ## Not yet specified
 
@@ -61,7 +62,6 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 072 Ledger events the snapshot fold needs
 - 073 Make GameState objects a BTreeMap
 - 076 Timing permissions granted by effects
 

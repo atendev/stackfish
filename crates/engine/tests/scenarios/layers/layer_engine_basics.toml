@@ -55,4 +55,4 @@ equals = "battlefield"
 
 [[steps]]
 type = "assert_ledger_len"
-equals = 1
+equals = 2

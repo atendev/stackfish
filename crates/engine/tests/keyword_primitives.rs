@@ -954,6 +954,33 @@ fn lifelink_source_gains_its_controller_life_on_combat_damage() {
         "702.15b: lifelink gains its controller life equal to damage dealt"
     );
     assert_eq!(engine.state().player(p1).unwrap().life, 17);
+    assert_eq!(
+        damage_follow_ons(&engine),
+        vec![
+            GameEventKind::LifeChanged {
+                player: p1,
+                delta: -3
+            },
+            GameEventKind::LifeChanged {
+                player: p0,
+                delta: 3
+            },
+        ]
+    );
+}
+
+fn damage_follow_ons(engine: &Engine) -> Vec<GameEventKind> {
+    let ledger = &engine.state().ledger;
+    let damage: Vec<_> = ledger
+        .iter()
+        .filter(|e| matches!(e.kind, GameEventKind::DamageDealt { .. }))
+        .collect();
+    assert_eq!(damage.len(), 1);
+    ledger
+        .iter()
+        .filter(|e| e.parent_event == Some(damage[0].event_id))
+        .map(|e| e.kind.clone())
+        .collect()
 }
 
 #[test]
@@ -1045,6 +1072,14 @@ fn infect_damage_to_a_player_becomes_poison_counters() {
             .counters
             .count(&CounterKind::Poison),
         3
+    );
+    assert_eq!(
+        damage_follow_ons(&engine),
+        vec![GameEventKind::PlayerCounterAdded {
+            player: p1,
+            kind: CounterKind::Poison,
+            amount: 3
+        }]
     );
 }
 

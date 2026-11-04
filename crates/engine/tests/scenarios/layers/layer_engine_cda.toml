@@ -40,4 +40,4 @@ equals = "graveyard"
 
 [[steps]]
 type = "assert_ledger_len"
-equals = 2
+equals = 3

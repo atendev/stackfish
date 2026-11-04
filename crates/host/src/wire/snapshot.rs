@@ -15,8 +15,9 @@ pub(crate) fn counters(set: &CounterSet) -> Vec<WireCounter> {
 }
 
 /// One Seat's view of the current state through `through_sequence_no`, which is `null`
-/// before the first event. Zones, counts, turn, phase and step equal the fold of the
-/// events that Seat receives; a revealed identity in a hidden zone is not kept.
+/// before the first event. Zones, counts, turn, phase, step, priority, life and poison
+/// equal the fold of the events that Seat receives; a revealed identity in a hidden zone
+/// is not kept.
 #[derive(Serialize, Clone, Debug)]
 pub(crate) struct WireSnapshot {
     pub through_sequence_no: Option<U64>,

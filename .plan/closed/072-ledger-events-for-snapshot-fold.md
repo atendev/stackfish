@@ -3,7 +3,7 @@ id: 072
 title: Ledger events the snapshot fold needs
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: []
 claimed: false
 ---
@@ -25,4 +25,11 @@ Make every change a Seat's snapshot shows reach the ledger as an event, so a Sea
 
 ## Resolution
 
-<Filled in at close: the decision and the reason for it.>
+Built on `phase5/ledger-events-snapshot-fold` (`52b1a1c`). Notes in `docs/implementation/31-snapshot-fold-events.md`.
+
+- Every life change writes `LifeChanged`, including damage to a player (CR 120.3a). A Seat's life is the sum of `life_changed` deltas, so neither the bot nor the fold reads `damage_dealt`. The life and poison changes that damage makes come back from `apply_damage_event` and follow the damage as its children.
+- Infect damage to a player writes a new `PlayerCounterAdded` event. A script's `GainLife` writes its event straight to the ledger, so `OperationOutcome` stays unchanged.
+- `Engine::set_priority` writes `PrioritySet` on every change of `priority_player`. CR 800.4a writes one `LeftGame` per object removed, and passes priority on when the leaving player held it. The host keeps a `left_game` id from Seats that could not see the object.
+- The snapshot does not keep a revealed card's identity once the card is back in a hidden zone, because a snapshot shows the state after the reveal's effect (CR 701.20a).
+- The fold tests compare priority, life and poison, and play five proof games to the end. `BEHAVIOUR_REV` is 3.
+- Left open: the wire `v` bump, CR 119.9 gain-life triggers, and the rest of CR 800.4a (ending control effects and exiling objects the player still controls).

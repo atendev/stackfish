@@ -128,7 +128,8 @@ impl Engine {
         events: Vec<GameEventKind>,
         since_ledger: usize,
     ) -> ProcessState {
-        self.state.priority_player = self.state.active_player;
+        let priority = self.set_priority(self.state.active_player);
+        self.log_events(priority.into_iter().collect());
         self.pipeline_context = Some(PipelineContext {
             since_ledger,
             caused_by_command: None,

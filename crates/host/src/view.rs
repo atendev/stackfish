@@ -194,6 +194,12 @@ pub(crate) enum Observed {
         zone: ZoneKind,
         cards: Vec<(ObjectId, PlayerId, WireIdentity)>,
     },
+    /// The id goes only to a Seat that could see the object where it was.
+    LeftGame {
+        object: ObjectId,
+        zone: ZoneKind,
+        owner: PlayerId,
+    },
 }
 
 fn without_source(kind: &WireEventKind) -> WireEventKind {
@@ -227,6 +233,22 @@ impl Observed {
             Observed::Omniscient(kind) => viewer.omniscient().then(|| kind.clone()),
             Observed::Move(mv) => Some(mv.kind_for(viewer)),
             Observed::Marker(marker) => Some(marker.kind_for(viewer)),
+            Observed::LeftGame {
+                object,
+                zone,
+                owner,
+            } => Some(WireEventKind::LeftGame {
+                object: sees_object(
+                    viewer,
+                    Place {
+                        zone: *zone,
+                        owner: Some(*owner),
+                    },
+                )
+                .then_some(U64::from(*object)),
+                zone: WireZone::from(*zone),
+                owner: owner.0,
+            }),
             Observed::Revealed {
                 player,
                 zone,
@@ -345,6 +367,25 @@ impl Observer {
                     .map(|c| (c.object, c.snapshot.owner, WireIdentity::from(&c.snapshot)))
                     .collect(),
             },
+            // CR 800.4a
+            K::LeftGame {
+                object,
+                zone,
+                owner,
+            } => {
+                if is_hidden(*zone) {
+                    let place = Place {
+                        zone: *zone,
+                        owner: Some(*owner),
+                    };
+                    self.retired.insert(*object, place);
+                }
+                Observed::LeftGame {
+                    object: *object,
+                    zone: *zone,
+                    owner: *owner,
+                }
+            }
             // CR 701.22, CR 701.25
             K::CardsScried { player, .. } | K::CardsSurveiled { player, .. } => {
                 Observed::Controller {
@@ -365,6 +406,7 @@ impl Observer {
             K::LifeChanged { .. }
             | K::DamageDealt { .. }
             | K::CounterAdded { .. }
+            | K::PlayerCounterAdded { .. }
             | K::Tapped { .. }
             | K::Untapped { .. }
             | K::ManaAdded { .. }
@@ -406,7 +448,8 @@ fn zone_count(state: &GameState, zone: ZoneKind, owner: PlayerId) -> u32 {
 
 /// The state as `viewer` sees it, through the last ledger entry. `observer` must have
 /// read every entry, so a stack source that left a hand stays hidden.
-// TODO: keep the identity of a card a `revealed` event showed while it stays in a hidden zone
+// CR 701.20a
+// A snapshot shows the state after the reveal's effect, so a revealed card in a hidden zone is hidden again.
 pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observer) -> WireSnapshot {
     let view_of = |object: &GameObject| {
         let place = Place {
@@ -541,5 +584,44 @@ pub(crate) fn decision_for(viewer: Viewer, state: &GameState, decision: &Decisio
             }
             _ => true,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stackfish_engine::{EventId, SequenceNo};
+
+    fn left_game(zone: ZoneKind) -> Observed {
+        let event = GameEvent::new(
+            EventId(0),
+            SequenceNo(0),
+            GameEventKind::LeftGame {
+                object: ObjectId(7),
+                zone,
+                owner: PlayerId(1),
+            },
+        );
+        Observer::default().observe(&stackfish_testutil::two_player_state(Vec::new()), &event)
+    }
+
+    fn object_seen(observed: &Observed, viewer: Viewer) -> Option<U64> {
+        match observed.kind_for(viewer) {
+            Some(WireEventKind::LeftGame { object, .. }) => object,
+            other => panic!("expected left_game, got {other:?}"),
+        }
+    }
+
+    // CR 800.4a
+    #[test]
+    fn a_left_game_card_from_a_hidden_zone_keeps_its_id_from_other_seats() {
+        let from_hand = left_game(ZoneKind::Hand);
+        assert!(object_seen(&from_hand, Viewer::Player(PlayerId(0))).is_none());
+        assert!(object_seen(&from_hand, Viewer::Spectator { omniscient: false }).is_none());
+        assert!(object_seen(&from_hand, Viewer::Player(PlayerId(1))).is_some());
+        assert!(object_seen(&from_hand, Viewer::Spectator { omniscient: true }).is_some());
+
+        let from_battlefield = left_game(ZoneKind::Battlefield);
+        assert!(object_seen(&from_battlefield, Viewer::Player(PlayerId(0))).is_some());
     }
 }

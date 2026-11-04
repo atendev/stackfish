@@ -49,6 +49,8 @@ impl Engine {
 
     /// Appends the checked events to the ledger, applying the deferred damage and
     /// counter effects, then pauses on `AwaitingPayment` or continues to `SbaLoop`.
+    /// A damage event is followed by the `LifeChanged` and `PlayerCounterAdded`
+    /// events `apply_damage_event` returns, each a child of the damage.
     pub(super) fn resolve_commit_events_state(
         &mut self,
         checked: Vec<GameEventKind>,
@@ -75,7 +77,7 @@ impl Engine {
             }
             // CR 510.2: damage is applied only now that replacements have settled
             // its final amount and target.
-            if let GameEventKind::DamageDealt {
+            let applied = if let GameEventKind::DamageDealt {
                 source,
                 target,
                 amount,
@@ -89,8 +91,10 @@ impl Engine {
                     *target,
                     *amount,
                     *is_combat_damage,
-                );
-            }
+                )
+            } else {
+                Vec::new()
+            };
             // CR 122.1a: applied here like damage, after replacements.
             // CR 613.7: the counter timestamp is allocated apart from the ledger
             // sequence number so the ledger numbering never gaps.
@@ -114,6 +118,19 @@ impl Engine {
                 caused_by_command,
                 parent_event,
             });
+            // CR 120.3a, 702.15b: the life and poison changes the damage made follow it,
+            // already applied, so they skip the replacement check.
+            for follow_on in applied {
+                let follow_on_id = self.state.allocate_event_id();
+                let sequence_no = self.state.allocate_sequence_no();
+                self.state.ledger.push(GameEvent {
+                    event_id: follow_on_id,
+                    sequence_no,
+                    kind: follow_on,
+                    caused_by_command,
+                    parent_event: Some(event_id),
+                });
+            }
         }
         if modal_resume && let Some(continuation) = self.modal_continuation.take() {
             return self.resume_modal_resolution(continuation);

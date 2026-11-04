@@ -104,15 +104,13 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   entries, top last, with `kind`, `owner`, `controller`, `targets`, `chosen_modes`, `x_value`, the spell's `card` and a
   `source` that is absent where the Seat cannot see it. The open Decision is the response's `decision`, built by
   `decision_for`.
-- The fold tests in `seat_visibility.rs` rebuild zones, counts, tapped, turn, phase and step from a first snapshot plus
-  the Seat's events and compare them with a later snapshot, over a bear game for all four Seats and 400 answers of five
-  proof games. Damage to a player is a `damage_dealt` event, not `life_changed`.
-- The fold found event gaps, each a TODO in the engine: life gain (the `GainLife` effect, the script `GainLife` result
-  and lifelink) writes no `life_changed`, poison from infect damage to a player writes no event, nothing writes
-  `priority_set`, and CR 800.4a removes a leaving player's objects without events. The proof-game fold skips life and
-  stops before an elimination until those land.
-- TODO: a card a `revealed` event showed keeps its identity in the events but not in a later snapshot while it stays
-  in a hand or library. The fold tests do not fold identities.
+- The fold tests in `seat_visibility.rs` rebuild zones, counts, tapped, turn, phase, step, priority, life and poison
+  from a first snapshot plus the Seat's events, and compare them with a later snapshot. They cover a bear game for all
+  four Seats and five proof games played to the end. Life is the sum of `life_changed` deltas, because damage to a
+  player also writes one. `left_game` lowers the owner's hand or library count. Details in `31-snapshot-fold-events.md`.
+- A card that a `revealed` event showed keeps its identity in the events, but a later snapshot does not, while the
+  card stays in a hand or library. Per CR 701.20a a reveal lasts only while its effect runs, and a snapshot shows the
+  current state. The fold tests do not fold identities.
 
 ## Replay export (ticket 022)
 

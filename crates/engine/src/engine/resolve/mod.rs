@@ -62,7 +62,8 @@ impl Engine {
             return StepStatus::Progressed;
         };
         // CR 117.3b: priority returns to the active player once the object resolves.
-        self.state.priority_player = self.state.active_player;
+        let priority = self.set_priority(self.state.active_player);
+        self.log_events(priority.into_iter().collect());
         let since_ledger = self.state.ledger.len();
         self.pipeline_context = Some(PipelineContext {
             since_ledger,

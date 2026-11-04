@@ -25,9 +25,17 @@ fn pass_priority_command_works() {
 
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == PlayerId(1)));
-    assert_eq!(engine.state().ledger.len(), 1);
-    assert!(
-        matches!(engine.state().ledger[0].kind, GameEventKind::PriorityPassed { player } if player == PlayerId(0))
+    // CR 117.3
+    assert_eq!(
+        kinds(&engine),
+        vec![
+            GameEventKind::PriorityPassed {
+                player: PlayerId(0)
+            },
+            GameEventKind::PrioritySet {
+                player: PlayerId(1)
+            },
+        ]
     );
     assert_eq!(engine.state().priority_player, PlayerId(1));
     assert_eq!(engine.state().consecutive_passes, 1);
@@ -90,26 +98,42 @@ fn all_pass_with_empty_stack_advances_turn_step() {
         "pipeline_context must be cleared once back at PriorityWindow"
     );
 
-    // 2 PriorityPassed, PhaseStarted, StepStarted{Untap}, TurnStarted and StepStarted{Upkeep}. The phase stays Beginning from Untap to Upkeep, and there are no objects to untap.
-    assert_eq!(engine.state().ledger.len(), 6);
-    assert!(matches!(
-        engine.state().ledger[2].kind,
-        GameEventKind::PhaseStarted {
-            phase: Phase::Beginning
-        }
-    ));
-    assert!(matches!(
-        engine.state().ledger[3].kind,
-        GameEventKind::StepStarted { step: Step::Untap }
-    ));
-    assert!(matches!(
-        engine.state().ledger[4].kind,
-        GameEventKind::TurnStarted { player, turn_number: 1 } if player == PlayerId(0)
-    ));
-    assert!(matches!(
-        engine.state().ledger[5].kind,
-        GameEventKind::StepStarted { step: Step::Upkeep }
-    ));
+    // Priority is already with the active player when Upkeep opens it, so no third `PrioritySet`.
+    assert_eq!(
+        kinds(&engine),
+        vec![
+            GameEventKind::PriorityPassed {
+                player: PlayerId(0)
+            },
+            GameEventKind::PrioritySet {
+                player: PlayerId(1)
+            },
+            GameEventKind::PriorityPassed {
+                player: PlayerId(1)
+            },
+            GameEventKind::PrioritySet {
+                player: PlayerId(0)
+            },
+            GameEventKind::PhaseStarted {
+                phase: Phase::Beginning
+            },
+            GameEventKind::StepStarted { step: Step::Untap },
+            GameEventKind::TurnStarted {
+                player: PlayerId(0),
+                turn_number: 1
+            },
+            GameEventKind::StepStarted { step: Step::Upkeep },
+        ]
+    );
+}
+
+fn kinds(engine: &Engine) -> Vec<GameEventKind> {
+    engine
+        .state()
+        .ledger
+        .iter()
+        .map(|e| e.kind.clone())
+        .collect()
 }
 
 #[test]
@@ -161,12 +185,24 @@ fn all_pass_with_nonempty_stack_resolves_top_instead_of_advancing_step() {
     assert_eq!(engine.state().priority_player, PlayerId(0));
     assert!(!engine.pipeline_context_active());
 
-    // 2 PriorityPassed + 1 StackObjectResolved.
-    assert_eq!(engine.state().ledger.len(), 3);
-    assert!(matches!(
-        engine.state().ledger[2].kind,
-        GameEventKind::StackObjectResolved { stack_id: id } if id == stack_id
-    ));
+    assert_eq!(
+        kinds(&engine),
+        vec![
+            GameEventKind::PriorityPassed {
+                player: PlayerId(0)
+            },
+            GameEventKind::PrioritySet {
+                player: PlayerId(1)
+            },
+            GameEventKind::PriorityPassed {
+                player: PlayerId(1)
+            },
+            GameEventKind::PrioritySet {
+                player: PlayerId(0)
+            },
+            GameEventKind::StackObjectResolved { stack_id },
+        ]
+    );
 }
 
 #[test]

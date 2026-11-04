@@ -329,14 +329,6 @@ impl Bot {
                 Some("life_changed") if event["player"].as_u64() == Some(u64::from(seat)) => {
                     *self.life.entry(seat).or_default() += event["delta"].as_i64().unwrap_or(0);
                 }
-                // Damage to a player is not a `life_changed` event.
-                // TODO: gaining life emits no event, so the tracked life can sit below the real one
-                Some("damage_dealt")
-                    if event["target"]["kind"] == "player"
-                        && event["target"]["id"].as_u64() == Some(u64::from(seat)) =>
-                {
-                    *self.life.entry(seat).or_default() -= event["amount"].as_i64().unwrap_or(0);
-                }
                 // CR 500.5
                 Some("step_started" | "phase_started") => *self.pool(seat) = Pool::default(),
                 Some("zone_change") => {
@@ -983,6 +975,27 @@ mod tests {
             }
         }
         assert!(pairs > 0 && none > 0, "{pairs} pairs, {none} without bands");
+    }
+
+    // CR 120.3a, 702.15b, 702.90b
+    #[test]
+    fn tracked_life_is_the_sum_of_life_changed_events() {
+        let mut bot = Bot::new(0);
+        let damage = |id: u32| {
+            json!({ "kind": "damage_dealt", "source": "9", "amount": 3, "is_combat_damage": true,
+                    "target": { "kind": "player", "id": id } })
+        };
+        let body = json!({ "events": [
+            damage(0),
+            { "kind": "life_changed", "player": 0, "delta": -3 },
+            { "kind": "life_changed", "player": 1, "delta": 3 },
+            damage(0),
+            { "kind": "player_counter_added", "player": 0, "counter": "poison", "amount": 3 },
+        ] });
+        bot.take_events(0, &body);
+        bot.take_events(1, &body);
+        assert_eq!(bot.life[&0], -3);
+        assert_eq!(bot.life[&1], 3);
     }
 
     #[test]
