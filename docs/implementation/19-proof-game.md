@@ -1,29 +1,32 @@
 # 19-proof-game
 
 B5 of the host protocol map (`phase5/proof-game-bot`). A random bot plays whole games through the byte interface of
-`crates/host`, using a fixture set of 25 cards. The design is in `.plan/closed/014-proof-game-bot.md`.
+`crates/host`, using a fixture set of 29 cards. The design is in `.plan/closed/014-proof-game-bot.md`.
 
 ## API
 
-- `stackfish_host::proof_cards() -> FixtureCardSource` serves the 25 cards by slug key (`grizzly_bear`, `shock`, ...).
+- `stackfish_host::proof_cards() -> FixtureCardSource` serves the 29 cards by slug key (`grizzly_bear`, `shock`, ...).
 - `stackfish_host::proof_setup_request(players, seed) -> Vec<u8>` is a `setup` request for the standard preset. Player
   `i` gets the red-green deck when `i` is even and the blue-black deck when it is odd, 40 cards each.
 - `stackfish_host::Bot` is a client of a `Session`. `Bot::new(seed).play(&mut session, max_answers)` plays to
   `game_over` and returns an `Outcome` (`winner`, `answers`, `rejected`, `transcript_hash`). `step` answers one
   Decision, which is what a host that runs a game across frames would call.
 - `Bot::recording(&[spectator seats])` keeps every event each Seat receives (`events(seat)`).
+- `Bot::mechanics_seen()` counts the Decisions the bot answered by `mechanic` label. Tests read it; the bot never
+  branches on it.
 
 ## The card set
 
-Four basic lands with a `{T}` mana ability, eight creatures, and thirteen other cards. All scripts are inline Lua that
+Four basic lands with a `{T}` mana ability, eleven creatures, and fourteen other cards. All scripts are inline Lua that
 uses documented primitives, except Fork in the Road, whose modes are declared in Rust because a card script cannot
 declare modes.
 
 - Creatures: Grizzly Bear, Stone Giant (vanilla), Wind Drake (flying), Cinder Duelist (first strike), Scholar Imp
-  (enters, draw), Grave Rat (dies, gain 3), Ember Pinger (`{T}`: 1 damage to a creature), Mirror Sage (enters, may
-  draw).
+  (enters, draw), Grave Rat (a Rat; dies, gain 3), Ember Pinger (`{T}`: 1 damage to a creature), Mirror Sage (enters, may
+  draw), Ravenous Ooze (Devour 1), Rat Herald (a Rat with Amplify 1), Mimic Pool (enters as a copy of a creature).
 - Instants and sorceries: Shock, Divination, Counterspell, Bounce, Fork in the Road (modal), Rampant Growth (search to
-  the battlefield), Raise Militia (token), Peek (scry), Drain Touch, Doom Blade.
+  the battlefield), Raise Militia (token), Peek (scry), Drain Touch, Doom Blade, Armory Call (search for an Equipment and put it onto the battlefield
+  attached).
 - Permanents: Giant Growth Aura, Spark Stone (mana artifact), Iron Blade (equipment with equip `{1}`).
 - Every card carries an inline script. A card with no abilities gets `local s = {} return s`, because a `ByKey` script
   fails to load on every zone change (the engine does not resolve keys).
@@ -65,8 +68,9 @@ declare modes.
 `crates/host/tests/phase5_proof_game.rs` (5, plus 1 ignored):
 
 - 30 two-player games reach `game_over` with no rejected Answer and no `script_error`, and both players win some.
-- The 30 games cast all 21 non-land cards and play all four lands.
-- Eight seeds each give byte-identical transcripts on two runs.
+- The 30 games cast all 25 non-land cards and play all four lands.
+- Seeds 0 to 10 each give byte-identical transcripts on two runs, and between them open the Devour, Amplify, Copy and
+  Attach on entry Decisions (see `33-ordered-choice-proof-cards.md`).
 - Three-player games finish.
 - No Seat receives a library id or an opponent's hand id over a whole game (the scan skips `power`, `toughness`,
   `loyalty` and `defense`, which are digit strings too).

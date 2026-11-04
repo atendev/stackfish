@@ -1,6 +1,6 @@
 //! CR 702.82a Devour N: the entering permanent gets N +1/+1 counters per creature sacrificed as it enters.
 //! `ResolveStackTop` checks `replacement::pending_devour_choice` before `apply_enters_battlefield_modifiers`, pauses on `AwaitingDevourChoice` and resumes via `submit_devour_choice` through `continue_scripted_zone_move`.
-//! Candidates are the controller's creatures (CR 701.17a), including the entrant, and `Devour [quality]` narrows them by subtype (CR 702.82c).
+//! Candidates are the controller's creatures (CR 701.17a), never the entrant, and `Devour [quality]` narrows them by subtype (CR 702.82c).
 
 use stackfish_engine::engine::{DevourChoiceError, Engine, StepStatus};
 use stackfish_engine::replacement;
@@ -188,8 +188,8 @@ fn pending_devour_choice_only_offers_creatures_the_entrant_s_own_controller_cont
     candidates.sort_by_key(|id| id.0);
 
     assert_eq!(per_creature, 2);
-    // The entrant and own_bear qualify, and the opponent's bear and the artifact do not.
-    assert_eq!(candidates, vec![entrant, own_bear]);
+    // CR 614.12
+    assert_eq!(candidates, vec![own_bear]);
 }
 
 #[test]
@@ -509,11 +509,11 @@ fn choosing_to_sacrifice_both_offered_creatures_grants_four_counters_and_removes
     assert_eq!(per_creature, 2);
     let mut sorted = candidates.clone();
     sorted.sort_by_key(|id| id.0);
-    let mut expected = vec![object, bear_a, bear_b];
+    let mut expected = vec![bear_a, bear_b];
     expected.sort_by_key(|id| id.0);
     assert_eq!(
         sorted, expected,
-        "the entrant itself plus both bears are all legal candidates"
+        "both bears are candidates and the entrant is not"
     );
 
     engine
@@ -730,8 +730,9 @@ fn choosing_to_sacrifice_nothing_grants_no_counters_but_still_resolves() {
     );
 }
 
+// CR 614.12
 #[test]
-fn a_devour_creature_with_no_other_creatures_can_still_devour_itself() {
+fn a_devour_creature_with_no_other_creatures_enters_without_a_choice() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(0);
@@ -760,36 +761,19 @@ fn a_devour_creature_with_no_other_creatures_can_still_devour_itself() {
     cast(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);
-    let StepStatus::AwaitingDevourChoice {
-        object, candidates, ..
-    } = status
-    else {
-        panic!(
-            "expected a Devour choice pause (the entrant itself is a legal candidate), got {status:?}"
-        )
-    };
-    assert_eq!(
-        candidates,
-        vec![object],
-        "only the entrant itself qualifies"
-    );
-
-    engine
-        .submit_devour_choice(vec![object])
-        .expect("devouring itself is legal, if pointless");
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-
-    // It sacrificed itself before it could receive counters, so it is gone and not on the battlefield with 2.
-    assert!(engine.state().object(object).is_none());
     assert!(
-        engine
-            .state()
-            .zone(ZoneKind::Battlefield, None)
-            .unwrap()
-            .contents
-            .is_empty()
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "the entrant cannot devour itself, so nothing is offered: {status:?}"
     );
+
+    let battlefield = &engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents;
+    assert_eq!(battlefield.len(), 1);
+    let entered = engine.state().object(battlefield[0]).unwrap();
+    assert!(entered.counters.totals().is_empty());
 }
 
 #[test]
@@ -817,6 +801,23 @@ fn devour_choice_rejects_a_candidate_not_offered() {
         .zone_mut(ZoneKind::Hand, Some(p0))
         .unwrap()
         .push_bottom(card);
+    // CR 614.12
+    // The entrant is not its own candidate, so the pause needs a bear.
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            ObjectId(1),
+            creature_definition(
+                "Bear",
+                ManaCost {
+                    symbols: Vec::new(),
+                },
+                "",
+            ),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
 
     let mut engine = Engine::new(state);
     cast(&mut engine, p0, card);

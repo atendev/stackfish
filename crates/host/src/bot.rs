@@ -111,6 +111,7 @@ pub struct Bot {
     illegal_rejected: usize,
     /// Illegal Answers turned down, by the shape and mechanic of the Decision they answered, such as `partition (Scry)`.
     illegal_by_shape: BTreeMap<String, usize>,
+    mechanics_seen: BTreeMap<String, usize>,
     /// The mana cost of each card the bot has seen, by object id. A move event
     /// carries the identity of every card its Seat may see, including the
     /// Seat's own hand.
@@ -141,6 +142,7 @@ impl Bot {
             injecting: false,
             illegal_rejected: 0,
             illegal_by_shape: BTreeMap::new(),
+            mechanics_seen: BTreeMap::new(),
             costs: HashMap::new(),
             seats: BTreeSet::new(),
             record: false,
@@ -176,6 +178,12 @@ impl Bot {
     /// How many illegal Answers were turned down, by Decision shape and mechanic.
     pub fn illegal_by_shape(&self) -> &BTreeMap<String, usize> {
         &self.illegal_by_shape
+    }
+
+    /// How many Decisions the bot answered, by mechanic label, such as `Devour`.
+    /// Tests read it to see which choices a game reached; the bot never branches on it.
+    pub fn mechanics_seen(&self) -> &BTreeMap<String, usize> {
+        &self.mechanics_seen
     }
 
     /// The events `seat` received, in order. Empty unless `recording` was set.
@@ -247,6 +255,9 @@ impl Bot {
             return Err(protocol("the chooser's poll shows a different Decision"));
         }
 
+        if let Some(mechanic) = decision["mechanic"].as_str() {
+            *self.mechanics_seen.entry(mechanic.to_string()).or_default() += 1;
+        }
         let reply = self.reply_for(seat, &decision);
         if self.injecting {
             self.send_illegal_answers(session, seat, &decision, &reply.value)?;

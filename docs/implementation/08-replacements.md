@@ -258,7 +258,7 @@
   touched `ResolveStackTop`'s own resolution tail and `continue_scripted_zone_move`'s shared
   sacrifice/destroy/exile machinery, not just an additive new match arm.
 - Verify: 11 new tests (`phase5_devour.rs` — `pending_devour_choice` unit tests, Lua registration,
-  and five real end-to-end cast-and-resolve tests: full sacrifice, sacrifice-nothing, self-devour,
+  and five real end-to-end cast-and-resolve tests: full sacrifice, sacrifice-nothing, a lone devourer with no choice,
   and both `DevourChoiceError` rejections), full workspace suite green.
 - Key finding that reshaped the plan: `ResolveStackTop` defers *everything* about a resolution
   (including the entering permanent's own `ZoneChange`) into one `ReplacementCheck` pass at the very
@@ -279,8 +279,8 @@
     this engine's test corpus fetches one — same "no real producer reaches this" posture
     `aura-attach-choice`'s dormant `AwaitingAttachChoice` already established). Candidates are every
     creature the entrant's own controller controls (CR 701.17a: sacrificing is always the
-    controller's own choice), the entrant itself included (real Magic allows devouring the source;
-    untested as its own scenario here beyond confirming it's offered and legal to choose).
+    controller's own choice), never the entrant itself: it is still entering and not on the
+    battlefield to sacrifice (CR 614.12). A lone Devour creature enters with no choice.
   - `ProcessState`/`StepStatus::AwaitingDevourChoice` — same "player must answer before this
     resolution can finish" shape every other choice-pause here uses; carries `stack_id`/
     `events_so_far` so `submit_devour_choice` can resume the exact same resolution.

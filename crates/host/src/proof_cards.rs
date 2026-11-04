@@ -15,29 +15,33 @@ type Deck = &'static [(&'static str, u32)];
 const RED_GREEN: Deck = &[
     ("mountain", 9),
     ("forest", 8),
-    ("grizzly_bear", 4),
-    ("stone_giant", 2),
-    ("cinder_duelist", 4),
+    ("grizzly_bear", 2),
+    ("stone_giant", 1),
+    ("cinder_duelist", 3),
     ("ember_pinger", 1),
     ("mirror_sage", 1),
-    ("shock", 3),
+    ("ravenous_ooze", 2),
+    ("shock", 2),
     ("fork_in_the_road", 1),
     ("rampant_growth", 2),
     ("raise_militia", 2),
+    ("armory_call", 2),
     ("giant_growth_aura", 1),
     ("spark_stone", 1),
-    ("iron_blade", 1),
+    ("iron_blade", 2),
 ];
 
 const BLUE_BLACK: Deck = &[
     ("island", 8),
     ("swamp", 9),
-    ("wind_drake", 4),
+    ("wind_drake", 3),
     ("scholar_imp", 3),
     ("grave_rat", 3),
-    ("counterspell", 2),
-    ("bounce", 2),
-    ("divination", 2),
+    ("rat_herald", 2),
+    ("mimic_pool", 2),
+    ("counterspell", 1),
+    ("bounce", 1),
+    ("divination", 1),
     ("peek", 1),
     ("drain_touch", 2),
     ("doom_blade", 2),
@@ -163,6 +167,26 @@ return s
     )
 }
 
+fn replacement(card: CardDefinition, payload: &str) -> CardDefinition {
+    with_ability(
+        card,
+        &format!(
+            r#"    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
+    e:SetPayload(Game.ReplacementPayloads.{payload})
+    e:SetAffected(Game.Affected.Self)
+    e:Register()"#
+        ),
+    )
+}
+
+fn with_subtype(card: CardDefinition, subtype: &str) -> CardDefinition {
+    CardDefinition {
+        subtypes: vec![Subtype(subtype.to_string())],
+        ..card
+    }
+}
+
 fn spell(card: CardDefinition, target: Option<&str>, operation: &str) -> CardDefinition {
     let target_fn = target.map_or(String::new(), |t| {
         format!("function s.target_requirement()\n    return {t}\nend\n")
@@ -271,13 +295,16 @@ pub fn proof_cards() -> FixtureCardSource {
     e:Register()"#,
     );
     let grave_rat = with_ability(
-        creature(
-            10,
-            "Grave Rat",
-            "{1}{B}",
-            2,
-            1,
-            "When Grave Rat dies, you gain 3 life.",
+        with_subtype(
+            creature(
+                10,
+                "Grave Rat",
+                "{1}{B}",
+                2,
+                1,
+                "When Grave Rat dies, you gain 3 life.",
+            ),
+            "Rat",
         ),
         r#"    local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Dies)
@@ -317,6 +344,35 @@ pub fn proof_cards() -> FixtureCardSource {
         return nil
     end)
     e:Register()"#,
+    );
+
+    let ravenous_ooze = replacement(
+        with_subtype(
+            creature(26, "Ravenous Ooze", "{1}{G}", 1, 1, "Devour 1"),
+            "Ooze",
+        ),
+        "EntersWithCountersDevour(1)",
+    );
+    let rat_herald = replacement(
+        with_subtype(
+            creature(27, "Rat Herald", "{2}{B}", 1, 1, "Amplify 1"),
+            "Rat",
+        ),
+        "EntersWithCountersAmplify(1)",
+    );
+    let mimic_pool = replacement(
+        with_subtype(
+            creature(
+                28,
+                "Mimic Pool",
+                "{3}{U}",
+                0,
+                0,
+                "You may have Mimic Pool enter the battlefield as a copy of any creature on the battlefield.",
+            ),
+            "Shapeshifter",
+        ),
+        "EntersAsCopy()",
     );
 
     let instant = CardTypeSet::INSTANT;
@@ -380,6 +436,18 @@ pub fn proof_cards() -> FixtureCardSource {
         ),
         None,
         r#"Game.Ops.CreateToken(Game.Tokens.Creature("Soldier", "G", 2, 2))"#,
+    );
+    // TODO: no proof card creates an Equipment token, since `Game.Tokens` has no Equipment shape
+    let armory_call = spell(
+        base(
+            29,
+            "Armory Call",
+            "{1}{R}",
+            sorcery,
+            "Search your library for an Equipment card, put it onto the battlefield attached to a creature, then shuffle.",
+        ),
+        None,
+        r#"Game.Ops.Search({ subtypes = { "Equipment" } }, 1, { destination = "Battlefield", enters_attached = true })"#,
     );
     let peek = spell(
         base(20, "Peek", "{U}", sorcery, "Scry 2."),
@@ -498,6 +566,10 @@ return s
         .with("giant_growth_aura", giant_growth_aura)
         .with("spark_stone", spark_stone)
         .with("iron_blade", iron_blade)
+        .with("ravenous_ooze", ravenous_ooze)
+        .with("rat_herald", rat_herald)
+        .with("mimic_pool", mimic_pool)
+        .with("armory_call", armory_call)
 }
 
 fn deck_json(deck: Deck) -> Value {

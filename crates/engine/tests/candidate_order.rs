@@ -159,7 +159,7 @@ fn devour_candidates_come_in_ascending_id_order() {
         P0,
     )
     .expect("P0 controls creatures");
-    assert_eq!(candidates.len(), COUNT as usize + 1);
+    assert_eq!(candidates.len(), COUNT as usize);
     assert_ascending(&candidates);
 }
 
@@ -281,7 +281,7 @@ fn a_devour_decision_lists_its_candidates_in_ascending_id_order() {
     );
 
     let ids = pick_ids(&mut engine);
-    assert_eq!(ids.len(), COUNT as usize + 1);
+    assert_eq!(ids.len(), COUNT as usize);
     assert_ascending(&ids);
 }
 

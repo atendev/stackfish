@@ -36,4 +36,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [30-payment-candidates](30-payment-candidates.md) — ticket 030: `ReplyShape::Payment::eligible`, `AdditionalCost::accepts`, `MayCast::options`, the CR 107.3b free-cast X check, the bot's object-cost payments and `cost_proof_game.rs`
 - [31-snapshot-fold-events](31-snapshot-fold-events.md) — `LifeChanged` from every life change, `PlayerCounterAdded`, `PrioritySet` producers, CR 800.4a `LeftGame` and the priority pass, the full-game fold tests
 - [32-objects-btreemap](32-objects-btreemap.md) — `GameState::objects` as a `BTreeMap`, the four candidate walks it put in id order, `candidate_order.rs`
+- [33-ordered-choice-proof-cards](33-ordered-choice-proof-cards.md) — proof cards that open the Devour, Amplify, Copy and Attach on entry Decisions, `Bot::mechanics_seen`, `BEHAVIOUR_REV` 4
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

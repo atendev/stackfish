@@ -1,7 +1,7 @@
 //! A random bot plays full games over bytes with the proof card set, reading nothing but
 //! the Decisions it is sent.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde_json::{Value, json};
 use stackfish_host::{Bot, Outcome, Session, proof_cards, proof_setup_request};
@@ -18,10 +18,16 @@ fn create(request: &[u8]) -> Session {
 }
 
 fn play(players: usize, seed: u64) -> Outcome {
+    play_with_bot(players, seed).0
+}
+
+fn play_with_bot(players: usize, seed: u64) -> (Outcome, Bot) {
     let mut session = create(&proof_setup_request(players, seed));
-    Bot::new(seed)
+    let mut bot = Bot::new(seed);
+    let outcome = bot
         .play(&mut session, ANSWER_LIMIT)
-        .unwrap_or_else(|e| panic!("seed {seed}: {e}"))
+        .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    (outcome, bot)
 }
 
 fn play_recorded(players: usize, seed: u64) -> (Outcome, Bot) {
@@ -76,7 +82,7 @@ fn a_bot_plays_thirty_two_player_games_to_the_end() {
     );
 }
 
-const SPELLS: [&str; 21] = [
+const SPELLS: [&str; 25] = [
     "Grizzly Bear",
     "Stone Giant",
     "Wind Drake",
@@ -98,6 +104,10 @@ const SPELLS: [&str; 21] = [
     "Giant Growth Aura",
     "Spark Stone",
     "Iron Blade",
+    "Ravenous Ooze",
+    "Rat Herald",
+    "Mimic Pool",
+    "Armory Call",
 ];
 
 #[test]
@@ -152,18 +162,29 @@ fn the_games_cast_every_card_of_the_set_and_play_every_land() {
     }
 }
 
+// The four mechanics build their candidate lists by walking every object.
+const ORDERED_CHOICES: [&str; 4] = ["Devour", "Amplify", "Copy", "Attach on entry"];
+
 #[test]
 fn the_same_seeds_give_a_byte_identical_game() {
-    // A `HashMap` walk differs between runs only some of the time, so try several seeds.
-    for seed in 0..8 {
-        let first = play(2, seed);
+    // A hash-ordered walk differs between runs only some of the time, so try several seeds.
+    // Seeds 0 to 10 are the shortest run that opens all four ordered choices.
+    let mut reached = BTreeSet::new();
+    for seed in 0..11 {
+        let (first, bot) = play_with_bot(2, seed);
         let second = play(2, seed);
         assert_eq!(
             first.transcript_hash, second.transcript_hash,
             "seed {seed} played two different games"
         );
         assert_eq!(first.answers, second.answers);
+        reached.extend(bot.mechanics_seen().keys().cloned());
     }
+    let missing: Vec<_> = ORDERED_CHOICES
+        .iter()
+        .filter(|m| !reached.contains(**m))
+        .collect();
+    assert!(missing.is_empty(), "no seed opened {missing:?}");
     assert_ne!(
         play(2, 11).transcript_hash,
         play(2, 12).transcript_hash,
