@@ -37,4 +37,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [31-snapshot-fold-events](31-snapshot-fold-events.md) — `LifeChanged` from every life change, `PlayerCounterAdded`, `PrioritySet` producers, CR 800.4a `LeftGame` and the priority pass, the full-game fold tests
 - [32-objects-btreemap](32-objects-btreemap.md) — `GameState::objects` as a `BTreeMap`, the four candidate walks it put in id order, `candidate_order.rs`
 - [33-ordered-choice-proof-cards](33-ordered-choice-proof-cards.md) — proof cards that open the Devour, Amplify, Copy and Attach on entry Decisions, `Bot::mechanics_seen`, `BEHAVIOUR_REV` 4
+- [34-clone-self-copy](34-clone-self-copy.md) — `pending_copy_choice` never offers the entrant (CR 614.12a), the self-copy tests, `BEHAVIOUR_REV` 5
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

@@ -302,8 +302,9 @@
   payloads on one permanent, since only a copy-producing effect can put more than one such payload
   under a single freshly-shared source id.
 - Unresolved: Search doesn't offer this choice either, same "no real producer reaches this yet"
-  posture `pending_devour_choice`'s own doc comment already takes. Self-copy (the entrant choosing
-  itself) isn't special-cased away, untested as its own scenario.
+  posture `pending_devour_choice`'s own doc comment already takes. The entrant is never its own
+  candidate, in the first round or a chained one, because its entry is not complete (CR 614.12a).
+  See `34-clone-self-copy.md`.
 
 ## Slice: script-effect-dependency (branch open)
 
