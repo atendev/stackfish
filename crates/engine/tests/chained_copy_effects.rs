@@ -139,8 +139,8 @@ fn choosing_a_chain_link_re_pauses_instead_of_finishing() {
         else {
             panic!("expected the first copy choice pause")
         };
-        // candidates: entrant itself, the Clone link, and the Bear.
-        assert_eq!(candidates.len(), 3);
+        // CR 614.12a
+        assert_eq!(candidates.len(), 2);
         (
             candidates
                 .iter()
@@ -172,8 +172,8 @@ fn choosing_a_chain_link_re_pauses_instead_of_finishing() {
     assert_eq!(player, PlayerId(0));
     assert_eq!(
         candidates.len(),
-        3,
-        "the entrant, the Clone link, and the Bear are all still legal candidates"
+        2,
+        "the Clone link and the Bear are still legal candidates"
     );
 
     assert_eq!(
@@ -186,6 +186,30 @@ fn choosing_a_chain_link_re_pauses_instead_of_finishing() {
         0,
         "CR 707.9e: the first round's additional-effect exception hasn't applied yet - still pending the chain"
     );
+}
+
+// CR 707.9e, 614.12a
+#[test]
+fn a_chained_round_does_not_offer_the_entrant() {
+    let (mut engine, _, _, _, clone_link, bear) = setup_chain_scenario();
+    let StepStatus::AwaitingCopyChoice {
+        object: entrant,
+        candidates,
+        ..
+    } = drain(&mut engine)
+    else {
+        panic!("expected the first copy choice pause")
+    };
+    assert_eq!(candidates, vec![clone_link, bear]);
+
+    engine
+        .submit_copy_choice(Some(clone_link))
+        .expect("chain into the Clone link");
+    let StepStatus::AwaitingCopyChoice { candidates, .. } = drain(&mut engine) else {
+        panic!("expected the chained pause")
+    };
+    assert_eq!(candidates, vec![clone_link, bear]);
+    assert!(!candidates.contains(&entrant));
 }
 
 #[test]

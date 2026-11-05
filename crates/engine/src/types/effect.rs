@@ -669,7 +669,7 @@ pub enum ReplacementPayload {
     /// Only `ResolveStackTop`'s resolving-spell path checks this; `Search`
     /// does not. The resume chains into `apply_enters_battlefield_modifiers`
     /// only, not back into Devour or Amplify, which no Clone-family card has.
-    /// Self-copy is not special-cased out.
+    /// The entrant is never its own candidate (CR 614.12a).
     // TODO: Clone for a Search-fetched creature, and chaining into the Devour and Amplify pauses
     EntersAsCopy(CopyExceptions),
     /// CR 702.89a (Umbra armor): "instead remove all damage marked on

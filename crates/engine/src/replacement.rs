@@ -579,8 +579,9 @@ pub fn pending_amplify_choice(
 /// carries an `EntersAsCopy` effect. Same separation as `pending_devour_choice`,
 /// with no `controller` since any creature on the battlefield qualifies.
 ///
-/// Returns `Some((exceptions, candidates))`: every creature on the battlefield,
-/// `object` included. `None` if no effect is registered or no creature exists.
+/// Returns `Some((exceptions, candidates))`: every creature on the battlefield.
+/// `object` is never one, since it is still entering, in a chained round too (CR 614.12a).
+/// `None` if no effect is registered or no other creature exists.
 pub fn pending_copy_choice(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -607,7 +608,8 @@ pub fn pending_copy_choice(
         .objects
         .values()
         .filter(|obj| {
-            obj.zone == ZoneKind::Battlefield
+            obj.object_id != object
+                && obj.zone == ZoneKind::Battlefield
                 && crate::layers::effective_characteristics(state, script_runtime, obj.object_id)
                     .card_types
                     .contains(CardTypeSet::CREATURE)

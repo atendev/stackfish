@@ -239,7 +239,7 @@ fn copy_candidates_come_in_ascending_id_order() {
     let (_, candidates) =
         replacement::pending_copy_choice(&state, &ScriptRuntime::new(), entrant, ZoneKind::Hand)
             .expect("creatures are on the battlefield");
-    assert_eq!(candidates.len(), COUNT as usize + 1);
+    assert_eq!(candidates.len(), COUNT as usize);
     assert_ascending(&candidates);
 }
 

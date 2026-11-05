@@ -3,7 +3,7 @@ id: 077
 title: A Clone offered as a copy of itself
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: []
 claimed: false
 ---
@@ -21,4 +21,4 @@ Should `replacement::pending_copy_choice` leave the entering object out of its o
 
 ## Resolution
 
-<Filled in at close: the decision and the reason for it.>
+Yes. `pending_copy_choice` skips the entering object by id, in the first round and in a chained CR 707.9e round. The engine moves the resolving spell into the battlefield zone before the copy pause, so a zone check alone listed it, but the choice is made before the permanent enters (CR 614.12a). A Clone with no other creature enters as itself with no Decision, and answering with the entrant is refused with `InvalidCandidate`. Event hashes moved for 29 of seeds 0 to 39. The pinned seed 9 did not, so `BEHAVIOUR_REV` is 5 and the pinned hash is unchanged. Notes in `docs/implementation/34-clone-self-copy.md`.

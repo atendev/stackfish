@@ -100,8 +100,9 @@ fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
 
+// CR 614.12a
 #[test]
-fn pending_copy_choice_offers_every_battlefield_creature_regardless_of_controller() {
+fn pending_copy_choice_offers_every_other_battlefield_creature_regardless_of_controller() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -155,10 +156,7 @@ fn pending_copy_choice_offers_every_battlefield_creature_regardless_of_controlle
             .expect("an EntersAsCopy effect is registered with real candidates");
     candidates.sort_by_key(|id| id.0);
 
-    // Both bears and the entrant itself are creatures and qualify, and the artifact does not.
-    let mut expected = vec![entrant, own_bear, opponents_bear];
-    expected.sort_by_key(|id| id.0);
-    assert_eq!(candidates, expected);
+    assert_eq!(candidates, vec![own_bear, opponents_bear]);
 }
 
 #[test]
@@ -320,13 +318,10 @@ fn choosing_to_copy_a_fading_and_tapped_creature_applies_both_on_top_of_the_copy
         panic!("expected a CR 707.6 copy choice pause, got {status:?}")
     };
     assert_eq!(player, p0);
-    let mut sorted = candidates.clone();
-    sorted.sort_by_key(|id| id.0);
-    let mut expected = vec![object, behemoth];
-    expected.sort_by_key(|id| id.0);
     assert_eq!(
-        sorted, expected,
-        "the entrant itself plus the Behemoth are both legal candidates"
+        candidates,
+        vec![behemoth],
+        "the Behemoth is a candidate and the entrant is not"
     );
 
     engine
@@ -565,8 +560,82 @@ fn declining_to_copy_does_not_apply_the_additional_counter_exception() {
     );
 }
 
+fn clone_in_hand_beside_a_bear() -> (GameState, ObjectId, ObjectId) {
+    let card = ObjectId(0);
+    let bear = ObjectId(1);
+    let mut state = two_player_state();
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            creature_definition("Clone", CLONE_SCRIPT),
+            PlayerId(0),
+            ZoneKind::Hand,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Hand, Some(PlayerId(0)))
+        .unwrap()
+        .push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear,
+            creature_definition("Bear", ""),
+            PlayerId(1),
+            ZoneKind::Battlefield,
+        ),
+    );
+    (state, card, bear)
+}
+
 #[test]
 fn copy_choice_rejects_a_candidate_not_offered() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let (state, card, _) = clone_in_hand_beside_a_bear();
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    let err = engine.submit_copy_choice(Some(ObjectId(999))).unwrap_err();
+    assert!(matches!(err, CopyChoiceError::InvalidCandidate));
+}
+
+// CR 614.12a
+#[test]
+fn copy_choice_rejects_the_entrant_and_changes_nothing() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let (state, card, bear) = clone_in_hand_beside_a_bear();
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    let StepStatus::AwaitingCopyChoice {
+        object, candidates, ..
+    } = status
+    else {
+        panic!("expected a copy choice pause, got {status:?}")
+    };
+    assert_eq!(candidates, vec![bear]);
+    let before = engine.state().clone();
+
+    let err = engine.submit_copy_choice(Some(object)).unwrap_err();
+    assert!(matches!(err, CopyChoiceError::InvalidCandidate));
+    assert_eq!(engine.state(), &before);
+    assert!(matches!(
+        drain(&mut engine),
+        StepStatus::AwaitingCopyChoice { .. }
+    ));
+}
+
+// CR 614.12a
+#[test]
+fn a_lone_clone_enters_as_itself_without_a_choice() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(0);
@@ -588,10 +657,29 @@ fn copy_choice_rejects_a_candidate_not_offered() {
     let mut engine = Engine::new(state);
     cast(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
-    pass_both_and_drain(&mut engine, p0, p1);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "the entrant cannot copy itself, so nothing is offered: {status:?}"
+    );
 
-    let err = engine.submit_copy_choice(Some(ObjectId(999))).unwrap_err();
-    assert!(matches!(err, CopyChoiceError::InvalidCandidate));
+    let battlefield = &engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents;
+    assert_eq!(battlefield.len(), 1);
+    let runtime = ScriptRuntime::new();
+    let entered = layers::effective_characteristics(engine.state(), &runtime, battlefield[0]);
+    assert_eq!(entered.name, "Clone");
+    assert_eq!(
+        engine
+            .state()
+            .object(battlefield[0])
+            .unwrap()
+            .copy_generation,
+        0
+    );
 }
 
 #[test]
