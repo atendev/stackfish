@@ -129,11 +129,38 @@ The permission never grants priority, and it covers only spells: land plays and 
 sorcery-speed rule. A cast from another zone through an alternative cost (flashback) is covered. A
 filter with `extra` set never matches. `EnchantedPlayer` is not available.
 
+## `Game.CreateZonePermission(c)` — CR 601.3, 305.1
+
+Lets the affected player play lands or cast spells from a graveyard or from exile. `:SetZone` picks
+`"Graveyard"` or `"Exile"`, and `:SetKind` picks `"PlayLand"` or `"Cast"`. Both are required with
+`:SetAffected`. `:SetOwner(Game.Affected.*)` says whose cards in that zone it covers and defaults to
+`You`, so "your graveyard". `:SetFilter(Game.Filter({...}))` is optional and limits which cards it
+covers.
+
+```lua
+-- Crucible of Worlds: you may play lands from your graveyard.
+local p = Game.CreateZonePermission(c)
+p:SetAffected(Game.Affected.You)
+p:SetZone("Graveyard")
+p:SetKind("PlayLand")
+p:Register()
+```
+
+The permission says where, not when. A cast through it still needs the card's normal timing (or a
+timing permission), and a land play still needs sorcery speed and an unused land play. A card cast or
+played from another player's graveyard is controlled by the player who cast or played it. A card's
+own flashback cost is separate: choosing it checks the flashback zone, and choosing the normal cost
+checks the permission. `EnchantedPlayer` is not available for `:SetAffected` or `:SetOwner`.
+
 ## Not modeled
 
 - Hand-reveal enforcement (above).
 - CR 121.2b's "can't choose to draw multiple cards" and "can't pay a cost that includes drawing
   multiple cards" — no choice-based draw or draw-cost mechanism exists.
-- `EnchantedPlayer` for draw limits, land plays and timing permissions — no real card needs it.
+- `EnchantedPlayer` for draw limits, land plays, timing permissions and zone permissions — no real
+  card needs it.
 - Timing permissions with a duration ("until end of turn"), conditional flash (CR 601.3d), "as though
-  it were a main phase", instant-speed equip, and zone permissions ("cast spells from your graveyard").
+  it were a main phase", and instant-speed equip.
+- Zone permissions for the top of a library or for "cards exiled with this" (CR 401.5), "until end of
+  turn" zone grants, a "may look" check for a face-down exiled card (CR 601.3f), and "exile it
+  instead" riders on a spell cast through a permission (CR 608.2n).

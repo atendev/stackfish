@@ -51,6 +51,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 079 Build timing permissions (flash grants). `can_cast_now` reads `state.timing_permissions` for the cast and `cast_entries`. `Game.CreateTimingPermission` registers one, and `retire_object` and `remap_abilities` drop it with its source. The permission tests the caster. Vedalken Orrery is in the proof deck, `token_ceased` carries its zone and owner, and `BEHAVIOUR_REV` is 6. [closed/079-build-timing-permissions.md]
 - 081 cost_modifiers outlive their source. `retire_object` purges a source's cost modifiers with the other static-ability lists (CR 611.3b), and a destroy-then-cast test pins it. The `remap_abilities` gap for hand-functioning modifiers stays a TODO. [closed/081-cost-modifiers-outlive-source.md]
 - 080 Zone permissions. A Zone permission is a new list `state.zone_permissions` beside `timing_permissions` (source, affected, zone, owners, play-land or cast kind, card filter), not a zone field on `TimingPermission`. `can_cast_from_zone` and `can_play_land_from_zone` replace the hand tests in the cast command, `validate_play_land` and both entry scans. Flashback stays on the alternative cost, timing and the land limit are unchanged, graveyard and exile are in scope, and a permission is removed when its source leaves. Top of library, linked exile, end-of-turn grants and exile-instead riders are follow-ups. Build is 082. [closed/080-zone-permissions.md]
+- 082 Build zone permissions. `can_cast_from_zone` and `can_play_land_from_zone` serve the cast and land commands and both entry scans. A card cast or played from another player's graveyard is controlled by the actor. `Game.CreateZonePermission` registers one, and the purges drop it with its source. Crucible of Worlds is in the red-green deck, a scenario covers the graveyard land play, and `BEHAVIOUR_REV` is 7. [closed/082-build-zone-permissions.md]
 
 ## Not yet specified
 
@@ -69,10 +70,6 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 082 Build zone permissions (play or cast from another zone), a build ticket
-
-Blocked:
-
-- 083 Library and linked-exile zone permissions, a grilling ticket, blocked by 082
-- 084 Expiring timing and zone permissions, a grilling ticket, blocked by 082
-- 085 Zone permission riders, a grilling ticket, blocked by 082
+- 083 Library and linked-exile zone permissions, a grilling ticket
+- 084 Expiring timing and zone permissions, a grilling ticket
+- 085 Zone permission riders, a grilling ticket

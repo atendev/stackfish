@@ -1,0 +1,117 @@
+# CR 305.1, 305.2a: Crucible of Worlds lets its controller play lands from their graveyard.
+# A graveyard land is refused before Crucible resolves, played after it, and the second
+# graveyard land is refused because the land play is used up.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "crucible"
+name = "Crucible of Worlds"
+types = ["Artifact"]
+script = """
+local s = {}
+function s.register_abilities(c)
+    local p = Game.CreateZonePermission(c)
+    p:SetAffected(Game.Affected.You)
+    p:SetZone("Graveyard")
+    p:SetKind("PlayLand")
+    p:Register()
+end
+return s
+"""
+
+[[cards]]
+key = "ruins"
+name = "Graveyard Land"
+types = ["Land"]
+
+[[cards]]
+key = "ruins2"
+name = "Second Graveyard Land"
+types = ["Land"]
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "crucible"
+
+[[setup]]
+player = 0
+zone = "graveyard"
+card = "ruins"
+
+[[setup]]
+player = 0
+zone = "graveyard"
+card = "ruins2"
+
+# Solo game, so the turn 1 draw step runs and needs a card (CR 103.8a, 704.5b).
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "play_land"
+player = 0
+card = "ruins"
+expect_error = true
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "crucible"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "crucible"
+equals = "battlefield"
+
+[[steps]]
+type = "play_land"
+player = 0
+card = "ruins"
+
+[[steps]]
+type = "assert_object_zone"
+card = "ruins"
+equals = "battlefield"
+
+[[steps]]
+type = "play_land"
+player = 0
+card = "ruins2"
+expect_error = true
+
+[[steps]]
+type = "assert_object_zone"
+card = "ruins2"
+equals = "graveyard"

@@ -678,6 +678,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> InitialState {
         draw_limit_modifiers: Vec::new(),
         land_play_modifiers: Vec::new(),
         timing_permissions: Vec::new(),
+        zone_permissions: Vec::new(),
         abilities,
         ledger: Vec::new(),
         rng: RngState {

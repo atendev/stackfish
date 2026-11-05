@@ -9,7 +9,7 @@ use crate::types::ids::{AbilityId, EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
 use crate::types::player::{
     DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, PlayerState,
-    TimingPermission,
+    TimingPermission, ZonePermission,
 };
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
@@ -89,6 +89,10 @@ pub struct GameState {
     /// CR 601.3b: "cast spells as though they had flash" permissions. See
     /// `TimingPermission`. Read by `commands::can_cast_now`.
     pub timing_permissions: Vec<TimingPermission>,
+    /// CR 601.3, 305.1: "play or cast from another zone" permissions. See
+    /// `ZonePermission`. Read by `commands::can_cast_from_zone` and
+    /// `commands::can_play_land_from_zone`.
+    pub zone_permissions: Vec<ZonePermission>,
     /// Registered triggered, activated and static abilities, flat.
     pub abilities: Vec<RegisteredAbility>,
     pub ledger: Vec<GameEvent>,
@@ -299,6 +303,7 @@ mod tests {
             draw_limit_modifiers: Vec::new(),
             land_play_modifiers: Vec::new(),
             timing_permissions: Vec::new(),
+            zone_permissions: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState {

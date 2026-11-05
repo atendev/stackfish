@@ -646,4 +646,61 @@ mod tests {
         let from_battlefield = left_game(ZoneKind::Battlefield);
         assert!(object_seen(&from_battlefield, Viewer::Player(PlayerId(0))).is_some());
     }
+
+    // CR 305.1, 400.2
+    // Player 0 plays player 1's land from player 1's graveyard, so both zones are public.
+    #[test]
+    fn a_land_played_from_a_graveyard_shows_every_seat_both_ids_and_the_identity() {
+        let definition = stackfish_testutil::minimal_card_definition(
+            1,
+            "Test Land",
+            "test_land",
+            stackfish_engine::ManaCost {
+                symbols: Vec::new(),
+            },
+            stackfish_engine::CardTypeSet::LAND,
+        );
+        let in_graveyard = stackfish_testutil::card_object(
+            ObjectId(7),
+            definition,
+            PlayerId(1),
+            ZoneKind::Graveyard,
+        );
+        let mut on_battlefield = in_graveyard.clone();
+        on_battlefield.object_id = ObjectId(8);
+        on_battlefield.zone = ZoneKind::Battlefield;
+        on_battlefield.controller = PlayerId(0);
+        let mut state = stackfish_testutil::two_player_state(Vec::new());
+        state.objects.insert(ObjectId(8), on_battlefield);
+        let event = GameEvent::new(
+            EventId(0),
+            SequenceNo(0),
+            GameEventKind::ZoneChange {
+                object: ObjectId(8),
+                from: ZoneKind::Graveyard,
+                to: ZoneKind::Battlefield,
+                last_known_info: Some(in_graveyard),
+            },
+        );
+        let observed = Observer::default().observe(&state, &event);
+        for viewer in [
+            Viewer::Player(PlayerId(0)),
+            Viewer::Player(PlayerId(1)),
+            Viewer::Spectator { omniscient: false },
+        ] {
+            match observed.kind_for(viewer) {
+                Some(WireEventKind::ZoneChange {
+                    object,
+                    previous,
+                    identity,
+                    ..
+                }) => {
+                    assert_eq!(object, Some(U64::from(ObjectId(8))), "{viewer:?}");
+                    assert_eq!(previous, Some(U64::from(ObjectId(7))), "{viewer:?}");
+                    assert!(identity.is_some(), "{viewer:?}");
+                }
+                other => panic!("expected zone_change, got {other:?}"),
+            }
+        }
+    }
 }

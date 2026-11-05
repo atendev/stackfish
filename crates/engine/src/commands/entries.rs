@@ -2,8 +2,6 @@
 //! activate and play-land commands run so an entry is listed exactly when the
 //! command would pass. See `DESIGN.md` for the rest.
 
-// TODO: zone permission granted by a continuous effect ("play lands from your graveyard") is not represented in the commands or the entries (CR 601.3)
-
 use std::collections::HashMap;
 
 use crate::decision::{
@@ -20,8 +18,8 @@ use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::legality::{
-    can_cast_now, has_summoning_sickness, is_sorcery_speed, legal_target_candidates_for_x,
-    requirement_depends_on_x, solo_only_modes,
+    can_cast_from_zone, can_cast_now, can_play_land_from_zone, has_summoning_sickness,
+    is_sorcery_speed, legal_target_candidates_for_x, requirement_depends_on_x, solo_only_modes,
 };
 
 /// Every entry the priority player may take, with `Pass` last.
@@ -44,14 +42,28 @@ fn play_land_entries(state: &GameState, player: PlayerId, entries: &mut Vec<Entr
     {
         return;
     }
-    let Some(hand) = state.zone(ZoneKind::Hand, Some(player)) else {
+    // Hand entries come first, in hand order, and then lands a zone permission
+    // opens, in id order.
+    if let Some(hand) = state.zone(ZoneKind::Hand, Some(player)) {
+        for &id in hand.contents.iter() {
+            let Some(object) = state.object(id) else {
+                continue;
+            };
+            if object.controller == player
+                && object.definition.card_types.contains(CardTypeSet::LAND)
+            {
+                entries.push(Entry::PlayLand { card: id });
+            }
+        }
+    }
+    if state.zone_permissions.is_empty() {
         return;
-    };
-    for &id in hand.contents.iter() {
-        let Some(object) = state.object(id) else {
-            continue;
-        };
-        if object.controller == player && object.definition.card_types.contains(CardTypeSet::LAND) {
+    }
+    for (&id, object) in &state.objects {
+        if object.zone != ZoneKind::Hand
+            && object.definition.card_types.contains(CardTypeSet::LAND)
+            && can_play_land_from_zone(state, player, object)
+        {
             entries.push(Entry::PlayLand { card: id });
         }
     }
@@ -71,10 +83,8 @@ fn cast_entries(
         if definition.card_types.contains(CardTypeSet::LAND) {
             continue;
         }
-        // CR 903.8
-        // The owner may cast a commander from the command zone. Every other normal cast comes from the hand.
-        let normal = (object.zone == ZoneKind::Hand && object.controller == player)
-            || (object.is_commander && object.zone == ZoneKind::Command && object.owner == player);
+        // CR 601.3, 903.8
+        let normal = can_cast_from_zone(state, player, object);
         // CR 601.2b
         // An alternative cost also grants the zone it casts from.
         let alternative_costs: Vec<usize> = if object.controller == player {

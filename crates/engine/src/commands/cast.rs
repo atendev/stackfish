@@ -15,7 +15,9 @@ use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::attach::{non_eliminated_players, remap_abilities};
-use super::legality::{can_cast_now, combine_chosen_modes, has_own_flash, validate_targets};
+use super::legality::{
+    can_cast_from_zone, can_cast_now, combine_chosen_modes, has_own_flash, validate_targets,
+};
 use super::{
     CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
     Validated,
@@ -113,13 +115,16 @@ pub(super) fn validate_cast_spell(
         && object.zone == ZoneKind::Command
         && object.owner == actor;
     // TODO: nothing checks that the chosen alternative cost really grants flashback's graveyard permission (a Flashback keyword versus an ad-hoc alternative_costs entry)
-    // The alternative's from_zone must match where the card is. Without an
-    // alternative cost the card must be in hand.
-    let required_zone = match alternative {
-        Some(AlternativeCost::Replacement { from_zone, .. }) => *from_zone,
-        None => ZoneKind::Hand,
+    // CR 601.3
+    // An alternative cost carries its own zone, so a flashback cast checks that
+    // zone and not a zone permission.
+    let zone_allowed = match alternative {
+        Some(AlternativeCost::Replacement { from_zone, .. }) => {
+            object.zone == *from_zone && object.controller == actor
+        }
+        None => can_cast_from_zone(state, actor, object),
     };
-    if !cast_from_command_zone && (object.zone != required_zone || object.controller != actor) {
+    if !zone_allowed {
         return Err(Rejected::IllegalAction(
             "card is not in the zone required to cast it this way".to_string(),
         ));
@@ -434,13 +439,14 @@ pub(super) fn validate_cast_spell(
 
     // CR 400.7
     // Exile, like Battlefield, is a shared zone and not per-player, using the same
-    // owner derivation as `commands::commit_zone_move`. Looked up before any id is
-    // allocated or the card is removed, so a missing zone rejects without a partial
-    // move.
+    // owner derivation as `commands::commit_zone_move`. A zone permission can open
+    // another player's graveyard, so the zone is the owner's and not the actor's.
+    // Looked up before any id is allocated or the card is removed, so a missing
+    // zone rejects without a partial move.
     let from_owner = if from_zone == ZoneKind::Exile {
         None
     } else {
-        Some(actor)
+        Some(object.owner)
     };
     if state.zone(from_zone, from_owner).is_none() {
         return Err(Rejected::IllegalAction(
@@ -508,6 +514,9 @@ pub(super) fn apply_cast_spell(
         previous: Some(card),
     };
     new_object.zone = ZoneKind::Stack;
+    // CR 601.2a
+    // A card cast from another player's graveyard is still controlled by its caster.
+    new_object.controller = actor;
     new_object.timestamp = state.allocate_sequence_no();
 
     state
