@@ -22,7 +22,7 @@ use crate::types::effect::{
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::player::{
     DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
-    HandSizeModifier, LandPlayAffected, LandPlayModifier,
+    HandSizeModifier, LandPlayAffected, LandPlayModifier, TimingPermission,
 };
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -1160,6 +1160,63 @@ impl UserData for LandPlayModifierBuilder {
                 affected,
                 additional,
             }, this.function_zone));
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreateTimingPermission(c)`'s return value (CR 601.3b), mirroring
+/// `LandPlayModifierBuilder` with a placeholder `controller`. `:SetFilter` is
+/// optional and takes `Game.Filter({...})`, as `CostModifierBuilder` does.
+/// `:SetFunctionsFrom` picks the zone it functions from (CR 113.6).
+pub(crate) struct TimingPermissionBuilder {
+    pub(crate) source: ObjectId,
+    pub(crate) affected: Option<FilterController>,
+    pub(crate) spells: Option<FilterSpec>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
+    pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for TimingPermissionBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
+        methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
+            let tag = decode_player_affected(value, "a timing permission")?;
+            this.affected = Some(reject_enchanted_player(tag, "a timing permission")?);
+            Ok(())
+        });
+        methods.add_method_mut("SetFilter", |_, this, value: Value| match value {
+            Value::UserData(ud) if ud.is::<FilterTag>() => {
+                this.spells = Some(ud.borrow::<FilterTag>()?.0.clone().into_filter_spec());
+                Ok(())
+            }
+            other => Err(mlua::Error::RuntimeError(format!(
+                "a timing permission's SetFilter expects Game.Filter({{...}}), got {}",
+                other.type_name()
+            ))),
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let affected = this.affected.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetAffected() - a timing permission needs to know \
+                     which player(s) it affects"
+                        .to_string(),
+                )
+            })?;
+            this.registry.borrow_mut().pending_timing_permissions.push((
+                TimingPermission {
+                    source: this.source,
+                    // Placeholder, stamped by `run_card_script`'s drain step.
+                    controller: PlayerId(0),
+                    affected,
+                    spells: this.spells.clone().unwrap_or(FilterSpec::ANY),
+                },
+                this.function_zone,
+            ));
             Ok(())
         });
     }

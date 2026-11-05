@@ -34,6 +34,7 @@ pub fn two_player_state(zones: Vec<Zone>) -> GameState {
         hand_reveal_modifiers: Vec::new(),
         draw_limit_modifiers: Vec::new(),
         land_play_modifiers: Vec::new(),
+        timing_permissions: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState {
@@ -92,6 +93,7 @@ pub fn single_player_state(player: PlayerId, zones: Vec<Zone>) -> GameState {
         hand_reveal_modifiers: Vec::new(),
         draw_limit_modifiers: Vec::new(),
         land_play_modifiers: Vec::new(),
+        timing_permissions: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState {

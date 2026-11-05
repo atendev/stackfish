@@ -59,6 +59,11 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
         ability.source = new_id;
         true
     });
+    // CR 611.3b
+    // A script re-registers a permission for the zone the object lands in, so the
+    // old object's permission must not keep granting flash.
+    state.timing_permissions.retain(|p| p.source != old_id);
+    // TODO: cost modifiers and player modifier lists are not purged here, so a modifier that functions from hand outlives its source's cast (CR 611.3b)
 }
 
 /// CR 707.2a: removes every `RegisteredAbility`, `ContinuousEffect` and
@@ -374,7 +379,8 @@ pub fn propose_attach(candidates: &[ObjectId]) -> AttachProposal {
 }
 
 /// Removes `old_id` from `state.objects` and purges every `RegisteredAbility`,
-/// `ContinuousEffect` and `ReplacementEffect` still pointing at it. Call it at a
+/// `ContinuousEffect`, `ReplacementEffect`, player modifier and timing permission
+/// still pointing at it. Call it at a
 /// zone-change site that does not call `remap_abilities` for `old_id` (discard,
 /// `draw_step`, SBA-driven death). Calling both deletes what remap carried
 /// forward; calling neither leaves dead entries behind.
@@ -422,13 +428,14 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     state.replacement_effects.retain(|r| r.source != old_id);
     // CR 611.3b
     // A continuous effect from a static ability applies only while its source is on
-    // the battlefield. These four player-level modifier lists have that shape (an
-    // extra land drop, an extra draw), so they get the same source-keyed purge as
-    // the three lists above.
+    // the battlefield. The player-level modifier lists and timing permissions have
+    // that shape (an extra land drop, an extra draw, flash), so they get the same
+    // source-keyed purge as the three lists above.
     state.hand_size_modifiers.retain(|m| m.source != old_id);
     state.hand_reveal_modifiers.retain(|m| m.source != old_id);
     state.draw_limit_modifiers.retain(|m| m.source != old_id);
     state.land_play_modifiers.retain(|m| m.source != old_id);
+    state.timing_permissions.retain(|p| p.source != old_id);
     departed_triggered
 }
 

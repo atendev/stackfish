@@ -26,13 +26,39 @@ use super::{Rejected, non_eliminated_players};
 /// the stack is empty (CR 307.1/305.1). A standalone predicate because
 /// `PlayLand`, `CastSpell` and `ActivateAbility`'s Equip check (CR 702.6a) share
 /// the condition.
-///
-/// TODO: effects that grant timing permission beyond the base rule ("additional land", "as though it had flash", "as though it were a main phase") are not consulted, since nothing here reads state.continuous_effects or abilities for them (CR 113.6)
+// TODO: Equip and other sorcery-speed activated abilities ignore timing permissions, so instant-speed equip is not granted (CR 702.6a)
+// TODO: "as though it were a main phase" and other timing grants beyond flash are not represented (CR 609.4)
 pub(in crate::commands) fn is_sorcery_speed(state: &GameState, player: PlayerId) -> bool {
     state.priority_player == player
         && state.active_player == player
         && state.phase == Phase::Main
         && state.stack.is_empty()
+}
+
+/// CR 117.1a, 601.3b: whether `player` may begin to cast `card` now. An instant,
+/// a Flash card or a card a `TimingPermission` covers needs only priority, and
+/// anything else needs `is_sorcery_speed`. `PlayLand` and Equip never read it.
+// TODO: zone permissions ("cast or play from another zone") are not read by the cast and land commands (CR 601.3)
+// TODO: a timing permission lasts while its source is on the battlefield, so "until end of turn" grants have no expiry (CR 611.2)
+// TODO: conditional flash ("as though it had flash if ...") has no condition on a timing permission (CR 601.3d)
+pub(in crate::commands) fn can_cast_now(
+    state: &GameState,
+    player: PlayerId,
+    card: &GameObject,
+) -> bool {
+    if has_own_flash(card)
+        || crate::types::player::has_timing_permission(&state.timing_permissions, player, card)
+    {
+        state.priority_player == player
+    } else {
+        is_sorcery_speed(state, player)
+    }
+}
+
+/// CR 117.1a, 702.8a: `card` is an instant or has Flash itself.
+pub(in crate::commands) fn has_own_flash(card: &GameObject) -> bool {
+    card.definition.card_types.contains(CardTypeSet::INSTANT)
+        || card.definition.keywords.contains(KeywordSet::FLASH)
 }
 
 /// CR 302.6/602.5a summoning sickness: `object` is sick unless it has been under
@@ -1230,13 +1256,13 @@ mod tests {
         CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SpellMode,
         SupertypeSet as SupertypeSetT,
     };
-    use crate::types::cost::FilterController;
+    use crate::types::cost::{FilterController, FilterSpec};
     use crate::types::counter::CounterSet;
     use crate::types::game::{GameState, RngState};
     use crate::types::ids::{ObjectId, PlayerId, SequenceNo, Target};
     use crate::types::mana::{Color, ManaCost, ManaPool, ManaUnit};
     use crate::types::object::{GameObject, VisibilityPolicy};
-    use crate::types::player::PlayerState;
+    use crate::types::player::{PlayerState, TimingPermission};
     use crate::types::stack::{StackEntryKind, StackObject};
     use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
     use crate::types::turn::{Phase, Step};
@@ -1355,6 +1381,7 @@ mod tests {
             hand_reveal_modifiers: Vec::new(),
             draw_limit_modifiers: Vec::new(),
             land_play_modifiers: Vec::new(),
+            timing_permissions: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState {
@@ -1460,6 +1487,113 @@ mod tests {
         let mut state = state_with(Vec::new());
         state.stack.push(stack_object(p0));
         assert!(!is_sorcery_speed(&state, p0));
+    }
+
+    fn permission(controller: PlayerId, affected: FilterController) -> TimingPermission {
+        TimingPermission {
+            source: ObjectId(50),
+            controller,
+            affected,
+            spells: FilterSpec::ANY,
+        }
+    }
+
+    // Player 1 holds priority on player 0's turn with a spell on the stack.
+    fn off_turn_state(objects: Vec<GameObject>) -> GameState {
+        let mut state = state_with(objects);
+        state.players.push(player(PlayerId(1)));
+        state.turn_order.push(PlayerId(1));
+        state.priority_player = PlayerId(1);
+        state.stack.push(stack_object(PlayerId(0)));
+        state
+    }
+
+    // CR 117.1a
+    #[test]
+    fn can_cast_now_lets_an_instant_or_flash_card_through_with_priority() {
+        let p1 = PlayerId(1);
+        let instant = object(ObjectId(1), p1, CardTypeSet::INSTANT, ZoneKind::Hand);
+        let mut flash = object(ObjectId(2), p1, CardTypeSet::CREATURE, ZoneKind::Hand);
+        flash.definition.keywords = KeywordSet::FLASH;
+        let state = off_turn_state(vec![instant.clone(), flash.clone()]);
+        assert!(can_cast_now(&state, p1, &instant));
+        assert!(can_cast_now(&state, p1, &flash));
+    }
+
+    // CR 117.1a
+    #[test]
+    fn can_cast_now_refuses_a_sorcery_off_turn_without_a_permission() {
+        let p1 = PlayerId(1);
+        let sorcery = object(ObjectId(1), p1, CardTypeSet::SORCERY, ZoneKind::Hand);
+        let state = off_turn_state(vec![sorcery.clone()]);
+        assert!(!can_cast_now(&state, p1, &sorcery));
+    }
+
+    // CR 601.3b
+    #[test]
+    fn can_cast_now_reads_the_permissions_affected_players() {
+        let (p0, p1) = (PlayerId(0), PlayerId(1));
+        let sorcery = object(ObjectId(1), p1, CardTypeSet::SORCERY, ZoneKind::Hand);
+        let mut state = off_turn_state(vec![sorcery.clone()]);
+        for (permission, expected) in [
+            (permission(p1, FilterController::You), true),
+            (permission(p0, FilterController::You), false),
+            (permission(p0, FilterController::Opponent), true),
+            (permission(p1, FilterController::Opponent), false),
+            (permission(p0, FilterController::Any), true),
+        ] {
+            state.timing_permissions = vec![permission.clone()];
+            assert_eq!(
+                can_cast_now(&state, p1, &sorcery),
+                expected,
+                "{permission:?}"
+            );
+        }
+    }
+
+    // CR 601.3b
+    #[test]
+    fn can_cast_now_needs_the_spell_filter_to_match() {
+        let p1 = PlayerId(1);
+        let sorcery = object(ObjectId(1), p1, CardTypeSet::SORCERY, ZoneKind::Hand);
+        let creature = object(ObjectId(2), p1, CardTypeSet::CREATURE, ZoneKind::Hand);
+        let mut state = off_turn_state(vec![sorcery.clone(), creature.clone()]);
+        state.timing_permissions = vec![TimingPermission {
+            spells: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                ..FilterSpec::ANY
+            },
+            ..permission(p1, FilterController::You)
+        }];
+        assert!(can_cast_now(&state, p1, &creature));
+        assert!(!can_cast_now(&state, p1, &sorcery));
+
+        state.timing_permissions[0].spells.extra = Some("power 4 or greater".to_string());
+        assert!(!can_cast_now(&state, p1, &creature));
+    }
+
+    // CR 601.3b
+    #[test]
+    fn can_cast_now_never_grants_priority() {
+        let (p0, p1) = (PlayerId(0), PlayerId(1));
+        let sorcery = object(ObjectId(1), p1, CardTypeSet::SORCERY, ZoneKind::Hand);
+        let mut state = off_turn_state(vec![sorcery.clone()]);
+        state.timing_permissions = vec![permission(p1, FilterController::You)];
+        state.priority_player = p0;
+        assert!(!can_cast_now(&state, p1, &sorcery));
+    }
+
+    // CR 903.8
+    // The owner casts a commander someone else controls, so the permission's subject is the caster.
+    #[test]
+    fn can_cast_now_tests_the_caster_and_not_the_cards_controller() {
+        let (p0, p1) = (PlayerId(0), PlayerId(1));
+        let mut commander = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Command);
+        commander.owner = p1;
+        commander.is_commander = true;
+        let mut state = off_turn_state(vec![commander.clone()]);
+        state.timing_permissions = vec![permission(p1, FilterController::You)];
+        assert!(can_cast_now(&state, p1, &commander));
     }
 
     #[test]

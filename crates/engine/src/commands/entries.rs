@@ -2,7 +2,7 @@
 //! activate and play-land commands run so an entry is listed exactly when the
 //! command would pass. See `DESIGN.md` for the rest.
 
-// TODO: timing or zone permission granted by a continuous effect ("as though it had flash", "play lands from your graveyard") is not represented in the commands or the entries
+// TODO: zone permission granted by a continuous effect ("play lands from your graveyard") is not represented in the commands or the entries (CR 601.3)
 
 use std::collections::HashMap;
 
@@ -11,7 +11,7 @@ use crate::decision::{
 };
 use crate::script::ScriptRuntime;
 use crate::types::ability::{AbilityEffect, AbilityKind};
-use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice};
+use crate::types::card::{CardDefinition, CardTypeSet, ModeChoice};
 use crate::types::cost::{AdditionalCost, AlternativeCost};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
@@ -20,7 +20,7 @@ use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::legality::{
-    has_summoning_sickness, is_sorcery_speed, legal_target_candidates_for_x,
+    can_cast_now, has_summoning_sickness, is_sorcery_speed, legal_target_candidates_for_x,
     requirement_depends_on_x, solo_only_modes,
 };
 
@@ -93,16 +93,8 @@ fn cast_entries(
         if !normal && alternative_costs.is_empty() {
             continue;
         }
-        // CR 117.1a/702.8b
-        // Instants and flash are castable whenever the player holds priority. Everything else needs the sorcery window.
-        let instant_speed = definition.card_types.contains(CardTypeSet::INSTANT)
-            || definition.keywords.contains(KeywordSet::FLASH);
-        let timing_ok = if instant_speed {
-            state.priority_player == player
-        } else {
-            is_sorcery_speed(state, player)
-        };
-        if !timing_ok {
+        // CR 117.1a, 601.3b
+        if !can_cast_now(state, player, object) {
             continue;
         }
         let Some((modes, targets)) =

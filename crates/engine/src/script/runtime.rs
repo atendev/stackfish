@@ -17,7 +17,7 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ManaCost;
 use crate::types::player::{
-    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier,
+    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, TimingPermission,
 };
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -371,6 +371,23 @@ impl ScriptRuntime {
             );
         }
         state.land_play_modifiers.append(&mut land_play_modifiers);
+
+        let mut timing_permissions: Vec<TimingPermission> = take_functioning(
+            &mut self.registry.borrow_mut().pending_timing_permissions,
+            source_zone,
+            on_battlefield,
+        );
+        for permission in &mut timing_permissions {
+            // The real controller, as for land_play_modifiers above.
+            permission.controller = state
+                .object(permission.source)
+                .map(|o| o.controller)
+                .expect(
+                    "TimingPermission's source must already exist in GameState by drain time - \
+                 Game.CreateTimingPermission was called with a bogus source id",
+                );
+        }
+        state.timing_permissions.append(&mut timing_permissions);
         Ok(())
     }
 
