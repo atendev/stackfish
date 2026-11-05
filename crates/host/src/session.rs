@@ -187,7 +187,7 @@ impl Session {
         loaded.unwrap_or_else(|_| Err(refuse_start(ErrorCode::EnginePanic, INTERNAL_MESSAGE)))
     }
 
-    // TODO: replay determinism also rests on the HashMap walk audit and on Lua pairs order
+    // TODO: replay determinism also rests on Lua pairs order
     fn drive(&mut self, answers: &[RecordedAnswer]) -> Result<(), String> {
         for (i, recorded) in answers.iter().enumerate() {
             match self.run_to_pause() {

@@ -9,3 +9,6 @@ path = "src/main.rs"
 
 [dependencies]
 stackfish-scenario = { path = "../scenario" }
+
+[lints.clippy]
+iter_over_hash_type = "warn"

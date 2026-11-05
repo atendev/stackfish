@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::types::config::{GameConfig, GameSettings, PlayerConfig};
@@ -48,7 +48,7 @@ fn build_game_settings(spec: &GameSettingsSpec) -> GameSettings {
 pub(crate) fn build_new_game_engine(
     file: &ScenarioFile,
     game: &GameSpec,
-) -> (Engine, HashMap<String, ObjectId>) {
+) -> (Engine, BTreeMap<String, ObjectId>) {
     let card_specs: HashMap<&str, &CardSpec> =
         file.cards.iter().map(|c| (c.key.as_str(), c)).collect();
     let card_db = open_card_db(file);
@@ -56,7 +56,7 @@ pub(crate) fn build_new_game_engine(
     let settings = build_game_settings(&game.settings);
     let rng_seed = game.rng_seed.or(file.seed).unwrap_or(0);
 
-    let mut card_ids: HashMap<String, ObjectId> = HashMap::new();
+    let mut card_ids: BTreeMap<String, ObjectId> = BTreeMap::new();
     let mut next_id: u64 = 0;
 
     let player_configs: Vec<PlayerConfig> = game

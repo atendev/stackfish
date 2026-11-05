@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 stackfish-engine = { path = "../engine" }
+
+[lints.clippy]
+iter_over_hash_type = "warn"

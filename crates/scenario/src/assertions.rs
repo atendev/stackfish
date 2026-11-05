@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use stackfish_engine::*;
 
@@ -14,7 +14,7 @@ pub enum AssertionOutcome {
 pub(crate) fn check_assertion(
     spec: &AssertionSpec,
     state: &GameState,
-    card_ids: &HashMap<String, ObjectId>,
+    card_ids: &BTreeMap<String, ObjectId>,
 ) -> AssertionOutcome {
     match spec {
         AssertionSpec::Life { player, equals } => {

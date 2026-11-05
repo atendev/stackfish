@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use stackfish_engine::*;
 
@@ -6,7 +6,7 @@ use crate::build::parse_mana_unit;
 use crate::schema::TargetSpec;
 use crate::schema::*;
 
-pub(crate) fn resolve_target(spec: &TargetSpec, card_ids: &HashMap<String, ObjectId>) -> Target {
+pub(crate) fn resolve_target(spec: &TargetSpec, card_ids: &BTreeMap<String, ObjectId>) -> Target {
     match spec {
         TargetSpec::Player(id) => Target::Player(PlayerId(*id)),
         TargetSpec::Card(key) => Target::Object(
@@ -17,7 +17,7 @@ pub(crate) fn resolve_target(spec: &TargetSpec, card_ids: &HashMap<String, Objec
     }
 }
 
-pub(crate) fn resolve_card(key: &str, card_ids: &HashMap<String, ObjectId>) -> ObjectId {
+pub(crate) fn resolve_card(key: &str, card_ids: &BTreeMap<String, ObjectId>) -> ObjectId {
     *card_ids
         .get(key)
         .unwrap_or_else(|| panic!("action references unknown card key '{key}'"))
@@ -25,7 +25,7 @@ pub(crate) fn resolve_card(key: &str, card_ids: &HashMap<String, ObjectId>) -> O
 
 pub(crate) fn to_player_action(
     spec: &ActionSpec,
-    card_ids: &HashMap<String, ObjectId>,
+    card_ids: &BTreeMap<String, ObjectId>,
 ) -> PlayerAction {
     let (player, kind) = match spec {
         ActionSpec::PassPriority { player } => (*player, PlayerActionKind::PassPriority),
