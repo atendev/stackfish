@@ -3,7 +3,7 @@ id: 078
 title: Build the hash-walk lint and clear its sites
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: [075]
 claimed: false
 ---
@@ -27,4 +27,4 @@ Add the lint decided in 075 and clear the 9 sites it fires on today, with the re
 
 ## Resolution
 
-<Filled in at close: the decision and the reason for it.>
+Built. `iter_over_hash_type` is `warn` in the workspace table and in the engine, cli and testutil tables. A root `clippy.toml` disallows the HashMap and HashSet methods that walk, and a probe showed it reaches every crate with no opt-in. The 9 sites became `BTreeMap` or `BTreeSet`, except `entries.rs`, which now checks `pending_damage_splits` by key. No `#[allow]` was needed. The replay pin and `BEHAVIOUR_REV` did not move, so no walk order had reached the event stream. `into_iter`, `extend`, `from_iter` and Lua `pairs` are still not caught. Notes in `docs/implementation/28-module-layout.md`.
