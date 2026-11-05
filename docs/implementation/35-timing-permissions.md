@@ -48,4 +48,4 @@ An effect that lets a player cast spells as though they had flash (Vedalken Orre
 
 ## Not built
 
-Zone permissions, "until end of turn" grants, conditional flash (CR 601.3d), "as though it were a main phase" and instant-speed equip each have a TODO.
+"Until end of turn" grants, conditional flash (CR 601.3d), "as though it were a main phase" and instant-speed equip each have a TODO.

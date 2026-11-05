@@ -460,6 +460,50 @@ function TimingPermissionBuilder:SetFilter(filter) end
 function TimingPermissionBuilder:Register() end
 
 -------------------------------------------------------------------------------
+-- Game.CreateZonePermission(c) — CR 601.3, 305.1 "you may play lands from your graveyard."
+-------------------------------------------------------------------------------
+
+---@class ZonePermissionBuilder
+local ZonePermissionBuilder = {}
+
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Hand"|"Graveyard"|"Exile"
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetFunctionsFrom(zoneName) end
+
+--- Which player(s) may use the permission. Required before :Register().
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent or .Any; .EnchantedPlayer is an error
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetAffected(value) end
+
+--- The zone the permission opens. Required before :Register().
+---@param zoneName "Graveyard"|"Exile"  -- any other zone is an error
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetZone(zoneName) end
+
+--- Whether the permission plays lands or casts spells. Required before :Register().
+---@param kind "PlayLand"|"Cast"
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetKind(kind) end
+
+--- Whose cards in the zone it covers, relative to the source's controller. Optional; the
+--- default is Game.Affected.You.
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent or .Any; .EnchantedPlayer is an error
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetOwner(value) end
+
+--- Which cards the permission covers. Optional; the default is every card. A filter with
+--- `extra` set never matches.
+---@param filter GameFilterValue  -- Game.Filter({...}); a plain table is an error
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetFilter(filter) end
+
+--- Finalizes and registers the permission. It changes where a card may come from, not when:
+--- a cast still needs its normal timing, and a land play still needs sorcery speed and an
+--- unused land play.
+function ZonePermissionBuilder:Register() end
+
+-------------------------------------------------------------------------------
 -- Game.Counter.* — common counter kinds and a custom-counter constructor.
 -------------------------------------------------------------------------------
 
@@ -1113,6 +1157,10 @@ function Game.CreateLandPlayModifier(c) end
 ---@param c ObjectId
 ---@return TimingPermissionBuilder
 function Game.CreateTimingPermission(c) end
+
+---@param c ObjectId
+---@return ZonePermissionBuilder
+function Game.CreateZonePermission(c) end
 
 ---@param c ObjectId
 ---@return HandSizeModifierBuilder
