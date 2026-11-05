@@ -44,14 +44,13 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 072 Ledger events the snapshot fold needs. Every life change writes `LifeChanged`, damage included, so life folds from `life_changed` alone. Infect writes `PlayerCounterAdded`, priority changes write `PrioritySet`, and CR 800.4a writes one `LeftGame` per object and passes priority on. A snapshot drops a revealed identity. `BEHAVIOUR_REV` is 3. [closed/072-ledger-events-for-snapshot-fold.md]
 - 073 Make GameState objects a BTreeMap. Every walk over `objects` is in `ObjectId` order, which puts the Devour, Amplify, copy and entry-attach candidates in id order. The replay pin did not move. [closed/073-objects-btreemap.md]
 - 074 Proof cards for ordered choices. Ravenous Ooze, Rat Herald, Mimic Pool and Armory Call put Devour, Amplify, Copy and Attach on entry into the proof decks, and the seed loop asserts all four open. They found a Devour creature offered as its own sacrifice, now excluded (CR 614.12). `BEHAVIOUR_REV` is 4. [closed/074-proof-cards-for-ordered-choices.md]
+- 075 Lint against hash-ordered walks. Add `iter_over_hash_type` (workspace table, plus per-crate tables in engine, cli and testutil to keep the engine's `unreachable_pub` exemption) and `disallowed-methods` on hash walks in a root `clippy.toml`. The 9 sites are cleared by ordered containers, not allows. `into_iter`, `extend`, `from_iter` and Lua `pairs` stay accepted gaps. Build is 078. [closed/075-hash-walk-lint.md]
 
 ## Not yet specified
 
 - Carddb-backed CardSource: a thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. Its shape is settled in 006. The Godot adapter's `create` needs it to serve real cards.
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
-
-- Audit of unordered `HashMap` walks over game state that can reach a host (found by 014, which fixed three). `objects` is settled by 073. A lint for the rest is 075.
 
 ## Out of scope
 
@@ -64,9 +63,9 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 075 Decide a lint against hash-ordered walks
 - 076 Timing permissions granted by effects
 - 077 A Clone offered as a copy of itself
+- 078 Build the hash-walk lint and clear its sites
 
 Blocked:
 
