@@ -379,8 +379,8 @@ pub fn propose_attach(candidates: &[ObjectId]) -> AttachProposal {
 }
 
 /// Removes `old_id` from `state.objects` and purges every `RegisteredAbility`,
-/// `ContinuousEffect`, `ReplacementEffect`, player modifier and timing permission
-/// still pointing at it. Call it at a
+/// `ContinuousEffect`, `ReplacementEffect`, cost modifier, player modifier and
+/// timing permission still pointing at it. Call it at a
 /// zone-change site that does not call `remap_abilities` for `old_id` (discard,
 /// `draw_step`, SBA-driven death). Calling both deletes what remap carried
 /// forward; calling neither leaves dead entries behind.
@@ -428,9 +428,10 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     state.replacement_effects.retain(|r| r.source != old_id);
     // CR 611.3b
     // A continuous effect from a static ability applies only while its source is on
-    // the battlefield. The player-level modifier lists and timing permissions have
-    // that shape (an extra land drop, an extra draw, flash), so they get the same
-    // source-keyed purge as the three lists above.
+    // the battlefield. Cost modifiers, the player-level modifier lists and timing
+    // permissions have that shape (a cost reduction, an extra land drop, flash), so
+    // they get the same source-keyed purge as the three lists above.
+    state.cost_modifiers.retain(|m| m.source != old_id);
     state.hand_size_modifiers.retain(|m| m.source != old_id);
     state.hand_reveal_modifiers.retain(|m| m.source != old_id);
     state.draw_limit_modifiers.retain(|m| m.source != old_id);

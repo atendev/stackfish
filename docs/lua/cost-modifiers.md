@@ -4,6 +4,7 @@
 
 CR 601.2f — "Spells you cast cost {N} more/less to cast," or similar. Built with
 `Game.CreateCostModifier(c)`. The smallest builder in this API — just a filter and an amount.
+The modifier is a static ability, so it ends when its source leaves the battlefield (CR 611.3b).
 
 ```lua
 -- Spells you cast cost {1} less to cast.

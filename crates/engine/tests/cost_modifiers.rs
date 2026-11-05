@@ -816,3 +816,165 @@ fn reduction_then_increase_and_increase_then_reduction_resolve_to_the_same_cost(
     resolves_to_a_free_spell(vec![reduce.clone(), increase.clone()]);
     resolves_to_a_free_spell(vec![increase, reduce]);
 }
+
+fn pass(engine: &mut Engine, player: PlayerId) {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::PassPriority,
+        })
+        .expect("player holds priority");
+    drain(engine);
+}
+
+// CR 611.3b
+// The destroy spell is free and matches the modifier too, so its {0} floor leaves it free.
+#[test]
+fn a_reduction_ends_once_its_source_leaves_the_battlefield() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let source = ObjectId(0);
+    let removal = ObjectId(1);
+    let card = ObjectId(2);
+    let free = ManaCost {
+        symbols: Vec::new(),
+    };
+    let modifier = CostModifier {
+        source,
+        controller: p0,
+        filter: FilterSpec::ANY,
+        amount: -1,
+        target: stackfish_engine::CostModifierTarget::Generic,
+    };
+    let mut state = two_player_state(
+        ManaPool {
+            red: 1,
+            colorless: 2,
+            ..ManaPool::default()
+        },
+        vec![modifier],
+    );
+    state.objects.insert(
+        source,
+        card_object(
+            source,
+            minimal_card_definition(
+                3,
+                "Test Cost Reducer",
+                "test_cost_reducer",
+                free.clone(),
+                CardTypeSet::ENCHANTMENT,
+            ),
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    state
+        .zone_mut(ZoneKind::Battlefield, None)
+        .unwrap()
+        .push_bottom(source);
+    let destroy = CardDefinition {
+        oracle_text: "Destroy target permanent.".to_string(),
+        target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
+            filter: TargetFilter::Object {
+                mana_value: None,
+                excluded_card_types: None,
+                excluded_subtypes: None,
+                card_types: None,
+                subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
+            count: 1,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        })),
+        effect: Some(AbilityEffect::Destroy),
+        ..minimal_card_definition(
+            30,
+            "Test Destroy Permanent",
+            "test_destroy_permanent",
+            free,
+            CardTypeSet::INSTANT,
+        )
+    };
+    let mana_cost = ManaCost {
+        symbols: vec![
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+        ],
+    };
+    for (id, definition) in [
+        (removal, destroy),
+        (card, spell_definition(mana_cost, CardTypeSet::SORCERY)),
+    ] {
+        state
+            .objects
+            .insert(id, card_object(id, definition, p0, ZoneKind::Hand));
+        state
+            .zone_mut(ZoneKind::Hand, Some(p0))
+            .unwrap()
+            .push_bottom(id);
+    }
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::CastSpell {
+                card: removal,
+                modes: Vec::new(),
+                targets: vec![Target::Object(source)],
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
+        })
+        .expect("p0 holds priority, the destroy spell is in hand");
+    drain(&mut engine);
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("empty plan pays a {0} cost");
+    drain(&mut engine);
+    pass(&mut engine, p0);
+    pass(&mut engine, p1);
+
+    assert!(
+        engine.state().object(source).is_none(),
+        "the source enchantment was destroyed"
+    );
+    assert!(engine.state().cost_modifiers.is_empty());
+
+    cast_spell(&mut engine, p0, card);
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }));
+    let reduced = PaymentPlan {
+        payments: vec![CostPayment::Mana {
+            units: vec![ManaUnit::Colored(Color::Red), ManaUnit::Colorless],
+            phyrexian_life: 0,
+        }],
+    };
+    assert!(
+        engine.submit_payment(reduced).is_err(),
+        "{{1}}{{R}} no longer pays the full {{2}}{{R}}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units: vec![
+                    ManaUnit::Colored(Color::Red),
+                    ManaUnit::Colorless,
+                    ManaUnit::Colorless,
+                ],
+                phyrexian_life: 0,
+            }],
+        })
+        .expect("the full {2}{R} pays it");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+}

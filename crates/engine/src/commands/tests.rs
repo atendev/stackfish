@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::attach::{remap_abilities, retire_object};
 use crate::types::ability::{AbilityEffect, AbilityKind, RegisteredAbility};
 use crate::types::card::ModeChoice;
-use crate::types::cost::{FilterController, FilterSpec};
+use crate::types::cost::{CostModifier, CostModifierTarget, FilterController, FilterSpec};
 use crate::types::counter::CounterSet;
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter,
@@ -143,6 +143,16 @@ fn dummy_replacement_effect(source: ObjectId) -> ReplacementEffect {
     }
 }
 
+fn dummy_cost_modifier(source: ObjectId) -> CostModifier {
+    CostModifier {
+        source,
+        controller: PlayerId(0),
+        filter: FilterSpec::ANY,
+        target: CostModifierTarget::Generic,
+        amount: -1,
+    }
+}
+
 fn dummy_hand_size_modifier(source: ObjectId) -> HandSizeModifier {
     HandSizeModifier {
         source,
@@ -224,6 +234,8 @@ fn retire_object_purges_only_the_retired_source() {
     state
         .replacement_effects
         .push(dummy_replacement_effect(ObjectId(2)));
+    state.cost_modifiers.push(dummy_cost_modifier(ObjectId(1)));
+    state.cost_modifiers.push(dummy_cost_modifier(ObjectId(2)));
     state
         .hand_size_modifiers
         .push(dummy_hand_size_modifier(ObjectId(1)));
@@ -294,6 +306,8 @@ fn retire_object_purges_only_the_retired_source() {
         ObjectId(2),
         "ObjectId(2)'s replacement effect must survive untouched"
     );
+    let sources: Vec<ObjectId> = state.cost_modifiers.iter().map(|m| m.source).collect();
+    assert_eq!(sources, vec![ObjectId(2)]);
     assert_eq!(
         state.hand_size_modifiers.len(),
         1,
