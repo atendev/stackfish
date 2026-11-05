@@ -49,6 +49,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 077 A Clone offered as a copy of itself. `pending_copy_choice` never lists the entrant, in a first or chained round (CR 614.12a). A lone Clone enters with no Decision. 29 of 40 proof seeds moved but not the pinned seed 9, so `BEHAVIOUR_REV` is 5 with the same hash. [closed/077-clone-copies-itself.md]
 - 078 Build the hash-walk lint and clear its sites. Clippy refuses a `for` loop or a walking method over a hash container in every crate. The 9 sites are ordered containers or keyed lookups with no allows, and the replay pin did not move. [closed/078-build-hash-walk-lint.md]
 - 079 Build timing permissions (flash grants). `can_cast_now` reads `state.timing_permissions` for the cast and `cast_entries`. `Game.CreateTimingPermission` registers one, and `retire_object` and `remap_abilities` drop it with its source. The permission tests the caster. Vedalken Orrery is in the proof deck, `token_ceased` carries its zone and owner, and `BEHAVIOUR_REV` is 6. [closed/079-build-timing-permissions.md]
+- 081 cost_modifiers outlive their source. `retire_object` purges a source's cost modifiers with the other static-ability lists (CR 611.3b), and a destroy-then-cast test pins it. The `remap_abilities` gap for hand-functioning modifiers stays a TODO. [closed/081-cost-modifiers-outlive-source.md]
 
 ## Not yet specified
 
@@ -68,6 +69,5 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 Open tickets, unblocked and unclaimed:
 
 - 080 Zone permissions (play or cast from another zone), a grilling ticket
-- 081 cost_modifiers outlive their source
 
 Blocked: none.
