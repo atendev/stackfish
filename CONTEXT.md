@@ -66,6 +66,12 @@ _Avoid_: Config, init, new game request
 A named preset that fills the game settings, such as standard or commander. Setup overrides apply on top of it.
 _Avoid_: Mode, ruleset
 
+### Rules primitives
+
+**Timing permission**:
+A standing grant that lets a player cast matching spells as though they had flash. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it. Zone permissions ("play lands from your graveyard") are not part of it yet.
+_Avoid_: Flash grant, flash effect, timing modifier
+
 ## Relationships
 
 - A **Session** runs exactly one game and has one or more **Seats**

@@ -45,6 +45,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 073 Make GameState objects a BTreeMap. Every walk over `objects` is in `ObjectId` order, which puts the Devour, Amplify, copy and entry-attach candidates in id order. The replay pin did not move. [closed/073-objects-btreemap.md]
 - 074 Proof cards for ordered choices. Ravenous Ooze, Rat Herald, Mimic Pool and Armory Call put Devour, Amplify, Copy and Attach on entry into the proof decks, and the seed loop asserts all four open. They found a Devour creature offered as its own sacrifice, now excluded (CR 614.12). `BEHAVIOUR_REV` is 4. [closed/074-proof-cards-for-ordered-choices.md]
 - 075 Lint against hash-ordered walks. Add `iter_over_hash_type` (workspace table, plus per-crate tables in engine, cli and testutil to keep the engine's `unreachable_pub` exemption) and `disallowed-methods` on hash walks in a root `clippy.toml`. The 9 sites are cleared by ordered containers, not allows. `into_iter`, `extend`, `from_iter` and Lua `pairs` stay accepted gaps. Build is 078. [closed/075-hash-walk-lint.md]
+- 076 Timing permissions granted by effects. A Timing permission is a new list `state.timing_permissions` (player filter plus spell filter, flash only, removed when its source leaves), not FLASH through layers. One `can_cast_now` predicate serves cast and `cast_entries`, and land plays and Equip keep `is_sorcery_speed`. Zone permissions, end-of-turn grants and instant-speed equip are follow-ups. Build is 079. [closed/076-timing-grants.md]
 
 ## Not yet specified
 
@@ -63,10 +64,11 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 076 Timing permissions granted by effects
 - 077 A Clone offered as a copy of itself
 - 078 Build the hash-walk lint and clear its sites
+- 079 Build timing permissions (flash grants)
+- 081 cost_modifiers outlive their source
 
 Blocked:
 
-- none
+- 080 Zone permissions (play or cast from another zone), blocked by 079
