@@ -1093,7 +1093,7 @@ mod tests {
     // CR 111.7
     // The token's hand id was never sent to the opponent, so the cease event must not leak it.
     #[test]
-    fn a_token_that_ceases_in_a_hand_is_reported_only_to_its_owner() {
+    fn a_token_that_ceases_in_a_hand_shows_its_id_only_to_its_owner() {
         let mut session = started();
         let card = a_card_in_player_zero_s_hand(&session);
         let token = stackfish_engine::GameObject {
@@ -1122,10 +1122,18 @@ mod tests {
             &mut session,
             GameEventKind::TokenCeased {
                 object: card.object_id,
+                zone: ZoneKind::Hand,
+                owner: PlayerId(0),
             },
         );
-        for (viewer, receives) in VIEWERS.into_iter().zip([true, false, false, true]) {
-            assert_eq!(ceased.kind_for(viewer).is_some(), receives, "{viewer:?}");
+        // An opponent still gets the zone and owner, so its hand count folds.
+        for (viewer, sees_id) in VIEWERS.into_iter().zip([true, false, false, true]) {
+            match ceased.kind_for(viewer) {
+                Some(crate::wire::WireEventKind::TokenCeased { object, .. }) => {
+                    assert_eq!(object.is_some(), sees_id, "{viewer:?}")
+                }
+                other => panic!("{viewer:?}: expected token_ceased, got {other:?}"),
+            }
         }
     }
 
@@ -1136,6 +1144,8 @@ mod tests {
             &mut session,
             GameEventKind::TokenCeased {
                 object: ObjectId(9002),
+                zone: ZoneKind::Graveyard,
+                owner: PlayerId(0),
             },
         );
         for viewer in VIEWERS {

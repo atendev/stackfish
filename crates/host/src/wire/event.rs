@@ -377,8 +377,12 @@ pub(crate) enum WireEventKind {
     Regenerated {
         object: U64,
     },
+    /// CR 704.5d: `object` is left out for a Seat that could not see it where it was.
     TokenCeased {
-        object: U64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        object: Option<U64>,
+        zone: WireZone,
+        owner: u32,
     },
     Attached {
         object: U64,
@@ -446,7 +450,8 @@ impl WireEventKind {
             | GameEventKind::Cycled { .. }
             | GameEventKind::MadnessExiled { .. }
             | GameEventKind::Revealed { .. }
-            | GameEventKind::LeftGame { .. } => return None,
+            | GameEventKind::LeftGame { .. }
+            | GameEventKind::TokenCeased { .. } => return None,
             GameEventKind::LifeChanged { player: p, delta } => W::LifeChanged {
                 player: player(*p),
                 delta: *delta,
@@ -586,9 +591,6 @@ impl WireEventKind {
                 b: (*b).into(),
             },
             GameEventKind::Regenerated { object } => W::Regenerated {
-                object: (*object).into(),
-            },
-            GameEventKind::TokenCeased { object } => W::TokenCeased {
                 object: (*object).into(),
             },
             GameEventKind::Attached {

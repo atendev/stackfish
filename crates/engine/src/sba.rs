@@ -654,6 +654,10 @@ fn commit_token_cessation(
     state: &mut GameState,
     id: ObjectId,
 ) -> (GameEvent, Vec<RegisteredAbility>) {
+    let (zone, owner) = state
+        .object(id)
+        .map(|o| (o.zone, o.owner))
+        .expect("a ceasing token is collected from a zone it is still in");
     for zone in &mut state.zones {
         zone.remove(id);
     }
@@ -663,7 +667,11 @@ fn commit_token_cessation(
     let event = GameEvent {
         event_id,
         sequence_no,
-        kind: GameEventKind::TokenCeased { object: id },
+        kind: GameEventKind::TokenCeased {
+            object: id,
+            zone,
+            owner,
+        },
         caused_by_command: None,
         parent_event: None,
     };
