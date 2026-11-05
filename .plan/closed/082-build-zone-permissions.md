@@ -3,7 +3,7 @@ id: 82
 title: Build zone permissions (play or cast from another zone)
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: [80]
 claimed: false
 ---
@@ -23,4 +23,4 @@ Build the zone permissions decided in 080: `ZonePermission`, `ZonePermissionKind
 
 ## Resolution
 
-<Filled in at close: the decision and the reason for it.>
+Zone permissions are built as 080 decided. `ZonePermission` lives in `GameState.zone_permissions`. `can_cast_from_zone` and `can_play_land_from_zone` decide the zone for the cast command, `validate_play_land`, `apply_play_land` and both entry scans, so `legal_actions` and the commands agree. A cast or land play removes the card from its real zone (the owner's, or the shared exile), reports that zone, and gives control to the actor (CR 601.2a, 110.2), which 080 did not state. `Game.CreateZonePermission` takes `SetZone` and `SetKind` as strings, like `SetFunctionsFrom`. `retire_object` and `remap_abilities` purge permissions with their source. Crucible of Worlds replaced one Grizzly Bear in the red-green deck. No proof seed from 0 to 29 plays a graveyard land, so `scenarios/permissions/crucible_graveyard_land.toml` covers the play. `BEHAVIOUR_REV` is 7 with the seed 9 pin moved in its own commit. The four TODOs from 080 are written and the two stale ones are gone. Notes are in `docs/implementation/36-zone-permissions.md`.
