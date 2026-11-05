@@ -69,8 +69,12 @@ _Avoid_: Mode, ruleset
 ### Rules primitives
 
 **Timing permission**:
-A standing grant that lets a player cast matching spells as though they had flash. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it. Zone permissions ("play lands from your graveyard") are not part of it yet.
+A standing grant that lets a player cast matching spells as though they had flash. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it. Where a card may be played or cast from is a Zone permission.
 _Avoid_: Flash grant, flash effect, timing modifier
+
+**Zone permission**:
+A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. A card's own alternative cost, such as flashback, is not a Zone permission.
+_Avoid_: Play-from-zone effect, zone grant
 
 ## Relationships
 
