@@ -31,7 +31,7 @@ are in `crates/engine/src/decision/entry.rs`. The builders are in `commands/entr
 ## Rules the builders mirror
 
 - Cast: not a land, in hand (or a commander in its owner's command zone), or in the `from_zone` of an alternative
-  cost. Instants and flash need priority. Everything else needs the sorcery window. Every target word needs enough
+  cost. Instants, flash and spells a timing permission covers need priority (`can_cast_now`). Everything else needs the sorcery window. Every target word needs enough
   candidates. A modal spell needs enough usable modes.
 - Activate: controlled by the priority player, in its function zone, Equip at sorcery speed, and a `{T}` cost needs an
   untapped source that is not summoning sick.

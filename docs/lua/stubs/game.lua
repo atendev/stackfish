@@ -433,6 +433,33 @@ function LandPlayModifierBuilder:SetAdditional(additional) end
 function LandPlayModifierBuilder:Register() end
 
 -------------------------------------------------------------------------------
+-- Game.CreateTimingPermission(c) — CR 601.3b "you may cast spells as though they had flash."
+-------------------------------------------------------------------------------
+
+---@class TimingPermissionBuilder
+local TimingPermissionBuilder = {}
+
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Hand"|"Graveyard"|"Exile"
+---@return TimingPermissionBuilder
+function TimingPermissionBuilder:SetFunctionsFrom(zoneName) end
+
+--- Which player(s) may cast spells as though they had flash. Required before :Register().
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent or .Any; .EnchantedPlayer is an error
+---@return TimingPermissionBuilder
+function TimingPermissionBuilder:SetAffected(value) end
+
+--- Which spells the permission covers. Optional; the default is every spell. A filter with
+--- `extra` set never matches.
+---@param filter GameFilterValue  -- Game.Filter({...}); a plain table is an error
+---@return TimingPermissionBuilder
+function TimingPermissionBuilder:SetFilter(filter) end
+
+--- Finalizes and registers the permission. It never grants priority, and land plays and
+--- Equip keep sorcery speed.
+function TimingPermissionBuilder:Register() end
+
+-------------------------------------------------------------------------------
 -- Game.Counter.* — common counter kinds and a custom-counter constructor.
 -------------------------------------------------------------------------------
 
@@ -1082,6 +1109,10 @@ function Game.CreateCostModifier(c) end
 ---@param c ObjectId
 ---@return LandPlayModifierBuilder
 function Game.CreateLandPlayModifier(c) end
+
+---@param c ObjectId
+---@return TimingPermissionBuilder
+function Game.CreateTimingPermission(c) end
 
 ---@param c ObjectId
 ---@return HandSizeModifierBuilder
