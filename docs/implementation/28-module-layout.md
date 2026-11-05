@@ -27,4 +27,12 @@ single owner and comment passes touch files in their final shape.
 - The scenario schema types in `crates/scenario/src/schema.rs` stay re-exported `pub` because they are the documented TOML format.
 - The workspace lint `unreachable_pub` covers `host`, `godot`, `carddb` and `scenario`. The engine is exempt because its modules are public.
 
+## Hash-ordered walks
+
+- `clippy::iter_over_hash_type` is `warn` in `[workspace.lints.clippy]`, which the four crates above inherit. `engine`, `cli` and `testutil` set it in their own `[lints.clippy]` table, because `workspace = true` would turn on `unreachable_pub` in the engine.
+- The root `clippy.toml` disallows the walking methods of `std::collections::HashMap` (`iter`, `iter_mut`, `keys`, `values`, `values_mut`, `into_keys`, `into_values`, `drain`, `retain`) and of `HashSet` (`iter`, `drain`, `retain`). Clippy finds the file from the workspace root, so every crate gets it with no opt-in. `-D warnings` in `tools/check.sh` makes both lints fail the build.
+- `iter_over_hash_type` only sees `for` loops, and `disallowed-methods` only sees named inherent methods, so `into_iter`, `extend` and `from_iter` on a hash container still pass. Lua `pairs` order over string keys is also outside the lint (TODO in `crates/host/src/session.rs`).
+- Code that needs to walk a keyed collection uses a `BTreeMap` or `BTreeSet`. The combat damage `SplitPlan` and its locals, and the scenario `card_ids` map, are ordered for this reason. A `HashMap` that is only read by key, such as `CombatState::pending_damage_splits`, stays a `HashMap`.
+- Use `#[allow(clippy::..., reason = "...")]` only where a conversion is not possible. No site needs one today.
+
 See the closed tickets in `.plan/closed/` for the original rationale.

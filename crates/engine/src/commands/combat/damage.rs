@@ -1,7 +1,7 @@
 //! The `AssignCombatDamage` command body: ordering, first and double strike,
 //! lethal-damage math and event building. See `DESIGN.md` for the rest.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::script::ScriptRuntime;
 use crate::types::card::KeywordSet;
@@ -25,13 +25,13 @@ pub(crate) struct SplitPlan<'a> {
     pub attackers: Vec<(ObjectId, Target)>,
     /// `alive_blocks` limited to blockers that strike in this step.
     pub blocks: Vec<(ObjectId, ObjectId)>,
-    pub declared_blocked_attackers: HashSet<ObjectId>,
-    pub blockers_by_attacker: HashMap<ObjectId, Vec<ObjectId>>,
-    pub attackers_by_blocker: HashMap<ObjectId, Vec<ObjectId>>,
+    pub declared_blocked_attackers: BTreeSet<ObjectId>,
+    pub blockers_by_attacker: BTreeMap<ObjectId, Vec<ObjectId>>,
+    pub attackers_by_blocker: BTreeMap<ObjectId, Vec<ObjectId>>,
     /// Attackers and blockers that need a split this step.
-    pub requires_assignment: HashSet<ObjectId>,
+    pub requires_assignment: BTreeSet<ObjectId>,
     /// The player who chooses each split (CR 702.22j/k can flip it).
-    pub required_actor_by_id: HashMap<ObjectId, PlayerId>,
+    pub required_actor_by_id: BTreeMap<ObjectId, PlayerId>,
 }
 
 /// `None` when this step's damage is already assigned. An `Err` means it is
@@ -110,7 +110,7 @@ pub(crate) fn plan_damage_splits<'a>(
     // defending player regardless of trample. `combat.effect_blocked` (CR
     // 509.1h/702.22i: blocked by an effect, with no real blocker) joins the same set
     // for the same reason.
-    let declared_blocked_attackers: HashSet<ObjectId> = combat
+    let declared_blocked_attackers: BTreeSet<ObjectId> = combat
         .blocks
         .iter()
         .map(|(_, attacker)| *attacker)
@@ -123,7 +123,7 @@ pub(crate) fn plan_damage_splits<'a>(
     // legal place for its damage, computed below. Built from `alive_blocks`, so a
     // dead blocker is never in a split but a step-ineligible one still is, since its
     // attacker's damage still has to go somewhere.
-    let mut blockers_by_attacker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+    let mut blockers_by_attacker: BTreeMap<ObjectId, Vec<ObjectId>> = BTreeMap::new();
     for (blocker, attacker) in &alive_blocks {
         blockers_by_attacker
             .entry(*attacker)
@@ -132,9 +132,9 @@ pub(crate) fn plan_damage_splits<'a>(
     }
     // Scoped to attackers that participate this step (alive and step-eligible): a
     // dead or step-ineligible attacker deals no damage, so it needs no split.
-    let participating_attackers: HashSet<ObjectId> =
+    let participating_attackers: BTreeSet<ObjectId> =
         attackers.iter().map(|(attacker, _)| *attacker).collect();
-    let mut requires_assignment: HashSet<ObjectId> = blockers_by_attacker
+    let mut requires_assignment: BTreeSet<ObjectId> = blockers_by_attacker
         .iter()
         .filter(|(attacker, blockers)| {
             participating_attackers.contains(attacker)
@@ -150,7 +150,7 @@ pub(crate) fn plan_damage_splits<'a>(
     // DeclareBlockers), and that blocker needs a chosen split like a multi-blocked
     // attacker. Built from the step-filtered `blocks`, since only a blocker that
     // deals damage this step can need one.
-    let mut attackers_by_blocker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+    let mut attackers_by_blocker: BTreeMap<ObjectId, Vec<ObjectId>> = BTreeMap::new();
     for (blocker, attacker) in &blocks {
         attackers_by_blocker
             .entry(*blocker)
@@ -237,7 +237,7 @@ pub(crate) fn plan_damage_splits<'a>(
     // Which player chooses each id's split. A map and not a set, because two ids in
     // one step can have different choosers (a multi-blocked attacker chosen by its
     // controller beside a Banding-blocked attacker chosen by the defending player).
-    let mut required_actor_by_id: HashMap<ObjectId, PlayerId> = HashMap::new();
+    let mut required_actor_by_id: BTreeMap<ObjectId, PlayerId> = BTreeMap::new();
     for id in &requires_assignment {
         let actor_for_id = if let Some(blockers) = blockers_by_attacker.get(id) {
             let banding_blocker = blockers.iter().any(|b| {
@@ -342,7 +342,7 @@ fn validate_damage(
     // more than one player). Cloned so nothing below juggles a `state.combat`
     // borrow beside the `effective_*(state, ...)` calls.
     let already_submitted = combat.pending_damage_splits.clone();
-    let still_needed: HashSet<ObjectId> = requires_assignment
+    let still_needed: BTreeSet<ObjectId> = requires_assignment
         .iter()
         .copied()
         .filter(|id| !already_submitted.contains_key(id))
@@ -350,7 +350,7 @@ fn validate_damage(
     // This actor's remaining share: not the whole step's `requires_assignment`
     // (which may include ids a different actor chooses) and not ids an earlier call
     // covered.
-    let this_actors_ids: HashSet<ObjectId> = still_needed
+    let this_actors_ids: BTreeSet<ObjectId> = still_needed
         .iter()
         .copied()
         .filter(|id| required_actor_by_id.get(id) == Some(&actor))
@@ -377,7 +377,7 @@ fn validate_damage(
     // Atomic per actor: `assignments` must cover exactly the ids this actor chooses
     // and has not yet submitted, with none extra, none missing and none belonging to
     // a different required actor (that player submits their own share separately).
-    let submitted: HashSet<ObjectId> = assignments.iter().map(|(id, _)| *id).collect();
+    let submitted: BTreeSet<ObjectId> = assignments.iter().map(|(id, _)| *id).collect();
     if submitted != this_actors_ids {
         return Err(Rejected::IllegalAction(
             "assignments must cover exactly this actor's own share of the attackers and \
@@ -590,7 +590,7 @@ fn validate_damage(
     // onto 2+ attackers (CR 702.22h/k), where the validated split above decides.
     // `handled_blockers` reduces `blocks`'s repeated blocker entries (one per
     // attacker it is forced onto) to one pass per blocker.
-    let mut handled_blockers: HashSet<ObjectId> = HashSet::new();
+    let mut handled_blockers: BTreeSet<ObjectId> = BTreeSet::new();
     for (blocker, _) in &blocks {
         if !handled_blockers.insert(*blocker) {
             continue;

@@ -47,6 +47,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 075 Lint against hash-ordered walks. Add `iter_over_hash_type` (workspace table, plus per-crate tables in engine, cli and testutil to keep the engine's `unreachable_pub` exemption) and `disallowed-methods` on hash walks in a root `clippy.toml`. The 9 sites are cleared by ordered containers, not allows. `into_iter`, `extend`, `from_iter` and Lua `pairs` stay accepted gaps. Build is 078. [closed/075-hash-walk-lint.md]
 - 076 Timing permissions granted by effects. A Timing permission is a new list `state.timing_permissions` (player filter plus spell filter, flash only, removed when its source leaves), not FLASH through layers. One `can_cast_now` predicate serves cast and `cast_entries`, and land plays and Equip keep `is_sorcery_speed`. Zone permissions, end-of-turn grants and instant-speed equip are follow-ups. Build is 079. [closed/076-timing-grants.md]
 - 077 A Clone offered as a copy of itself. `pending_copy_choice` never lists the entrant, in a first or chained round (CR 614.12a). A lone Clone enters with no Decision. 29 of 40 proof seeds moved but not the pinned seed 9, so `BEHAVIOUR_REV` is 5 with the same hash. [closed/077-clone-copies-itself.md]
+- 078 Build the hash-walk lint and clear its sites. Clippy refuses a `for` loop or a walking method over a hash container in every crate. The 9 sites are ordered containers or keyed lookups with no allows, and the replay pin did not move. [closed/078-build-hash-walk-lint.md]
 
 ## Not yet specified
 
@@ -65,7 +66,6 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 078 Build the hash-walk lint and clear its sites
 - 079 Build timing permissions (flash grants)
 - 081 cost_modifiers outlive their source
 

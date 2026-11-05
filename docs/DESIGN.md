@@ -221,6 +221,10 @@ original plan:
   priority are folded in. Details in `docs/implementation/30-loop-detection.md`.
 - `GameState::objects` is a `BTreeMap`, so every walk over it is in `ObjectId` order. Any code that
   walks a `HashMap` and produces events or ids must still sort first.
+- A keyed collection that is walked is a `BTreeMap` or `BTreeSet`, and a `HashMap` is only read by
+  key. Clippy enforces this with `iter_over_hash_type` and `disallowed-methods` in the root
+  `clippy.toml`. `into_iter`, `extend` and `from_iter` are not caught. Details in
+  `docs/implementation/28-module-layout.md`.
 
 ## Open questions
 

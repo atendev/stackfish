@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::*;
@@ -78,7 +78,7 @@ impl ScenarioReport {
 /// one, since a zone change mints a new `ObjectId` and leaves the `card_ids` entry stale.
 // CR 400.7
 pub(crate) fn remap_moved_card_ids(
-    card_ids: &mut HashMap<String, ObjectId>,
+    card_ids: &mut BTreeMap<String, ObjectId>,
     new_events: &[GameEvent],
 ) {
     for event in new_events {
@@ -99,7 +99,7 @@ pub(crate) fn remap_moved_card_ids(
 
 pub(crate) fn run_action_spec(
     engine: &mut Engine,
-    card_ids: &mut HashMap<String, ObjectId>,
+    card_ids: &mut BTreeMap<String, ObjectId>,
     action_spec: &ActionSpec,
     expect_error: bool,
 ) -> EntryReport {

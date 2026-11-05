@@ -46,7 +46,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     graveyard-exile costs from the Payment candidates. No byte-level game offers `may_cast` yet (no Lua constructor
     for madness or cascade). Phyrexian stays partly open: the bot keeps 1 life and assumes 20 starting life.
   - `GameState::objects` is a `BTreeMap`, so its walks are in `ObjectId` order (`32-objects-btreemap.md`). Other
-    `HashMap` fields are keyed lookups. A lint against hash-ordered walks is ticket 075.
+    `HashMap` fields are keyed lookups. Clippy refuses a `for` loop or a walking method over a hash container
+    (`28-module-layout.md`). `into_iter`, `extend`, `from_iter` and Lua `pairs` order are still unchecked.
   - No main proof card uses a sacrifice or discard cost (`cost_proof_game.rs` has its own set), menace or a must-attack rule (the keyword exists since ticket
     026, but no proof card has it), so the engine atomicity item (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it, and
     `Bot::injecting_illegal_answers` now sends illegal Answers at every Decision (see `21-atomicity.md`).

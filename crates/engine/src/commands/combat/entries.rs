@@ -2,8 +2,6 @@
 //! matching command, and the whole-declaration rules come from `predicate`. See
 //! `DESIGN.md` for the rest.
 
-use std::collections::HashSet;
-
 use crate::decision::{AttackerEntry, BlockerEntry, DamageSplitEntry};
 use crate::script::ScriptRuntime;
 use crate::types::card::KeywordSet;
@@ -148,12 +146,11 @@ pub(crate) fn damage_split_entries(
     script_runtime: &ScriptRuntime,
 ) -> Option<(PlayerId, Vec<DamageSplitEntry>)> {
     let plan = plan_damage_splits(state, script_runtime).ok().flatten()?;
-    let submitted: HashSet<ObjectId> = plan.combat.pending_damage_splits.keys().copied().collect();
     let mut missing: Vec<ObjectId> = plan
         .requires_assignment
         .iter()
         .copied()
-        .filter(|id| !submitted.contains(id))
+        .filter(|id| !plan.combat.pending_damage_splits.contains_key(id))
         .collect();
     missing.sort();
     let chooser = *plan.required_actor_by_id.get(missing.first()?)?;

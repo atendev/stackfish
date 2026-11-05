@@ -447,7 +447,7 @@ fn zone_owner_for(kind: ZoneKind, player: PlayerId) -> Option<PlayerId> {
 /// The built state, the card-key to `ObjectId` map and the scripts `run()` loads once an engine exists.
 pub(crate) type InitialState = (
     GameState,
-    HashMap<String, ObjectId>,
+    BTreeMap<String, ObjectId>,
     Vec<PendingTriggerScript>,
     Vec<PendingTargetScript>,
     Vec<PendingScriptTargetRequirement>,
@@ -463,7 +463,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> InitialState {
     // placeholder could collide with a later self-registered ability. `next_sequence_no` is
     // seeded past this counter.
     let mut next_ability_id: u64 = 0;
-    let mut card_ids: HashMap<String, ObjectId> = HashMap::new();
+    let mut card_ids: BTreeMap<String, ObjectId> = BTreeMap::new();
     let mut trigger_scripts: Vec<PendingTriggerScript> = Vec::new();
     let mut target_scripts: Vec<PendingTargetScript> = Vec::new();
     let mut script_target_requirements: Vec<PendingScriptTargetRequirement> = Vec::new();

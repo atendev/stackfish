@@ -16,3 +16,6 @@ mlua = { version = "0.9", features = ["lua54", "vendored"] }
 rusqlite = { workspace = true }
 stackfish-scenario = { path = "../scenario" }
 stackfish-testutil = { path = "../testutil" }
+
+[lints.clippy]
+iter_over_hash_type = "warn"

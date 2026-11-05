@@ -186,7 +186,7 @@ fn repeated_sweeps_never_duplicate_a_hand_ability() {
     run_sweep(&mut engine);
     run_sweep(&mut engine);
     let by_source = |engine: &Engine| {
-        let mut counts = std::collections::HashMap::new();
+        let mut counts = std::collections::BTreeMap::new();
         for a in &engine.state().abilities {
             *counts.entry(a.source).or_insert(0) += 1;
         }

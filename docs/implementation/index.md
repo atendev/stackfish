@@ -31,7 +31,7 @@ Compact reference for my own use. Each file covers one subsystem.
 - [25-chain-operations](25-chain-operations.md) — `Game.Ops.Chain`/`ChainEach`, `AbilityEffect::Chain`, `ModalContinuation::shared_legal`, per-entry target words, `:SetTarget` arrays, `DrawCards` player target
 - [26-special-mana-payment](26-special-mana-payment.md) — ticket 030: the `{C}` cost symbol, snow mana from snow sources, hybrid Phyrexian wire text, the bot's payment planner (`bot_payment.rs`), X and life tracking
 - [27-constructor-only-results](27-constructor-only-results.md) — ticket 053: callbacks return `Game.Ops.*`/`Game.Effects.*` values, `OperationResultTag`, `DealDamageTo`/`AddCountersTo`/`DoublePT`, one pending kind per returned value
-- [28-module-layout](28-module-layout.md) — post-cleanup file split rationale for `crates/engine/src/`, `crates/scenario/src/`, and `crates/engine/src/script/`
+- [28-module-layout](28-module-layout.md) — post-cleanup file split rationale for `crates/engine/src/`, `crates/scenario/src/`, and `crates/engine/src/script/`, the `unreachable_pub` exemption and the hash-walk lints
 - [29-checks](29-checks.md) — `tools/check.sh` (fast and `--full`), the pre-commit hook and its installer, the CI workflow, the 1.98.0 toolchain pin, and the `db_scripts_smoke.rs` skip in CI
 - [30-payment-candidates](30-payment-candidates.md) — ticket 030: `ReplyShape::Payment::eligible`, `AdditionalCost::accepts`, `MayCast::options`, the CR 107.3b free-cast X check, the bot's object-cost payments and `cost_proof_game.rs`
 - [31-snapshot-fold-events](31-snapshot-fold-events.md) — `LifeChanged` from every life change, `PlayerCounterAdded`, `PrioritySet` producers, CR 800.4a `LeftGame` and the priority pass, the full-game fold tests
