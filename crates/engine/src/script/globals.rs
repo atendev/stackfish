@@ -26,7 +26,7 @@ use super::builders::{
     ActivatedAbilityBuilder, CostModifierBuilder, DrawLimitModifierBuilder,
     HandRevealModifierBuilder, HandSizeModifierBuilder, LandPlayModifierBuilder,
     ManaAbilityBuilder, ReplacementEffectBuilder, StaticAbilityBuilder, TimingPermissionBuilder,
-    TriggeredAbilityBuilder,
+    TriggeredAbilityBuilder, ZonePermissionBuilder,
 };
 use super::decode::{
     decode_copy_exceptions, decode_counter_arg, decode_creature_token_opts,
@@ -1270,6 +1270,22 @@ pub(crate) fn bind_game_globals(
         })?
     };
 
+    let create_zone_permission = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(ZonePermissionBuilder {
+                source: ObjectId(source),
+                affected: None,
+                zone: None,
+                owners: None,
+                kind: None,
+                cards: None,
+                function_zone: None,
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
     let tokens = lua.create_table()?;
     tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
     tokens.set("Food", TokenTag(TokenSpec::Named(NamedToken::Food)))?;
@@ -1551,6 +1567,7 @@ pub(crate) fn bind_game_globals(
     game.set("CreateDrawLimitModifier", create_draw_limit_modifier)?;
     game.set("CreateLandPlayModifier", create_land_play_modifier)?;
     game.set("CreateTimingPermission", create_timing_permission)?;
+    game.set("CreateZonePermission", create_zone_permission)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;
     game.set("ChooseN", choose_n)?;

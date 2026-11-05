@@ -17,9 +17,10 @@ use crate::types::mana::ManaPool;
 use crate::types::player::{
     DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
     HandSizeEffect, HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerState,
-    TimingPermission,
+    TimingPermission, ZonePermission, ZonePermissionKind,
 };
 use crate::types::turn::{Phase, Step};
+use crate::types::zone::ZoneKind;
 
 fn minimal_state() -> GameState {
     let p0 = PlayerId(0);
@@ -58,6 +59,7 @@ fn minimal_state() -> GameState {
         draw_limit_modifiers: Vec::new(),
         land_play_modifiers: Vec::new(),
         timing_permissions: Vec::new(),
+        zone_permissions: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState {
@@ -200,6 +202,35 @@ fn dummy_timing_permission(source: ObjectId) -> TimingPermission {
     }
 }
 
+fn dummy_zone_permission(source: ObjectId) -> ZonePermission {
+    ZonePermission {
+        source,
+        controller: PlayerId(0),
+        affected: FilterController::You,
+        zone: ZoneKind::Graveyard,
+        owners: FilterController::You,
+        kind: ZonePermissionKind::PlayLand,
+        cards: FilterSpec::ANY,
+    }
+}
+
+// CR 611.3b
+#[test]
+fn remap_abilities_drops_the_old_objects_zone_permission() {
+    let mut state = minimal_state();
+    state
+        .zone_permissions
+        .push(dummy_zone_permission(ObjectId(1)));
+    state
+        .zone_permissions
+        .push(dummy_zone_permission(ObjectId(2)));
+
+    remap_abilities(&mut state, ObjectId(1), ObjectId(3));
+
+    let sources: Vec<ObjectId> = state.zone_permissions.iter().map(|p| p.source).collect();
+    assert_eq!(sources, vec![ObjectId(2)]);
+}
+
 // CR 611.3b
 #[test]
 fn remap_abilities_drops_the_old_objects_timing_permission() {
@@ -268,6 +299,13 @@ fn retire_object_purges_only_the_retired_source() {
         .timing_permissions
         .push(dummy_timing_permission(ObjectId(2)));
 
+    state
+        .zone_permissions
+        .push(dummy_zone_permission(ObjectId(1)));
+    state
+        .zone_permissions
+        .push(dummy_zone_permission(ObjectId(2)));
+
     let departed = retire_object(&mut state, ObjectId(1));
 
     assert_eq!(
@@ -333,5 +371,7 @@ fn retire_object_purges_only_the_retired_source() {
     );
     assert_eq!(state.land_play_modifiers[0].source, ObjectId(2));
     let sources: Vec<ObjectId> = state.timing_permissions.iter().map(|p| p.source).collect();
+    assert_eq!(sources, vec![ObjectId(2)]);
+    let sources: Vec<ObjectId> = state.zone_permissions.iter().map(|p| p.source).collect();
     assert_eq!(sources, vec![ObjectId(2)]);
 }

@@ -35,6 +35,7 @@ pub fn snapshot_diff(before: &EngineSnapshot, after: &EngineSnapshot) -> Vec<Str
         draw_limit_modifiers,
         land_play_modifiers,
         timing_permissions,
+        zone_permissions,
         abilities,
         ledger,
         rng,

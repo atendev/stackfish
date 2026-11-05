@@ -9,7 +9,7 @@ use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
 use crate::types::zone::ZoneKind;
 
 use super::attach::{next_active_player, remap_abilities};
-use super::legality::is_sorcery_speed;
+use super::legality::{can_play_land_from_zone, is_sorcery_speed};
 use super::{CommandOutcome, Internal, PriorityHandoff, Rejected, Validated};
 
 pub(super) fn validate_pass_priority(
@@ -67,6 +67,8 @@ pub(super) fn apply_make_choice() -> Result<CommandOutcome, Internal> {
 pub(crate) struct LandPlan {
     actor: PlayerId,
     card: ObjectId,
+    from_zone: ZoneKind,
+    from_owner: Option<PlayerId>,
 }
 
 pub(super) fn validate_play_land(
@@ -98,28 +100,48 @@ pub(super) fn validate_play_land(
     if !object.definition.card_types.contains(CardTypeSet::LAND) {
         return Err(Rejected::IllegalAction("card is not a Land".to_string()));
     }
-    if object.zone != ZoneKind::Hand || object.controller != actor {
+    // CR 305.1
+    // A land comes from the actor's hand unless a zone permission opens another zone.
+    if !can_play_land_from_zone(state, actor, object) {
         return Err(Rejected::IllegalAction(
-            "card is not in actor's hand".to_string(),
+            "card is not in a zone actor may play lands from".to_string(),
         ));
     }
+    // CR 400.7
+    // Exile is shared, and any other zone belongs to the card's owner.
+    let from_zone = object.zone;
+    let from_owner = if from_zone == ZoneKind::Exile {
+        None
+    } else {
+        Some(object.owner)
+    };
     // Every zone the move touches is looked up here, so `apply_play_land` has nothing left that can fail.
-    if state.zone(ZoneKind::Hand, Some(actor)).is_none() {
+    if state.zone(from_zone, from_owner).is_none() {
         return Err(Rejected::IllegalAction(
-            "actor has no hand zone".to_string(),
+            "the card's zone does not exist".to_string(),
         ));
     }
     if state.zone(ZoneKind::Battlefield, None).is_none() {
         return Err(Rejected::IllegalAction("no battlefield zone".to_string()));
     }
-    Ok(Validated::PlayLand(LandPlan { actor, card }))
+    Ok(Validated::PlayLand(LandPlan {
+        actor,
+        card,
+        from_zone,
+        from_owner,
+    }))
 }
 
 pub(super) fn apply_play_land(
     state: &mut GameState,
     plan: LandPlan,
 ) -> Result<CommandOutcome, Internal> {
-    let LandPlan { actor, card } = plan;
+    let LandPlan {
+        actor,
+        card,
+        from_zone,
+        from_owner,
+    } = plan;
     let object = state
         .object(card)
         .ok_or_else(|| Internal::new("play land: the validated card is gone"))?;
@@ -128,7 +150,7 @@ pub(super) fn apply_play_land(
     let last_known_info = object.clone();
 
     // CR 400.7
-    // The move makes a new object: mint a fresh ObjectId linked back through ObjectLineage. `card`'s entry in state.objects is removed, so later reads of the hand version must use last_known_info.
+    // The move makes a new object: mint a fresh ObjectId linked back through ObjectLineage. `card`'s entry in state.objects is removed, so later reads of the old version must use last_known_info.
     let new_id = state.allocate_object_id();
     let mut new_object = last_known_info.clone();
     new_object.object_id = new_id;
@@ -136,11 +158,14 @@ pub(super) fn apply_play_land(
         previous: Some(card),
     };
     new_object.zone = ZoneKind::Battlefield;
+    // CR 110.2
+    // A land played from another player's graveyard enters under the player who played it.
+    new_object.controller = actor;
     new_object.timestamp = state.allocate_sequence_no();
 
     state
-        .zone_mut(ZoneKind::Hand, Some(actor))
-        .ok_or_else(|| Internal::new("play land: the validated hand zone is gone"))?
+        .zone_mut(from_zone, from_owner)
+        .ok_or_else(|| Internal::new("play land: the validated source zone is gone"))?
         .remove(card);
     state.objects.remove(&card);
     state
@@ -154,7 +179,7 @@ pub(super) fn apply_play_land(
     Ok(CommandOutcome {
         events: vec![GameEventKind::ZoneChange {
             object: new_id,
-            from: ZoneKind::Hand,
+            from: from_zone,
             to: ZoneKind::Battlefield,
             last_known_info: Some(last_known_info),
         }],

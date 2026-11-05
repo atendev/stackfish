@@ -22,7 +22,8 @@ use crate::types::effect::{
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::player::{
     DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
-    HandSizeModifier, LandPlayAffected, LandPlayModifier, TimingPermission,
+    HandSizeModifier, LandPlayAffected, LandPlayModifier, TimingPermission, ZonePermission,
+    ZonePermissionKind,
 };
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -1214,6 +1215,99 @@ impl UserData for TimingPermissionBuilder {
                     controller: PlayerId(0),
                     affected,
                     spells: this.spells.clone().unwrap_or(FilterSpec::ANY),
+                },
+                this.function_zone,
+            ));
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreateZonePermission(c)`'s return value (CR 601.3, 305.1), mirroring
+/// `TimingPermissionBuilder`. `:SetAffected`, `:SetZone` and `:SetKind` are
+/// required. `:SetOwner` defaults to `Game.Affected.You`, and `:SetFilter` to
+/// every card.
+pub(crate) struct ZonePermissionBuilder {
+    pub(crate) source: ObjectId,
+    pub(crate) affected: Option<FilterController>,
+    pub(crate) zone: Option<ZoneKind>,
+    pub(crate) owners: Option<FilterController>,
+    pub(crate) kind: Option<ZonePermissionKind>,
+    pub(crate) cards: Option<FilterSpec>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
+    pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for ZonePermissionBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
+        methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
+            let tag = decode_player_affected(value, "a zone permission")?;
+            this.affected = Some(reject_enchanted_player(tag, "a zone permission")?);
+            Ok(())
+        });
+        methods.add_method_mut("SetZone", |_, this, name: String| {
+            let zone = super::decode::parse_zone_kind_name(&name).map_err(to_lua_err)?;
+            match zone {
+                ZoneKind::Graveyard | ZoneKind::Exile => {
+                    this.zone = Some(zone);
+                    Ok(())
+                }
+                other => Err(mlua::Error::RuntimeError(format!(
+                    "a zone permission's SetZone only supports \"Graveyard\" or \"Exile\", got {other:?}"
+                ))),
+            }
+        });
+        methods.add_method_mut("SetKind", |_, this, name: String| {
+            this.kind = Some(match name.as_str() {
+                "PlayLand" => ZonePermissionKind::PlayLand,
+                "Cast" => ZonePermissionKind::Cast,
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "a zone permission's SetKind expects \"PlayLand\" or \"Cast\", got {other:?}"
+                    )));
+                }
+            });
+            Ok(())
+        });
+        methods.add_method_mut("SetOwner", |_, this, value: mlua::AnyUserData| {
+            let tag = decode_player_affected(value, "a zone permission's owner")?;
+            this.owners = Some(reject_enchanted_player(tag, "a zone permission's owner")?);
+            Ok(())
+        });
+        methods.add_method_mut("SetFilter", |_, this, value: Value| match value {
+            Value::UserData(ud) if ud.is::<FilterTag>() => {
+                this.cards = Some(ud.borrow::<FilterTag>()?.0.clone().into_filter_spec());
+                Ok(())
+            }
+            other => Err(mlua::Error::RuntimeError(format!(
+                "a zone permission's SetFilter expects Game.Filter({{...}}), got {}",
+                other.type_name()
+            ))),
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let missing = |setter: &str| {
+                mlua::Error::RuntimeError(format!(
+                    "Register() called with no {setter}() - a zone permission needs it"
+                ))
+            };
+            let affected = this.affected.ok_or_else(|| missing("SetAffected"))?;
+            let zone = this.zone.ok_or_else(|| missing("SetZone"))?;
+            let kind = this.kind.ok_or_else(|| missing("SetKind"))?;
+            this.registry.borrow_mut().pending_zone_permissions.push((
+                ZonePermission {
+                    source: this.source,
+                    // Placeholder, stamped by `run_card_script`'s drain step.
+                    controller: PlayerId(0),
+                    affected,
+                    zone,
+                    owners: this.owners.unwrap_or(FilterController::You),
+                    kind,
+                    cards: this.cards.clone().unwrap_or(FilterSpec::ANY),
                 },
                 this.function_zone,
             ));

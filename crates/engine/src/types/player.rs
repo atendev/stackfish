@@ -313,6 +313,60 @@ pub fn has_timing_permission(
     })
 }
 
+/// CR 601.3, 305.1: whether a `ZonePermission` lets a player play lands or
+/// cast spells from its zone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZonePermissionKind {
+    PlayLand,
+    Cast,
+}
+
+/// CR 601.3, 305.1: a static "you may play lands from your graveyard" effect
+/// (Crucible of Worlds). It answers where a card may come from, and
+/// `TimingPermission` answers when. `commands::can_cast_from_zone` and
+/// `commands::can_play_land_from_zone` read it, and `commands::retire_object`
+/// purges it by `source` (CR 611.3b).
+// TODO: top-of-library and linked-exile zone permissions are not represented (CR 401.5)
+// TODO: a zone permission lasts while its source is on the battlefield, so "until end of turn" grants have no expiry (CR 611.2)
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZonePermission {
+    pub source: ObjectId,
+    /// Whose "you" and "opponent" `affected` and `owners` are relative to.
+    pub controller: PlayerId,
+    pub affected: FilterController,
+    /// `Graveyard` or `Exile`, the only zones the Lua builder accepts.
+    pub zone: ZoneKind,
+    /// Whose cards it covers, matched against `card.owner`, since a graveyard
+    /// belongs to its owner and exile is shared.
+    pub owners: FilterController,
+    pub kind: ZonePermissionKind,
+    /// `FilterSpec::ANY` for every card. A filter with `extra` set never
+    /// matches (see `FilterSpec::matches`).
+    pub cards: FilterSpec,
+}
+
+/// CR 601.3, 305.1: whether a permission in `permissions` lets `player` take a
+/// `kind` action with `card` from the zone it is in.
+pub fn has_zone_permission(
+    permissions: &[ZonePermission],
+    kind: ZonePermissionKind,
+    player: PlayerId,
+    card: &GameObject,
+) -> bool {
+    let relative = |filter: FilterController, who: PlayerId, controller: PlayerId| match filter {
+        FilterController::You => who == controller,
+        FilterController::Opponent => who != controller,
+        FilterController::Any => true,
+    };
+    permissions.iter().any(|p| {
+        p.kind == kind
+            && p.zone == card.zone
+            && relative(p.affected, player, p.controller)
+            && relative(p.owners, card.owner, p.controller)
+            && p.cards.matches(card, card.owner, p.controller)
+    })
+}
+
 /// CR 121.2b: cards `player` has drawn this turn, counted from the ledger
 /// after the latest `TurnStarted` (the same scan as
 /// `replacement::opponent_damaged_this_turn`). Counts library-to-hand

@@ -10,6 +10,7 @@ use crate::types::cost::FilterController;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::object::GameObject;
+use crate::types::player::ZonePermissionKind;
 use crate::types::stack::StackEntryKind;
 use crate::types::target::{
     ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement,
@@ -38,7 +39,6 @@ pub(in crate::commands) fn is_sorcery_speed(state: &GameState, player: PlayerId)
 /// CR 117.1a, 601.3b: whether `player` may begin to cast `card` now. An instant,
 /// a Flash card or a card a `TimingPermission` covers needs only priority, and
 /// anything else needs `is_sorcery_speed`. `PlayLand` and Equip never read it.
-// TODO: zone permissions ("cast or play from another zone") are not read by the cast and land commands (CR 601.3)
 // TODO: a timing permission lasts while its source is on the battlefield, so "until end of turn" grants have no expiry (CR 611.2)
 // TODO: conditional flash ("as though it had flash if ...") has no condition on a timing permission (CR 601.3d)
 pub(in crate::commands) fn can_cast_now(
@@ -52,6 +52,48 @@ pub(in crate::commands) fn can_cast_now(
         state.priority_player == player
     } else {
         is_sorcery_speed(state, player)
+    }
+}
+
+/// CR 601.3, 903.8: whether `player` may cast `card` from the zone it is in
+/// at its normal cost: their own hand, their commander in the command zone,
+/// or a zone a `ZonePermission` opens. Timing is `can_cast_now`'s job, and an
+/// alternative cost's `from_zone` is checked by the caller.
+// TODO: a face-down exiled card is offered with no "may look" check (CR 601.3f)
+// TODO: a spell cast through a zone permission has no "exile it instead" rider (CR 608.2n)
+pub(in crate::commands) fn can_cast_from_zone(
+    state: &GameState,
+    player: PlayerId,
+    card: &GameObject,
+) -> bool {
+    match card.zone {
+        ZoneKind::Hand => card.controller == player,
+        ZoneKind::Command => card.is_commander && card.owner == player,
+        _ => crate::types::player::has_zone_permission(
+            &state.zone_permissions,
+            ZonePermissionKind::Cast,
+            player,
+            card,
+        ),
+    }
+}
+
+/// CR 305.1: whether `player` may play `card` as a land from the zone it is
+/// in: their own hand, or a zone a `ZonePermission` opens. The land limit and
+/// `is_sorcery_speed` are checked by the caller.
+pub(in crate::commands) fn can_play_land_from_zone(
+    state: &GameState,
+    player: PlayerId,
+    card: &GameObject,
+) -> bool {
+    match card.zone {
+        ZoneKind::Hand => card.controller == player,
+        _ => crate::types::player::has_zone_permission(
+            &state.zone_permissions,
+            ZonePermissionKind::PlayLand,
+            player,
+            card,
+        ),
     }
 }
 
@@ -1262,7 +1304,7 @@ mod tests {
     use crate::types::ids::{ObjectId, PlayerId, SequenceNo, Target};
     use crate::types::mana::{Color, ManaCost, ManaPool, ManaUnit};
     use crate::types::object::{GameObject, VisibilityPolicy};
-    use crate::types::player::{PlayerState, TimingPermission};
+    use crate::types::player::{PlayerState, TimingPermission, ZonePermission, ZonePermissionKind};
     use crate::types::stack::{StackEntryKind, StackObject};
     use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
     use crate::types::turn::{Phase, Step};
@@ -1382,6 +1424,7 @@ mod tests {
             draw_limit_modifiers: Vec::new(),
             land_play_modifiers: Vec::new(),
             timing_permissions: Vec::new(),
+            zone_permissions: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState {
@@ -1594,6 +1637,85 @@ mod tests {
         let mut state = off_turn_state(vec![commander.clone()]);
         state.timing_permissions = vec![permission(p1, FilterController::You)];
         assert!(can_cast_now(&state, p1, &commander));
+    }
+
+    fn zone_permission(kind: ZonePermissionKind, owners: FilterController) -> ZonePermission {
+        ZonePermission {
+            source: ObjectId(50),
+            controller: PlayerId(0),
+            affected: FilterController::You,
+            zone: ZoneKind::Graveyard,
+            owners,
+            kind,
+            cards: FilterSpec::ANY,
+        }
+    }
+
+    // CR 305.1, 601.3
+    #[test]
+    fn a_hand_card_needs_no_permission_and_an_opponents_hand_card_is_refused() {
+        let (p0, p1) = (PlayerId(0), PlayerId(1));
+        let land = object(ObjectId(1), p0, CardTypeSet::LAND, ZoneKind::Hand);
+        let sorcery = object(ObjectId(2), p1, CardTypeSet::SORCERY, ZoneKind::Hand);
+        let state = state_with(vec![land.clone(), sorcery.clone()]);
+        assert!(can_play_land_from_zone(&state, p0, &land));
+        assert!(!can_cast_from_zone(&state, p0, &sorcery));
+        assert!(can_cast_from_zone(&state, p1, &sorcery));
+    }
+
+    // CR 903.8
+    #[test]
+    fn only_a_commanders_owner_casts_it_from_the_command_zone() {
+        let (p0, p1) = (PlayerId(0), PlayerId(1));
+        let mut commander = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Command);
+        commander.owner = p1;
+        commander.is_commander = true;
+        let state = state_with(vec![commander.clone()]);
+        assert!(can_cast_from_zone(&state, p1, &commander));
+        assert!(!can_cast_from_zone(&state, p0, &commander));
+    }
+
+    // CR 305.1, 601.3
+    #[test]
+    fn a_zone_permission_matches_its_kind_zone_players_owners_and_filter() {
+        let (p0, p1) = (PlayerId(0), PlayerId(1));
+        let own_land = object(ObjectId(1), p0, CardTypeSet::LAND, ZoneKind::Graveyard);
+        let their_land = object(ObjectId(2), p1, CardTypeSet::LAND, ZoneKind::Graveyard);
+        let exiled_land = object(ObjectId(3), p0, CardTypeSet::LAND, ZoneKind::Exile);
+        let own_sorcery = object(ObjectId(4), p0, CardTypeSet::SORCERY, ZoneKind::Graveyard);
+        let mut state = state_with(Vec::new());
+        assert!(!can_play_land_from_zone(&state, p0, &own_land));
+
+        state.zone_permissions = vec![zone_permission(
+            ZonePermissionKind::PlayLand,
+            FilterController::You,
+        )];
+        assert!(can_play_land_from_zone(&state, p0, &own_land));
+        assert!(!can_play_land_from_zone(&state, p1, &own_land));
+        assert!(!can_play_land_from_zone(&state, p0, &their_land));
+        assert!(!can_play_land_from_zone(&state, p0, &exiled_land));
+        assert!(!can_cast_from_zone(&state, p0, &own_sorcery));
+
+        state.zone_permissions[0].owners = FilterController::Opponent;
+        assert!(can_play_land_from_zone(&state, p0, &their_land));
+        assert!(!can_play_land_from_zone(&state, p0, &own_land));
+
+        state.zone_permissions = vec![ZonePermission {
+            affected: FilterController::Any,
+            owners: FilterController::Any,
+            cards: FilterSpec {
+                card_types: Some(CardTypeSet::INSTANT),
+                ..FilterSpec::ANY
+            },
+            ..zone_permission(ZonePermissionKind::Cast, FilterController::You)
+        }];
+        let instant = object(ObjectId(5), p1, CardTypeSet::INSTANT, ZoneKind::Graveyard);
+        assert!(can_cast_from_zone(&state, p0, &instant));
+        assert!(can_cast_from_zone(&state, p1, &instant));
+        assert!(!can_cast_from_zone(&state, p0, &own_sorcery));
+
+        state.zone_permissions[0].cards.extra = Some("mana value 2 or less".to_string());
+        assert!(!can_cast_from_zone(&state, p0, &instant));
     }
 
     #[test]

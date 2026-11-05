@@ -61,8 +61,9 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     });
     // CR 611.3b
     // A script re-registers a permission for the zone the object lands in, so the
-    // old object's permission must not keep granting flash.
+    // old object's permission must not keep granting flash or another zone.
     state.timing_permissions.retain(|p| p.source != old_id);
+    state.zone_permissions.retain(|p| p.source != old_id);
     // TODO: cost modifiers and player modifier lists are not purged here, so a modifier that functions from hand outlives its source's cast (CR 611.3b)
 }
 
@@ -429,14 +430,16 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     // CR 611.3b
     // A continuous effect from a static ability applies only while its source is on
     // the battlefield. Cost modifiers, the player-level modifier lists and timing
-    // permissions have that shape (a cost reduction, an extra land drop, flash), so
-    // they get the same source-keyed purge as the three lists above.
+    // and zone permissions have that shape (a cost reduction, an extra land drop,
+    // flash, a graveyard land play), so they get the same source-keyed purge as the
+    // three lists above.
     state.cost_modifiers.retain(|m| m.source != old_id);
     state.hand_size_modifiers.retain(|m| m.source != old_id);
     state.hand_reveal_modifiers.retain(|m| m.source != old_id);
     state.draw_limit_modifiers.retain(|m| m.source != old_id);
     state.land_play_modifiers.retain(|m| m.source != old_id);
     state.timing_permissions.retain(|p| p.source != old_id);
+    state.zone_permissions.retain(|p| p.source != old_id);
     departed_triggered
 }
 
