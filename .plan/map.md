@@ -54,6 +54,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 082 Build zone permissions. `can_cast_from_zone` and `can_play_land_from_zone` serve the cast and land commands and both entry scans. A card cast or played from another player's graveyard is controlled by the actor. `Game.CreateZonePermission` registers one, and the purges drop it with its source. Crucible of Worlds is in the red-green deck, a scenario covers the graveyard land play, and `BEHAVIOUR_REV` is 7. [closed/082-build-zone-permissions.md]
 - 083 Library and linked-exile zone permissions. `ZonePermission` gains `library_top`, `linked` and `reveals_top`. The top card is found at check time, linked cards sit in a new `GameState.exiled_with` list, and a library id reaches only the permission holder unless the top is revealed (CR 401.5). Face-down linked cards are never offered. Future Sight joins the blue-black proof deck. Build is 086. [closed/083-library-linked-exile-zone-permissions.md]
 - 084 Expiring timing and zone permissions. `TimingPermission` and `ZonePermission` each gain `duration: EffectDuration`. Static grants keep `WhileSourceOnBattlefield`, and Timed grants installed by a resolving effect last until end of turn, end of combat or your next turn, outlive their source and expire through the `engine/turn.rs` drains (CR 611.2a, 514.2). No proof card. Build is 087. [closed/084-expiring-permissions.md]
+- 085 Zone permission riders. A rider is a per-cast fact on `StackObject`: `leave_stack_rider: Option<LeaveStackRider>` (`ExileInstead`, `ExileInsteadOfGraveyard`) replaces the flashback bool, `cast_zone_source` reports which permission allowed the cast, and one `leave_destination` helper serves resolve, fizzle and counter (CR 608.2n, 702.34a). Kess, Dissident Mage is a scenario fixture. Build is 088. [closed/085-zone-permission-riders.md]
 
 ## Not yet specified
 
@@ -74,4 +75,4 @@ Open tickets, unblocked and unclaimed:
 
 - 086 Build library-top and linked-exile zone permissions, a build ticket
 - 087 Build expiring timing and zone permissions, a build ticket
-- 085 Zone permission riders, a grilling ticket
+- 088 Build zone permission riders, a build ticket
