@@ -5,7 +5,7 @@ type: grilling
 mode: HITL
 status: open
 blocked_by: [82]
-claimed: false
+claimed: true
 ---
 
 ## Question
