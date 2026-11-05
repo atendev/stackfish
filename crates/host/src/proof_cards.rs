@@ -15,7 +15,8 @@ type Deck = &'static [(&'static str, u32)];
 const RED_GREEN: Deck = &[
     ("mountain", 9),
     ("forest", 8),
-    ("grizzly_bear", 2),
+    ("grizzly_bear", 1),
+    ("crucible_of_worlds", 1),
     ("stone_giant", 1),
     ("cinder_duelist", 3),
     ("ember_pinger", 1),
@@ -553,6 +554,21 @@ return s
     p:Register()"#,
     );
 
+    let crucible_of_worlds = with_ability(
+        base(
+            31,
+            "Crucible of Worlds",
+            "{3}",
+            CardTypeSet::ARTIFACT,
+            "You may play lands from your graveyard.",
+        ),
+        r#"    local p = Game.CreateZonePermission(c)
+    p:SetAffected(Game.Affected.You)
+    p:SetZone("Graveyard")
+    p:SetKind("PlayLand")
+    p:Register()"#,
+    );
+
     FixtureCardSource::new()
         .with("mountain", mountain)
         .with("forest", forest)
@@ -584,6 +600,7 @@ return s
         .with("mimic_pool", mimic_pool)
         .with("armory_call", armory_call)
         .with("vedalken_orrery", vedalken_orrery)
+        .with("crucible_of_worlds", crucible_of_worlds)
 }
 
 fn deck_json(deck: Deck) -> Value {

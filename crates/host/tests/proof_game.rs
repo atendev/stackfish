@@ -82,8 +82,9 @@ fn a_bot_plays_thirty_two_player_games_to_the_end() {
     );
 }
 
-const SPELLS: [&str; 25] = [
+const SPELLS: [&str; 26] = [
     "Grizzly Bear",
+    "Crucible of Worlds",
     "Stone Giant",
     "Wind Drake",
     "Cinder Duelist",
