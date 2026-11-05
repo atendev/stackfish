@@ -34,7 +34,8 @@ const RED_GREEN: Deck = &[
 const BLUE_BLACK: Deck = &[
     ("island", 8),
     ("swamp", 9),
-    ("wind_drake", 3),
+    ("wind_drake", 2),
+    ("vedalken_orrery", 1),
     ("scholar_imp", 3),
     ("grave_rat", 3),
     ("rat_herald", 2),
@@ -539,6 +540,18 @@ return s
     equip:SetOperation(Game.Ops.Attach)
     equip:Register()"#,
     );
+    let vedalken_orrery = with_ability(
+        base(
+            30,
+            "Vedalken Orrery",
+            "{4}",
+            CardTypeSet::ARTIFACT,
+            "You may cast spells as though they had flash.",
+        ),
+        r#"    local p = Game.CreateTimingPermission(c)
+    p:SetAffected(Game.Affected.You)
+    p:Register()"#,
+    );
 
     FixtureCardSource::new()
         .with("mountain", mountain)
@@ -570,6 +583,7 @@ return s
         .with("rat_herald", rat_herald)
         .with("mimic_pool", mimic_pool)
         .with("armory_call", armory_call)
+        .with("vedalken_orrery", vedalken_orrery)
 }
 
 fn deck_json(deck: Deck) -> Value {
