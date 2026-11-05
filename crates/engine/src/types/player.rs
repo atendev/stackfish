@@ -1,9 +1,10 @@
-use crate::types::cost::FilterController;
+use crate::types::cost::{FilterController, FilterSpec};
 use crate::types::counter::CounterSet;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
 use crate::types::mana::ManaPool;
+use crate::types::object::GameObject;
 use crate::types::zone::ZoneKind;
 
 /// CR 114.1: an emblem lives in the command zone but is not a card, so it has
@@ -277,6 +278,39 @@ pub fn effective_land_play_limit(modifiers: &[LandPlayModifier], player: PlayerI
         })
         .map(|m| m.additional)
         .sum::<u32>()
+}
+
+/// CR 601.3b: a static "you may cast spells as though they had flash" effect
+/// (Vedalken Orrery). A permission, not the FLASH keyword, so no keyword reader
+/// sees it. `commands::can_cast_now` reads it and `commands::retire_object`
+/// purges it by `source` (CR 611.3b).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimingPermission {
+    pub source: ObjectId,
+    /// Whose "you" and "opponent" `affected` and `spells` are relative to.
+    pub controller: PlayerId,
+    pub affected: FilterController,
+    /// The spells it covers, `FilterSpec::ANY` for every spell. A filter with
+    /// `extra` set never matches (see `FilterSpec::matches`).
+    pub spells: FilterSpec,
+}
+
+/// CR 601.3b: whether a permission in `permissions` lets `player` cast `card`
+/// as though it had flash. `card.controller` is the spell's would-be controller
+/// for a card in hand or the command zone.
+pub fn has_timing_permission(
+    permissions: &[TimingPermission],
+    player: PlayerId,
+    card: &GameObject,
+) -> bool {
+    permissions.iter().any(|p| {
+        let affected = match p.affected {
+            FilterController::You => player == p.controller,
+            FilterController::Opponent => player != p.controller,
+            FilterController::Any => true,
+        };
+        affected && p.spells.matches(card, card.controller, p.controller)
+    })
 }
 
 /// CR 121.2b: cards `player` has drawn this turn, counted from the ledger

@@ -200,6 +200,12 @@ pub(crate) enum Observed {
         zone: ZoneKind,
         owner: PlayerId,
     },
+    /// The same rule as `LeftGame`, for a token that ceased to exist.
+    TokenCeased {
+        object: ObjectId,
+        zone: ZoneKind,
+        owner: PlayerId,
+    },
 }
 
 fn without_source(kind: &WireEventKind) -> WireEventKind {
@@ -238,6 +244,22 @@ impl Observed {
                 zone,
                 owner,
             } => Some(WireEventKind::LeftGame {
+                object: sees_object(
+                    viewer,
+                    Place {
+                        zone: *zone,
+                        owner: Some(*owner),
+                    },
+                )
+                .then_some(U64::from(*object)),
+                zone: WireZone::from(*zone),
+                owner: owner.0,
+            }),
+            Observed::TokenCeased {
+                object,
+                zone,
+                owner,
+            } => Some(WireEventKind::TokenCeased {
                 object: sees_object(
                     viewer,
                     Place {
@@ -318,21 +340,21 @@ impl Observer {
                     self.retired.insert(previous, mv.from.place);
                 }
                 // CR 111.7
-                // The later cease event names this id, so remember where it went.
+                // A later event may name this id after the token is gone, so remember where it went.
                 if is_hidden(*to) && last_known_info.as_ref().is_some_and(|o| o.is_token) {
                     self.retired.insert(*object, mv.to.place);
                 }
                 Observed::Move(mv)
             }
             // CR 111.7
-            K::TokenCeased { object } => match self.hidden_place(state, *object) {
-                Some(Place {
-                    owner: Some(owner), ..
-                }) => Observed::Controller {
-                    player: owner,
-                    kind: plain(),
-                },
-                _ => Observed::Public(plain()),
+            K::TokenCeased {
+                object,
+                zone,
+                owner,
+            } => Observed::TokenCeased {
+                object: *object,
+                zone: *zone,
+                owner: *owner,
             },
             K::Cycled {
                 object,

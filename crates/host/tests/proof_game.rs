@@ -168,9 +168,9 @@ const ORDERED_CHOICES: [&str; 4] = ["Devour", "Amplify", "Copy", "Attach on entr
 #[test]
 fn the_same_seeds_give_a_byte_identical_game() {
     // A hash-ordered walk differs between runs only some of the time, so try several seeds.
-    // Seeds 0 to 10 are the shortest run that opens all four ordered choices.
+    // Seeds 0 to 19 are the shortest run that opens all four ordered choices.
     let mut reached = BTreeSet::new();
-    for seed in 0..11 {
+    for seed in 0..20 {
         let (first, bot) = play_with_bot(2, seed);
         let second = play(2, seed);
         assert_eq!(

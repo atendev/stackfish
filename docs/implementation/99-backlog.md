@@ -11,7 +11,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
    4. Done on `phase5/mode-combination` (awaiting review): 036 mode-combination predicate, shared by the cast, the modal entries, modal triggers and the opponent's mode choice. See `24-mode-combination.md`.
 2. 019 carddb-backed `CardSource` and 037 real-card proof bot. Done on `phase5/carddb-card-source` and `phase5/real-card-proof-bot`: `CardDbCardSource` loads real cards, `crates/host/tests/real_card_bot.rs` runs the bot against two curated 40-card decks, and `docs/real_card_set.md` lists the chosen cards. The six nonland spells now have active scripts in the database. The test skips if `../stackfish-db/stackfish.db` is absent so CI stays independent.
 3. Done on `phase5/special-mana-payment` (awaiting review): ticket 030, hybrid, Phyrexian, `{C}`, snow and `{X}` payment, the bot's matching gaps, and snow mana from snow sources. See `26-special-mana-payment.md`. Still open: real cards that use these symbols have no scripts in the database yet (Dismember, Deathrite Shaman, Glaring Fleshraker are examples).
-4. Remaining `legal_actions` gaps (ticket 031). Done: target candidates that mention X, a `DeclareBands` Decision, mana abilities through a Payment Decision, and `Target::Ability` candidates for script picks (see `17-legal-actions.md`). Still open: timing grants from continuous effects ("as though it had flash"), moved to ticket 076.
+4. Remaining `legal_actions` gaps (ticket 031). Done: target candidates that mention X, a `DeclareBands` Decision, mana abilities through a Payment Decision, and `Target::Ability` candidates for script picks (see `17-legal-actions.md`). Timing grants ("as though it had flash") are built as timing permissions (see `35-timing-permissions.md`).
 5. Late join, replay and wire versioning. Decide in 020, then build 021 (Seat snapshot), 022 (replay export and card-data version) and 023 (`v` bump and outbox bound). Do the `HashMap` ordering audit (028) in this step, because replay determinism depends on it.
 6. Lua event visibility. Let conditions see damage, life, tap/untap and mill events. `GainLife`, lifelink and damage to a player already write `LifeChanged` (`31-snapshot-fold-events.md`). This unblocks the most card scripts for the least work.
 7. Modal builders in Lua for spells and triggered abilities, then modal activated abilities in `commands/activate.rs` (its CR 700.2b TODO).
@@ -23,6 +23,12 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 
 ## Live TODOs / unresolved gaps
 
+- **Timing permissions (`phase5/timing-permissions`)**: see `35-timing-permissions.md`. Open items:
+  - Zone permissions, "until end of turn" grants, conditional flash, "as though it were a main phase" and
+    instant-speed equip are not built.
+  - `remap_abilities` drops timing permissions but not cost modifiers or the player modifier lists, so one that
+    functions from hand outlives its source's cast or land play.
+  - No proof-game assertion checks that the bot ever casts off-turn under Vedalken Orrery.
 - **Chain operations (`phase5/chain-operations`, `phase5/chain-per-entry-targets`)**: see `25-chain-operations.md`. Open items:
   - A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode
     are not built.
@@ -76,8 +82,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     on the stack and can change the attackers before bands are chosen (CR 508.1e).
   - A modal spell is listed when enough single modes are usable. Two modes that cannot combine are rejected only when
     the engine runs the cast.
-  - Timing and zone permissions granted by continuous effects ("as though it had flash") are missing from the
-    commands too, so entries inherit that gap.
+  - Zone permissions granted by continuous effects ("play lands from your graveyard") are missing from the
+    commands too, so entries inherit that gap. Flash timing permissions are built (`35-timing-permissions.md`).
   - The declare attackers Decision is offered only while the active player holds priority, and the declare blockers
     and damage Decisions come before priority. A host that mixes `submit_action` with `answer` can skip them.
 - **Decision/Answer facade (`phase5/decision-answer-facade`, B1)**: see `16-decision-facade.md`. Open items:

@@ -369,7 +369,7 @@ fn the_build_id_revision_moves_with_the_proof_game() {
     let hash = fnv(&serde_json::to_vec(&events).unwrap());
     assert_eq!(
         (BEHAVIOUR_REV, hash),
-        (5, 3_503_559_754_867_336_375),
+        (6, 12_989_221_082_387_008_711),
         "the proof game changed: bump BEHAVIOUR_REV in crates/engine/src/lib.rs and pin the new hash"
     );
 }

@@ -92,6 +92,7 @@ pub(crate) fn fingerprint(state: &GameState) -> String {
         hand_reveal_modifiers,
         draw_limit_modifiers,
         land_play_modifiers,
+        timing_permissions,
         abilities,
         ledger: _,
         rng,
@@ -125,7 +126,7 @@ pub(crate) fn fingerprint(state: &GameState) -> String {
          {last_active_turn_number:?};{objects:?};{zones:?};{stack:?};{continuous_effects:?};\
          {replacement_effects:?};{cost_modifiers:?};{hand_size_modifiers:?};\
          {hand_reveal_modifiers:?};{draw_limit_modifiers:?};{land_play_modifiers:?};\
-         {abilities:?};{rng:?};{pending_step_skips:?};{once_per_turn_triggered:?};\
+         {timing_permissions:?};{abilities:?};{rng:?};{pending_step_skips:?};{once_per_turn_triggered:?};\
          {commander_return_offered:?};{linked_ability_generation:?};{script_ability_ids:?};\
          {ability_function_zones:?};{off_battlefield_scripts_run:?};{linked_exiles:?};\
          {pending_timing_bypass:?};{pending_free_cast:?};{ledger_reads:?}"

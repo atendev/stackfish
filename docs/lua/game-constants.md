@@ -129,8 +129,8 @@ something to it, and anything else is a load error.
 | `EnchantedPlayer` | player | CR 303.4m, the player this Aura is attached to. |
 
 Player tags go to the [player modifiers](player-modifiers.md): `Game.CreateHandSizeModifier`,
-`CreateHandRevealModifier`, `CreateDrawLimitModifier` and `CreateLandPlayModifier`. The draw limit and
-land play modifiers reject `EnchantedPlayer` at `:SetAffected`. An object tag given to a player
+`CreateHandRevealModifier`, `CreateDrawLimitModifier`, `CreateLandPlayModifier` and `CreateTimingPermission`.
+The draw limit and land play modifiers and the timing permission reject `EnchantedPlayer` at `:SetAffected`. An object tag given to a player
 modifier, or a player tag given to a static ability, is a load error.
 
 ## `Game.Filter(table)`

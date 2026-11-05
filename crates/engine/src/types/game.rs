@@ -9,6 +9,7 @@ use crate::types::ids::{AbilityId, EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
 use crate::types::player::{
     DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, PlayerState,
+    TimingPermission,
 };
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
@@ -85,6 +86,9 @@ pub struct GameState {
     /// the latest timestamp (see `LandPlayModifier`). Read by
     /// `commands::execute_play_land`.
     pub land_play_modifiers: Vec<LandPlayModifier>,
+    /// CR 601.3b: "cast spells as though they had flash" permissions. See
+    /// `TimingPermission`. Read by `commands::can_cast_now`.
+    pub timing_permissions: Vec<TimingPermission>,
     /// Registered triggered, activated and static abilities, flat.
     pub abilities: Vec<RegisteredAbility>,
     pub ledger: Vec<GameEvent>,
@@ -294,6 +298,7 @@ mod tests {
             hand_reveal_modifiers: Vec::new(),
             draw_limit_modifiers: Vec::new(),
             land_play_modifiers: Vec::new(),
+            timing_permissions: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState {

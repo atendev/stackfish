@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use super::attach::retire_object;
+use super::attach::{remap_abilities, retire_object};
 use crate::types::ability::{AbilityEffect, AbilityKind, RegisteredAbility};
 use crate::types::card::ModeChoice;
-use crate::types::cost::FilterController;
+use crate::types::cost::{FilterController, FilterSpec};
 use crate::types::counter::CounterSet;
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter,
@@ -17,6 +17,7 @@ use crate::types::mana::ManaPool;
 use crate::types::player::{
     DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
     HandSizeEffect, HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerState,
+    TimingPermission,
 };
 use crate::types::turn::{Phase, Step};
 
@@ -56,6 +57,7 @@ fn minimal_state() -> GameState {
         hand_reveal_modifiers: Vec::new(),
         draw_limit_modifiers: Vec::new(),
         land_play_modifiers: Vec::new(),
+        timing_permissions: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState {
@@ -179,6 +181,32 @@ fn dummy_land_play_modifier(source: ObjectId) -> LandPlayModifier {
     }
 }
 
+fn dummy_timing_permission(source: ObjectId) -> TimingPermission {
+    TimingPermission {
+        source,
+        controller: PlayerId(0),
+        affected: FilterController::You,
+        spells: FilterSpec::ANY,
+    }
+}
+
+// CR 611.3b
+#[test]
+fn remap_abilities_drops_the_old_objects_timing_permission() {
+    let mut state = minimal_state();
+    state
+        .timing_permissions
+        .push(dummy_timing_permission(ObjectId(1)));
+    state
+        .timing_permissions
+        .push(dummy_timing_permission(ObjectId(2)));
+
+    remap_abilities(&mut state, ObjectId(1), ObjectId(3));
+
+    let sources: Vec<ObjectId> = state.timing_permissions.iter().map(|p| p.source).collect();
+    assert_eq!(sources, vec![ObjectId(2)]);
+}
+
 #[test]
 fn retire_object_purges_only_the_retired_source() {
     let mut state = minimal_state();
@@ -220,6 +248,13 @@ fn retire_object_purges_only_the_retired_source() {
     state
         .land_play_modifiers
         .push(dummy_land_play_modifier(ObjectId(2)));
+
+    state
+        .timing_permissions
+        .push(dummy_timing_permission(ObjectId(1)));
+    state
+        .timing_permissions
+        .push(dummy_timing_permission(ObjectId(2)));
 
     let departed = retire_object(&mut state, ObjectId(1));
 
@@ -283,4 +318,6 @@ fn retire_object_purges_only_the_retired_source() {
         "only ObjectId(1)'s land play modifier should be purged"
     );
     assert_eq!(state.land_play_modifiers[0].source, ObjectId(2));
+    let sources: Vec<ObjectId> = state.timing_permissions.iter().map(|p| p.source).collect();
+    assert_eq!(sources, vec![ObjectId(2)]);
 }

@@ -13,7 +13,7 @@ use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::player::{
-    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier,
+    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, TimingPermission,
 };
 use crate::types::target::TargetFilter;
 
@@ -189,6 +189,10 @@ pub(crate) struct ScriptRegistry {
     /// `LandPlayModifier` has no `timestamp`.
     pub(crate) pending_land_play_modifiers:
         Vec<(LandPlayModifier, Option<crate::types::zone::ZoneKind>)>,
+    /// For `Game.CreateTimingPermission`'s builder (CR 601.3b), drained into
+    /// `GameState.timing_permissions`, with a placeholder `controller` only.
+    pub(crate) pending_timing_permissions:
+        Vec<(TimingPermission, Option<crate::types::zone::ZoneKind>)>,
     /// A coroutine `Thread` suspended mid-`invoke_operation` at a
     /// `Game.SelectTargets` call, keyed in the `ScriptHandle` space `scripts`
     /// uses (sharing `next_handle`). A separate map because `resume_operation`

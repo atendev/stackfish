@@ -441,6 +441,7 @@ Game.CreateHandSizeModifier(source)
 Game.CreateHandRevealModifier(source)
 Game.CreateDrawLimitModifier(source)
 Game.CreateLandPlayModifier(source)
+Game.CreateTimingPermission(source)
 ```
 
 ### `Game.CreateTriggeredAbility`

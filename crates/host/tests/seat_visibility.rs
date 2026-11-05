@@ -781,9 +781,15 @@ impl Folded {
                 }
             }
             "token_ceased" => {
-                let object = id("object").unwrap();
-                self.zone_of.remove(&object);
-                self.tapped.remove(&object);
+                if let Some(object) = id("object") {
+                    self.zone_of.remove(&object);
+                    self.tapped.remove(&object);
+                }
+                self.count(
+                    &event["zone"],
+                    event["owner"].as_u64().unwrap() as usize,
+                    -1,
+                );
             }
             "left_game" => {
                 if let Some(object) = id("object") {

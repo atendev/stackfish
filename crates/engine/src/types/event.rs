@@ -204,12 +204,14 @@ pub enum GameEventKind {
     Regenerated {
         object: ObjectId,
     },
-    /// CR 704.5d: a token outside the battlefield ceased to exist. Not a
-    /// `ZoneChange`, since there is nowhere to move it. Produced by
-    /// `sba::collect_ceasing_tokens` and `commit_token_cessation`, which skip
-    /// a token that died this same pass so its triggers fire first (CR 111.7).
+    /// CR 704.5d: a token outside the battlefield ceased to exist, with nowhere to
+    /// move it. `commit_token_cessation` skips a token that died this same pass so
+    /// its triggers fire first (CR 111.7). `zone` and `owner` let a Seat that
+    /// cannot see the id still fold the hand or library count.
     TokenCeased {
         object: ObjectId,
+        zone: ZoneKind,
+        owner: PlayerId,
     },
     /// CR 303.4b, 702.6a: `object`, an Aura or Equipment, became attached to
     /// `attached_to`, as an Aura entered or an Equip resolved. Not a

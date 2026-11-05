@@ -237,8 +237,12 @@ fn player_modifiers_share_game_affected() {
 }
 
 #[test]
-fn draw_limit_and_land_play_modifiers_reject_the_enchanted_player() {
-    for constructor in ["CreateDrawLimitModifier", "CreateLandPlayModifier"] {
+fn draw_limit_land_play_and_timing_permission_reject_the_enchanted_player() {
+    for constructor in [
+        "CreateDrawLimitModifier",
+        "CreateLandPlayModifier",
+        "CreateTimingPermission",
+    ] {
         let error = error_of(&format!(
             "local m = Game.{constructor}(c) m:SetAffected(Game.Affected.EnchantedPlayer)"
         ));

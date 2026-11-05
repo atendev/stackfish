@@ -24,6 +24,16 @@ pub struct FilterSpec {
 }
 
 impl FilterSpec {
+    /// A filter that matches every object.
+    pub const ANY: FilterSpec = FilterSpec {
+        card_types: None,
+        supertypes: None,
+        subtypes: None,
+        controller: None,
+        random: false,
+        extra: None,
+    };
+
     /// Whether `object` satisfies this filter from `viewer`'s perspective
     /// (`You` and `Opponent` are relative to the payer). The caller resolves
     /// `object_controller` with `layers::effective_controller` (CR 108.4),

@@ -3,9 +3,9 @@
 [← index](index.md)
 
 Static effects that change a *player's* rules rather than an object's characteristics: hand size,
-hand visibility, draw limits, and land plays. Each has its own constructor and enforcement point —
-they are not CR 613 layer effects, so they don't go through
-[`Game.CreateStaticAbility`](static-abilities.md). All four follow the same shape:
+hand visibility, draw limits, land plays, and flash timing. Each has its own constructor and enforcement
+point — they are not CR 613 layer effects, so they don't go through
+[`Game.CreateStaticAbility`](static-abilities.md). All five follow the same shape:
 
 ```lua
 local m = Game.CreateXModifier(c)
@@ -111,9 +111,29 @@ m:Register()
 Unlike the other three, land-play modifiers **stack additively**: two registered `+1` modifiers
 mean three land plays per turn (CR 305.2). `EnchantedPlayer` is not available.
 
+## `Game.CreateTimingPermission(c)` — CR 601.3b
+
+Lets the affected player cast spells as though they had flash: with priority, on any turn, with a
+non-empty stack. It is a permission, not the Flash keyword, so nothing that reads keywords sees it.
+`:SetFilter(Game.Filter({...}))` is optional and limits which spells it covers; without it, every
+spell. There is no magnitude setter.
+
+```lua
+-- Vedalken Orrery: you may cast spells as though they had flash.
+local p = Game.CreateTimingPermission(c)
+p:SetAffected(Game.Affected.You)
+p:Register()
+```
+
+The permission never grants priority, and it covers only spells: land plays and Equip keep the
+sorcery-speed rule. A cast from another zone through an alternative cost (flashback) is covered. A
+filter with `extra` set never matches. `EnchantedPlayer` is not available.
+
 ## Not modeled
 
 - Hand-reveal enforcement (above).
 - CR 121.2b's "can't choose to draw multiple cards" and "can't pay a cost that includes drawing
   multiple cards" — no choice-based draw or draw-cost mechanism exists.
-- `EnchantedPlayer` for draw limits and land plays — no real card needs it.
+- `EnchantedPlayer` for draw limits, land plays and timing permissions — no real card needs it.
+- Timing permissions with a duration ("until end of turn"), conditional flash (CR 601.3d), "as though
+  it were a main phase", instant-speed equip, and zone permissions ("cast spells from your graveyard").

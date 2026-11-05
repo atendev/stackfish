@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityEffect;
-use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice};
+use crate::types::card::{CardTypeSet, ModeChoice};
 use crate::types::cost::{self, AdditionalCost, AlternativeCost, CostSpec};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -15,7 +15,7 @@ use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::attach::{non_eliminated_players, remap_abilities};
-use super::legality::{combine_chosen_modes, is_sorcery_speed, validate_targets};
+use super::legality::{can_cast_now, combine_chosen_modes, has_own_flash, validate_targets};
 use super::{
     CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
     Validated,
@@ -125,27 +125,18 @@ pub(super) fn validate_cast_spell(
         ));
     }
     let from_zone = object.zone;
-    // CR 117.1a/602/702.8b
-    // Instants and flash spells may be cast any time the actor holds priority.
-    // Everything else needs the sorcery window; is_sorcery_speed already requires
-    // priority, so this branch adds only the priority check.
-    // TODO: effects that grant flash ("as though it had flash") are not on continuous_effects, so only the card's own Flash keyword counts
-    let castable_at_instant_speed = object.definition.card_types.contains(CardTypeSet::INSTANT)
-        || object.definition.keywords.contains(KeywordSet::FLASH);
-    if !timing_bypassed {
-        if castable_at_instant_speed {
-            if state.priority_player != actor {
-                return Err(Rejected::IllegalAction(
-                    "actor does not hold priority".to_string(),
-                ));
-            }
-        } else if !is_sorcery_speed(state, actor) {
-            return Err(Rejected::IllegalAction(
-                "this spell can only be cast at sorcery speed: actor's turn, a main \
-                 phase, actor holding priority, and an empty stack"
-                    .to_string(),
-            ));
-        }
+    // CR 117.1a, 601.3b
+    // Only an instant or Flash card hears that the actor lacks priority, so a card
+    // a timing permission covers keeps the sorcery-speed message.
+    // TODO: a Flash keyword granted through the layers is not read, since the timing check reads the printed keywords (CR 702.8a)
+    if !timing_bypassed && !can_cast_now(state, actor, object) {
+        return Err(Rejected::IllegalAction(if has_own_flash(object) {
+            "actor does not hold priority".to_string()
+        } else {
+            "this spell can only be cast at sorcery speed: actor's turn, a main \
+             phase, actor holding priority, and an empty stack"
+                .to_string()
+        }));
     }
 
     // CR 700.2a/d/h

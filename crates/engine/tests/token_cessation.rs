@@ -122,7 +122,7 @@ fn a_token_that_just_died_does_not_cease_until_the_next_sba_pass() {
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
     assert!(
-        matches!(events[0].kind, GameEventKind::TokenCeased { object } if object == graveyard_id)
+        matches!(events[0].kind, GameEventKind::TokenCeased { object, .. } if object == graveyard_id)
     );
     assert!(
         state.object(graveyard_id).is_none(),
@@ -178,7 +178,7 @@ fn a_token_already_sitting_in_exile_ceases_on_the_very_first_check() {
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].kind, GameEventKind::TokenCeased { object } if object == relic));
+    assert!(matches!(events[0].kind, GameEventKind::TokenCeased { object, .. } if object == relic));
     assert!(state.object(relic).is_none());
     assert!(
         state
