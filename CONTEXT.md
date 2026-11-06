@@ -87,6 +87,14 @@ _Avoid_: Temporary permission, one-shot permission
 A record that a card was exiled by a particular source, kept in `GameState.exiled_with` (CR 607.2a). `Game.Ops.ExileLinked` writes it, and a linked Zone permission reads it. The link ends when the card leaves exile or the source leaves the battlefield, because either one becomes a new object. It is not the "exile until it leaves the battlefield" link in `linked_exiles`, which returns the card.
 _Avoid_: Linked card, imprint
 
+**Condition event**:
+The plain Lua table a custom trigger condition receives for one ledger event. It carries only ids, zone and counter names, players, numbers and flags, never card characteristics, so it is safe to show to a condition any player controls. A ledger event kind that is not bridged arrives as `nil`.
+_Avoid_: Event payload, trigger event
+
+**Milled cards event**:
+The one ledger record of a single mill action by one player. It lists the milled cards that ended up in a public zone, including a zone a replacement sent them to instead (CR 701.17c). Surveil never writes one, though its moves look the same.
+_Avoid_: Mill event, mill trigger
+
 ## Relationships
 
 - A **Session** runs exactly one game and has one or more **Seats**
