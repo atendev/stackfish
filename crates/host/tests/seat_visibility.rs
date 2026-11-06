@@ -742,7 +742,12 @@ impl Folded {
             }
             folded.zone_of.insert(id, zone.to_string());
         };
+        // A visible library top is computed per snapshot and no event announces it, so the
+        // fold checks a library by its count alone.
         for zone in snapshot["zones"].as_array().unwrap() {
+            if zone["zone"] == "library" {
+                continue;
+            }
             for object in zone["objects"].as_array().unwrap() {
                 place(object, zone["zone"].as_str().unwrap());
             }
