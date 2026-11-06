@@ -34,7 +34,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     choice between matching permissions (CR 601.2), and once-per-turn permission limits.
   - Face-down linked cards are never offered (CR 601.3f), since nothing makes a card face down yet.
   - Revealing the top applies only to permissions, not the stand-alone "play with the top card revealed" effect
-    (CR 401.5).
+    (CR 401.5). Decided in ticket 094 (library top views and a `LibraryTopShown` event), and the build is ticket 119.
   - Linked records do not cover cards exiled by a replaced source copy, and `ExileLinked` has no untargeted or
     library form (CR 607.2a).
   - `remap_abilities` drops timing permissions but not cost modifiers or the player modifier lists, so one that
