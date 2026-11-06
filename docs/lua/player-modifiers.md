@@ -131,8 +131,9 @@ filter with `extra` set never matches. `EnchantedPlayer` is not available.
 
 ## `Game.CreateZonePermission(c)` — CR 601.3, 305.1
 
-Lets the affected player play lands or cast spells from a graveyard or from exile. `:SetZone` picks
-`"Graveyard"` or `"Exile"`, and `:SetKind` picks `"PlayLand"` or `"Cast"`. Both are required with
+Lets the affected player play lands or cast spells from a graveyard, from exile or from the top of a
+library. `:SetZone` picks `"Graveyard"`, `"Exile"` or `"Library"`, and `:SetKind` picks `"PlayLand"` or
+`"Cast"`. Both are required with
 `:SetAffected`. `:SetOwner(Game.Affected.*)` says whose cards in that zone it covers and defaults to
 `You`, so "your graveyard". `:SetFilter(Game.Filter({...}))` is optional and limits which cards it
 covers.
@@ -152,6 +153,31 @@ played from another player's graveyard is controlled by the player who cast or p
 own flashback cost is separate: choosing it checks the flashback zone, and choosing the normal cost
 checks the permission. `EnchantedPlayer` is not available for `:SetAffected` or `:SetOwner`.
 
+`"Library"` needs `:SetFromLibraryTop()`, which opens only the top card of each covered library,
+found again at every check (CR 401.5). Only the affected players may look at that card, unless
+`:SetRevealTop()` is also called, in which case every player sees it. Once a card from the top is
+cast or played, the next top card opens.
+
+```lua
+-- Future Sight: play with the top card of your library revealed. You may play lands and cast
+-- spells from the top of your library.
+for _, kind in ipairs({ "PlayLand", "Cast" }) do
+    local p = Game.CreateZonePermission(c)
+    p:SetAffected(Game.Affected.You)
+    p:SetZone("Library")
+    p:SetKind(kind)
+    p:SetFromLibraryTop()
+    p:SetRevealTop()
+    p:Register()
+end
+```
+
+`:SetLinked()` with `"Exile"` opens only cards exiled with the source through `Game.Ops.ExileLinked`
+(CR 607.2a). The link ends when the card leaves exile or the source leaves the battlefield. A
+face-down card is never offered (CR 601.3f). `:Register()` is an error when `"Library"` and
+`:SetFromLibraryTop()` are not used together, when `:SetLinked()` is used with a zone other than
+`"Exile"`, or when `:SetRevealTop()` is used without `:SetFromLibraryTop()`.
+
 ## Not modeled
 
 - Hand-reveal enforcement (above).
@@ -161,6 +187,6 @@ checks the permission. `EnchantedPlayer` is not available for `:SetAffected` or 
   card needs it.
 - Timing permissions with a duration ("until end of turn"), conditional flash (CR 601.3d), "as though
   it were a main phase", and instant-speed equip.
-- Zone permissions for the top of a library or for "cards exiled with this" (CR 401.5), "until end of
-  turn" zone grants, a "may look" check for a face-down exiled card (CR 601.3f), and "exile it
-  instead" riders on a spell cast through a permission (CR 608.2n).
+- "Until end of turn" zone grants, face-down linked cards (never offered, CR 601.3f), the
+  stand-alone "play with the top card of your library revealed" effect without a permission
+  (CR 401.5), and "exile it instead" riders on a spell cast through a permission (CR 608.2n).

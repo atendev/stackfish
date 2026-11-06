@@ -182,6 +182,7 @@ Game.Ops.Exile
 Game.Ops.ExileSelf
 Game.Ops.ExileAll(filter, zone?)
 Game.Ops.ExileUntilSourceLeaves
+Game.Ops.ExileLinked
 Game.Ops.Regenerate
 ```
 

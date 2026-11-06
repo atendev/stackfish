@@ -476,10 +476,27 @@ function ZonePermissionBuilder:SetFunctionsFrom(zoneName) end
 ---@return ZonePermissionBuilder
 function ZonePermissionBuilder:SetAffected(value) end
 
---- The zone the permission opens. Required before :Register().
----@param zoneName "Graveyard"|"Exile"  -- any other zone is an error
+--- The zone the permission opens. Required before :Register(). "Library" needs
+--- :SetFromLibraryTop().
+---@param zoneName "Graveyard"|"Exile"|"Library"  -- any other zone is an error
 ---@return ZonePermissionBuilder
 function ZonePermissionBuilder:SetZone(zoneName) end
+
+--- CR 401.5: opens only the top card of each covered library, found again at every check.
+--- Required with SetZone("Library") and an error with any other zone. Only the affected
+--- players may look at that card unless :SetRevealTop() is also called.
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetFromLibraryTop() end
+
+--- CR 607.2a: opens only cards exiled with this source through Game.Ops.ExileLinked. Needs
+--- SetZone("Exile"). A face-down card is never offered.
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetLinked() end
+
+--- CR 401.5: every player sees the top card :SetFromLibraryTop() opens ("play with the top
+--- card of your library revealed"). Needs :SetFromLibraryTop().
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetRevealTop() end
 
 --- Whether the permission plays lands or casts spells. Required before :Register().
 ---@param kind "PlayLand"|"Cast"
@@ -696,6 +713,13 @@ function GameOpsTable.ExileAll(filter, zone) end
 --- battlefield. Does nothing if the source already left before the ability resolves (CR 610.3a/b).
 ---@type GameOpsValue
 GameOpsTable.ExileUntilSourceLeaves = nil
+
+--- CR 607.2a: "exile target card" that records each exiled card as exiled with the ability's source, so a
+--- zone permission with :SetLinked() can open it. Source zones are Exile's (battlefield or graveyard). The card
+--- is exiled even if the source left first, but then no link is recorded. The link ends when the card leaves
+--- exile or the source leaves the battlefield.
+---@type GameOpsValue
+GameOpsTable.ExileLinked = nil
 
 --- CR 110.2a/400.7: "return target creature card from a graveyard to the battlefield". Declare the target with a
 --- `zone = "Graveyard"` (or "Exile") filter. Replacement-checked, then the card enters as a new object with its

@@ -27,10 +27,13 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - "Until end of turn" grants, conditional flash, "as though it were a main phase" and instant-speed equip are
     not built.
 - **Zone permissions (`phase5/zone-permissions`)**: see `36-zone-permissions.md`. Open items:
-  - Top-of-library and linked-exile permissions (CR 401.5), ticket 083.
   - "Until end of turn" grants (CR 611.2), ticket 084.
   - "Exile it instead" riders on a spell cast through a permission (CR 608.2n), ticket 085.
-  - A face-down exiled card is offered with no "may look" check (CR 601.3f).
+  - Face-down linked cards are never offered (CR 601.3f), since nothing makes a card face down yet.
+  - Revealing the top applies only to permissions, not the stand-alone "play with the top card revealed" effect
+    (CR 401.5).
+  - Linked records do not cover cards exiled by a replaced source copy, and `ExileLinked` has no untargeted or
+    library form (CR 607.2a).
   - `remap_abilities` drops timing permissions but not cost modifiers or the player modifier lists, so one that
     functions from hand outlives its source's cast or land play.
   - No proof-game assertion checks that the bot ever casts off-turn under Vedalken Orrery.
