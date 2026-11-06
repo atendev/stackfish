@@ -40,6 +40,7 @@ fn zone_template(duration: EffectDuration) -> ZonePermission {
         linked: false,
         reveals_top: false,
         duration,
+        rider: None,
     }
 }
 

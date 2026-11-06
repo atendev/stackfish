@@ -765,6 +765,7 @@ mod tests {
                 linked: false,
                 reveals_top,
                 duration: stackfish_engine::EffectDuration::WhileSourceOnBattlefield,
+                rider: None,
             });
         state
     }

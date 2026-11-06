@@ -6,6 +6,7 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
 use crate::types::mana::ManaPool;
 use crate::types::object::GameObject;
+use crate::types::stack::LeaveStackRider;
 use crate::types::zone::ZoneKind;
 
 /// CR 114.1: an emblem lives in the command zone but is not a card, so it has
@@ -366,6 +367,9 @@ pub struct ZonePermission {
     pub reveals_top: bool,
     /// As `TimingPermission::duration`.
     pub duration: EffectDuration,
+    /// CR 608.2n: copied onto a spell cast through this row. `Cast` only.
+    // TODO: once-per-turn permission limit
+    pub rider: Option<LeaveStackRider>,
 }
 
 fn relative(filter: FilterController, who: PlayerId, controller: PlayerId) -> bool {
@@ -415,6 +419,27 @@ pub fn has_zone_permission(
     state.zone_permissions.iter().any(|p| {
         p.kind == kind && relative(p.affected, player, p.controller) && p.covers(state, card)
     })
+}
+
+/// CR 601.3: the rider of the `Cast` permission that lets `player` cast
+/// `card`, or `None` when none does. A rider-less match wins over one with a
+/// rider, else the first in `state.zone_permissions` order.
+pub fn cast_permission_rider(
+    state: &GameState,
+    player: PlayerId,
+    card: &GameObject,
+) -> Option<Option<LeaveStackRider>> {
+    let mut matching = state.zone_permissions.iter().filter(|p| {
+        p.kind == ZonePermissionKind::Cast
+            && relative(p.affected, player, p.controller)
+            && p.covers(state, card)
+    });
+    let first = matching.next()?;
+    if first.rider.is_none() || matching.any(|p| p.rider.is_none()) {
+        Some(None)
+    } else {
+        Some(first.rider)
+    }
 }
 
 /// CR 401.5: whether `viewer` may see `card` because a `library_top`

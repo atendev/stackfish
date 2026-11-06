@@ -655,7 +655,7 @@ fn push_ability_with_gone_player(engine: &mut Engine, effect: AbilityEffect) {
         vec![Target::Player(PlayerId(9))],
         Some(player_target(false)),
         None,
-        false,
+        None,
         false,
         false,
         ScriptHandle(0),

@@ -11,7 +11,7 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::object::GameObject;
 use crate::types::player::ZonePermissionKind;
-use crate::types::stack::StackEntryKind;
+use crate::types::stack::{LeaveStackRider, StackEntryKind};
 use crate::types::target::{
     ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement,
     TargetSpec,
@@ -59,25 +59,40 @@ pub(in crate::commands) fn can_cast_now(
 /// at its normal cost: their own hand, their commander in the command zone,
 /// or a zone a `ZonePermission` opens. Timing is `can_cast_now`'s job, and an
 /// alternative cost's `from_zone` is checked by the caller.
-// TODO: face-down linked cards are never offered (CR 601.3f)
-// TODO: a spell cast through a zone permission has no "exile it instead" rider (CR 608.2n)
 pub(in crate::commands) fn can_cast_from_zone(
     state: &GameState,
     player: PlayerId,
     card: &GameObject,
 ) -> bool {
+    cast_zone_source(state, player, card).is_some()
+}
+
+/// What let a card be cast from the zone it is in. `Permission` carries the
+/// leave-stack rider the spell takes onto the stack (CR 608.2n).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::commands) enum ZoneCastSource {
+    Hand,
+    Command,
+    Permission(Option<LeaveStackRider>),
+}
+
+/// CR 601.3, 903.8: as `can_cast_from_zone`, and which rule allowed it.
+// TODO: face-down linked cards are never offered (CR 601.3f)
+// TODO: no "if it would die or leave exile this way" rider on a permission cast (CR 608.2n)
+// TODO: no player choice between matching permissions (CR 601.2)
+pub(in crate::commands) fn cast_zone_source(
+    state: &GameState,
+    player: PlayerId,
+    card: &GameObject,
+) -> Option<ZoneCastSource> {
     match card.zone {
-        ZoneKind::Hand => card.controller == player,
-        ZoneKind::Command => card.is_commander && card.owner == player,
-        _ => {
-            !card.face_down
-                && crate::types::player::has_zone_permission(
-                    state,
-                    ZonePermissionKind::Cast,
-                    player,
-                    card,
-                )
+        ZoneKind::Hand => (card.controller == player).then_some(ZoneCastSource::Hand),
+        ZoneKind::Command => {
+            (card.is_commander && card.owner == player).then_some(ZoneCastSource::Command)
         }
+        _ if card.face_down => None,
+        _ => crate::types::player::cast_permission_rider(state, player, card)
+            .map(ZoneCastSource::Permission),
     }
 }
 
@@ -1472,7 +1487,7 @@ mod tests {
             Vec::new(),
             None,
             None,
-            false,
+            None,
             false,
             false,
             crate::types::ids::ScriptHandle(0),
@@ -1667,6 +1682,7 @@ mod tests {
             linked: false,
             reveals_top: false,
             duration: EffectDuration::WhileSourceOnBattlefield,
+            rider: None,
         }
     }
 

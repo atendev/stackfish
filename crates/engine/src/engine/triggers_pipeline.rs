@@ -341,7 +341,7 @@ impl Engine {
             targets,
             target_requirement,
             None,
-            false,
+            None,
             // CR 702.27a: a triggered ability has no buyback.
             false,
             // CR 702.138b: nor can it be escaped.

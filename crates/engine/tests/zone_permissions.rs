@@ -86,6 +86,7 @@ fn with_permission(
         linked: false,
         reveals_top: false,
         duration: EffectDuration::WhileSourceOnBattlefield,
+        rider: None,
     });
     state
 }

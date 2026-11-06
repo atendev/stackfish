@@ -1310,6 +1310,7 @@ pub(crate) fn bind_game_globals(
                 library_top: false,
                 linked: false,
                 reveals_top: false,
+                rider: None,
                 function_zone: None,
                 registry: Rc::clone(&registry),
             })

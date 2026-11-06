@@ -3,6 +3,7 @@ use crate::types::cost::CostPayment;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::object::GameObject;
 use crate::types::target::TargetSpec;
+use crate::types::zone::ZoneKind;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum StackEntryKind {
@@ -34,10 +35,10 @@ pub struct StackObject {
     /// against it (CR 608.2b). The target count is fixed at cast (CR 601.2c).
     pub target_requirement: Option<TargetSpec>,
     pub x_value: Option<u32>,
-    /// CR 702.34a: set at push from the chosen `AlternativeCost`, never for an
-    /// ability. A resolving or fizzling spell then goes to exile, not the
-    /// graveyard.
-    pub exile_on_leaving_stack: bool,
+    /// CR 702.34a, 608.2n: set at push from the chosen `AlternativeCost` or
+    /// the `ZonePermission` the spell was cast through, never for an ability
+    /// or a copy. Read only through `leave_destination`.
+    pub leave_stack_rider: Option<LeaveStackRider>,
     /// CR 702.27a: set at push when buyback was paid. A resolving instant or
     /// sorcery returns to hand. The fizzle path ignores it, since the rule
     /// covers only resolution.
@@ -63,6 +64,16 @@ pub struct StackObject {
     pub pending_mode_choice: Option<PendingModeChoice>,
 }
 
+/// CR 702.34a, 608.2n: where a spell goes in place of its usual zone when it
+/// leaves the stack. `ExileInstead` is flashback's wording and covers any
+/// destination, and `ExileInsteadOfGraveyard` replaces only the graveyard.
+// TODO: no "if it would die or leave exile this way" rider and no battlefield-side exile such as unearth
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LeaveStackRider {
+    ExileInstead,
+    ExileInsteadOfGraveyard,
+}
+
 /// See `StackObject::pending_mode_choice`.
 #[derive(Clone, PartialEq, Debug)]
 pub struct PendingModeChoice {
@@ -85,7 +96,7 @@ impl StackObject {
         targets: Vec<Target>,
         target_requirement: Option<TargetSpec>,
         x_value: Option<u32>,
-        exile_on_leaving_stack: bool,
+        leave_stack_rider: Option<LeaveStackRider>,
         bought_back: bool,
         escaped: bool,
         operation: ScriptHandle,
@@ -107,7 +118,7 @@ impl StackObject {
             targets,
             target_requirement,
             x_value,
-            exile_on_leaving_stack,
+            leave_stack_rider,
             bought_back,
             escaped,
             costs_paid: Vec::new(),
@@ -115,6 +126,18 @@ impl StackObject {
             effect,
             intervening_if,
             pending_mode_choice,
+        }
+    }
+
+    /// CR 608.2n, 702.34a: the zone this spell moves to when it leaves the
+    /// stack and would otherwise go to `default`.
+    pub fn leave_destination(&self, default: ZoneKind) -> ZoneKind {
+        match self.leave_stack_rider {
+            Some(LeaveStackRider::ExileInstead) => ZoneKind::Exile,
+            Some(LeaveStackRider::ExileInsteadOfGraveyard) if default == ZoneKind::Graveyard => {
+                ZoneKind::Exile
+            }
+            _ => default,
         }
     }
 }

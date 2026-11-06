@@ -10,13 +10,14 @@ use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ManaCost;
-use crate::types::stack::{PendingModeChoice, StackEntryKind, StackObject};
+use crate::types::stack::{LeaveStackRider, PendingModeChoice, StackEntryKind, StackObject};
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::attach::{non_eliminated_players, remap_abilities};
 use super::legality::{
-    can_cast_from_zone, can_cast_now, combine_chosen_modes, has_own_flash, validate_targets,
+    ZoneCastSource, can_cast_now, cast_zone_source, combine_chosen_modes, has_own_flash,
+    validate_targets,
 };
 use super::{
     CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
@@ -35,7 +36,7 @@ pub(crate) struct CastPlan {
     from_zone: ZoneKind,
     from_owner: Option<PlayerId>,
     cost: CostSpec,
-    exile_on_leaving_stack: bool,
+    leave_stack_rider: Option<LeaveStackRider>,
     escaped: bool,
     cast_from_command_zone: bool,
     modal_effect: Option<AbilityEffect>,
@@ -117,12 +118,16 @@ pub(super) fn validate_cast_spell(
     // TODO: nothing checks that the chosen alternative cost really grants flashback's graveyard permission (a Flashback keyword versus an ad-hoc alternative_costs entry)
     // CR 601.3
     // An alternative cost carries its own zone, so a flashback cast checks that
-    // zone and not a zone permission.
-    let zone_allowed = match alternative {
-        Some(AlternativeCost::Replacement { from_zone, .. }) => {
-            object.zone == *from_zone && object.controller == actor
-        }
-        None => can_cast_from_zone(state, actor, object),
+    // zone and not a zone permission, and takes its rider from the cost.
+    let (zone_allowed, permission_rider) = match alternative {
+        Some(AlternativeCost::Replacement { from_zone, .. }) => (
+            object.zone == *from_zone && object.controller == actor,
+            None,
+        ),
+        None => match cast_zone_source(state, actor, object) {
+            Some(ZoneCastSource::Permission(rider)) => (true, rider),
+            source => (source.is_some(), None),
+        },
     };
     if !zone_allowed {
         return Err(Rejected::IllegalAction(
@@ -364,13 +369,17 @@ pub(super) fn validate_cast_spell(
     // ManaCost::resolve_x). Activated abilities do the same (activate.rs
     // `cost_has_x`).
     // TODO: X combined with an alternative cost (flashback on an X spell) is not handled, and x_value goes unchecked in that branch
-    let (mut cost, exile_on_leaving_stack, escaped) = match alternative {
+    let (mut cost, leave_stack_rider, escaped) = match alternative {
         Some(AlternativeCost::Replacement {
             cost,
             exile_on_leaving_stack,
             escape,
             ..
-        }) => (cost.clone(), *exile_on_leaving_stack, *escape),
+        }) => (
+            cost.clone(),
+            exile_on_leaving_stack.then_some(LeaveStackRider::ExileInstead),
+            *escape,
+        ),
         None => {
             let has_x = object.definition.mana_cost.has_x();
             let resolved_mana_cost = match (has_x, x_value) {
@@ -415,7 +424,11 @@ pub(super) fn validate_cast_spell(
             } else {
                 resolved_mana_cost
             };
-            (CostSpec::mana_only(resolved_mana_cost), false, false)
+            (
+                CostSpec::mana_only(resolved_mana_cost),
+                permission_rider,
+                false,
+            )
         }
     };
     // CR 700.2h
@@ -464,7 +477,7 @@ pub(super) fn validate_cast_spell(
         from_zone,
         from_owner,
         cost,
-        exile_on_leaving_stack,
+        leave_stack_rider,
         escaped,
         cast_from_command_zone,
         modal_effect,
@@ -487,7 +500,7 @@ pub(super) fn apply_cast_spell(
         from_zone,
         from_owner,
         cost,
-        exile_on_leaving_stack,
+        leave_stack_rider,
         escaped,
         cast_from_command_zone,
         modal_effect,
@@ -571,7 +584,7 @@ pub(super) fn apply_cast_spell(
         targets,
         target_requirement,
         x_value,
-        exile_on_leaving_stack,
+        leave_stack_rider,
         // CR 702.27a
         // Baked in so the resolution-side destination check
         // (engine/resolve/permanent_entry.rs) need not re-read CardDefinition.

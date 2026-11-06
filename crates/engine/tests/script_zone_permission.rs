@@ -74,6 +74,7 @@ fn a_script_registers_a_graveyard_land_permission() {
             linked: false,
             reveals_top: false,
             duration: EffectDuration::WhileSourceOnBattlefield,
+            rider: None,
         }]
     );
 }

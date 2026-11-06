@@ -228,7 +228,7 @@ fn an_ability_targeting_its_own_source_fizzles_at_resolution_recheck() {
             exclude_source: true,
         })),
         None,
-        false,
+        None,
         false,
         false,
         ScriptHandle(0),

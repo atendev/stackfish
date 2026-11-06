@@ -509,7 +509,7 @@ pub(super) fn apply_activate_ability(
                 targets,
                 target_requirement,
                 x_value,
-                false,
+                None,
                 // CR 702.27a
                 // Buyback is spell-only.
                 false,
