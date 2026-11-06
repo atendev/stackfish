@@ -63,6 +63,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 090 Modal builders in Lua. A mode is a strict plain table `{ target, operation, cost, pawprint }`, and the count is a `Game.ModeChoice.*` tag. Spells declare `s.modes()`, triggers and activated abilities `:SetModes(choice, modes)`. Activation gains `modes` on `ActivateAbility` (CR 602.2b, 700.2a) with an additive wire field. Function and chain modes are solo only, costs and pawprints are spell-only, mana abilities get no modes, and handle 0 is reserved. Decided in auto mode. Builds are 114 then 115. [closed/090-lua-modal-builders.md]
 - 091 Divide damage or counters among targets. A `division: Vec<u32>` joins `CastSpell`, `ActivateAbility` and the trigger-target answer, parallel to `targets`, with no extra Decision and no reuse of `AssignDamage`. New `DividedDamage(total)` and `DividedCounters { kind, total }` effects carry a fixed total. Each share is at least 1, the sum is the total, and a lone target sends an empty field. A share outlives an illegal sibling with no redistribution (CR 608.2b). Lua gets `Game.Ops.DividedDamage` and `DividedCounters`. Decided in auto mode. Build is 116. [closed/091-divide-among-targets.md]
 - 092 Effect-owned exile links. A spell's impulse draw finds its cards through CR 400.7j, so the Timed grant row owns them: `linked` becomes `ExileLink { None, Source, Cards }`, and `:SetExiledByThisEffect()` copies the ids a resolution exiled from a new resolution-scoped `exiled_this_resolution` list. `exiled_with` and `linked_exiles` keep their shape. `Game.Ops.ExileTopLinked(n)` exiles from the library `Mill` would pick. No wire change. Decided in auto mode. Build is 117. [closed/092-effect-owned-exile-links.md]
+- 093 Scenario battlefield setup runs card scripts. Every scripted battlefield setup card runs `register_abilities` once through a new `pub Engine::run_battlefield_card_scripts`, which the harness calls after `Engine::new` and the `Pending*` registrations. ETB triggers register and never fire, a failure panics with the card key, and a script with `trigger_operation`, `mana_ability` or `continuous_effect` on one battlefield card panics. No existing scenario changes. Decided in auto mode. Build is 118. [closed/093-scenario-battlefield-scripts.md]
 
 ## Not yet specified
 
@@ -79,6 +80,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - The loader rejection build. Its card set and error shape wait on 112.
 - Several pending kinds in one custom operation outcome. A `Chain` holds one pending kind today (`not-available-yet.md`).
 - A grant lasting "until the end of your next turn" (Light Up the Stage). No `EffectDuration` expresses it (found by 092).
+- A precise check for a scripted battlefield setup card that also sets a harness shortcut. The 093 check rejects the pair even when the script registers nothing. Narrow it only once a fixture needs the pair.
 
 ## Out of scope
 
@@ -93,7 +95,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 093 Scenario battlefield setup runs scripts
 - 094 Library top reveal event
 - 095 Scenario schema additions
 - 096 Script-backed costs, or delete `invoke_cost`
@@ -119,3 +120,4 @@ Builds and audits:
 - 114 Build Lua modal spells and triggers
 - 116 Build divided damage and counters
 - 117 Build effect-owned exile links and a library-top `ExileLinked`
+- 118 Build battlefield setup card scripts
