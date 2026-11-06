@@ -64,9 +64,14 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Carddb-backed CardSource: a thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. Its shape is settled in 006. The Godot adapter's `create` needs it to serve real cards.
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
-- Impulse draw from a spell. `ExileLinked` records links only under a battlefield source, and a link ends when its source moves, so a spell's "exile the top card, you may play it this turn" has no link for its Timed grant. The link needs to belong to the effect, not the source (found by 087).
-- Scenario battlefield setup does not run a card's script, so a static ability on a card placed there never registers. Fixtures cast the source from hand instead (found by 088).
-- A reveal event for a library top. A revealed top shows in snapshots and decisions, but no event tells a Seat when it appears or stops being the top, so an event-only client cannot track it (found by 086).
+- Chain operation leftovers. A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode are not built (`25-chain-operations.md`). A chain as a mode waits on the modal builder decision.
+- Opponent-chosen modes with three or more players, where the controller picks the chooser (CR 700.2e), and repeatable pawprint-budget modes (CR 700.2i).
+- Condescend's `{X}`. "Counter unless that player pays {X}" supports only a fixed printed amount, and an X announced on the countering spell has no representation yet.
+- Devour and Amplify quality restrictions, and a creature with several independent Amplify instances.
+- Enchanting or equipping a player. Attachment targets a permanent only.
+- Splice (CR 601.2b, 702.47). `PlayerAction` and `StackObject` cannot say which cards are spliced.
+- Restricted mana beyond a card-type filter (CR 106.11). Object-specific and activation restrictions are not modeled.
+- Several pending kinds in one custom operation outcome. A `Chain` holds one pending kind today (`not-available-yet.md`).
 
 ## Out of scope
 
@@ -77,6 +82,36 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 ## Frontier
 
-Open tickets, unblocked and unclaimed:
+Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 from the backlog and the "Not yet specified" list, so they are follow-up work past the destination above.
 
-- none
+Decisions (HITL):
+
+- 089 Lua event visibility for conditions
+- 090 Modal builders in Lua
+- 091 Divide damage or counters among targets
+- 092 Effect-owned exile links
+- 093 Scenario battlefield setup runs scripts
+- 094 Library top reveal event
+- 095 Scenario schema additions
+- 096 Script-backed costs, or delete `invoke_cost`
+- 097 Permission choice and once-per-turn limits
+- 098 Timing permission follow-ups
+- 099 Riders beyond leaving the stack
+- 100 Reanimation options
+- 101 Ward costs and player hexproof
+- 103 Damage redirect to another target
+- 104 Fight and bite target shapes
+
+Builds and audits:
+
+- 105 Loader treatment of non-goal card types (research, AFK)
+- 106 Audit remaining order leaks (AFK)
+- 107 `remap_abilities` purges cost modifiers
+- 108 `new_game` loads alternative costs and buyback
+- 109 Proof game coverage gaps
+- 110 Stale note sweep (AFK)
+- 111 Echo sacrifice checks control
+
+Blocked:
+
+- 102 Stun counters and tap hooks (by 089)
