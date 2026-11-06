@@ -58,6 +58,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 086 Build library-top and linked-exile zone permissions. Built as 083 decided, with `Game.Ops.ExileLinked` in place of an exile-builder setter, the top-card helpers in `types/player.rs` and host visibility computed from the permissions at check time. A revealed top is snapshot-only, with no reveal event. [closed/086-build-library-linked-exile-zone-permissions.md]
 - 087 Build expiring timing and zone permissions. Built as 084 decided, with the `AbilityEffect` rows boxed and `BEHAVIOUR_REV` left at 8, because the pin did not move. A Timed linked grant is accepted, and one from a spell matches nothing. [closed/087-build-expiring-permissions.md]
 - 088 Build zone permission riders. Built as 085 decided. A rider-less permission wins over ones with riders, then list order, because permissions have no id. The Kess scenario casts Kess first, because battlefield setup does not register static scripts. `BEHAVIOUR_REV` stays 8. [closed/088-build-zone-permission-riders.md]
+- 105 How the loader treats design non-goal card types. 518 planeswalkers, battles and sagas and 38 Class cards load and do nothing, with no error. 231 face-down-cast cards play face up, and 73 face-down producers do nothing. Research recommends rejecting at load with a new `CardLoadError`, except the 229 face-up-playable cards. The choice goes to 112. [closed/105-unsupported-card-types-in-loader.md]
 
 ## Not yet specified
 
@@ -71,6 +72,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Enchanting or equipping a player. Attachment targets a permanent only.
 - Splice (CR 601.2b, 702.47). `PlayerAction` and `StackObject` cannot say which cards are spliced.
 - Restricted mana beyond a card-type filter (CR 106.11). Object-specific and activation restrictions are not modeled.
+- The loader rejection build. Its card set and error shape wait on 112.
 - Several pending kinds in one custom operation outcome. A `Chain` holds one pending kind today (`not-available-yet.md`).
 
 ## Out of scope
@@ -101,10 +103,10 @@ Decisions (HITL):
 - 101 Ward costs and player hexproof
 - 103 Damage redirect to another target
 - 104 Fight and bite target shapes
+- 112 Which non-goal cards the loader rejects
 
 Builds and audits:
 
-- 105 Loader treatment of non-goal card types (research, AFK)
 - 106 Audit remaining order leaks (AFK)
 - 107 `remap_abilities` purges cost modifiers
 - 108 `new_game` loads alternative costs and buyback
