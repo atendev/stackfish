@@ -50,6 +50,7 @@ pub fn snapshot_diff(before: &EngineSnapshot, after: &EngineSnapshot) -> Vec<Str
         ability_function_zones,
         off_battlefield_scripts_run,
         linked_exiles,
+        exiled_with,
         pending_timing_bypass,
         pending_free_cast,
     );

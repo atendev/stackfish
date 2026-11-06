@@ -326,7 +326,6 @@ pub enum ZonePermissionKind {
 /// `TimingPermission` answers when. `commands::can_cast_from_zone` and
 /// `commands::can_play_land_from_zone` read it, and `commands::retire_object`
 /// purges it by `source` (CR 611.3b).
-// TODO: top-of-library and linked-exile zone permissions are not represented (CR 401.5)
 // TODO: a zone permission lasts while its source is on the battlefield, so "until end of turn" grants have no expiry (CR 611.2)
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZonePermission {
@@ -334,7 +333,7 @@ pub struct ZonePermission {
     /// Whose "you" and "opponent" `affected` and `owners` are relative to.
     pub controller: PlayerId,
     pub affected: FilterController,
-    /// `Graveyard` or `Exile`, the only zones the Lua builder accepts.
+    /// `Graveyard` or `Exile`, or `Library` together with `library_top`.
     pub zone: ZoneKind,
     /// Whose cards it covers, matched against `card.owner`, since a graveyard
     /// belongs to its owner and exile is shared.
@@ -343,27 +342,76 @@ pub struct ZonePermission {
     /// `FilterSpec::ANY` for every card. A filter with `extra` set never
     /// matches (see `FilterSpec::matches`).
     pub cards: FilterSpec,
+    /// CR 401.5: only the top card of its owner's library matches, found
+    /// again at every check. Set only with zone `Library`.
+    pub library_top: bool,
+    /// CR 607.2a: only cards in `GameState.exiled_with` under `source` match.
+    /// Set only with zone `Exile`.
+    pub linked: bool,
+    /// CR 401.5: every player sees the top card `library_top` opens, not just
+    /// the players it affects.
+    pub reveals_top: bool,
 }
 
-/// CR 601.3, 305.1: whether a permission in `permissions` lets `player` take a
-/// `kind` action with `card` from the zone it is in.
+fn relative(filter: FilterController, who: PlayerId, controller: PlayerId) -> bool {
+    match filter {
+        FilterController::You => who == controller,
+        FilterController::Opponent => who != controller,
+        FilterController::Any => true,
+    }
+}
+
+impl ZonePermission {
+    /// Whether `card` is one this permission opens, whoever acts on it.
+    fn covers(&self, state: &GameState, card: &GameObject) -> bool {
+        self.zone == card.zone
+            && relative(self.owners, card.owner, self.controller)
+            && self.cards.matches(card, card.owner, self.controller)
+            && (!self.library_top || is_top_of_library(state, card))
+            && (!self.linked
+                || state
+                    .exiled_with
+                    .iter()
+                    .any(|link| link.source == self.source && link.exiled == card.object_id))
+    }
+}
+
+/// CR 401.5: `card` is the first card of its owner's library.
+pub fn is_top_of_library(state: &GameState, card: &GameObject) -> bool {
+    card.zone == ZoneKind::Library
+        && state
+            .zone(ZoneKind::Library, Some(card.owner))
+            .is_some_and(|library| library.contents.front() == Some(&card.object_id))
+}
+
+/// CR 601.3, 305.1: whether a permission in `state.zone_permissions` lets
+/// `player` take a `kind` action with `card` from the zone it is in.
 pub fn has_zone_permission(
-    permissions: &[ZonePermission],
+    state: &GameState,
     kind: ZonePermissionKind,
     player: PlayerId,
     card: &GameObject,
 ) -> bool {
-    let relative = |filter: FilterController, who: PlayerId, controller: PlayerId| match filter {
-        FilterController::You => who == controller,
-        FilterController::Opponent => who != controller,
-        FilterController::Any => true,
-    };
-    permissions.iter().any(|p| {
-        p.kind == kind
-            && p.zone == card.zone
-            && relative(p.affected, player, p.controller)
-            && relative(p.owners, card.owner, p.controller)
-            && p.cards.matches(card, card.owner, p.controller)
+    state.zone_permissions.iter().any(|p| {
+        p.kind == kind && relative(p.affected, player, p.controller) && p.covers(state, card)
+    })
+}
+
+/// CR 401.5: whether `viewer` may see `card` because a `library_top`
+/// permission opens it: everyone when the permission reveals the top,
+/// otherwise only the players it affects. `None` is a viewer who is not a
+/// player, such as a spectator. False for any other card.
+// TODO: revealing the top applies only to permissions, not the stand-alone "play with top revealed" effect (CR 401.5)
+pub fn library_top_visible_to(
+    state: &GameState,
+    card: &GameObject,
+    viewer: Option<PlayerId>,
+) -> bool {
+    state.zone_permissions.iter().any(|p| {
+        p.library_top
+            && (p.reveals_top
+                || viewer.is_some_and(|player| relative(p.affected, player, p.controller)))
+            && p.covers(state, card)
     })
 }
 

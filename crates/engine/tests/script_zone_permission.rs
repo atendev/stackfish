@@ -70,6 +70,9 @@ fn a_script_registers_a_graveyard_land_permission() {
             owners: FilterController::You,
             kind: ZonePermissionKind::PlayLand,
             cards: FilterSpec::ANY,
+            library_top: false,
+            linked: false,
+            reveals_top: false,
         }]
     );
 }
@@ -119,12 +122,12 @@ fn register_without_a_required_setter_is_an_error() {
 
 #[test]
 fn unsupported_zones_kinds_and_the_enchanted_player_are_rejected() {
-    for zone in ["Library", "Hand", "Battlefield", "Stack", "Command"] {
+    for zone in ["Hand", "Battlefield", "Stack", "Command"] {
         let (_, result) = run(
             &format!("local p = Game.CreateZonePermission(c)\np:SetZone(\"{zone}\")"),
             ZoneKind::Battlefield,
         );
-        let err = result.expect_err("only Graveyard and Exile");
+        let err = result.expect_err("only Graveyard, Exile and Library");
         assert!(err.contains("SetZone"), "{zone}: {err}");
     }
     let (_, result) = run(
@@ -140,6 +143,60 @@ fn unsupported_zones_kinds_and_the_enchanted_player_are_rejected() {
             ZoneKind::Battlefield,
         );
         assert!(result.is_err(), "{setter}");
+    }
+}
+
+// CR 401.5
+#[test]
+fn a_script_registers_a_revealed_library_top_permission() {
+    let (state, result) = run(
+        &permission(
+            "p:SetAffected(Game.Affected.You)\np:SetZone(\"Library\")\np:SetKind(\"Cast\")\np:SetFromLibraryTop()\np:SetRevealTop()",
+        ),
+        ZoneKind::Battlefield,
+    );
+    result.expect("the script registers cleanly");
+    let [permission] = state.zone_permissions.as_slice() else {
+        panic!("one permission, got {:?}", state.zone_permissions);
+    };
+    assert_eq!(permission.zone, ZoneKind::Library);
+    assert!(permission.library_top && permission.reveals_top && !permission.linked);
+}
+
+// CR 607.2a
+#[test]
+fn a_script_registers_a_linked_exile_permission() {
+    let (state, result) = run(
+        &permission(
+            "p:SetAffected(Game.Affected.You)\np:SetZone(\"Exile\")\np:SetKind(\"Cast\")\np:SetOwner(Game.Affected.Any)\np:SetLinked()",
+        ),
+        ZoneKind::Battlefield,
+    );
+    result.expect("the script registers cleanly");
+    let [permission] = state.zone_permissions.as_slice() else {
+        panic!("one permission, got {:?}", state.zone_permissions);
+    };
+    assert!(permission.linked && !permission.library_top && !permission.reveals_top);
+}
+
+#[test]
+fn library_top_linked_and_reveal_flags_need_their_zones() {
+    for setters in [
+        "p:SetZone(\"Library\")",
+        "p:SetZone(\"Graveyard\")\np:SetFromLibraryTop()",
+        "p:SetZone(\"Graveyard\")\np:SetLinked()",
+        "p:SetZone(\"Library\")\np:SetFromLibraryTop()\np:SetLinked()",
+        "p:SetZone(\"Exile\")\np:SetRevealTop()",
+    ] {
+        let (state, result) = run(
+            &permission(&format!(
+                "p:SetAffected(Game.Affected.You)\np:SetKind(\"Cast\")\n{setters}"
+            )),
+            ZoneKind::Battlefield,
+        );
+        let err = result.expect_err(setters);
+        assert!(err.contains("Register() refused"), "{setters}: {err}");
+        assert!(state.zone_permissions.is_empty());
     }
 }
 

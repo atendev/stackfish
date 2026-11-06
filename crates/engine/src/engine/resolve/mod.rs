@@ -329,6 +329,10 @@ impl Engine {
             Some(AbilityEffect::ExileUntilSourceLeaves) => {
                 self.resolve_exile_until_source_leaves_effect(top, legal_targets, events)
             }
+            // CR 607.2a
+            Some(AbilityEffect::ExileLinked) => {
+                self.resolve_exile_linked_effect(top, legal_targets, events)
+            }
             // CR 400.3
             Some(AbilityEffect::ReturnToHand) => {
                 self.resolve_return_to_hand_effect(top, legal_targets, events)

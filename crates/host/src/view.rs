@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use stackfish_engine::decision::{Candidate, Decision};
 use stackfish_engine::{
     GameEvent, GameEventKind, GameObject, GameState, ObjectId, PlayerId, Target, ZoneKind,
+    library_top_visible_to,
 };
 
 use crate::wire::{
@@ -32,6 +33,13 @@ impl Viewer {
     fn is(self, player: Option<PlayerId>) -> bool {
         matches!((self, player), (Viewer::Player(a), Some(b)) if a == b)
     }
+
+    fn player(self) -> Option<PlayerId> {
+        match self {
+            Viewer::Player(player) => Some(player),
+            Viewer::Spectator { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -48,6 +56,12 @@ fn sees_object(viewer: Viewer, place: Place) -> bool {
     viewer.omniscient()
         || !is_hidden(place.zone)
         || (place.zone == ZoneKind::Hand && viewer.is(place.owner))
+}
+
+// CR 401.5
+// A library card is hidden unless a permission opens the top to this viewer.
+fn sees_library_top(viewer: Viewer, state: &GameState, object: &GameObject) -> bool {
+    object.zone == ZoneKind::Library && library_top_visible_to(state, object, viewer.player())
 }
 
 // Only the controller sees a face-down object's identity.
@@ -480,7 +494,8 @@ pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observe
         };
         WireObjectView::new(
             object,
-            sees_identity(viewer, place, object.face_down, Some(object.controller)),
+            sees_identity(viewer, place, object.face_down, Some(object.controller))
+                || sees_library_top(viewer, state, object),
         )
     };
     let visible = |id: ObjectId| {
@@ -511,31 +526,35 @@ pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observe
     let zones = state
         .zones
         .iter()
-        .filter(|zone| {
-            sees_object(
+        .filter_map(|zone| {
+            let whole = sees_object(
                 viewer,
                 Place {
                     zone: zone.kind,
                     owner: zone.owner,
                 },
-            )
-        })
-        .map(|zone| {
-            let mut ids: Vec<ObjectId> = zone.contents.iter().copied().collect();
+            );
+            // CR 401.5
+            // A hidden library still shows the one top card this viewer may see.
+            let mut objects: Vec<&GameObject> = zone
+                .contents
+                .iter()
+                .filter_map(|&id| state.object(id))
+                .filter(|object| whole || sees_library_top(viewer, state, object))
+                .collect();
+            if !whole && objects.is_empty() {
+                return None;
+            }
             // CR 401.2
             // Sorting by id hides the library order and how a hand was drawn.
             if is_hidden(zone.kind) {
-                ids.sort();
+                objects.sort_by_key(|object| object.object_id);
             }
-            WireZoneView {
+            Some(WireZoneView {
                 zone: zone.kind.into(),
                 owner: zone.owner.map(|p| p.0),
-                objects: ids
-                    .into_iter()
-                    .filter_map(|id| state.object(id))
-                    .map(view_of)
-                    .collect(),
-            }
+                objects: objects.into_iter().map(view_of).collect(),
+            })
         })
         .collect();
     let stack = state
@@ -601,9 +620,9 @@ pub(crate) fn decision_for(viewer: Viewer, state: &GameState, decision: &Decisio
         WireDecision::full(decision, identities)
     } else {
         WireDecision::opaque(decision, |candidate| match candidate {
-            Candidate::Target(Target::Object(id)) => {
-                state.object(*id).is_none_or(|o| !is_hidden(o.zone))
-            }
+            Candidate::Target(Target::Object(id)) => state
+                .object(*id)
+                .is_none_or(|o| !is_hidden(o.zone) || sees_library_top(viewer, state, o)),
             _ => true,
         })
     }
@@ -698,6 +717,146 @@ mod tests {
                     assert_eq!(object, Some(U64::from(ObjectId(8))), "{viewer:?}");
                     assert_eq!(previous, Some(U64::from(ObjectId(7))), "{viewer:?}");
                     assert!(identity.is_some(), "{viewer:?}");
+                }
+                other => panic!("expected zone_change, got {other:?}"),
+            }
+        }
+    }
+
+    fn library_card(id: u64, owner: PlayerId) -> GameObject {
+        let definition = stackfish_testutil::minimal_card_definition(
+            id,
+            "Test Card",
+            "test_card",
+            stackfish_engine::ManaCost {
+                symbols: Vec::new(),
+            },
+            stackfish_engine::CardTypeSet::SORCERY,
+        );
+        stackfish_testutil::card_object(ObjectId(id), definition, owner, ZoneKind::Library)
+    }
+
+    // Player 0's top card is object 7 and player 1's is object 9, under a
+    // permission player 0 controls over their own library.
+    fn library_top_state(reveals_top: bool) -> GameState {
+        let mut state = stackfish_testutil::two_player_state(stackfish_testutil::zones(
+            PlayerId(0),
+            PlayerId(1),
+            &[ZoneKind::Library],
+        ));
+        for (id, owner) in [(7, PlayerId(0)), (8, PlayerId(0)), (9, PlayerId(1))] {
+            state
+                .zone_mut(ZoneKind::Library, Some(owner))
+                .unwrap()
+                .push_bottom(ObjectId(id));
+            state.objects.insert(ObjectId(id), library_card(id, owner));
+        }
+        state
+            .zone_permissions
+            .push(stackfish_engine::ZonePermission {
+                source: ObjectId(1),
+                controller: PlayerId(0),
+                affected: stackfish_engine::FilterController::You,
+                zone: ZoneKind::Library,
+                owners: stackfish_engine::FilterController::You,
+                kind: stackfish_engine::ZonePermissionKind::Cast,
+                cards: stackfish_engine::FilterSpec::ANY,
+                library_top: true,
+                linked: false,
+                reveals_top,
+            });
+        state
+    }
+
+    fn seen_library_cards(viewer: Viewer, state: &GameState) -> Vec<(U64, bool)> {
+        snapshot_for(viewer, state, &Observer::default())
+            .zones
+            .into_iter()
+            .filter(|zone| matches!(zone.zone, crate::wire::WireZone::Library))
+            .flat_map(|zone| zone.objects)
+            .map(|object| (object.object, object.identity.is_some()))
+            .collect()
+    }
+
+    // CR 401.5
+    #[test]
+    fn a_snapshot_shows_a_library_top_only_to_players_a_permission_lets_see_it() {
+        let hidden = library_top_state(false);
+        let holder = Viewer::Player(PlayerId(0));
+        let opponent = Viewer::Player(PlayerId(1));
+        let spectator = Viewer::Spectator { omniscient: false };
+        assert_eq!(seen_library_cards(holder, &hidden), vec![(U64(7), true)]);
+        assert!(seen_library_cards(opponent, &hidden).is_empty());
+        assert!(seen_library_cards(spectator, &hidden).is_empty());
+
+        let revealed = library_top_state(true);
+        for viewer in [holder, opponent, spectator] {
+            assert_eq!(
+                seen_library_cards(viewer, &revealed),
+                vec![(U64(7), true)],
+                "{viewer:?}"
+            );
+        }
+    }
+
+    // CR 401.5
+    #[test]
+    fn an_opaque_decision_keeps_a_revealed_top_and_drops_a_hidden_one() {
+        let decision = Decision {
+            id: stackfish_engine::decision::DecisionId(1),
+            player: PlayerId(0),
+            mechanic: "Test",
+            shape: stackfish_engine::decision::ReplyShape::Pick {
+                candidates: vec![
+                    Candidate::Target(Target::Object(ObjectId(7))),
+                    Candidate::Target(Target::Object(ObjectId(9))),
+                ],
+                min: 1,
+                max: 1,
+            },
+        };
+        let opaque_count = |state: &GameState| {
+            let wire = decision_for(Viewer::Player(PlayerId(1)), state, &decision);
+            let json = serde_json::to_value(&wire).unwrap();
+            assert_eq!(json["shape"], "opaque");
+            json["candidates"].as_array().map_or(0, Vec::len)
+        };
+        assert_eq!(opaque_count(&library_top_state(false)), 0);
+        assert_eq!(opaque_count(&library_top_state(true)), 1);
+    }
+
+    // CR 401.5
+    // Player 0 plays their library top, so the moved card's old id is a library id.
+    #[test]
+    fn a_card_played_from_the_library_top_shows_an_opponent_no_library_id() {
+        for reveals_top in [false, true] {
+            let mut state = library_top_state(reveals_top);
+            let in_library = state.objects.remove(&ObjectId(7)).unwrap();
+            state
+                .zone_mut(ZoneKind::Library, Some(PlayerId(0)))
+                .unwrap()
+                .remove(ObjectId(7));
+            let mut on_battlefield = in_library.clone();
+            on_battlefield.object_id = ObjectId(20);
+            on_battlefield.zone = ZoneKind::Battlefield;
+            state.objects.insert(ObjectId(20), on_battlefield);
+            let event = GameEvent::new(
+                EventId(0),
+                SequenceNo(0),
+                GameEventKind::ZoneChange {
+                    object: ObjectId(20),
+                    from: ZoneKind::Library,
+                    to: ZoneKind::Battlefield,
+                    last_known_info: Some(in_library),
+                },
+            );
+            let observed = Observer::default().observe(&state, &event);
+            match observed.kind_for(Viewer::Player(PlayerId(1))) {
+                Some(WireEventKind::ZoneChange {
+                    object, previous, ..
+                }) => {
+                    assert_eq!(object, Some(U64::from(ObjectId(20))), "{reveals_top}");
+                    assert_eq!(previous, None, "reveals_top {reveals_top}");
                 }
                 other => panic!("expected zone_change, got {other:?}"),
             }

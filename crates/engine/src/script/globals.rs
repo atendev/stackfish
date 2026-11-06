@@ -250,6 +250,8 @@ pub(crate) fn bind_game_globals(
         "ExileUntilSourceLeaves",
         OperationTag(AbilityEffect::ExileUntilSourceLeaves),
     )?;
+    // CR 607.2a: targeted exile that links each card to the ability's source.
+    ops.set("ExileLinked", OperationTag(AbilityEffect::ExileLinked))?;
     ops.set("ReturnToHand", OperationTag(AbilityEffect::ReturnToHand))?;
     ops.set(
         "ReturnSelfToHand",
@@ -1280,6 +1282,9 @@ pub(crate) fn bind_game_globals(
                 owners: None,
                 kind: None,
                 cards: None,
+                library_top: false,
+                linked: false,
+                reveals_top: false,
                 function_zone: None,
                 registry: Rc::clone(&registry),
             })

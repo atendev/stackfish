@@ -1226,7 +1226,7 @@ impl UserData for TimingPermissionBuilder {
 /// `Game.CreateZonePermission(c)`'s return value (CR 601.3, 305.1), mirroring
 /// `TimingPermissionBuilder`. `:SetAffected`, `:SetZone` and `:SetKind` are
 /// required. `:SetOwner` defaults to `Game.Affected.You`, and `:SetFilter` to
-/// every card.
+/// every card. `"Library"` needs `:SetFromLibraryTop()` (CR 401.5).
 pub(crate) struct ZonePermissionBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<FilterController>,
@@ -1234,6 +1234,9 @@ pub(crate) struct ZonePermissionBuilder {
     pub(crate) owners: Option<FilterController>,
     pub(crate) kind: Option<ZonePermissionKind>,
     pub(crate) cards: Option<FilterSpec>,
+    pub(crate) library_top: bool,
+    pub(crate) linked: bool,
+    pub(crate) reveals_top: bool,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
     pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
@@ -1253,14 +1256,26 @@ impl UserData for ZonePermissionBuilder {
         methods.add_method_mut("SetZone", |_, this, name: String| {
             let zone = super::decode::parse_zone_kind_name(&name).map_err(to_lua_err)?;
             match zone {
-                ZoneKind::Graveyard | ZoneKind::Exile => {
+                ZoneKind::Graveyard | ZoneKind::Exile | ZoneKind::Library => {
                     this.zone = Some(zone);
                     Ok(())
                 }
                 other => Err(mlua::Error::RuntimeError(format!(
-                    "a zone permission's SetZone only supports \"Graveyard\" or \"Exile\", got {other:?}"
+                    "a zone permission's SetZone only supports \"Graveyard\", \"Exile\" or \"Library\", got {other:?}"
                 ))),
             }
+        });
+        methods.add_method_mut("SetFromLibraryTop", |_, this, ()| {
+            this.library_top = true;
+            Ok(())
+        });
+        methods.add_method_mut("SetLinked", |_, this, ()| {
+            this.linked = true;
+            Ok(())
+        });
+        methods.add_method_mut("SetRevealTop", |_, this, ()| {
+            this.reveals_top = true;
+            Ok(())
         });
         methods.add_method_mut("SetKind", |_, this, name: String| {
             this.kind = Some(match name.as_str() {
@@ -1298,6 +1313,20 @@ impl UserData for ZonePermissionBuilder {
             let affected = this.affected.ok_or_else(|| missing("SetAffected"))?;
             let zone = this.zone.ok_or_else(|| missing("SetZone"))?;
             let kind = this.kind.ok_or_else(|| missing("SetKind"))?;
+            let refuse = |reason: &str| {
+                Err(mlua::Error::RuntimeError(format!(
+                    "a zone permission's Register() refused: {reason}"
+                )))
+            };
+            if (zone == ZoneKind::Library) != this.library_top {
+                return refuse("SetZone(\"Library\") and SetFromLibraryTop() go together");
+            }
+            if this.linked && zone != ZoneKind::Exile {
+                return refuse("SetLinked() needs SetZone(\"Exile\")");
+            }
+            if this.reveals_top && !this.library_top {
+                return refuse("SetRevealTop() needs SetFromLibraryTop()");
+            }
             this.registry.borrow_mut().pending_zone_permissions.push((
                 ZonePermission {
                     source: this.source,
@@ -1308,6 +1337,9 @@ impl UserData for ZonePermissionBuilder {
                     owners: this.owners.unwrap_or(FilterController::You),
                     kind,
                     cards: this.cards.clone().unwrap_or(FilterSpec::ANY),
+                    library_top: this.library_top,
+                    linked: this.linked,
+                    reveals_top: this.reveals_top,
                 },
                 this.function_zone,
             ));
