@@ -265,6 +265,12 @@ pub enum AbilityEffect {
     // TODO: no "phases out until" form (CR 610.4)
     // TODO: no untargeted form, graveyard source, other durations (until end of turn, until your next turn) or Oblivion Ring style separate-trigger return (CR 607)
     ExileUntilSourceLeaves,
+    /// `Game.Ops.ExileLinked` (CR 607.2a): "exile target card", recording each
+    /// exiled card in `GameState::exiled_with` under the ability's source so a
+    /// `linked` `ZonePermission` can open it. Source zones are `Exile`'s. No
+    /// link is recorded when the source left the battlefield first.
+    // TODO: ExileLinked has no untargeted or library form (CR 607.2a)
+    ExileLinked,
     /// `Game.Ops.ReturnToBattlefield(opts?)`: "return target creature card
     /// from a graveyard to the battlefield" (Reanimate, Zombify, Unburial
     /// Rites). Every legal object target moves through
@@ -2103,6 +2109,7 @@ mod tests {
             ability_function_zones: std::collections::HashMap::new(),
             off_battlefield_scripts_run: std::collections::HashSet::new(),
             linked_exiles: Vec::new(),
+            exiled_with: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
         }

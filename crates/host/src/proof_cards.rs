@@ -34,7 +34,8 @@ const RED_GREEN: Deck = &[
 
 const BLUE_BLACK: Deck = &[
     ("island", 8),
-    ("swamp", 9),
+    ("swamp", 8),
+    ("future_sight", 1),
     ("wind_drake", 2),
     ("vedalken_orrery", 1),
     ("scholar_imp", 3),
@@ -569,6 +570,25 @@ return s
     p:Register()"#,
     );
 
+    let future_sight = with_ability(
+        base(
+            32,
+            "Future Sight",
+            "{2}{U}{U}{U}",
+            CardTypeSet::ENCHANTMENT,
+            "Play with the top card of your library revealed. You may play lands and cast spells from the top of your library.",
+        ),
+        r#"    for _, kind in ipairs({ "PlayLand", "Cast" }) do
+        local p = Game.CreateZonePermission(c)
+        p:SetAffected(Game.Affected.You)
+        p:SetZone("Library")
+        p:SetKind(kind)
+        p:SetFromLibraryTop()
+        p:SetRevealTop()
+        p:Register()
+    end"#,
+    );
+
     FixtureCardSource::new()
         .with("mountain", mountain)
         .with("forest", forest)
@@ -601,6 +621,7 @@ return s
         .with("armory_call", armory_call)
         .with("vedalken_orrery", vedalken_orrery)
         .with("crucible_of_worlds", crucible_of_worlds)
+        .with("future_sight", future_sight)
 }
 
 fn deck_json(deck: Deck) -> Value {

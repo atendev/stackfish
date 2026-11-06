@@ -1,0 +1,150 @@
+# CR 607.2a: once cast, a source exiles a creature with Game.Ops.ExileLinked, and its linked zone
+# permission then lets its controller cast that card from exile. A card already in exile
+# that the source never exiled is refused.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "keeper"
+name = "Linked Keeper"
+types = ["Artifact"]
+script = """
+local s = {}
+function s.register_abilities(c)
+    local a = Game.CreateActivatedAbility(c)
+    a:SetTarget({ card_types = { "Creature" } })
+    a:SetOperation(Game.Ops.ExileLinked)
+    a:Register()
+    local p = Game.CreateZonePermission(c)
+    p:SetAffected(Game.Affected.You)
+    p:SetZone("Exile")
+    p:SetKind("Cast")
+    p:SetOwner(Game.Affected.Any)
+    p:SetLinked()
+    p:Register()
+end
+return s
+"""
+
+[[cards]]
+key = "bear"
+name = "Linked Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "stray"
+name = "Stray Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "keeper"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "exile"
+card = "stray"
+
+# Solo game, so the turn 1 draw step runs and needs a card (CR 103.8a, 704.5b).
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "keeper"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "stray"
+expect_error = true
+
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "keeper"
+ability_index = 0
+targets = ["bear"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "exile"
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "stray"
+expect_error = true
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "bear"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "stray"
+equals = "exile"

@@ -64,6 +64,12 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     // old object's permission must not keep granting flash or another zone.
     state.timing_permissions.retain(|p| p.source != old_id);
     state.zone_permissions.retain(|p| p.source != old_id);
+    // CR 607.2a, 400.7
+    // A cast or land play moves the card with this call alone, so a linked card
+    // leaving exile ends its link here as well as a source leaving play.
+    state
+        .exiled_with
+        .retain(|link| link.source != old_id && link.exiled != old_id);
     // TODO: cost modifiers and player modifier lists are not purged here, so a modifier that functions from hand outlives its source's cast (CR 611.3b)
 }
 
@@ -440,6 +446,12 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     state.land_play_modifiers.retain(|m| m.source != old_id);
     state.timing_permissions.retain(|p| p.source != old_id);
     state.zone_permissions.retain(|p| p.source != old_id);
+    // CR 607.2a, 400.7
+    // A new object is unrelated to the old one, so a link ends when either the
+    // exiled card or its source leaves its zone.
+    state
+        .exiled_with
+        .retain(|link| link.source != old_id && link.exiled != old_id);
     departed_triggered
 }
 

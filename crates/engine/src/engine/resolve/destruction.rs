@@ -148,6 +148,33 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
+    /// CR 607.2a: `resolve_exile_effect` plus an "exiled with" record under
+    /// `top.source`. The card is exiled even when the source left first; the
+    /// commit then records no link.
+    pub(super) fn resolve_exile_linked_effect(
+        &mut self,
+        top: &StackObject,
+        legal_targets: &[Target],
+        events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let targets: VecDeque<ObjectId> = legal_targets
+            .iter()
+            .filter_map(|t| match t {
+                Target::Object(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        self.process_state = self.continue_scripted_zone_move(
+            ScriptedZoneMoveKind::ExileLinked { source: top.source },
+            targets,
+            ScriptedZoneMoveThen::StackResolution {
+                stack_id: top.stack_id,
+            },
+            events,
+        );
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
     /// CR 610.3: `resolve_exile_effect` plus a link to `top.source`. If the source
     /// already left the battlefield the "until" event has happened, so nothing is
     /// exiled (CR 610.3a).

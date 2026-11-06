@@ -108,6 +108,7 @@ pub(crate) fn fingerprint(state: &GameState) -> String {
         ability_function_zones,
         off_battlefield_scripts_run,
         linked_exiles,
+        exiled_with,
         pending_timing_bypass,
         pending_free_cast,
     } = state;
@@ -129,7 +130,7 @@ pub(crate) fn fingerprint(state: &GameState) -> String {
          {hand_reveal_modifiers:?};{draw_limit_modifiers:?};{land_play_modifiers:?};\
          {timing_permissions:?};{zone_permissions:?};{abilities:?};{rng:?};{pending_step_skips:?};{once_per_turn_triggered:?};\
          {commander_return_offered:?};{linked_ability_generation:?};{script_ability_ids:?};\
-         {ability_function_zones:?};{off_battlefield_scripts_run:?};{linked_exiles:?};\
+         {ability_function_zones:?};{off_battlefield_scripts_run:?};{linked_exiles:?};{exiled_with:?};\
          {pending_timing_bypass:?};{pending_free_cast:?};{ledger_reads:?}"
     );
     let relabeled = relabel(raw.as_bytes());

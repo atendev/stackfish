@@ -320,6 +320,7 @@ mod tests {
             ability_function_zones: std::collections::HashMap::new(),
             off_battlefield_scripts_run: std::collections::HashSet::new(),
             linked_exiles: Vec::new(),
+            exiled_with: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
         }

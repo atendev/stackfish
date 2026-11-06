@@ -153,6 +153,11 @@ pub struct GameState {
     /// the source is off the battlefield. `commands::retire_object` drops an
     /// entry whose `exiled` card left exile some other way.
     pub linked_exiles: Vec<LinkedExile>,
+    /// CR 607.2a: cards "exiled with" a source, read by a `linked`
+    /// `ZonePermission`. Separate from `linked_exiles`, which drains on return.
+    /// `commands::retire_object` drops an entry when either object leaves.
+    // TODO: linked records do not cover cards exiled by a replaced source copy (CR 607.2a)
+    pub exiled_with: Vec<LinkedExile>,
     /// CR 702.35b, 601.3: one-shot timing waiver, set before
     /// `Engine::submit_madness_cast` queues its `CastSpell` and consumed by the
     /// sorcery-speed gate in `commands::cast::execute_cast_spell`. A side
@@ -321,6 +326,7 @@ mod tests {
             ability_function_zones: std::collections::HashMap::new(),
             off_battlefield_scripts_run: std::collections::HashSet::new(),
             linked_exiles: Vec::new(),
+            exiled_with: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
         };

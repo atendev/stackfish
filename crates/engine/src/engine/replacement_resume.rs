@@ -717,7 +717,9 @@ impl Engine {
                 self.departed_triggered_abilities.extend(departed);
                 self.state.ledger.push(event);
             }
-            ScriptedZoneMoveKind::Exile | ScriptedZoneMoveKind::ExileUntilLeaves { .. } => {
+            ScriptedZoneMoveKind::Exile
+            | ScriptedZoneMoveKind::ExileUntilLeaves { .. }
+            | ScriptedZoneMoveKind::ExileLinked { .. } => {
                 let GameEventKind::ZoneChange {
                     object: old_id,
                     from,
@@ -767,6 +769,19 @@ impl Engine {
                     && to == ZoneKind::Exile
                 {
                     self.state.linked_exiles.push(LinkedExile {
+                        source,
+                        exiled: new_id,
+                    });
+                }
+                // CR 607.2a
+                if let ScriptedZoneMoveKind::ExileLinked { source } = kind
+                    && to == ZoneKind::Exile
+                    && self
+                        .state
+                        .object(source)
+                        .is_some_and(|o| o.zone == ZoneKind::Battlefield)
+                {
+                    self.state.exiled_with.push(LinkedExile {
                         source,
                         exiled: new_id,
                     });
@@ -1134,9 +1149,9 @@ impl Engine {
                 }
             }
             let to = match kind {
-                ScriptedZoneMoveKind::Exile | ScriptedZoneMoveKind::ExileUntilLeaves { .. } => {
-                    ZoneKind::Exile
-                }
+                ScriptedZoneMoveKind::Exile
+                | ScriptedZoneMoveKind::ExileUntilLeaves { .. }
+                | ScriptedZoneMoveKind::ExileLinked { .. } => ZoneKind::Exile,
                 ScriptedZoneMoveKind::Bounce => ZoneKind::Hand,
                 ScriptedZoneMoveKind::Reanimate { .. } => ZoneKind::Battlefield,
                 _ => ZoneKind::Graveyard,

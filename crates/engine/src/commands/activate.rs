@@ -281,6 +281,7 @@ pub(super) fn validate_activate_ability(
         | Some(AbilityEffect::LoseLife(_))
         | Some(AbilityEffect::Exile)
         | Some(AbilityEffect::ExileUntilSourceLeaves)
+        | Some(AbilityEffect::ExileLinked)
         | Some(AbilityEffect::ReturnToHand)
         | Some(AbilityEffect::ReturnSelfToHand)
         | Some(AbilityEffect::ReturnAllToHand { .. })

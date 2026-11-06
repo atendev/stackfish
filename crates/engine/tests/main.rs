@@ -78,6 +78,7 @@ mod etb_replacement_modifiers;
 mod etb_zone_redirect;
 mod eventfilter_would_move_zone;
 mod exchange_of_words;
+mod exile_linked;
 mod exile_until_leaves;
 mod fight_bite;
 mod first_strike;

@@ -10,8 +10,8 @@ use crate::types::effect::{
     EffectPayload, EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload,
     ReplacementSpec,
 };
-use crate::types::game::GameState;
 use crate::types::game::RngState;
+use crate::types::game::{GameState, LinkedExile};
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo};
 use crate::types::mana::ManaPool;
 use crate::types::player::{
@@ -77,6 +77,7 @@ fn minimal_state() -> GameState {
         ability_function_zones: std::collections::HashMap::new(),
         off_battlefield_scripts_run: std::collections::HashSet::new(),
         linked_exiles: Vec::new(),
+        exiled_with: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
     }
@@ -211,7 +212,59 @@ fn dummy_zone_permission(source: ObjectId) -> ZonePermission {
         owners: FilterController::You,
         kind: ZonePermissionKind::PlayLand,
         cards: FilterSpec::ANY,
+        library_top: false,
+        linked: false,
+        reveals_top: false,
     }
+}
+
+fn links() -> Vec<LinkedExile> {
+    vec![
+        LinkedExile {
+            source: ObjectId(1),
+            exiled: ObjectId(5),
+        },
+        LinkedExile {
+            source: ObjectId(2),
+            exiled: ObjectId(6),
+        },
+        LinkedExile {
+            source: ObjectId(2),
+            exiled: ObjectId(7),
+        },
+    ]
+}
+
+// CR 607.2a, 400.7
+#[test]
+fn retire_object_drops_links_to_a_departing_source_or_exiled_card() {
+    let mut state = minimal_state();
+    state.exiled_with = links();
+    retire_object(&mut state, ObjectId(1));
+    retire_object(&mut state, ObjectId(6));
+    assert_eq!(
+        state.exiled_with,
+        vec![LinkedExile {
+            source: ObjectId(2),
+            exiled: ObjectId(7),
+        }]
+    );
+}
+
+// CR 607.2a, 400.7
+#[test]
+fn remap_abilities_drops_links_to_a_moved_source_or_exiled_card() {
+    let mut state = minimal_state();
+    state.exiled_with = links();
+    remap_abilities(&mut state, ObjectId(1), ObjectId(10));
+    remap_abilities(&mut state, ObjectId(7), ObjectId(11));
+    assert_eq!(
+        state.exiled_with,
+        vec![LinkedExile {
+            source: ObjectId(2),
+            exiled: ObjectId(6),
+        }]
+    );
 }
 
 // CR 611.3b

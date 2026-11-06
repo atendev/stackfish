@@ -82,6 +82,9 @@ fn with_permission(
         owners,
         kind,
         cards: FilterSpec::ANY,
+        library_top: false,
+        linked: false,
+        reveals_top: false,
     });
     state
 }
@@ -425,4 +428,277 @@ fn a_bounced_source_takes_its_zone_permission_with_it() {
     assert_eq!(engine.state().object(CRUCIBLE), None);
     assert!(engine.state().zone_permissions.is_empty());
     assert!(!lists_land(&engine, LAND));
+}
+
+fn with_top_permission(
+    mut state: GameState,
+    kind: ZonePermissionKind,
+    affected: FilterController,
+    reveals_top: bool,
+) -> GameState {
+    state = with_permission(state, kind, ZoneKind::Library, FilterController::You);
+    let permission = &mut state.zone_permissions[0];
+    permission.affected = affected;
+    permission.library_top = true;
+    permission.reveals_top = reveals_top;
+    state
+}
+
+fn with_linked_permission(state: GameState) -> GameState {
+    let mut state = with_permission(
+        state,
+        ZonePermissionKind::Cast,
+        ZoneKind::Exile,
+        FilterController::Any,
+    );
+    state.zone_permissions[0].linked = true;
+    state
+}
+
+// CR 401.5, 305.2a
+#[test]
+fn a_library_top_permission_plays_the_top_land_and_counts_the_land_play() {
+    let state = with_top_permission(
+        main_phase_state(),
+        ZonePermissionKind::PlayLand,
+        FilterController::You,
+        false,
+    );
+    let mut engine = Engine::new(with_land(state, P0, ZoneKind::Library));
+    assert!(lists_land(&engine, LAND));
+    engine
+        .submit_action(play_land(P0, LAND))
+        .expect("the permission opens the top card");
+    drain(&mut engine);
+    let (_, from, to) = last_zone_change(&engine);
+    assert_eq!((from, to), (ZoneKind::Library, ZoneKind::Battlefield));
+    assert_eq!(engine.state().lands_played_this_turn.get(&P0), Some(&1));
+}
+
+// CR 401.5
+#[test]
+fn a_library_top_permission_casts_the_top_card() {
+    let sorcery = ObjectId(21);
+    let state = with_top_permission(
+        main_phase_state(),
+        ZonePermissionKind::Cast,
+        FilterController::You,
+        true,
+    );
+    let mut engine = Engine::new(with_card(
+        state,
+        sorcery,
+        definition(3, "Test Sorcery", CardTypeSet::SORCERY),
+        P0,
+        ZoneKind::Library,
+    ));
+    assert_eq!(cast_entry(&engine, sorcery), Some((true, Vec::new())));
+    try_cast_spell(&mut engine, P0, sorcery, Vec::new()).expect("a sorcery from the top");
+    drain(&mut engine);
+    let (_, from, to) = last_zone_change(&engine);
+    assert_eq!((from, to), (ZoneKind::Library, ZoneKind::Stack));
+}
+
+// CR 401.5
+#[test]
+fn only_the_top_card_is_open_and_the_next_one_opens_after_a_play() {
+    let second = ObjectId(21);
+    let state = with_top_permission(
+        main_phase_state(),
+        ZonePermissionKind::PlayLand,
+        FilterController::You,
+        false,
+    );
+    let state = with_land(state, P0, ZoneKind::Library);
+    let mut state = with_card(
+        state,
+        second,
+        definition(3, "Second Land", CardTypeSet::LAND),
+        P0,
+        ZoneKind::Library,
+    );
+    let mut engine = Engine::new(state.clone());
+    assert!(!lists_land(&engine, second));
+    assert_action_rejected(&mut engine, "not the top", play_land(P0, second));
+
+    state.land_play_modifiers.push(LandPlayModifier {
+        source: CRUCIBLE,
+        controller: P0,
+        affected: LandPlayAffected::Filter(FilterController::You),
+        additional: 1,
+    });
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(play_land(P0, LAND))
+        .expect("the top land");
+    drain(&mut engine);
+    assert!(lists_land(&engine, second));
+}
+
+// CR 401.5
+#[test]
+fn an_opponents_entries_never_hold_your_library_top() {
+    let instant = ObjectId(21);
+    for reveals_top in [false, true] {
+        let state = with_top_permission(
+            main_phase_state(),
+            ZonePermissionKind::Cast,
+            FilterController::You,
+            reveals_top,
+        );
+        let mut state = with_card(
+            state,
+            instant,
+            definition(3, "Test Instant", CardTypeSet::INSTANT),
+            P0,
+            ZoneKind::Library,
+        );
+        state.priority_player = P1;
+        let mut engine = Engine::new(state);
+        assert_eq!(
+            cast_entry(&engine, instant),
+            None,
+            "reveals_top {reveals_top}"
+        );
+        assert_action_rejected(&mut engine, "opponent", cast_action(P1, instant, None));
+    }
+}
+
+// CR 401.5
+#[test]
+fn a_permission_that_affects_every_player_lists_the_top_for_an_opponent() {
+    let instant = ObjectId(21);
+    let state = with_top_permission(
+        main_phase_state(),
+        ZonePermissionKind::Cast,
+        FilterController::Any,
+        true,
+    );
+    let mut state = with_card(
+        state,
+        instant,
+        definition(3, "Test Instant", CardTypeSet::INSTANT),
+        P0,
+        ZoneKind::Library,
+    );
+    state.priority_player = P1;
+    let engine = Engine::new(state);
+    assert_eq!(cast_entry(&engine, instant), Some((true, Vec::new())));
+}
+
+// CR 401.5
+#[test]
+fn a_permission_over_your_library_does_not_open_an_opponents_top() {
+    let state = with_top_permission(
+        main_phase_state(),
+        ZonePermissionKind::PlayLand,
+        FilterController::You,
+        true,
+    );
+    let mut engine = Engine::new(with_land(state, P1, ZoneKind::Library));
+    assert!(!lists_land(&engine, LAND));
+    assert_action_rejected(&mut engine, "opponent's library", play_land(P0, LAND));
+}
+
+// CR 607.2a
+#[test]
+fn a_linked_permission_casts_only_cards_exiled_with_its_source() {
+    let (linked, unlinked) = (ObjectId(21), ObjectId(22));
+    let state = with_linked_permission(main_phase_state());
+    let state = with_card(
+        state,
+        linked,
+        definition(3, "Linked Sorcery", CardTypeSet::SORCERY),
+        P1,
+        ZoneKind::Exile,
+    );
+    let mut state = with_card(
+        state,
+        unlinked,
+        definition(4, "Unlinked Sorcery", CardTypeSet::SORCERY),
+        P1,
+        ZoneKind::Exile,
+    );
+    state.exiled_with.push(LinkedExile {
+        source: CRUCIBLE,
+        exiled: linked,
+    });
+    let mut engine = Engine::new(state);
+    assert_eq!(cast_entry(&engine, unlinked), None);
+    assert_action_rejected(&mut engine, "not linked", cast_action(P0, unlinked, None));
+    assert_eq!(cast_entry(&engine, linked), Some((true, Vec::new())));
+    try_cast_spell(&mut engine, P0, linked, Vec::new()).expect("a linked card");
+    drain(&mut engine);
+    let (_, from, _) = last_zone_change(&engine);
+    assert_eq!(from, ZoneKind::Exile);
+    assert!(engine.state().exiled_with.is_empty());
+}
+
+// CR 607.2a, 611.3b
+#[test]
+fn a_source_leaving_drops_its_linked_cards() {
+    let (bounce, linked) = (ObjectId(21), ObjectId(22));
+    let mut bounce_card = definition(3, "Test Bounce", CardTypeSet::INSTANT);
+    bounce_card.effect = Some(AbilityEffect::ReturnToHand);
+    bounce_card.target_requirement = Some(TargetSpec::Primitive(TargetRequirement {
+        filter: TargetFilter::Object {
+            mana_value: None,
+            card_types: Some(CardTypeSet::ARTIFACT),
+            excluded_card_types: None,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+            controller: None,
+            zone: None,
+        },
+        count: 1,
+        up_to: false,
+        at_least: false,
+        exclude_source: false,
+    }));
+    let state = with_linked_permission(main_phase_state());
+    let state = with_card(state, bounce, bounce_card, P0, ZoneKind::Hand);
+    let mut state = with_card(
+        state,
+        linked,
+        definition(4, "Linked Sorcery", CardTypeSet::SORCERY),
+        P1,
+        ZoneKind::Exile,
+    );
+    state.exiled_with.push(LinkedExile {
+        source: CRUCIBLE,
+        exiled: linked,
+    });
+    let mut engine = Engine::new(state);
+    try_cast_spell(&mut engine, P0, bounce, vec![Target::Object(CRUCIBLE)]).expect("instant");
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, P0, P1);
+    drain(&mut engine);
+
+    assert!(engine.state().exiled_with.is_empty());
+    assert_eq!(cast_entry(&engine, linked), None);
+}
+
+// CR 601.3f
+#[test]
+fn a_face_down_exiled_card_is_never_offered() {
+    let sorcery = ObjectId(21);
+    let state = with_permission(
+        main_phase_state(),
+        ZonePermissionKind::Cast,
+        ZoneKind::Exile,
+        FilterController::You,
+    );
+    let mut state = with_card(
+        state,
+        sorcery,
+        definition(3, "Test Sorcery", CardTypeSet::SORCERY),
+        P0,
+        ZoneKind::Exile,
+    );
+    state.objects.get_mut(&sorcery).unwrap().face_down = true;
+    let mut engine = Engine::new(state);
+    assert_eq!(cast_entry(&engine, sorcery), None);
+    assert_action_rejected(&mut engine, "face down", cast_action(P0, sorcery, None));
 }

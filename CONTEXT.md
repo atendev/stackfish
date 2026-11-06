@@ -73,8 +73,12 @@ A standing grant that lets a player cast matching spells as though they had flas
 _Avoid_: Flash grant, flash effect, timing modifier
 
 **Zone permission**:
-A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. A card's own alternative cost, such as flashback, is not a Zone permission.
+A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. A library-top permission opens only the top card of a library, which only its affected players may look at unless it reveals the top to everyone (Future Sight). A linked permission opens only the cards exiled with its source. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. A card's own alternative cost, such as flashback, is not a Zone permission.
 _Avoid_: Play-from-zone effect, zone grant
+
+**Linked exile (exiled with)**:
+A record that a card was exiled by a particular source, kept in `GameState.exiled_with` (CR 607.2a). `Game.Ops.ExileLinked` writes it, and a linked Zone permission reads it. The link ends when the card leaves exile or the source leaves the battlefield, because either one becomes a new object. It is not the "exile until it leaves the battlefield" link in `linked_exiles`, which returns the card.
+_Avoid_: Linked card, imprint
 
 ## Relationships
 

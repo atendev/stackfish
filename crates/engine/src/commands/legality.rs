@@ -59,7 +59,7 @@ pub(in crate::commands) fn can_cast_now(
 /// at its normal cost: their own hand, their commander in the command zone,
 /// or a zone a `ZonePermission` opens. Timing is `can_cast_now`'s job, and an
 /// alternative cost's `from_zone` is checked by the caller.
-// TODO: a face-down exiled card is offered with no "may look" check (CR 601.3f)
+// TODO: face-down linked cards are never offered (CR 601.3f)
 // TODO: a spell cast through a zone permission has no "exile it instead" rider (CR 608.2n)
 pub(in crate::commands) fn can_cast_from_zone(
     state: &GameState,
@@ -69,12 +69,15 @@ pub(in crate::commands) fn can_cast_from_zone(
     match card.zone {
         ZoneKind::Hand => card.controller == player,
         ZoneKind::Command => card.is_commander && card.owner == player,
-        _ => crate::types::player::has_zone_permission(
-            &state.zone_permissions,
-            ZonePermissionKind::Cast,
-            player,
-            card,
-        ),
+        _ => {
+            !card.face_down
+                && crate::types::player::has_zone_permission(
+                    state,
+                    ZonePermissionKind::Cast,
+                    player,
+                    card,
+                )
+        }
     }
 }
 
@@ -88,12 +91,15 @@ pub(in crate::commands) fn can_play_land_from_zone(
 ) -> bool {
     match card.zone {
         ZoneKind::Hand => card.controller == player,
-        _ => crate::types::player::has_zone_permission(
-            &state.zone_permissions,
-            ZonePermissionKind::PlayLand,
-            player,
-            card,
-        ),
+        _ => {
+            !card.face_down
+                && crate::types::player::has_zone_permission(
+                    state,
+                    ZonePermissionKind::PlayLand,
+                    player,
+                    card,
+                )
+        }
     }
 }
 
@@ -1142,6 +1148,7 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::ExileSelf
             | AbilityEffect::ExileAll { .. }
             | AbilityEffect::ExileUntilSourceLeaves
+            | AbilityEffect::ExileLinked
             | AbilityEffect::ReturnToHand
             | AbilityEffect::ReturnSelfToHand
             | AbilityEffect::ReturnAllToHand { .. }
@@ -1304,7 +1311,10 @@ mod tests {
     use crate::types::ids::{ObjectId, PlayerId, SequenceNo, Target};
     use crate::types::mana::{Color, ManaCost, ManaPool, ManaUnit};
     use crate::types::object::{GameObject, VisibilityPolicy};
-    use crate::types::player::{PlayerState, TimingPermission, ZonePermission, ZonePermissionKind};
+    use crate::types::player::{
+        PlayerState, TimingPermission, ZonePermission, ZonePermissionKind, is_top_of_library,
+        library_top_visible_to,
+    };
     use crate::types::stack::{StackEntryKind, StackObject};
     use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
     use crate::types::turn::{Phase, Step};
@@ -1442,6 +1452,7 @@ mod tests {
             ability_function_zones: std::collections::HashMap::new(),
             off_battlefield_scripts_run: std::collections::HashSet::new(),
             linked_exiles: Vec::new(),
+            exiled_with: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
         }
@@ -1648,6 +1659,9 @@ mod tests {
             owners,
             kind,
             cards: FilterSpec::ANY,
+            library_top: false,
+            linked: false,
+            reveals_top: false,
         }
     }
 
@@ -1716,6 +1730,100 @@ mod tests {
 
         state.zone_permissions[0].cards.extra = Some("mana value 2 or less".to_string());
         assert!(!can_cast_from_zone(&state, p0, &instant));
+    }
+
+    fn with_libraries(mut state: GameState, tops: &[(PlayerId, Vec<ObjectId>)]) -> GameState {
+        for (owner, ids) in tops {
+            let mut library = crate::types::zone::Zone::new(ZoneKind::Library, Some(*owner));
+            for id in ids {
+                library.push_bottom(*id);
+            }
+            state.zones.push(library);
+        }
+        state
+    }
+
+    fn top_permission(affected: FilterController, reveals_top: bool) -> ZonePermission {
+        ZonePermission {
+            affected,
+            zone: ZoneKind::Library,
+            library_top: true,
+            reveals_top,
+            ..zone_permission(ZonePermissionKind::Cast, FilterController::You)
+        }
+    }
+
+    // CR 401.5
+    #[test]
+    fn is_top_of_library_matches_only_the_first_card_of_the_owners_library() {
+        let (p0, p1) = (PlayerId(0), PlayerId(1));
+        let top = object(ObjectId(1), p0, CardTypeSet::SORCERY, ZoneKind::Library);
+        let second = object(ObjectId(2), p0, CardTypeSet::SORCERY, ZoneKind::Library);
+        let elsewhere = object(ObjectId(3), p0, CardTypeSet::SORCERY, ZoneKind::Graveyard);
+        let unlisted = object(ObjectId(4), p1, CardTypeSet::SORCERY, ZoneKind::Library);
+        let state = with_libraries(
+            state_with(Vec::new()),
+            &[(p0, vec![ObjectId(1), ObjectId(2)]), (p1, Vec::new())],
+        );
+        assert!(is_top_of_library(&state, &top));
+        assert!(!is_top_of_library(&state, &second));
+        assert!(!is_top_of_library(&state, &elsewhere));
+        assert!(!is_top_of_library(&state, &unlisted));
+    }
+
+    // CR 401.5
+    #[test]
+    fn library_top_visible_to_reads_reveals_top_affected_and_owners() {
+        let (p0, p1) = (PlayerId(0), PlayerId(1));
+        let own_top = object(ObjectId(1), p0, CardTypeSet::SORCERY, ZoneKind::Library);
+        let own_second = object(ObjectId(2), p0, CardTypeSet::SORCERY, ZoneKind::Library);
+        let their_top = object(ObjectId(3), p1, CardTypeSet::SORCERY, ZoneKind::Library);
+        let mut state = with_libraries(
+            state_with(Vec::new()),
+            &[
+                (p0, vec![ObjectId(1), ObjectId(2)]),
+                (p1, vec![ObjectId(3)]),
+            ],
+        );
+        assert!(!library_top_visible_to(&state, &own_top, Some(p0)));
+
+        state.zone_permissions = vec![top_permission(FilterController::You, false)];
+        assert!(library_top_visible_to(&state, &own_top, Some(p0)));
+        assert!(!library_top_visible_to(&state, &own_top, Some(p1)));
+        assert!(!library_top_visible_to(&state, &own_second, Some(p0)));
+
+        assert!(!library_top_visible_to(&state, &own_top, None));
+
+        state.zone_permissions[0].reveals_top = true;
+        assert!(library_top_visible_to(&state, &own_top, Some(p1)));
+        assert!(library_top_visible_to(&state, &own_top, None));
+        assert!(!library_top_visible_to(&state, &their_top, Some(p0)));
+        assert!(!library_top_visible_to(&state, &their_top, Some(p1)));
+    }
+
+    // CR 601.3f
+    #[test]
+    fn a_face_down_card_outside_the_hand_is_never_castable_or_playable() {
+        let p0 = PlayerId(0);
+        let mut sorcery = object(ObjectId(1), p0, CardTypeSet::SORCERY, ZoneKind::Exile);
+        let mut land = object(ObjectId(2), p0, CardTypeSet::LAND, ZoneKind::Exile);
+        let mut state = state_with(Vec::new());
+        state.zone_permissions = vec![
+            ZonePermission {
+                zone: ZoneKind::Exile,
+                ..zone_permission(ZonePermissionKind::Cast, FilterController::You)
+            },
+            ZonePermission {
+                zone: ZoneKind::Exile,
+                ..zone_permission(ZonePermissionKind::PlayLand, FilterController::You)
+            },
+        ];
+        assert!(can_cast_from_zone(&state, p0, &sorcery));
+        assert!(can_play_land_from_zone(&state, p0, &land));
+        sorcery.face_down = true;
+        land.face_down = true;
+        assert!(!can_cast_from_zone(&state, p0, &sorcery));
+        assert!(!can_play_land_from_zone(&state, p0, &land));
     }
 
     #[test]
