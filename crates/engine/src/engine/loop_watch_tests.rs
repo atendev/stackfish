@@ -246,3 +246,25 @@ fn a_forced_pass_with_a_stack_is_watched() {
         .unwrap();
     assert_eq!(engine.loop_watch.len(), 1);
 }
+
+#[test]
+fn the_fingerprint_sees_a_permission_duration() {
+    // CR 104.4b, 611.2a
+    let permission = crate::types::player::TimingPermission {
+        source: ObjectId(5),
+        controller: P0,
+        affected: crate::types::cost::FilterController::You,
+        spells: crate::types::cost::FilterSpec::ANY,
+        duration: crate::types::effect::EffectDuration::WhileSourceOnBattlefield,
+    };
+    let mut fixed = two_players();
+    fixed.timing_permissions.push(permission.clone());
+    let mut timed = two_players();
+    timed
+        .timing_permissions
+        .push(crate::types::player::TimingPermission {
+            duration: crate::types::effect::EffectDuration::UntilEndOfTurn,
+            ..permission
+        });
+    assert_ne!(fingerprint(&fixed), fingerprint(&timed));
+}

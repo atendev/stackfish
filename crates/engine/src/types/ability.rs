@@ -131,6 +131,14 @@ pub enum AbilityEffect {
     /// silently. This covers only the resolving-spell path.
     // TODO: `GameObject.controlled_since_turn` is not updated here, though CR 302.6 restarts summoning sickness for the new controller; stamping it would leave a stale value once the effect expires
     GainControl(crate::types::effect::EffectDuration),
+    /// `Game.Ops.GrantTimingPermission(builder, duration)` (CR 601.3b, 611.2a):
+    /// a Timed grant pushed on resolution. `source` and `controller` are
+    /// stamped from the resolving object, and `duration` is a drained one.
+    /// Boxed so the row does not widen every `AbilityEffect`.
+    GrantTimingPermission(Box<crate::types::player::TimingPermission>),
+    /// `Game.Ops.GrantZonePermission(builder, duration)` (CR 601.3, 611.2a),
+    /// stamped as `GrantTimingPermission` is.
+    GrantZonePermission(Box<crate::types::player::ZonePermission>),
     /// `Game.Ops.Regenerate()` (CR 701.19a): each legal target gets its own
     /// one-shot shield (`EventFilter::WouldDie` with
     /// `ReplacementPayload::Regenerate`, pinned by `self_only: true` as `Pump`

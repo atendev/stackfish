@@ -48,6 +48,8 @@ fn is_synchronous(effect: &AbilityEffect) -> bool {
             | AbilityEffect::Counters { .. }
             | AbilityEffect::Pump { .. }
             | AbilityEffect::GainControl(_)
+            | AbilityEffect::GrantTimingPermission(_)
+            | AbilityEffect::GrantZonePermission(_)
             | AbilityEffect::Shuffle
             | AbilityEffect::Regenerate
             | AbilityEffect::LoseLife(_)

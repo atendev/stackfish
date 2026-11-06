@@ -411,6 +411,14 @@ impl Engine {
             Some(AbilityEffect::GainControl(duration)) => {
                 self.resolve_gain_control_effect(top, legal_targets, duration, events)
             }
+            // CR 611.2a
+            // Fixed to the resolving object and controller, so it outlives both changing.
+            Some(AbilityEffect::GrantTimingPermission(permission)) => {
+                self.resolve_grant_timing_permission(top, permission, events)
+            }
+            Some(AbilityEffect::GrantZonePermission(permission)) => {
+                self.resolve_grant_zone_permission(top, permission, events)
+            }
             // CR 701.19a: each legal object target gets a one-shot shield pinned with
             // `self_only`. A target that can't be regenerated gets none, checked at
             // creation (CR 701.19c).

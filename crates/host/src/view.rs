@@ -764,6 +764,7 @@ mod tests {
                 library_top: true,
                 linked: false,
                 reveals_top,
+                duration: stackfish_engine::EffectDuration::WhileSourceOnBattlefield,
             });
         state
     }

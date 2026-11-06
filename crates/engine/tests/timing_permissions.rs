@@ -89,6 +89,7 @@ fn with_orrery(
         controller,
         affected,
         spells: FilterSpec::ANY,
+        duration: EffectDuration::WhileSourceOnBattlefield,
     });
     state
 }
@@ -278,6 +279,7 @@ fn a_hand_sourced_permission_is_dropped_when_its_source_is_cast() {
         controller: P1,
         affected: FilterController::You,
         spells: FilterSpec::ANY,
+        duration: EffectDuration::WhileSourceOnBattlefield,
     });
     let mut engine = Engine::new(state);
     try_cast_spell(&mut engine, P1, source, Vec::new()).expect("the source covers itself");
