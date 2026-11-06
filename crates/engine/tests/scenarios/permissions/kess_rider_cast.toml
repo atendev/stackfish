@@ -1,0 +1,156 @@
+# CR 601.3, 608.2n: Kess, Dissident Mage lets its controller cast an instant or sorcery from
+# their graveyard, and a spell cast that way is exiled instead of returning there. A sorcery
+# cast from hand still goes to the graveyard, a graveyard creature stays uncastable, and the
+# graveyard sorcery is refused before Kess resolves.
+# Kess's once-per-turn limit is not modeled, so this fixture casts through it once.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "kess"
+name = "Kess, Dissident Mage"
+types = ["Creature"]
+power = 3
+toughness = 4
+script = """
+local s = {}
+function s.register_abilities(c)
+    local p = Game.CreateZonePermission(c)
+    p:SetAffected(Game.Affected.You)
+    p:SetZone("Graveyard")
+    p:SetKind("Cast")
+    p:SetFilter(Game.Filter({ card_types = { "Instant", "Sorcery" } }))
+    p:SetRider("ExileInsteadOfGraveyard")
+    p:Register()
+end
+return s
+"""
+
+[[cards]]
+key = "rite"
+name = "Graveyard Rite"
+types = ["Sorcery"]
+
+[[cards]]
+key = "study"
+name = "Hand Study"
+types = ["Sorcery"]
+
+[[cards]]
+key = "bear"
+name = "Graveyard Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "kess"
+
+[[setup]]
+player = 0
+zone = "graveyard"
+card = "rite"
+
+[[setup]]
+player = 0
+zone = "graveyard"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "study"
+
+# Solo game, so the turn 1 draw step runs and needs a card (CR 103.8a, 704.5b).
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "rite"
+expect_error = true
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "kess"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "bear"
+expect_error = true
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "rite"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "rite"
+equals = "exile"
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "study"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "study"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "graveyard"

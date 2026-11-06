@@ -86,6 +86,7 @@ fn with_permission(
         linked: false,
         reveals_top: false,
         duration: EffectDuration::WhileSourceOnBattlefield,
+        rider: None,
     });
     state
 }
@@ -702,4 +703,278 @@ fn a_face_down_exiled_card_is_never_offered() {
     let mut engine = Engine::new(state);
     assert_eq!(cast_entry(&engine, sorcery), None);
     assert_action_rejected(&mut engine, "face down", cast_action(P0, sorcery, None));
+}
+
+const SPELL: ObjectId = ObjectId(21);
+const SPELL_NAME: &str = "Test Rider Spell";
+
+fn object_filter(card_types: Option<CardTypeSet>, zone: Option<ZoneKind>) -> TargetSpec {
+    TargetSpec::Primitive(TargetRequirement {
+        filter: TargetFilter::Object {
+            mana_value: None,
+            card_types,
+            excluded_card_types: None,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+            controller: None,
+            zone,
+        },
+        count: 1,
+        up_to: false,
+        at_least: false,
+        exclude_source: false,
+    })
+}
+
+fn bounce_definition(id: u64, name: &str) -> CardDefinition {
+    let mut card = definition(id, name, CardTypeSet::INSTANT);
+    card.effect = Some(AbilityEffect::ReturnToHand);
+    card.target_requirement = Some(object_filter(Some(CardTypeSet::ARTIFACT), None));
+    card
+}
+
+fn counterspell_definition() -> CardDefinition {
+    let mut card = definition(9, "Test Counterspell", CardTypeSet::INSTANT);
+    card.effect = Some(AbilityEffect::Counter);
+    card.target_requirement = Some(object_filter(None, Some(ZoneKind::Stack)));
+    card
+}
+
+// A graveyard Cast permission with `rider`, and `card` in player 0's graveyard as `SPELL`.
+fn rider_state(rider: Option<LeaveStackRider>, card: CardDefinition) -> GameState {
+    let mut state = with_permission(
+        main_phase_state(),
+        ZonePermissionKind::Cast,
+        ZoneKind::Graveyard,
+        FilterController::You,
+    );
+    state.zone_permissions[0].rider = rider;
+    with_card(state, SPELL, card, P0, ZoneKind::Graveyard)
+}
+
+fn rider_sorcery() -> CardDefinition {
+    definition(3, SPELL_NAME, CardTypeSet::SORCERY)
+}
+
+fn names_in(engine: &Engine, zone: ZoneKind, owner: Option<PlayerId>) -> Vec<String> {
+    let state = engine.state();
+    state
+        .zone(zone, owner)
+        .unwrap()
+        .contents
+        .iter()
+        .map(|id| state.object(*id).unwrap().definition.name.clone())
+        .collect()
+}
+
+fn ends_in_exile(engine: &Engine) -> bool {
+    names_in(engine, ZoneKind::Exile, None).contains(&SPELL_NAME.to_string())
+        && !names_in(engine, ZoneKind::Graveyard, Some(P0)).contains(&SPELL_NAME.to_string())
+}
+
+fn cast_and_resolve(engine: &mut Engine, card: ObjectId, targets: Vec<Target>) {
+    try_cast_spell(engine, P0, card, targets).expect("the permission allows the cast");
+    pay_free_and_drain(engine);
+    pass_both_and_drain(engine, P0, P1);
+    drain(engine);
+}
+
+// Casts `SPELL` and leaves it on the stack with player 0 holding priority.
+fn cast_spell_onto_stack(engine: &mut Engine, targets: Vec<Target>) -> ObjectId {
+    try_cast_spell(engine, P0, SPELL, targets).expect("the permission allows the cast");
+    pay_free_and_drain(engine);
+    let (on_stack, _, to) = last_zone_change(engine);
+    assert_eq!(to, ZoneKind::Stack);
+    on_stack
+}
+
+fn counter_it(engine: &mut Engine, on_stack: ObjectId) {
+    let counter = ObjectId(30);
+    let state = engine.state_mut();
+    put(
+        state,
+        card_object(counter, counterspell_definition(), P0, ZoneKind::Hand),
+    );
+    cast_and_resolve(engine, counter, vec![Target::Object(on_stack)]);
+}
+
+// CR 608.2n
+#[test]
+fn a_rider_cast_resolves_into_exile() {
+    let mut engine = Engine::new(rider_state(
+        Some(LeaveStackRider::ExileInsteadOfGraveyard),
+        rider_sorcery(),
+    ));
+    cast_and_resolve(&mut engine, SPELL, Vec::new());
+    let (_, from, to) = last_zone_change(&engine);
+    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Exile));
+    assert!(ends_in_exile(&engine));
+}
+
+// CR 608.2n
+#[test]
+fn a_permission_without_a_rider_resolves_into_the_graveyard() {
+    let mut engine = Engine::new(rider_state(None, rider_sorcery()));
+    cast_and_resolve(&mut engine, SPELL, Vec::new());
+    let (_, from, to) = last_zone_change(&engine);
+    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard));
+}
+
+// CR 701.6a, 608.2n
+#[test]
+fn a_countered_rider_spell_goes_to_exile() {
+    let mut engine = Engine::new(rider_state(
+        Some(LeaveStackRider::ExileInsteadOfGraveyard),
+        definition(3, SPELL_NAME, CardTypeSet::INSTANT),
+    ));
+    let on_stack = cast_spell_onto_stack(&mut engine, Vec::new());
+    counter_it(&mut engine, on_stack);
+    assert!(engine.state().stack.is_empty());
+    assert!(ends_in_exile(&engine));
+}
+
+// CR 608.2b, 608.2n
+// A second bounce returns the target first, so the rider spell finds no legal target.
+#[test]
+fn a_fizzled_rider_spell_goes_to_exile() {
+    let (artifact, second_bounce) = (ObjectId(40), ObjectId(41));
+    let mut state = rider_state(
+        Some(LeaveStackRider::ExileInsteadOfGraveyard),
+        bounce_definition(3, SPELL_NAME),
+    );
+    state = with_card(
+        state,
+        artifact,
+        definition(5, "Test Trinket", CardTypeSet::ARTIFACT),
+        P0,
+        ZoneKind::Battlefield,
+    );
+    state = with_card(
+        state,
+        second_bounce,
+        bounce_definition(6, "Test Second Bounce"),
+        P0,
+        ZoneKind::Hand,
+    );
+    let mut engine = Engine::new(state);
+    cast_spell_onto_stack(&mut engine, vec![Target::Object(artifact)]);
+    cast_and_resolve(&mut engine, second_bounce, vec![Target::Object(artifact)]);
+    pass_both_and_drain(&mut engine, P0, P1);
+    drain(&mut engine);
+    assert!(engine.state().stack.is_empty());
+    assert!(ends_in_exile(&engine));
+}
+
+// CR 608.3
+#[test]
+fn a_permanent_spell_with_a_rider_resolves_onto_the_battlefield() {
+    let mut engine = Engine::new(rider_state(
+        Some(LeaveStackRider::ExileInsteadOfGraveyard),
+        definition(3, SPELL_NAME, CardTypeSet::ARTIFACT),
+    ));
+    cast_and_resolve(&mut engine, SPELL, Vec::new());
+    assert!(names_in(&engine, ZoneKind::Battlefield, None).contains(&SPELL_NAME.to_string()));
+}
+
+// CR 701.6a, 608.2n
+#[test]
+fn a_countered_permanent_spell_with_a_rider_is_exiled() {
+    let mut engine = Engine::new(rider_state(
+        Some(LeaveStackRider::ExileInsteadOfGraveyard),
+        definition(3, SPELL_NAME, CardTypeSet::ARTIFACT),
+    ));
+    let on_stack = cast_spell_onto_stack(&mut engine, Vec::new());
+    counter_it(&mut engine, on_stack);
+    assert!(ends_in_exile(&engine));
+}
+
+// CR 601.3, 702.34a
+// The chosen cost decides the rider: flashback exiles, and the rider-less permission does not.
+#[test]
+fn a_flashback_cast_exiles_and_a_riderless_permission_cast_does_not() {
+    let mut card = rider_sorcery();
+    card.alternative_costs = vec![AlternativeCost::Replacement {
+        description: "Flashback {0}".to_string(),
+        cost: CostSpec::mana_only(ManaCost {
+            symbols: Vec::new(),
+        }),
+        from_zone: ZoneKind::Graveyard,
+        exile_on_leaving_stack: true,
+        escape: false,
+    }];
+
+    let mut flashback = Engine::new(rider_state(None, card.clone()));
+    flashback
+        .submit_action(cast_action(P0, SPELL, Some(0)))
+        .expect("flashback from the graveyard");
+    pay_free_and_drain(&mut flashback);
+    pass_both_and_drain(&mut flashback, P0, P1);
+    drain(&mut flashback);
+    assert!(ends_in_exile(&flashback));
+
+    let mut normal = Engine::new(rider_state(None, card));
+    cast_and_resolve(&mut normal, SPELL, Vec::new());
+    let (_, from, to) = last_zone_change(&normal);
+    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard));
+}
+
+// CR 608.2n
+// The rider is copied onto the spell at cast, so the permission's removal does not reach it.
+#[test]
+fn a_rider_outlives_its_source() {
+    let bounce = ObjectId(41);
+    let state = with_card(
+        rider_state(Some(LeaveStackRider::ExileInstead), rider_sorcery()),
+        bounce,
+        bounce_definition(6, "Test Bounce"),
+        P0,
+        ZoneKind::Hand,
+    );
+    let mut engine = Engine::new(state);
+    cast_spell_onto_stack(&mut engine, Vec::new());
+    cast_and_resolve(&mut engine, bounce, vec![Target::Object(CRUCIBLE)]);
+    assert!(engine.state().zone_permissions.is_empty());
+    pass_both_and_drain(&mut engine, P0, P1);
+    drain(&mut engine);
+    assert!(ends_in_exile(&engine));
+}
+
+// CR 601.3
+#[test]
+fn the_riderless_permission_wins_when_two_match() {
+    let mut state = rider_state(
+        Some(LeaveStackRider::ExileInsteadOfGraveyard),
+        rider_sorcery(),
+    );
+    let riderless = ZonePermission {
+        rider: None,
+        ..state.zone_permissions[0].clone()
+    };
+    state.zone_permissions.push(riderless);
+    let mut engine = Engine::new(state);
+    cast_and_resolve(&mut engine, SPELL, Vec::new());
+    let (_, from, to) = last_zone_change(&engine);
+    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard));
+}
+
+// CR 702.27a
+#[test]
+fn buyback_returns_a_rider_spell_to_hand() {
+    let mut card = definition(3, SPELL_NAME, CardTypeSet::INSTANT);
+    card.buyback_cost = Some(ManaCost {
+        symbols: Vec::new(),
+    });
+    let mut engine = Engine::new(rider_state(Some(LeaveStackRider::ExileInstead), card));
+    let mut action = cast_action(P0, SPELL, None);
+    if let PlayerActionKind::CastSpell { pay_buyback, .. } = &mut action.kind {
+        *pay_buyback = true;
+    }
+    engine.submit_action(action).expect("buyback is announced");
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, P0, P1);
+    drain(&mut engine);
+    let (_, from, to) = last_zone_change(&engine);
+    assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Hand));
 }

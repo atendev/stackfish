@@ -1175,7 +1175,7 @@ mod tests {
             vec![Target::Object(target), Target::Player(PlayerId(1))],
             None,
             None,
-            false,
+            None,
             false,
             false,
             ScriptHandle(0),

@@ -309,7 +309,7 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
         targets: Vec::new(),
         target_requirement: None,
         x_value: None,
-        exile_on_leaving_stack: false,
+        leave_stack_rider: None,
         bought_back: false,
         escaped: false,
         costs_paid: Vec::new(),

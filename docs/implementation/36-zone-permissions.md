@@ -62,4 +62,4 @@ An effect that lets a player play lands or cast spells from another zone (Crucib
 
 ## Not built
 
-Face-down linked cards (CR 601.3f), the stand-alone "play with the top card revealed" effect (CR 401.5), links for cards exiled by a replaced source copy (CR 607.2a), an untargeted or library `ExileLinked`, "until end of turn" grants (CR 611.2) and "exile it instead" riders (CR 608.2n) each have a TODO.
+Face-down linked cards (CR 601.3f), the stand-alone "play with the top card revealed" effect (CR 401.5), links for cards exiled by a replaced source copy (CR 607.2a), an untargeted or library `ExileLinked`, "until end of turn" grants (CR 611.2) each have a TODO. "Exile it instead" riders are built in `38-zone-permission-riders.md`.

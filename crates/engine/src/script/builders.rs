@@ -25,6 +25,7 @@ use crate::types::player::{
     HandSizeModifier, LandPlayAffected, LandPlayModifier, TimingPermission, ZonePermission,
     ZonePermissionKind,
 };
+use crate::types::stack::LeaveStackRider;
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
@@ -1235,7 +1236,8 @@ impl TimingPermissionBuilder {
 /// `Game.CreateZonePermission(c)`'s return value (CR 601.3, 305.1), mirroring
 /// `TimingPermissionBuilder`. `:SetAffected`, `:SetZone` and `:SetKind` are
 /// required. `:SetOwner` defaults to `Game.Affected.You`, and `:SetFilter` to
-/// every card. `"Library"` needs `:SetFromLibraryTop()` (CR 401.5).
+/// every card. `"Library"` needs `:SetFromLibraryTop()` (CR 401.5), and
+/// `:SetRider` needs `:SetKind("Cast")` (CR 608.2n).
 pub(crate) struct ZonePermissionBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<FilterController>,
@@ -1246,6 +1248,7 @@ pub(crate) struct ZonePermissionBuilder {
     pub(crate) library_top: bool,
     pub(crate) linked: bool,
     pub(crate) reveals_top: bool,
+    pub(crate) rider: Option<LeaveStackRider>,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
     pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
@@ -1284,6 +1287,18 @@ impl UserData for ZonePermissionBuilder {
         });
         methods.add_method_mut("SetRevealTop", |_, this, ()| {
             this.reveals_top = true;
+            Ok(())
+        });
+        methods.add_method_mut("SetRider", |_, this, name: String| {
+            this.rider = Some(match name.as_str() {
+                "ExileInstead" => LeaveStackRider::ExileInstead,
+                "ExileInsteadOfGraveyard" => LeaveStackRider::ExileInsteadOfGraveyard,
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "a zone permission's SetRider expects \"ExileInstead\" or \"ExileInsteadOfGraveyard\", got {other:?}"
+                    )));
+                }
+            });
             Ok(())
         });
         methods.add_method_mut("SetKind", |_, this, name: String| {
@@ -1350,6 +1365,9 @@ impl ZonePermissionBuilder {
         if self.reveals_top && !self.library_top {
             return refuse("SetRevealTop() needs SetFromLibraryTop()");
         }
+        if self.rider.is_some() && kind != ZonePermissionKind::Cast {
+            return refuse("SetRider() needs SetKind(\"Cast\")");
+        }
         Ok(ZonePermission {
             source: self.source,
             // Placeholder, stamped by `run_card_script`'s drain step or on resolution.
@@ -1363,6 +1381,7 @@ impl ZonePermissionBuilder {
             linked: self.linked,
             reveals_top: self.reveals_top,
             duration: EffectDuration::WhileSourceOnBattlefield,
+            rider: self.rider,
         })
     }
 }

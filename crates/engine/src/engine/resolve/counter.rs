@@ -47,11 +47,7 @@ impl Engine {
         };
         let countered: StackObject = self.state.stack.remove(pos);
         if matches!(countered.kind, StackEntryKind::Spell) {
-            let destination = if countered.exile_on_leaving_stack {
-                ZoneKind::Exile
-            } else {
-                ZoneKind::Graveyard
-            };
+            let destination = countered.leave_destination(ZoneKind::Graveyard);
             if let Some(event) = self.move_resolving_spell(target_id, destination, false, false) {
                 events.push(event);
             }

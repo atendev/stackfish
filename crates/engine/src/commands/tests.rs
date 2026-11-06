@@ -217,6 +217,7 @@ fn dummy_zone_permission(source: ObjectId) -> ZonePermission {
         linked: false,
         reveals_top: false,
         duration: EffectDuration::WhileSourceOnBattlefield,
+        rider: None,
     }
 }
 

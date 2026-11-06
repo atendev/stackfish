@@ -28,15 +28,15 @@ impl Engine {
                 .card_types
                 .intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY)
             {
-                // CR 702.27a: buyback is checked before exile-on-leaving; it is the more specific choice.
+                // CR 702.27a: buyback is checked before the rider; it is the more specific choice.
                 if top.bought_back {
                     ZoneKind::Hand
-                } else if top.exile_on_leaving_stack {
-                    ZoneKind::Exile
                 } else {
-                    ZoneKind::Graveyard
+                    top.leave_destination(ZoneKind::Graveyard)
                 }
             } else {
+                // CR 608.3: a permanent spell enters the battlefield and the rider is not read.
+                // TODO: rider on a permanent spell's battlefield entry
                 ZoneKind::Battlefield
             }
         });

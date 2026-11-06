@@ -890,7 +890,7 @@ fn stack_entry(
         Vec::new(),
         None,
         None,
-        false,
+        None,
         false,
         false,
         ScriptHandle(0),

@@ -160,9 +160,11 @@ original plan:
   `remap_abilities`, except a Timed permission from a resolving effect, which carries a
   `duration` and expires in the turn drains instead. "Exiled with" links live in `exiled_with`, apart from the `linked_exiles`
   "until it leaves" returns, and end when either object moves. A revealed library top reaches a
-  Seat through `library_top_visible_to`, read at check time. See
-  `docs/implementation/35-timing-permissions.md`, `36-zone-permissions.md` and
-  `37-expiring-permissions.md`.
+  Seat through `library_top_visible_to`, read at check time. A spell's leave-stack rider
+  (flashback's exile, or one a zone permission supplies) is copied onto its `StackObject` at
+  cast, and `StackObject::leave_destination` is the one reader at resolve, fizzle and counter. See
+  `docs/implementation/35-timing-permissions.md`, `36-zone-permissions.md`,
+  `37-expiring-permissions.md` and `38-zone-permission-riders.md`.
 - `PlayerAction -> EngineCommand -> GameEvent` pipeline, per the adaptation doc, unchanged — see
   `docs/implementation/01-pipeline.md` for why `EngineCommand` doesn't decompose into a lower command tier.
 

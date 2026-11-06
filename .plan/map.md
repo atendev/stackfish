@@ -57,6 +57,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 085 Zone permission riders. A rider is a per-cast fact on `StackObject`: `leave_stack_rider: Option<LeaveStackRider>` (`ExileInstead`, `ExileInsteadOfGraveyard`) replaces the flashback bool, `cast_zone_source` reports which permission allowed the cast, and one `leave_destination` helper serves resolve, fizzle and counter (CR 608.2n, 702.34a). Kess, Dissident Mage is a scenario fixture. Build is 088. [closed/085-zone-permission-riders.md]
 - 086 Build library-top and linked-exile zone permissions. Built as 083 decided, with `Game.Ops.ExileLinked` in place of an exile-builder setter, the top-card helpers in `types/player.rs` and host visibility computed from the permissions at check time. A revealed top is snapshot-only, with no reveal event. [closed/086-build-library-linked-exile-zone-permissions.md]
 - 087 Build expiring timing and zone permissions. Built as 084 decided, with the `AbilityEffect` rows boxed and `BEHAVIOUR_REV` left at 8, because the pin did not move. A Timed linked grant is accepted, and one from a spell matches nothing. [closed/087-build-expiring-permissions.md]
+- 088 Build zone permission riders. Built as 085 decided. A rider-less permission wins over ones with riders, then list order, because permissions have no id. The Kess scenario casts Kess first, because battlefield setup does not register static scripts. `BEHAVIOUR_REV` stays 8. [closed/088-build-zone-permission-riders.md]
 
 ## Not yet specified
 
@@ -64,6 +65,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
 - Impulse draw from a spell. `ExileLinked` records links only under a battlefield source, and a link ends when its source moves, so a spell's "exile the top card, you may play it this turn" has no link for its Timed grant. The link needs to belong to the effect, not the source (found by 087).
+- Scenario battlefield setup does not run a card's script, so a static ability on a card placed there never registers. Fixtures cast the source from hand instead (found by 088).
 - A reveal event for a library top. A revealed top shows in snapshots and decisions, but no event tells a Seat when it appears or stops being the top, so an event-only client cannot track it (found by 086).
 
 ## Out of scope
@@ -77,4 +79,4 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 088 Build zone permission riders, a build ticket. It touches `ZonePermission`, so rebase on 086.
+- none

@@ -369,8 +369,8 @@ pub enum AbilityEffect {
     /// object reachable through `continue_scripted_zone_move`.
     /// `resolve_counter_effect` finds it by `stack_id` and removes it. Only a
     /// `Spell` then moves, through `Engine::move_resolving_spell` (CR 701.6a:
-    /// owner's graveyard, or exile if that spell's own `exile_on_leaving_stack`
-    /// is set, as with a flashbacked spell, CR 702.34a). An ability just stops
+    /// owner's graveyard unless `StackObject::leave_destination` says
+    /// otherwise, as with a flashbacked spell, CR 702.34a). An ability just stops
     /// existing. There is no `apply_replacements` call, as in the CR 608.2b
     /// fizzle branch, and no CR 616.1 ordering pause, since one stack entry
     /// leaves.

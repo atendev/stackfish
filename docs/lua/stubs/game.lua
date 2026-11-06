@@ -504,6 +504,14 @@ function ZonePermissionBuilder:SetRevealTop() end
 ---@return ZonePermissionBuilder
 function ZonePermissionBuilder:SetKind(kind) end
 
+--- CR 608.2n: where a spell cast through this permission goes when it leaves the stack.
+--- "ExileInstead" exiles it from any exit (flashback's wording). "ExileInsteadOfGraveyard"
+--- exiles it only where it would go to a graveyard (Kess, Dissident Mage). Optional, default
+--- none. Needs SetKind("Cast"). Any other name is an error.
+---@param rider "ExileInstead"|"ExileInsteadOfGraveyard"
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetRider(rider) end
+
 --- Whose cards in the zone it covers, relative to the source's controller. Optional; the
 --- default is Game.Affected.You.
 ---@param value GameAffectedValue  -- Game.Affected.You, .Opponent or .Any; .EnchantedPlayer is an error

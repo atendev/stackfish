@@ -284,7 +284,7 @@ fn play_land_rejects_nonempty_stack() {
         targets: Vec::new(),
         target_requirement: None,
         x_value: None,
-        exile_on_leaving_stack: false,
+        leave_stack_rider: None,
         bought_back: false,
         escaped: false,
         costs_paid: Vec::new(),

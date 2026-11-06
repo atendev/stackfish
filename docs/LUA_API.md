@@ -468,6 +468,24 @@ e:SetTarget(target_spec)
 e:Register()
 ```
 
+### `Game.CreateZonePermission`
+
+```lua
+p:SetFunctionsFrom(zone)
+p:SetAffected(game_affected_value)
+p:SetZone("Graveyard" | "Exile" | "Library")
+p:SetFromLibraryTop()
+p:SetLinked()
+p:SetRevealTop()
+p:SetKind("PlayLand" | "Cast")
+p:SetOwner(game_affected_value)
+p:SetFilter(Game.Filter(...))
+p:SetRider("ExileInstead" | "ExileInsteadOfGraveyard")
+p:Register()
+```
+
+`:SetRider` needs `:SetKind("Cast")`. See [lua/player-modifiers.md](lua/player-modifiers.md).
+
 ### `Game.HandSizeEffects.*`
 
 Used with `:SetEffect` on `Game.CreateHandSizeModifier`.

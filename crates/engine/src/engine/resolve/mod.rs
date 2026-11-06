@@ -194,13 +194,9 @@ impl Engine {
         let mut events = Vec::new();
         if fizzles {
             // CR 608.2b: a fizzled spell does nothing and lands in its owner's graveyard,
-            // or exile if cast with an exiling alternative cost (CR 702.34a).
+            // unless its leave-stack rider says otherwise (CR 702.34a).
             if matches!(top.kind, StackEntryKind::Spell) {
-                let destination = if top.exile_on_leaving_stack {
-                    ZoneKind::Exile
-                } else {
-                    ZoneKind::Graveyard
-                };
+                let destination = top.leave_destination(ZoneKind::Graveyard);
                 if let Some(event) =
                     self.move_resolving_spell(top.stack_id, destination, false, false)
                 {
