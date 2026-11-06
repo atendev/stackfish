@@ -216,3 +216,48 @@ fn a_zone_permission_functions_only_from_its_declared_zone() {
     result.expect("the script runs cleanly");
     assert_eq!(state.zone_permissions.len(), 1);
 }
+
+// CR 608.2n
+#[test]
+fn set_rider_reaches_the_registered_permission() {
+    for (name, rider) in [
+        ("ExileInstead", LeaveStackRider::ExileInstead),
+        (
+            "ExileInsteadOfGraveyard",
+            LeaveStackRider::ExileInsteadOfGraveyard,
+        ),
+    ] {
+        let (state, result) = run(
+            &permission(&format!(
+                "p:SetAffected(Game.Affected.You)\np:SetZone(\"Graveyard\")\np:SetKind(\"Cast\")\np:SetRider(\"{name}\")"
+            )),
+            ZoneKind::Battlefield,
+        );
+        result.expect("the script registers cleanly");
+        let [permission] = state.zone_permissions.as_slice() else {
+            panic!("one permission, got {:?}", state.zone_permissions);
+        };
+        assert_eq!(permission.rider, Some(rider), "{name}");
+    }
+}
+
+#[test]
+fn set_rider_rejects_unknown_names_and_land_permissions() {
+    let (_, result) = run(
+        "local p = Game.CreateZonePermission(c)\np:SetRider(\"ShuffleInstead\")",
+        ZoneKind::Battlefield,
+    );
+    assert!(result.expect_err("no such rider").contains("SetRider"));
+    let (state, result) = run(
+        &permission(
+            "p:SetAffected(Game.Affected.You)\np:SetZone(\"Graveyard\")\np:SetKind(\"PlayLand\")\np:SetRider(\"ExileInstead\")",
+        ),
+        ZoneKind::Battlefield,
+    );
+    let err = result.expect_err("a land is never cast");
+    assert!(
+        err.contains("SetRider() needs SetKind(\\\"Cast\\\")"),
+        "{err}"
+    );
+    assert!(state.zone_permissions.is_empty());
+}

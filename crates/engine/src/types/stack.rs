@@ -141,3 +141,54 @@ impl StackObject {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spell(rider: Option<LeaveStackRider>) -> StackObject {
+        StackObject::new(
+            ObjectId(1),
+            StackEntryKind::Spell,
+            ObjectId(1),
+            PlayerId(0),
+            PlayerId(0),
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            rider,
+            false,
+            false,
+            ScriptHandle(0),
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    // CR 608.2n, 702.34a
+    #[test]
+    fn leave_destination_applies_each_rider() {
+        use ZoneKind::{Battlefield, Exile, Graveyard, Hand};
+        for (rider, default, expected) in [
+            (None, Graveyard, Graveyard),
+            (None, Hand, Hand),
+            (Some(LeaveStackRider::ExileInstead), Graveyard, Exile),
+            (Some(LeaveStackRider::ExileInstead), Battlefield, Exile),
+            (
+                Some(LeaveStackRider::ExileInsteadOfGraveyard),
+                Graveyard,
+                Exile,
+            ),
+            (Some(LeaveStackRider::ExileInsteadOfGraveyard), Hand, Hand),
+        ] {
+            assert_eq!(
+                spell(rider).leave_destination(default),
+                expected,
+                "{rider:?}"
+            );
+        }
+    }
+}
