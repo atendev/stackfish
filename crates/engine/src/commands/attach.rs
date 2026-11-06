@@ -59,11 +59,16 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
         ability.source = new_id;
         true
     });
-    // CR 611.3b
-    // A script re-registers a permission for the zone the object lands in, so the
-    // old object's permission must not keep granting flash or another zone.
-    state.timing_permissions.retain(|p| p.source != old_id);
-    state.zone_permissions.retain(|p| p.source != old_id);
+    // CR 611.3b, 611.2a
+    // A script re-registers a static permission for the zone the object lands in, so
+    // the old object's must not keep granting flash or another zone. A Timed grant
+    // has no script to re-register it and lasts its stated duration.
+    state
+        .timing_permissions
+        .retain(|p| p.source != old_id || !p.source_bound());
+    state
+        .zone_permissions
+        .retain(|p| p.source != old_id || !p.source_bound());
     // CR 607.2a, 400.7
     // A cast or land play moves the card with this call alone, so a linked card
     // leaving exile ends its link here as well as a source leaving play.
@@ -438,14 +443,19 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     // the battlefield. Cost modifiers, the player-level modifier lists and timing
     // and zone permissions have that shape (a cost reduction, an extra land drop,
     // flash, a graveyard land play), so they get the same source-keyed purge as the
-    // three lists above.
+    // three lists above. A Timed permission from a resolving effect is not static, so
+    // it stays (CR 611.2a).
     state.cost_modifiers.retain(|m| m.source != old_id);
     state.hand_size_modifiers.retain(|m| m.source != old_id);
     state.hand_reveal_modifiers.retain(|m| m.source != old_id);
     state.draw_limit_modifiers.retain(|m| m.source != old_id);
     state.land_play_modifiers.retain(|m| m.source != old_id);
-    state.timing_permissions.retain(|p| p.source != old_id);
-    state.zone_permissions.retain(|p| p.source != old_id);
+    state
+        .timing_permissions
+        .retain(|p| p.source != old_id || !p.source_bound());
+    state
+        .zone_permissions
+        .retain(|p| p.source != old_id || !p.source_bound());
     // CR 607.2a, 400.7
     // A new object is unrelated to the old one, so a link ends when either the
     // exiled card or its source leaves its zone.

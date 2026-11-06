@@ -1,5 +1,6 @@
 use crate::types::cost::{FilterController, FilterSpec};
 use crate::types::counter::CounterSet;
+use crate::types::effect::EffectDuration;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
@@ -280,10 +281,11 @@ pub fn effective_land_play_limit(modifiers: &[LandPlayModifier], player: PlayerI
         .sum::<u32>()
 }
 
-/// CR 601.3b: a static "you may cast spells as though they had flash" effect
-/// (Vedalken Orrery). A permission, not the FLASH keyword, so no keyword reader
-/// sees it. `commands::can_cast_now` reads it and `commands::retire_object`
-/// purges it by `source` (CR 611.3b).
+/// CR 601.3b: a "you may cast spells as though they had flash" effect, static
+/// (Vedalken Orrery) or a Timed grant from a resolving effect. A permission, not
+/// the FLASH keyword, so no keyword reader sees it. `commands::can_cast_now`
+/// reads it, and `commands::retire_object` purges a static one by `source`
+/// (CR 611.3b).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimingPermission {
     pub source: ObjectId,
@@ -293,6 +295,16 @@ pub struct TimingPermission {
     /// The spells it covers, `FilterSpec::ANY` for every spell. A filter with
     /// `extra` set never matches (see `FilterSpec::matches`).
     pub spells: FilterSpec,
+    /// `WhileSourceOnBattlefield` for a static ability. A Timed grant carries
+    /// a drained duration and outlives its source (CR 611.2a).
+    pub duration: EffectDuration,
+}
+
+impl TimingPermission {
+    /// CR 611.3b: whether the row ends when its source leaves.
+    pub(crate) fn source_bound(&self) -> bool {
+        self.duration == EffectDuration::WhileSourceOnBattlefield
+    }
 }
 
 /// CR 601.3b: whether a permission in `permissions` lets `player` cast `card`
@@ -321,12 +333,12 @@ pub enum ZonePermissionKind {
     Cast,
 }
 
-/// CR 601.3, 305.1: a static "you may play lands from your graveyard" effect
-/// (Crucible of Worlds). It answers where a card may come from, and
-/// `TimingPermission` answers when. `commands::can_cast_from_zone` and
+/// CR 601.3, 305.1: a "you may play lands from your graveyard" effect, static
+/// (Crucible of Worlds) or a Timed grant. It answers where a card may come
+/// from, and `TimingPermission` answers when. `commands::can_cast_from_zone` and
 /// `commands::can_play_land_from_zone` read it, and `commands::retire_object`
-/// purges it by `source` (CR 611.3b).
-// TODO: a zone permission lasts while its source is on the battlefield, so "until end of turn" grants have no expiry (CR 611.2)
+/// purges a static one by `source` (CR 611.3b).
+// TODO: Permanent, WhileConditionHolds and UntilSourceLeaves durations are rejected for permissions (CR 611.2b)
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZonePermission {
     pub source: ObjectId,
@@ -347,10 +359,13 @@ pub struct ZonePermission {
     pub library_top: bool,
     /// CR 607.2a: only cards in `GameState.exiled_with` under `source` match.
     /// Set only with zone `Exile`.
+    // TODO: a Timed linked grant matches nothing once its source leaves, so a spell's impulse draw has no exile link (CR 607.2a)
     pub linked: bool,
     /// CR 401.5: every player sees the top card `library_top` opens, not just
     /// the players it affects.
     pub reveals_top: bool,
+    /// As `TimingPermission::duration`.
+    pub duration: EffectDuration,
 }
 
 fn relative(filter: FilterController, who: PlayerId, controller: PlayerId) -> bool {
@@ -362,6 +377,11 @@ fn relative(filter: FilterController, who: PlayerId, controller: PlayerId) -> bo
 }
 
 impl ZonePermission {
+    /// CR 611.3b: whether the row ends when its source leaves.
+    pub(crate) fn source_bound(&self) -> bool {
+        self.duration == EffectDuration::WhileSourceOnBattlefield
+    }
+
     /// Whether `card` is one this permission opens, whoever acts on it.
     fn covers(&self, state: &GameState, card: &GameObject) -> bool {
         self.zone == card.zone

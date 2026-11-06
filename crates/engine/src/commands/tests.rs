@@ -200,6 +200,7 @@ fn dummy_timing_permission(source: ObjectId) -> TimingPermission {
         controller: PlayerId(0),
         affected: FilterController::You,
         spells: FilterSpec::ANY,
+        duration: EffectDuration::WhileSourceOnBattlefield,
     }
 }
 
@@ -215,6 +216,7 @@ fn dummy_zone_permission(source: ObjectId) -> ZonePermission {
         library_top: false,
         linked: false,
         reveals_top: false,
+        duration: EffectDuration::WhileSourceOnBattlefield,
     }
 }
 
@@ -427,4 +429,56 @@ fn retire_object_purges_only_the_retired_source() {
     assert_eq!(sources, vec![ObjectId(2)]);
     let sources: Vec<ObjectId> = state.zone_permissions.iter().map(|p| p.source).collect();
     assert_eq!(sources, vec![ObjectId(2)]);
+}
+
+fn timed(mut state: GameState, source: ObjectId) -> GameState {
+    state.timing_permissions.push(TimingPermission {
+        duration: EffectDuration::UntilEndOfTurn,
+        ..dummy_timing_permission(source)
+    });
+    state.zone_permissions.push(ZonePermission {
+        duration: EffectDuration::UntilEndOfTurn,
+        ..dummy_zone_permission(source)
+    });
+    state
+}
+
+// CR 611.2a, 611.3b
+#[test]
+fn retire_object_keeps_a_timed_permission_from_the_departed_source() {
+    let mut state = timed(minimal_state(), ObjectId(1));
+    state
+        .timing_permissions
+        .push(dummy_timing_permission(ObjectId(1)));
+    state
+        .zone_permissions
+        .push(dummy_zone_permission(ObjectId(1)));
+
+    retire_object(&mut state, ObjectId(1));
+
+    let timing: Vec<EffectDuration> = state
+        .timing_permissions
+        .iter()
+        .map(|p| p.duration.clone())
+        .collect();
+    assert_eq!(timing, vec![EffectDuration::UntilEndOfTurn]);
+    let zone: Vec<EffectDuration> = state
+        .zone_permissions
+        .iter()
+        .map(|p| p.duration.clone())
+        .collect();
+    assert_eq!(zone, vec![EffectDuration::UntilEndOfTurn]);
+}
+
+// CR 611.2a
+#[test]
+fn remap_abilities_keeps_a_timed_permission_under_its_old_source() {
+    let mut state = timed(minimal_state(), ObjectId(1));
+
+    remap_abilities(&mut state, ObjectId(1), ObjectId(3));
+
+    assert_eq!(state.timing_permissions.len(), 1);
+    assert_eq!(state.timing_permissions[0].source, ObjectId(1));
+    assert_eq!(state.zone_permissions.len(), 1);
+    assert_eq!(state.zone_permissions[0].source, ObjectId(1));
 }

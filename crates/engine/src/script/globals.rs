@@ -514,6 +514,31 @@ pub(crate) fn bind_game_globals(
         Ok(OperationTag(AbilityEffect::GainControl(duration)))
     })?;
     ops.set("GainControl", gain_control)?;
+    // CR 611.2a
+    // `Game.Ops.GrantTimingPermission(builder, duration)` and `GrantZonePermission` take a
+    // finished builder without pushing it, since a Timed grant is installed only on resolution.
+    let grant_timing_permission =
+        lua.create_function(|_, (builder, duration): (AnyUserData, AnyUserData)| {
+            let mut permission = builder
+                .borrow::<TimingPermissionBuilder>()?
+                .build("Game.Ops.GrantTimingPermission")?;
+            permission.duration = timed_grant_duration(&duration, "GrantTimingPermission")?;
+            Ok(OperationTag(AbilityEffect::GrantTimingPermission(
+                Box::new(permission),
+            )))
+        })?;
+    ops.set("GrantTimingPermission", grant_timing_permission)?;
+    let grant_zone_permission =
+        lua.create_function(|_, (builder, duration): (AnyUserData, AnyUserData)| {
+            let mut permission = builder
+                .borrow::<ZonePermissionBuilder>()?
+                .build("Game.Ops.GrantZonePermission")?;
+            permission.duration = timed_grant_duration(&duration, "GrantZonePermission")?;
+            Ok(OperationTag(AbilityEffect::GrantZonePermission(Box::new(
+                permission,
+            ))))
+        })?;
+    ops.set("GrantZonePermission", grant_zone_permission)?;
     // `Game.Ops.Regenerate()` (CR 701.19a): a no-argument toggle like `Destroy`.
     ops.set("Regenerate", OperationTag(AbilityEffect::Regenerate))?;
     let draw_cards =
@@ -1577,6 +1602,20 @@ pub(crate) fn bind_game_globals(
     game.set("MayChoose", may_choose)?;
     game.set("ChooseN", choose_n)?;
     lua.globals().set("Game", game)
+}
+
+/// CR 611.2b: a Timed grant takes only a duration with a drain in `engine/turn.rs`.
+fn timed_grant_duration(duration: &AnyUserData, op_name: &str) -> mlua::Result<EffectDuration> {
+    let duration = duration.borrow::<DurationTag>()?.0.clone();
+    match duration {
+        EffectDuration::UntilEndOfTurn
+        | EffectDuration::UntilYourNextTurn
+        | EffectDuration::UntilEndOfCombat => Ok(duration),
+        other => Err(mlua::Error::RuntimeError(format!(
+            "Game.Ops.{op_name} takes Game.Durations.UntilEndOfTurn, UntilYourNextTurn or \
+             UntilEndOfCombat (CR 611.2b), got {other:?}"
+        ))),
+    }
 }
 
 /// Decodes the `{ control = "you" | "owner", tapped = bool }` options table

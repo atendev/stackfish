@@ -4,7 +4,7 @@ An effect that lets a player play lands or cast spells from another zone (Crucib
 
 ## Shape
 
-- `ZonePermission { source, controller, affected, zone, owners, kind, cards, library_top, linked, reveals_top }` in `types/player.rs`, with `ZonePermissionKind { PlayLand, Cast }`.
+- `ZonePermission { source, controller, affected, zone, owners, kind, cards, library_top, linked, reveals_top, duration }` in `types/player.rs`, with `ZonePermissionKind { PlayLand, Cast }`.
 - `zone` is `Graveyard`, `Exile`, or `Library` with `library_top`. `owners` matches `card.owner` relative to `controller`, because a graveyard belongs to its owner and exile is shared. `cards` is `FilterSpec::ANY` unless a script calls `:SetFilter`, and a filter with `extra` never matches.
 - It is not a field on `TimingPermission`. Timing answers when and zone answers where, and an effect that grants both registers both.
 
@@ -37,7 +37,7 @@ An effect that lets a player play lands or cast spells from another zone (Crucib
 
 ## Leaving
 
-`retire_object` and `remap_abilities` drop a source's zone permissions, as they do timing permissions (CR 611.3b), and the `exiled_with` records of a source or card that moved (CR 607.2a, 400.7).
+`retire_object` and `remap_abilities` drop a source's static zone permissions (Timed grants stay, see `37-expiring-permissions.md`), as they do timing permissions (CR 611.3b), and the `exiled_with` records of a source or card that moved (CR 607.2a, 400.7).
 
 ## Lua
 

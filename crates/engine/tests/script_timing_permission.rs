@@ -61,6 +61,7 @@ fn a_script_registers_a_permission_for_every_spell() {
             controller: PlayerId(1),
             affected: FilterController::You,
             spells: FilterSpec::ANY,
+            duration: EffectDuration::WhileSourceOnBattlefield,
         }]
     );
 }

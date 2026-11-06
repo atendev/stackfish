@@ -56,12 +56,14 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 084 Expiring timing and zone permissions. `TimingPermission` and `ZonePermission` each gain `duration: EffectDuration`. Static grants keep `WhileSourceOnBattlefield`, and Timed grants installed by a resolving effect last until end of turn, end of combat or your next turn, outlive their source and expire through the `engine/turn.rs` drains (CR 611.2a, 514.2). No proof card. Build is 087. [closed/084-expiring-permissions.md]
 - 085 Zone permission riders. A rider is a per-cast fact on `StackObject`: `leave_stack_rider: Option<LeaveStackRider>` (`ExileInstead`, `ExileInsteadOfGraveyard`) replaces the flashback bool, `cast_zone_source` reports which permission allowed the cast, and one `leave_destination` helper serves resolve, fizzle and counter (CR 608.2n, 702.34a). Kess, Dissident Mage is a scenario fixture. Build is 088. [closed/085-zone-permission-riders.md]
 - 086 Build library-top and linked-exile zone permissions. Built as 083 decided, with `Game.Ops.ExileLinked` in place of an exile-builder setter, the top-card helpers in `types/player.rs` and host visibility computed from the permissions at check time. A revealed top is snapshot-only, with no reveal event. [closed/086-build-library-linked-exile-zone-permissions.md]
+- 087 Build expiring timing and zone permissions. Built as 084 decided, with the `AbilityEffect` rows boxed and `BEHAVIOUR_REV` left at 8, because the pin did not move. A Timed linked grant is accepted, and one from a spell matches nothing. [closed/087-build-expiring-permissions.md]
 
 ## Not yet specified
 
 - Carddb-backed CardSource: a thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. Its shape is settled in 006. The Godot adapter's `create` needs it to serve real cards.
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
+- Impulse draw from a spell. `ExileLinked` records links only under a battlefield source, and a link ends when its source moves, so a spell's "exile the top card, you may play it this turn" has no link for its Timed grant. The link needs to belong to the effect, not the source (found by 087).
 - A reveal event for a library top. A revealed top shows in snapshots and decisions, but no event tells a Seat when it appears or stops being the top, so an event-only client cannot track it (found by 086).
 
 ## Out of scope
@@ -75,5 +77,4 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open tickets, unblocked and unclaimed:
 
-- 087 Build expiring timing and zone permissions, a build ticket. It touches `ZonePermission`, so rebase on 086.
 - 088 Build zone permission riders, a build ticket. It touches `ZonePermission`, so rebase on 086.

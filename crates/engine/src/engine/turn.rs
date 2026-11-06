@@ -9,6 +9,7 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::types::card::KeywordSet;
 use crate::types::effect::EffectDuration;
 use crate::types::event::GameEventKind;
+use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId};
 use crate::types::player::effective_max_hand_size;
 use crate::types::turn::{Phase, Step};
@@ -185,6 +186,9 @@ impl Engine {
         self.state
             .continuous_effects
             .retain(|e| !matches!(e.duration, EffectDuration::UntilEndOfTurn));
+        expire_permissions(&mut self.state, |duration, _| {
+            *duration == EffectDuration::UntilEndOfTurn
+        });
 
         let active = self.state.active_player;
         let hand_size = self
@@ -335,6 +339,9 @@ impl Engine {
                 self.state
                     .continuous_effects
                     .retain(|e| !matches!(e.duration, EffectDuration::UntilEndOfCombat));
+                expire_permissions(&mut self.state, |duration, _| {
+                    *duration == EffectDuration::UntilEndOfCombat
+                });
                 false
             }
             (Phase::Main, Step::PostCombatMain) => {
@@ -370,6 +377,12 @@ impl Engine {
                         Some(source_obj) => source_obj.controller != new_active_player,
                         None => true,
                     }
+                });
+                // A permission keeps its controller from resolution, so a source that
+                // has left cannot strand it.
+                expire_permissions(&mut self.state, |duration, controller| {
+                    *duration == EffectDuration::UntilYourNextTurn
+                        && controller == new_active_player
                 });
                 self.state.turn_number += 1;
                 self.state.phase = Phase::Beginning;
@@ -543,4 +556,16 @@ impl Engine {
         self.process_state = ProcessState::AwaitingDiscard { player, excess };
         status
     }
+}
+
+/// CR 611.2a: drops every timing and zone permission whose duration and stored
+/// controller `expired` matches. Static rows never match, since they carry
+/// `WhileSourceOnBattlefield` and end with their source instead.
+fn expire_permissions(state: &mut GameState, expired: impl Fn(&EffectDuration, PlayerId) -> bool) {
+    state
+        .timing_permissions
+        .retain(|p| !expired(&p.duration, p.controller));
+    state
+        .zone_permissions
+        .retain(|p| !expired(&p.duration, p.controller));
 }

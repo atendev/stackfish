@@ -1126,6 +1126,8 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::Counters { .. }
             | AbilityEffect::Pump { .. }
             | AbilityEffect::GainControl(_)
+            | AbilityEffect::GrantTimingPermission(_)
+            | AbilityEffect::GrantZonePermission(_)
             | AbilityEffect::Shuffle
             | AbilityEffect::Regenerate
             | AbilityEffect::LoseLife(_)
@@ -1307,6 +1309,7 @@ mod tests {
     };
     use crate::types::cost::{FilterController, FilterSpec};
     use crate::types::counter::CounterSet;
+    use crate::types::effect::EffectDuration;
     use crate::types::game::{GameState, RngState};
     use crate::types::ids::{ObjectId, PlayerId, SequenceNo, Target};
     use crate::types::mana::{Color, ManaCost, ManaPool, ManaUnit};
@@ -1549,6 +1552,7 @@ mod tests {
             controller,
             affected,
             spells: FilterSpec::ANY,
+            duration: EffectDuration::WhileSourceOnBattlefield,
         }
     }
 
@@ -1662,6 +1666,7 @@ mod tests {
             library_top: false,
             linked: false,
             reveals_top: false,
+            duration: EffectDuration::WhileSourceOnBattlefield,
         }
     }
 

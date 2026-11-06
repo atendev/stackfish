@@ -73,6 +73,7 @@ fn a_script_registers_a_graveyard_land_permission() {
             library_top: false,
             linked: false,
             reveals_top: false,
+            duration: EffectDuration::WhileSourceOnBattlefield,
         }]
     );
 }

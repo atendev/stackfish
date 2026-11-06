@@ -13,6 +13,7 @@ use crate::types::effect::{
 };
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, Target};
+use crate::types::player::{TimingPermission, ZonePermission};
 use crate::types::stack::StackObject;
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -359,6 +360,34 @@ impl Engine {
                 condition: None,
             });
         }
+        ControlFlow::Continue(events)
+    }
+
+    pub(super) fn resolve_grant_timing_permission(
+        &mut self,
+        top: &StackObject,
+        permission: &TimingPermission,
+        events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        self.state.timing_permissions.push(TimingPermission {
+            source: top.source,
+            controller: top.controller,
+            ..permission.clone()
+        });
+        ControlFlow::Continue(events)
+    }
+
+    pub(super) fn resolve_grant_zone_permission(
+        &mut self,
+        top: &StackObject,
+        permission: &ZonePermission,
+        events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        self.state.zone_permissions.push(ZonePermission {
+            source: top.source,
+            controller: top.controller,
+            ..permission.clone()
+        });
         ControlFlow::Continue(events)
     }
 

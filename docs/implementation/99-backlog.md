@@ -24,10 +24,11 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 ## Live TODOs / unresolved gaps
 
 - **Timing permissions (`phase5/timing-permissions`)**: see `35-timing-permissions.md`. Open items:
-  - "Until end of turn" grants, conditional flash, "as though it were a main phase" and instant-speed equip are
-    not built.
+  - Conditional flash, "as though it were a main phase" and instant-speed equip are not built.
+  - `Permanent`, `WhileConditionHolds` and "until the source leaves" durations are refused for a grant (CR 611.2b).
 - **Zone permissions (`phase5/zone-permissions`)**: see `36-zone-permissions.md`. Open items:
-  - "Until end of turn" grants (CR 611.2), ticket 084.
+  - A Timed linked grant matches nothing once its source leaves, so a spell's impulse draw has no exile link
+    (CR 607.2a).
   - "Exile it instead" riders on a spell cast through a permission (CR 608.2n), ticket 085.
   - Face-down linked cards are never offered (CR 601.3f), since nothing makes a card face down yet.
   - Revealing the top applies only to permissions, not the stand-alone "play with the top card revealed" effect

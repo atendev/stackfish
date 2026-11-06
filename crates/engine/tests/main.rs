@@ -141,6 +141,7 @@ mod operation_only_script;
 mod operation_result_draw_damage_counters;
 mod pass_priority_loop;
 mod payment_unwind;
+mod permission_expiry;
 mod persist_undying;
 mod play_land;
 mod player_elimination;

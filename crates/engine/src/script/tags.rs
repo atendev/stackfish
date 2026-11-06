@@ -170,8 +170,9 @@ impl UserData for LayerTag {}
 pub(crate) struct EffectPrimitiveTag(pub(crate) EffectPrimitive);
 impl UserData for EffectPrimitiveTag {}
 
-/// Like `ConditionTag`, for `Game.Durations.*`, the third argument to
-/// `Game.Ops.Pump`. Only the four durations with a drain path
+/// Like `ConditionTag`, for `Game.Durations.*`, the duration argument to
+/// `Game.Ops.Pump`, `GainControl` and the two permission grants, which take
+/// only the three drained ones. Only the four durations with a drain path
 /// (`Engine::advance_turn_step`'s Cleanup and EndOfCombat arms) are bound.
 /// `WhileSourceOnBattlefield` and `UntilSourceLeaves` would be sugar for
 /// `Pump`, since the target's id stops resolving when it leaves any zone (see

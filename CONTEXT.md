@@ -69,12 +69,16 @@ _Avoid_: Mode, ruleset
 ### Rules primitives
 
 **Timing permission**:
-A standing grant that lets a player cast matching spells as though they had flash. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it. Where a card may be played or cast from is a Zone permission.
+A standing grant that lets a player cast matching spells as though they had flash. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it. Where a card may be played or cast from is a Zone permission. A static one lasts while its source is on the battlefield, and a Timed grant lasts its `duration`.
 _Avoid_: Flash grant, flash effect, timing modifier
 
 **Zone permission**:
-A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. A library-top permission opens only the top card of a library, which only its affected players may look at unless it reveals the top to everyone (Future Sight). A linked permission opens only the cards exiled with its source. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. A card's own alternative cost, such as flashback, is not a Zone permission.
+A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. A library-top permission opens only the top card of a library, which only its affected players may look at unless it reveals the top to everyone (Future Sight). A linked permission opens only the cards exiled with its source. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. Like a Timing permission, it is static or a Timed grant. A card's own alternative cost, such as flashback, is not a Zone permission.
 _Avoid_: Play-from-zone effect, zone grant
+
+**Timed grant**:
+A Timing or Zone permission installed by a resolving spell or ability through `Game.Ops.GrantTimingPermission` or `GrantZonePermission`, with `UntilEndOfTurn`, `UntilYourNextTurn` or `UntilEndOfCombat` (CR 611.2a). It is independent of its source, so it survives the source leaving, and the turn drains remove it.
+_Avoid_: Temporary permission, one-shot permission
 
 **Linked exile (exiled with)**:
 A record that a card was exiled by a particular source, kept in `GameState.exiled_with` (CR 607.2a). `Game.Ops.ExileLinked` writes it, and a linked Zone permission reads it. The link ends when the card leaves exile or the source leaves the battlefield, because either one becomes a new object. It is not the "exile until it leaves the battlefield" link in `linked_exiles`, which returns the card.

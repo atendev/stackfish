@@ -320,6 +320,8 @@ pub(super) fn validate_activate_ability(
         | Some(AbilityEffect::Counters { .. })
         | Some(AbilityEffect::Pump { .. })
         | Some(AbilityEffect::GainControl(_))
+        | Some(AbilityEffect::GrantTimingPermission(_))
+        | Some(AbilityEffect::GrantZonePermission(_))
         | Some(AbilityEffect::Regenerate)
         | Some(AbilityEffect::DrawCards(_))
         | Some(AbilityEffect::CreateToken { .. })

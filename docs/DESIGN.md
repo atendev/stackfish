@@ -157,10 +157,12 @@ original plan:
   `land_play_modifiers` and the other player modifiers, `timing_permissions` (when a player may
   cast) and `zone_permissions` (which zone a player may play or cast from, including the top of a
   library and cards exiled with a source). Each is purged by source in `retire_object` and
-  `remap_abilities`. "Exiled with" links live in `exiled_with`, apart from the `linked_exiles`
+  `remap_abilities`, except a Timed permission from a resolving effect, which carries a
+  `duration` and expires in the turn drains instead. "Exiled with" links live in `exiled_with`, apart from the `linked_exiles`
   "until it leaves" returns, and end when either object moves. A revealed library top reaches a
   Seat through `library_top_visible_to`, read at check time. See
-  `docs/implementation/35-timing-permissions.md` and `docs/implementation/36-zone-permissions.md`.
+  `docs/implementation/35-timing-permissions.md`, `36-zone-permissions.md` and
+  `37-expiring-permissions.md`.
 - `PlayerAction -> EngineCommand -> GameEvent` pipeline, per the adaptation doc, unchanged — see
   `docs/implementation/01-pipeline.md` for why `EngineCommand` doesn't decompose into a lower command tier.
 

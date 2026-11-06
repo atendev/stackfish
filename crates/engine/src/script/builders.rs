@@ -1201,25 +1201,34 @@ impl UserData for TimingPermissionBuilder {
             ))),
         });
         methods.add_method_mut("Register", |_, this, ()| {
-            let affected = this.affected.ok_or_else(|| {
-                mlua::Error::RuntimeError(
-                    "Register() called with no SetAffected() - a timing permission needs to know \
-                     which player(s) it affects"
-                        .to_string(),
-                )
-            })?;
-            this.registry.borrow_mut().pending_timing_permissions.push((
-                TimingPermission {
-                    source: this.source,
-                    // Placeholder, stamped by `run_card_script`'s drain step.
-                    controller: PlayerId(0),
-                    affected,
-                    spells: this.spells.clone().unwrap_or(FilterSpec::ANY),
-                },
-                this.function_zone,
-            ));
+            let permission = this.build("Register()")?;
+            this.registry
+                .borrow_mut()
+                .pending_timing_permissions
+                .push((permission, this.function_zone));
             Ok(())
         });
+    }
+}
+
+impl TimingPermissionBuilder {
+    /// The finished row with the static default duration, shared by `:Register`
+    /// and `Game.Ops.GrantTimingPermission`. `call` names the caller in errors.
+    pub(crate) fn build(&self, call: &str) -> mlua::Result<TimingPermission> {
+        let affected = self.affected.ok_or_else(|| {
+            mlua::Error::RuntimeError(format!(
+                "{call} called with no SetAffected() - a timing permission needs to know \
+                 which player(s) it affects"
+            ))
+        })?;
+        Ok(TimingPermission {
+            source: self.source,
+            // Placeholder, stamped by `run_card_script`'s drain step or on resolution.
+            controller: PlayerId(0),
+            affected,
+            spells: self.spells.clone().unwrap_or(FilterSpec::ANY),
+            duration: EffectDuration::WhileSourceOnBattlefield,
+        })
     }
 }
 
@@ -1305,45 +1314,55 @@ impl UserData for ZonePermissionBuilder {
             ))),
         });
         methods.add_method_mut("Register", |_, this, ()| {
-            let missing = |setter: &str| {
-                mlua::Error::RuntimeError(format!(
-                    "Register() called with no {setter}() - a zone permission needs it"
-                ))
-            };
-            let affected = this.affected.ok_or_else(|| missing("SetAffected"))?;
-            let zone = this.zone.ok_or_else(|| missing("SetZone"))?;
-            let kind = this.kind.ok_or_else(|| missing("SetKind"))?;
-            let refuse = |reason: &str| {
-                Err(mlua::Error::RuntimeError(format!(
-                    "a zone permission's Register() refused: {reason}"
-                )))
-            };
-            if (zone == ZoneKind::Library) != this.library_top {
-                return refuse("SetZone(\"Library\") and SetFromLibraryTop() go together");
-            }
-            if this.linked && zone != ZoneKind::Exile {
-                return refuse("SetLinked() needs SetZone(\"Exile\")");
-            }
-            if this.reveals_top && !this.library_top {
-                return refuse("SetRevealTop() needs SetFromLibraryTop()");
-            }
-            this.registry.borrow_mut().pending_zone_permissions.push((
-                ZonePermission {
-                    source: this.source,
-                    // Placeholder, stamped by `run_card_script`'s drain step.
-                    controller: PlayerId(0),
-                    affected,
-                    zone,
-                    owners: this.owners.unwrap_or(FilterController::You),
-                    kind,
-                    cards: this.cards.clone().unwrap_or(FilterSpec::ANY),
-                    library_top: this.library_top,
-                    linked: this.linked,
-                    reveals_top: this.reveals_top,
-                },
-                this.function_zone,
-            ));
+            let permission = this.build("Register()")?;
+            this.registry
+                .borrow_mut()
+                .pending_zone_permissions
+                .push((permission, this.function_zone));
             Ok(())
         });
+    }
+}
+
+impl ZonePermissionBuilder {
+    /// As `TimingPermissionBuilder::build`, for `:Register` and
+    /// `Game.Ops.GrantZonePermission`.
+    pub(crate) fn build(&self, call: &str) -> mlua::Result<ZonePermission> {
+        let missing = |setter: &str| {
+            mlua::Error::RuntimeError(format!(
+                "{call} called with no {setter}() - a zone permission needs it"
+            ))
+        };
+        let affected = self.affected.ok_or_else(|| missing("SetAffected"))?;
+        let zone = self.zone.ok_or_else(|| missing("SetZone"))?;
+        let kind = self.kind.ok_or_else(|| missing("SetKind"))?;
+        let refuse = |reason: &str| {
+            Err(mlua::Error::RuntimeError(format!(
+                "a zone permission's {call} refused: {reason}"
+            )))
+        };
+        if (zone == ZoneKind::Library) != self.library_top {
+            return refuse("SetZone(\"Library\") and SetFromLibraryTop() go together");
+        }
+        if self.linked && zone != ZoneKind::Exile {
+            return refuse("SetLinked() needs SetZone(\"Exile\")");
+        }
+        if self.reveals_top && !self.library_top {
+            return refuse("SetRevealTop() needs SetFromLibraryTop()");
+        }
+        Ok(ZonePermission {
+            source: self.source,
+            // Placeholder, stamped by `run_card_script`'s drain step or on resolution.
+            controller: PlayerId(0),
+            affected,
+            zone,
+            owners: self.owners.unwrap_or(FilterController::You),
+            kind,
+            cards: self.cards.clone().unwrap_or(FilterSpec::ANY),
+            library_top: self.library_top,
+            linked: self.linked,
+            reveals_top: self.reveals_top,
+            duration: EffectDuration::WhileSourceOnBattlefield,
+        })
     }
 }

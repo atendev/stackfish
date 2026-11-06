@@ -18,9 +18,13 @@ An effect that lets a player cast spells as though they had flash (Vedalken Orre
 - Casts during resolution (cascade, `may_cast`) and the madness `pending_timing_bypass` never read timing (CR 608.2g), so they skip the predicate.
 - Land plays and Equip keep `is_sorcery_speed`.
 
+## Duration
+
+- `duration: EffectDuration` is `WhileSourceOnBattlefield` for a `:Register`ed static permission. A Timed grant from `AbilityEffect::GrantTimingPermission` carries `UntilEndOfTurn`, `UntilYourNextTurn` or `UntilEndOfCombat`. See `37-expiring-permissions.md`.
+
 ## Leaving
 
-- `retire_object` drops a source's permissions, which covers every move through `commit_zone_move` (a bounce, a death).
+- `retire_object` drops a source's static permissions (`source_bound`), which covers every move through `commit_zone_move` (a bounce, a death).
 - Cast, land play, payment, library choices and pregame move an object by hand and call `remap_abilities`, which also drops permissions keyed to the old id. A script re-registers one for the new zone if it functions there.
 - The cost modifier and player modifier lists are not purged in `remap_abilities`. That is a TODO there.
 
@@ -48,4 +52,4 @@ An effect that lets a player cast spells as though they had flash (Vedalken Orre
 
 ## Not built
 
-"Until end of turn" grants, conditional flash (CR 601.3d), "as though it were a main phase" and instant-speed equip each have a TODO.
+Conditional flash (CR 601.3d), "as though it were a main phase" and instant-speed equip each have a TODO.

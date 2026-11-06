@@ -10,7 +10,7 @@ The canonical reference has moved to [docs/LUA_API.md](../LUA_API.md). This fold
 - **[Mana abilities](mana-abilities.md)** — `Game.CreateManaAbility` and mana production.
 - **[Replacement effects](replacement-effects.md)** — `Game.CreateReplacementEffect`, filters, payloads, and consumption.
 - **[Cost modifiers](cost-modifiers.md)** — `Game.CreateCostModifier`.
-- **[Player modifiers](player-modifiers.md)** — hand size, hand reveal, draw limit, extra land plays, flash timing permissions, and permissions to play or cast from a graveyard or exile.
+- **[Player modifiers](player-modifiers.md)** — hand size, hand reveal, draw limit, extra land plays, flash timing permissions, permissions to play or cast from a graveyard or exile, and Timed grants of both.
 - **[Targeting and mid-resolution choices](targeting-and-choices.md)** — filter tables, `Game.SelectTargets`, `Game.MayChoose`, `Game.ChooseN`, and scripted predicates.
 - **[Tokens](tokens.md)** — `Game.Tokens.*` and `Game.Ops.CreateToken`.
 - **[Not available yet](not-available-yet.md)** — named gaps rather than silently guessed features.
