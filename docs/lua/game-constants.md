@@ -131,7 +131,8 @@ something to it, and anything else is a load error.
 Player tags go to the [player modifiers](player-modifiers.md): `Game.CreateHandSizeModifier`,
 `CreateHandRevealModifier`, `CreateDrawLimitModifier`, `CreateLandPlayModifier`, `CreateTimingPermission`
 and `CreateZonePermission`. The draw limit and land play modifiers and the timing and zone permissions
-reject `EnchantedPlayer` at `:SetAffected`, and the zone permission rejects it at `:SetOwner` too. An object tag given to a player
+reject `EnchantedPlayer` at `:SetAffected`, and the zone permission rejects it at `:SetOwner` too. A zone
+permission's `:SetRider` takes the name `"ExileInstead"` or `"ExileInsteadOfGraveyard"` (CR 608.2n). An object tag given to a player
 modifier, or a player tag given to a static ability, is a load error.
 
 ## `Game.Filter(table)`

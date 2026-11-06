@@ -178,6 +178,26 @@ face-down card is never offered (CR 601.3f). `:Register()` is an error when `"Li
 `:SetFromLibraryTop()` are not used together, when `:SetLinked()` is used with a zone other than
 `"Exile"`, or when `:SetRevealTop()` is used without `:SetFromLibraryTop()`.
 
+`:SetRider(name)` sets where a spell cast through the permission goes when it leaves the stack
+(CR 608.2n). `"ExileInstead"` exiles it whether it resolves, is countered or fizzles, as flashback
+does. `"ExileInsteadOfGraveyard"` exiles it only where it would go to a graveyard, so a permanent
+spell still enters the battlefield, and a countered one is exiled. The rider is fixed when the spell
+is cast, so it still applies after the source leaves. It is optional and needs `:SetKind("Cast")`.
+When several permissions let a card be cast, one without a rider is used. A flashback cast uses the
+flashback cost's own exile and ignores the permission. Buyback still returns the spell to hand.
+
+```lua
+-- Kess, Dissident Mage: during each of your turns, you may cast an instant or sorcery spell from
+-- your graveyard. If a spell cast this way would be put into your graveyard, exile it instead.
+local p = Game.CreateZonePermission(c)
+p:SetAffected(Game.Affected.You)
+p:SetZone("Graveyard")
+p:SetKind("Cast")
+p:SetFilter(Game.Filter({ card_types = { "Instant", "Sorcery" } }))
+p:SetRider("ExileInsteadOfGraveyard")
+p:Register()
+```
+
 ## Timed grants — CR 611.2a
 
 `:Register()` installs a static permission, which lasts while its source is on the battlefield. A
@@ -221,4 +241,7 @@ spell matches nothing.
 - Impulse draw from a spell: a linked Timed grant matches nothing once its source leaves (CR 607.2a).
 - Face-down linked cards (never offered, CR 601.3f), the
   stand-alone "play with the top card of your library revealed" effect without a permission
-  (CR 401.5), and "exile it instead" riders on a spell cast through a permission (CR 608.2n).
+  (CR 401.5).
+- Kess's "during each of your turns" and once-per-turn limits, a choice between several matching
+  permissions (CR 601.2), "if it would die or leave exile this way" riders and battlefield-side exile
+  such as unearth (CR 608.2n).

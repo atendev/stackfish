@@ -29,7 +29,9 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Zone permissions (`phase5/zone-permissions`)**: see `36-zone-permissions.md`. Open items:
   - A Timed linked grant matches nothing once its source leaves, so a spell's impulse draw has no exile link
     (CR 607.2a).
-  - "Exile it instead" riders on a spell cast through a permission (CR 608.2n), ticket 085.
+  - Leave-stack riders are built (see `38-zone-permission-riders.md`). Open: "if it would die or leave exile this way"
+    riders, battlefield-side exile such as unearth, a rider on a permanent spell's battlefield entry, a player
+    choice between matching permissions (CR 601.2), and once-per-turn permission limits.
   - Face-down linked cards are never offered (CR 601.3f), since nothing makes a card face down yet.
   - Revealing the top applies only to permissions, not the stand-alone "play with the top card revealed" effect
     (CR 401.5).

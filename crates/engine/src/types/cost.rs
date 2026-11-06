@@ -208,7 +208,7 @@ pub enum AlternativeCost {
         /// reuse it.
         from_zone: ZoneKind,
         /// CR 702.34a: exile instead of the normal destination when it leaves
-        /// the stack. Copied to `StackObject::exile_on_leaving_stack` at push.
+        /// the stack. Copied to `StackObject::leave_stack_rider` as `ExileInstead`.
         exile_on_leaving_stack: bool,
         /// CR 702.138b: Escape's own alternative cost, `false` for Flashback
         /// and the rest. Both cast from the graveyard, so this is the only

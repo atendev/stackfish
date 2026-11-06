@@ -73,7 +73,10 @@ A standing grant that lets a player cast matching spells as though they had flas
 _Avoid_: Flash grant, flash effect, timing modifier
 
 **Zone permission**:
-A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. A library-top permission opens only the top card of a library, which only its affected players may look at unless it reveals the top to everyone (Future Sight). A linked permission opens only the cards exiled with its source. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. Like a Timing permission, it is static or a Timed grant. A card's own alternative cost, such as flashback, is not a Zone permission.
+A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. A library-top permission opens only the top card of a library, which only its affected players may look at unless it reveals the top to everyone (Future Sight). A linked permission opens only the cards exiled with its source. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. Like a Timing permission, it is static or a Timed grant. A Cast permission may carry a Leave-stack rider. A card's own alternative cost, such as flashback, is not a Zone permission.
+
+**Leave-stack rider**:
+Where a spell goes in place of its usual zone when it leaves the stack, such as flashback's "exile it instead" (CR 702.34a) or Kess, Dissident Mage's "if a spell cast this way would be put into your graveyard, exile it instead" (CR 608.2n). It is `StackObject.leave_stack_rider`, copied at cast from the chosen alternative cost or the Zone permission the spell was cast through, so it is a fact about that one cast and outlives the permission. `StackObject::leave_destination` is the one reader.
 _Avoid_: Play-from-zone effect, zone grant
 
 **Timed grant**:
