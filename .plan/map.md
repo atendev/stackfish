@@ -58,15 +58,22 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 086 Build library-top and linked-exile zone permissions. Built as 083 decided, with `Game.Ops.ExileLinked` in place of an exile-builder setter, the top-card helpers in `types/player.rs` and host visibility computed from the permissions at check time. A revealed top is snapshot-only, with no reveal event. [closed/086-build-library-linked-exile-zone-permissions.md]
 - 087 Build expiring timing and zone permissions. Built as 084 decided, with the `AbilityEffect` rows boxed and `BEHAVIOUR_REV` left at 8, because the pin did not move. A Timed linked grant is accepted, and one from a spell matches nothing. [closed/087-build-expiring-permissions.md]
 - 088 Build zone permission riders. Built as 085 decided. A rider-less permission wins over ones with riders, then list order, because permissions have no id. The Kess scenario casts Kess first, because battlefield setup does not register static scripts. `BEHAVIOUR_REV` stays 8. [closed/088-build-zone-permission-riders.md]
+- 105 How the loader treats design non-goal card types. 518 planeswalkers, battles and sagas and 38 Class cards load and do nothing, with no error. 231 face-down-cast cards play face up, and 73 face-down producers do nothing. Research recommends rejecting at load with a new `CardLoadError`, except the 229 face-up-playable cards. The choice goes to 112. [closed/105-unsupported-card-types-in-loader.md]
 
 ## Not yet specified
 
 - Carddb-backed CardSource: a thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. Its shape is settled in 006. The Godot adapter's `create` needs it to serve real cards.
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
-- Impulse draw from a spell. `ExileLinked` records links only under a battlefield source, and a link ends when its source moves, so a spell's "exile the top card, you may play it this turn" has no link for its Timed grant. The link needs to belong to the effect, not the source (found by 087).
-- Scenario battlefield setup does not run a card's script, so a static ability on a card placed there never registers. Fixtures cast the source from hand instead (found by 088).
-- A reveal event for a library top. A revealed top shows in snapshots and decisions, but no event tells a Seat when it appears or stops being the top, so an event-only client cannot track it (found by 086).
+- Chain operation leftovers. A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode are not built (`25-chain-operations.md`). A chain as a mode waits on the modal builder decision.
+- Opponent-chosen modes with three or more players, where the controller picks the chooser (CR 700.2e), and repeatable pawprint-budget modes (CR 700.2i).
+- Condescend's `{X}`. "Counter unless that player pays {X}" supports only a fixed printed amount, and an X announced on the countering spell has no representation yet.
+- Devour and Amplify quality restrictions, and a creature with several independent Amplify instances.
+- Enchanting or equipping a player. Attachment targets a permanent only.
+- Splice (CR 601.2b, 702.47). `PlayerAction` and `StackObject` cannot say which cards are spliced.
+- Restricted mana beyond a card-type filter (CR 106.11). Object-specific and activation restrictions are not modeled.
+- The loader rejection build. Its card set and error shape wait on 112.
+- Several pending kinds in one custom operation outcome. A `Chain` holds one pending kind today (`not-available-yet.md`).
 
 ## Out of scope
 
@@ -77,6 +84,36 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 ## Frontier
 
-Open tickets, unblocked and unclaimed:
+Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 from the backlog and the "Not yet specified" list, so they are follow-up work past the destination above.
 
-- none
+Decisions (HITL):
+
+- 089 Lua event visibility for conditions
+- 090 Modal builders in Lua
+- 091 Divide damage or counters among targets
+- 092 Effect-owned exile links
+- 093 Scenario battlefield setup runs scripts
+- 094 Library top reveal event
+- 095 Scenario schema additions
+- 096 Script-backed costs, or delete `invoke_cost`
+- 097 Permission choice and once-per-turn limits
+- 098 Timing permission follow-ups
+- 099 Riders beyond leaving the stack
+- 100 Reanimation options
+- 101 Ward costs and player hexproof
+- 103 Damage redirect to another target
+- 104 Fight and bite target shapes
+- 112 Which non-goal cards the loader rejects
+
+Builds and audits:
+
+- 106 Audit remaining order leaks (AFK)
+- 107 `remap_abilities` purges cost modifiers
+- 108 `new_game` loads alternative costs and buyback
+- 109 Proof game coverage gaps
+- 110 Stale note sweep (AFK)
+- 111 Echo sacrifice checks control
+
+Blocked:
+
+- 102 Stun counters and tap hooks (by 089)
