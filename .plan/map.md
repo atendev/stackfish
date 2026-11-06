@@ -60,13 +60,14 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 088 Build zone permission riders. Built as 085 decided. A rider-less permission wins over ones with riders, then list order, because permissions have no id. The Kess scenario casts Kess first, because battlefield setup does not register static scripts. `BEHAVIOUR_REV` stays 8. [closed/088-build-zone-permission-riders.md]
 - 105 How the loader treats design non-goal card types. 518 planeswalkers, battles and sagas and 38 Class cards load and do nothing, with no error. 231 face-down-cast cards play face up, and 73 face-down producers do nothing. Research recommends rejecting at load with a new `CardLoadError`, except the 229 face-up-playable cards. The choice goes to 112. [closed/105-unsupported-card-types-in-loader.md]
 - 089 Lua event visibility for conditions. `event_to_lua` bridges damage, life, tap, untap, counter, attack and block events as flat snake_case tables with ids, names, numbers and flags only, and it has no wildcard arm. A new `CardsMilled` event makes mill exact. Seven tags ship: `BecomesTapped`, `BecomesUntapped`, `GainsLife`, `LosesLife`, `Attacks`, `Blocks` and `Mills`. Scry and surveil stay `nil`. Decided in auto mode. Build is 113. [closed/089-lua-event-visibility.md]
+- 090 Modal builders in Lua. A mode is a strict plain table `{ target, operation, cost, pawprint }`, and the count is a `Game.ModeChoice.*` tag. Spells declare `s.modes()`, triggers and activated abilities `:SetModes(choice, modes)`. Activation gains `modes` on `ActivateAbility` (CR 602.2b, 700.2a) with an additive wire field. Function and chain modes are solo only, costs and pawprints are spell-only, mana abilities get no modes, and handle 0 is reserved. Decided in auto mode. Builds are 114 then 115. [closed/090-lua-modal-builders.md]
 
 ## Not yet specified
 
 - Carddb-backed CardSource: a thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. Its shape is settled in 006. The Godot adapter's `create` needs it to serve real cards.
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
-- Chain operation leftovers. A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode are not built (`25-chain-operations.md`). A chain as a mode waits on the modal builder decision.
+- Chain operation leftovers. A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode are not built (`25-chain-operations.md`). A chain mode is solo only (090), and combining it with other modes is not built.
 - Opponent-chosen modes with three or more players, where the controller picks the chooser (CR 700.2e), and repeatable pawprint-budget modes (CR 700.2i).
 - Condescend's `{X}`. "Counter unless that player pays {X}" supports only a fixed printed amount, and an X announced on the countering spell has no representation yet.
 - Devour and Amplify quality restrictions, and a creature with several independent Amplify instances.
@@ -89,7 +90,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 090 Modal builders in Lua
 - 091 Divide damage or counters among targets
 - 092 Effect-owned exile links
 - 093 Scenario battlefield setup runs scripts
@@ -115,3 +115,4 @@ Builds and audits:
 - 110 Stale note sweep (AFK)
 - 111 Echo sacrifice checks control
 - 113 Bridge condition events into Lua
+- 114 Build Lua modal spells and triggers
