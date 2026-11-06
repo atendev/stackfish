@@ -456,7 +456,8 @@ function TimingPermissionBuilder:SetAffected(value) end
 function TimingPermissionBuilder:SetFilter(filter) end
 
 --- Finalizes and registers the permission. It never grants priority, and land plays and
---- Equip keep sorcery speed.
+--- Equip keep sorcery speed. A registered permission lasts while its source is on the
+--- battlefield; pass the builder to Game.Ops.GrantTimingPermission for a Timed grant instead.
 function TimingPermissionBuilder:Register() end
 
 -------------------------------------------------------------------------------
@@ -518,6 +519,8 @@ function ZonePermissionBuilder:SetFilter(filter) end
 --- Finalizes and registers the permission. It changes where a card may come from, not when:
 --- a cast still needs its normal timing, and a land play still needs sorcery speed and an
 --- unused land play.
+--- A registered permission lasts while its source is on the battlefield; pass the builder to
+--- Game.Ops.GrantZonePermission for a Timed grant instead.
 function ZonePermissionBuilder:Register() end
 
 -------------------------------------------------------------------------------
@@ -815,6 +818,21 @@ function GameOpsTable.Pump(power, toughness, duration) end
 ---@return GameOpsValue
 function GameOpsTable.GainControl(duration) end
 
+--- CR 611.2a: "you may cast spells as though they had flash until `duration`". On resolution
+--- the grant takes the resolving object as its source and its controller as "you", and it
+--- outlives its source. `builder` is finished but not registered.
+---@param builder TimingPermissionBuilder
+---@param duration GameDurationsValue  -- UntilEndOfTurn, UntilYourNextTurn or UntilEndOfCombat; Permanent is an error
+---@return GameOpsValue
+function GameOpsTable.GrantTimingPermission(builder, duration) end
+
+--- CR 611.2a: GrantTimingPermission for a zone permission ("you may play lands from your
+--- graveyard this turn"). A :SetLinked() grant matches nothing once its source leaves.
+---@param builder ZonePermissionBuilder
+---@param duration GameDurationsValue  -- UntilEndOfTurn, UntilYourNextTurn or UntilEndOfCombat; Permanent is an error
+---@return GameOpsValue
+function GameOpsTable.GrantZonePermission(builder, duration) end
+
 --- The controller draws, unless the ability declares a player target word, in which case that player draws.
 ---@param amount integer
 ---@return GameOpsValue
@@ -1015,7 +1033,8 @@ function GameEffectsTable.AddCardType(name) end
 function GameEffectsTable.AddColor(letter) end
 
 -------------------------------------------------------------------------------
--- Game.Durations.* — bare values, :SetDuration (static) or duration arg of Pump/GainControl.
+-- Game.Durations.* — bare values, :SetDuration (static) or duration arg of Pump/GainControl/
+-- GrantTimingPermission/GrantZonePermission.
 -------------------------------------------------------------------------------
 
 ---@class GameDurationsTable

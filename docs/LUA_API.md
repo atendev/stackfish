@@ -220,6 +220,17 @@ Game.Ops.GainControl(duration)
 
 `duration` is a `Game.Durations.*` value.
 
+### Timed grants
+
+```lua
+Game.Ops.GrantTimingPermission(builder, duration)
+Game.Ops.GrantZonePermission(builder, duration)
+```
+
+`builder` is a finished `Game.CreateTimingPermission` or `Game.CreateZonePermission` builder that is
+not registered. `duration` is `Game.Durations.UntilEndOfTurn`, `UntilYourNextTurn` or
+`UntilEndOfCombat`. The grant lasts that long even if its source leaves.
+
 ### Library and hand
 
 ```lua
@@ -360,7 +371,7 @@ Use these with `:SetLayer` on static abilities. These are bare values only.
 
 ## `Game.Durations.*`
 
-Use these with `:SetDuration` on static abilities or as the `duration` argument to `Game.Ops.Pump`/`GainControl`.
+Use these with `:SetDuration` on static abilities or as the `duration` argument to `Game.Ops.Pump`/`GainControl`/`GrantTimingPermission`/`GrantZonePermission`.
 
 | Name | Meaning |
 |---|---|

@@ -178,6 +178,37 @@ face-down card is never offered (CR 601.3f). `:Register()` is an error when `"Li
 `:SetFromLibraryTop()` are not used together, when `:SetLinked()` is used with a zone other than
 `"Exile"`, or when `:SetRevealTop()` is used without `:SetFromLibraryTop()`.
 
+## Timed grants — CR 611.2a
+
+`:Register()` installs a static permission, which lasts while its source is on the battlefield. A
+resolving spell or ability grants one for a stated duration instead: pass the finished builder,
+without `:Register()`, to `Game.Ops.GrantTimingPermission(builder, duration)` or
+`Game.Ops.GrantZonePermission(builder, duration)`. `duration` is `Game.Durations.UntilEndOfTurn`,
+`UntilYourNextTurn` or `UntilEndOfCombat`, and any other value is an error (CR 611.2b). On
+resolution the grant takes the resolving object as its source and that object's controller as
+"you". It outlives its source and ends at cleanup, at the end of combat, or as its controller's next
+turn begins (CR 514.2, 511.3).
+
+```lua
+-- {T}: You may play lands from your graveyard this turn.
+function s.register_abilities(c)
+    local p = Game.CreateZonePermission(c)
+    p:SetAffected(Game.Affected.You)
+    p:SetZone("Graveyard")
+    p:SetKind("PlayLand")
+    local e = Game.CreateActivatedAbility(c)
+    e:AddCost(Game.Costs.TapSelf)
+    e:SetOperation(Game.Ops.GrantZonePermission(p, Game.Durations.UntilEndOfTurn))
+    e:Register()
+end
+```
+
+The builder's source id is replaced on resolution, so a spell's `s.operation()`, which gets no `c`,
+may build it with any id, such as `Game.CreateTimingPermission(0)`.
+
+A `:SetLinked()` grant still needs its source on the battlefield to keep its links, so one from a
+spell matches nothing.
+
 ## Not modeled
 
 - Hand-reveal enforcement (above).
@@ -185,8 +216,9 @@ face-down card is never offered (CR 601.3f). `:Register()` is an error when `"Li
   multiple cards" — no choice-based draw or draw-cost mechanism exists.
 - `EnchantedPlayer` for draw limits, land plays, timing permissions and zone permissions — no real
   card needs it.
-- Timing permissions with a duration ("until end of turn"), conditional flash (CR 601.3d), "as though
-  it were a main phase", and instant-speed equip.
-- "Until end of turn" zone grants, face-down linked cards (never offered, CR 601.3f), the
+- Conditional flash (CR 601.3d), "as though it were a main phase", and instant-speed equip.
+- `Permanent`, `WhileConditionHolds` and "until the source leaves" durations for a grant (CR 611.2b).
+- Impulse draw from a spell: a linked Timed grant matches nothing once its source leaves (CR 607.2a).
+- Face-down linked cards (never offered, CR 601.3f), the
   stand-alone "play with the top card of your library revealed" effect without a permission
   (CR 401.5), and "exile it instead" riders on a spell cast through a permission (CR 608.2n).

@@ -200,6 +200,8 @@ what the ability/spell actually does when it resolves.
 | `Counters(counter, amount)` | `counter`: counter kind name from the known set or a `Game.Counter.*` tag. Unknown strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. `amount`: integer. | CR 122.1a, puts `amount` counters of `counter` on the ability's target. Object targets only — no player-facing counters (Energy/Experience on a player) yet. |
 | `Pump(power, toughness, duration)` | `power`/`toughness`: integers (can be negative). `duration`: a `Game.Durations.*` value. | "Target creature gets +X/+Y until `duration`." Every legal target gets its own independent effect. |
 | `GainControl(duration)` | `duration`: a `Game.Durations.*` value. | CR 108.4/613.1, "gain control of target permanent until `duration`" (Threaten-style). The new controller is always whoever controls the resolving spell/ability — there's no separate "give control to a specific player" argument. Only covers a resolving spell/ability's own one-shot control change; a static "you control enchanted creature" aura effect isn't built yet. |
+| `GrantTimingPermission(builder, duration)` | `builder`: a finished, unregistered `Game.CreateTimingPermission` builder. `duration`: `Game.Durations.UntilEndOfTurn`, `UntilYourNextTurn` or `UntilEndOfCombat`. | CR 611.2a, "you may cast spells as though they had flash until `duration`". On resolution the grant's source is the resolving object and its "you" is that object's controller. It outlives its source. Any other duration is a load error (CR 611.2b). See [player-modifiers.md](player-modifiers.md#timed-grants--cr-6112a). |
+| `GrantZonePermission(builder, duration)` | As `GrantTimingPermission`, with a `Game.CreateZonePermission` builder. | CR 611.2a, "you may play lands from your graveyard this turn". A `:SetLinked()` grant matches nothing once its source leaves. |
 | `Regenerate` | — | CR 701.19a, gives the ability's target a one-shot regeneration shield. A target that can't be regenerated gets no shield (silently) rather than erroring. |
 | `DrawCards(amount)` | integer | CR 120.3/121, the ability's controller draws exactly `amount` cards. If the ability declares a player target word ("target player draws two cards", "target opponent draws a card"), the first legal player target draws instead, and nobody draws if that target is gone. A target requirement with no player word ("destroy target creature, then draw") leaves the controller drawing. Drawing from an empty library currently just stops, rather than being tracked as a loss condition. |
 | `DealDamageTo(pick, amount)` | `pick`: a `{ kind, id }` pick from `Game.SelectTargets`/`Game.ChooseN`. `amount`: integer. | CR 120.3, deals `amount` damage to `pick` through the normal damage pipeline. Only valid as a custom operation function's return value, alone or inside a `Chain`. See [targeting-and-choices.md](targeting-and-choices.md#drawing-dealing-damage-and-adding-counters). |
@@ -399,7 +401,8 @@ card script changes here.
 ## `Game.Durations.*`
 
 Used with `:SetDuration` on a [static ability](static-abilities.md), or as the `duration` argument
-to `Game.Ops.Pump`/`Game.Ops.GainControl`. Bare values only:
+to `Game.Ops.Pump`/`Game.Ops.GainControl`/`Game.Ops.GrantTimingPermission`/`Game.Ops.GrantZonePermission`
+(which take only the first three). Bare values only:
 
 | Name | Meaning |
 |---|---|
