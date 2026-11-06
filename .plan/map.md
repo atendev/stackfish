@@ -59,6 +59,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 087 Build expiring timing and zone permissions. Built as 084 decided, with the `AbilityEffect` rows boxed and `BEHAVIOUR_REV` left at 8, because the pin did not move. A Timed linked grant is accepted, and one from a spell matches nothing. [closed/087-build-expiring-permissions.md]
 - 088 Build zone permission riders. Built as 085 decided. A rider-less permission wins over ones with riders, then list order, because permissions have no id. The Kess scenario casts Kess first, because battlefield setup does not register static scripts. `BEHAVIOUR_REV` stays 8. [closed/088-build-zone-permission-riders.md]
 - 105 How the loader treats design non-goal card types. 518 planeswalkers, battles and sagas and 38 Class cards load and do nothing, with no error. 231 face-down-cast cards play face up, and 73 face-down producers do nothing. Research recommends rejecting at load with a new `CardLoadError`, except the 229 face-up-playable cards. The choice goes to 112. [closed/105-unsupported-card-types-in-loader.md]
+- 089 Lua event visibility for conditions. `event_to_lua` bridges damage, life, tap, untap, counter, attack and block events as flat snake_case tables with ids, names, numbers and flags only, and it has no wildcard arm. A new `CardsMilled` event makes mill exact. Seven tags ship: `BecomesTapped`, `BecomesUntapped`, `GainsLife`, `LosesLife`, `Attacks`, `Blocks` and `Mills`. Scry and surveil stay `nil`. Decided in auto mode. Build is 113. [closed/089-lua-event-visibility.md]
 
 ## Not yet specified
 
@@ -88,7 +89,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 089 Lua event visibility for conditions
 - 090 Modal builders in Lua
 - 091 Divide damage or counters among targets
 - 092 Effect-owned exile links
@@ -102,6 +102,7 @@ Decisions (HITL):
 - 100 Reanimation options
 - 101 Ward costs and player hexproof
 - 103 Damage redirect to another target
+- 102 Stun counters and tap hooks
 - 104 Fight and bite target shapes
 - 112 Which non-goal cards the loader rejects
 
@@ -113,7 +114,4 @@ Builds and audits:
 - 109 Proof game coverage gaps
 - 110 Stale note sweep (AFK)
 - 111 Echo sacrifice checks control
-
-Blocked:
-
-- 102 Stun counters and tap hooks (by 089)
+- 113 Bridge condition events into Lua
