@@ -95,6 +95,14 @@ _Avoid_: Event payload, trigger event
 The one ledger record of a single mill action by one player. It lists the milled cards that ended up in a public zone, including a zone a replacement sent them to instead (CR 701.17c). Surveil never writes one, though its moves look the same.
 _Avoid_: Mill event, mill trigger
 
+**Mode**:
+One option of a modal spell or ability (CR 700.2). It holds its own targets and operation, and a spell's mode can also carry its own cost and pawprint weight. The modes are chosen when the spell is cast, the ability is activated or the triggered ability is put on the stack, and only a chosen mode's targets are chosen.
+_Avoid_: Option, choice, charm
+
+**Solo-only mode**:
+A mode that can be chosen on its own but not together with any other mode of the same spell or ability. No rule forbids choosing it with other modes, so this is a limit of the engine, not of the game, and a Decision says which modes it applies to.
+_Avoid_: Exclusive mode, single mode
+
 ## Relationships
 
 - A **Session** runs exactly one game and has one or more **Seats**
