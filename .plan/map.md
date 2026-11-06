@@ -61,6 +61,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 105 How the loader treats design non-goal card types. 518 planeswalkers, battles and sagas and 38 Class cards load and do nothing, with no error. 231 face-down-cast cards play face up, and 73 face-down producers do nothing. Research recommends rejecting at load with a new `CardLoadError`, except the 229 face-up-playable cards. The choice goes to 112. [closed/105-unsupported-card-types-in-loader.md]
 - 089 Lua event visibility for conditions. `event_to_lua` bridges damage, life, tap, untap, counter, attack and block events as flat snake_case tables with ids, names, numbers and flags only, and it has no wildcard arm. A new `CardsMilled` event makes mill exact. Seven tags ship: `BecomesTapped`, `BecomesUntapped`, `GainsLife`, `LosesLife`, `Attacks`, `Blocks` and `Mills`. Scry and surveil stay `nil`. Decided in auto mode. Build is 113. [closed/089-lua-event-visibility.md]
 - 090 Modal builders in Lua. A mode is a strict plain table `{ target, operation, cost, pawprint }`, and the count is a `Game.ModeChoice.*` tag. Spells declare `s.modes()`, triggers and activated abilities `:SetModes(choice, modes)`. Activation gains `modes` on `ActivateAbility` (CR 602.2b, 700.2a) with an additive wire field. Function and chain modes are solo only, costs and pawprints are spell-only, mana abilities get no modes, and handle 0 is reserved. Decided in auto mode. Builds are 114 then 115. [closed/090-lua-modal-builders.md]
+- 091 Divide damage or counters among targets. A `division: Vec<u32>` joins `CastSpell`, `ActivateAbility` and the trigger-target answer, parallel to `targets`, with no extra Decision and no reuse of `AssignDamage`. New `DividedDamage(total)` and `DividedCounters { kind, total }` effects carry a fixed total. Each share is at least 1, the sum is the total, and a lone target sends an empty field. A share outlives an illegal sibling with no redistribution (CR 608.2b). Lua gets `Game.Ops.DividedDamage` and `DividedCounters`. Decided in auto mode. Build is 116. [closed/091-divide-among-targets.md]
 
 ## Not yet specified
 
@@ -90,7 +91,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 091 Divide damage or counters among targets
 - 092 Effect-owned exile links
 - 093 Scenario battlefield setup runs scripts
 - 094 Library top reveal event
@@ -116,3 +116,4 @@ Builds and audits:
 - 111 Echo sacrifice checks control
 - 113 Bridge condition events into Lua
 - 114 Build Lua modal spells and triggers
+- 116 Build divided damage and counters
