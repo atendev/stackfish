@@ -13,7 +13,7 @@ Commits should be straight and to the point, but in readable and understandable 
 > [IMPORTANT] Do not add anything else. No attribution line, nothing.
 
 ## Vertical Slice Instructions
-Every ticket runs this loop without waiting on me, except for the two button prompts. Subagents are `haiku` or `sonnet`, your pick per job. A fork or subagent cannot spawn agents, so it runs the audit inline.
+Every ticket runs this loop without waiting on me, except for the two button prompts. Subagents are `haiku` or `sonnet`, your pick per job. Every spawn names its model, never the parent's. A fork or subagent cannot spawn agents, so it runs the audit inline. Each audit loop has one auditor, continued with `SendMessage` for every re-check. Send it only the changed parts and its open objections. After two rounds with no `APPROVE`, stop and report.
 
 ### Implementation tickets
 1. Write a requirements report:
@@ -21,16 +21,16 @@ Every ticket runs this loop without waiting on me, except for the two button pro
    - What requirements from the comp rules are there?
    - What TODO's are we going to need to mark since they aren't implemented yet?
    - What tests will we want to add so that we can make sure this section works properly?
-2. Spawn a subagent (default `haiku`) to audit the report. It is read-only: it may not edit files. It returns `APPROVE` or a list of required changes. Apply the changes and re-audit until it approves.
+2. Spawn a subagent (default `haiku`) to audit the report. It is read-only: it may not edit files. It returns `APPROVE` or a list of required changes. Apply the changes and re-audit with the same auditor.
 3. Create a local branch `phase5/<feature-name>`. Do not push it to origin.
 4. Implement the feature. Mark every stubbed part with a TODO (eg: PlayLand has no "play additional lands" effects yet, so the PlayLand action gets a TODO). Commit on the branch at sensible points without asking.
-5. Spawn a subagent (default `sonnet`) to audit the work. It is read-only. It runs `tools/check.sh --full`, checks the code against the approved report and the comp rules, checks the comment rules and, for Lua API changes, the game stub in the docs. It returns `APPROVE` or a list of problems. Fix them and re-audit until it approves.
+5. Run `tools/check.sh --full` yourself and keep the output. Spawn a subagent (default `sonnet`) to audit the work. It is read-only. It reads the diff and that output, and does not rerun the suite. It checks the code against the approved report and the comp rules, checks the comment rules and, for Lua API changes, the game stub in the docs. It returns `APPROVE` or a list of problems. Fix them, rerun `tools/check.sh --full`, and send the same auditor the changed hunks and the new output.
 6. Report in the chat as the workflow document describes, then ask with `AskUserQuestion`: options `Merge` and `Don't merge`.
 7. On `Merge`: merge into master, push master, then delete the local branch. On `Don't merge`: keep the branch and wait for my instructions.
 
 ### Grilling tickets
 1. Write a report listing the ticket's questions and what is needed to answer them.
-2. Spawn a read-only subagent (default `haiku`) to audit the report. Same `APPROVE` or changes loop.
+2. Spawn a read-only subagent (default `haiku`) to audit the report. Same `APPROVE` or changes loop, with the same auditor.
 3. Spawn a subagent (default `sonnet`) to answer the questions from the docs, comp rules and code. It does not ask me anything.
 4. Give me the answers in the chat, then ask with `AskUserQuestion`: options `Approve` and `Deny`.
 5. On `Approve`: create a local branch `phase5/<ticket-slug>`, fill in the ticket's Resolution, close it per `.plan/README.md`, and commit. On `Deny`: ask what to change and redo step 3.
