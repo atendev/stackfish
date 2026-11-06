@@ -64,6 +64,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 091 Divide damage or counters among targets. A `division: Vec<u32>` joins `CastSpell`, `ActivateAbility` and the trigger-target answer, parallel to `targets`, with no extra Decision and no reuse of `AssignDamage`. New `DividedDamage(total)` and `DividedCounters { kind, total }` effects carry a fixed total. Each share is at least 1, the sum is the total, and a lone target sends an empty field. A share outlives an illegal sibling with no redistribution (CR 608.2b). Lua gets `Game.Ops.DividedDamage` and `DividedCounters`. Decided in auto mode. Build is 116. [closed/091-divide-among-targets.md]
 - 092 Effect-owned exile links. A spell's impulse draw finds its cards through CR 400.7j, so the Timed grant row owns them: `linked` becomes `ExileLink { None, Source, Cards }`, and `:SetExiledByThisEffect()` copies the ids a resolution exiled from a new resolution-scoped `exiled_this_resolution` list. `exiled_with` and `linked_exiles` keep their shape. `Game.Ops.ExileTopLinked(n)` exiles from the library `Mill` would pick. No wire change. Decided in auto mode. Build is 117. [closed/092-effect-owned-exile-links.md]
 - 093 Scenario battlefield setup runs card scripts. Every scripted battlefield setup card runs `register_abilities` once through a new `pub Engine::run_battlefield_card_scripts`, which the harness calls after `Engine::new` and the `Pending*` registrations. ETB triggers register and never fire, a failure panics with the card key, and a script with `trigger_operation`, `mana_ability` or `continuous_effect` on one battlefield card panics. No existing scenario changes. Decided in auto mode. Build is 118. [closed/093-scenario-battlefield-scripts.md]
+- 094 Library top views and the shown-top event. A new `LibraryTopView` row (reveal to everyone or look for some players, no card filter) replaces `reveals_top`, and a permission gives no implicit look. The engine stores each library's shown top, re-syncs it at the start and end of every step and after every accepted Answer, and freezes it while payment is pending (CR 401.5). A `LibraryTopShown` ledger event reaches Seats in the audience and a Seat just leaving it. Lua gets `Game.CreateLibraryTopView`. Decided in auto mode. Build is 119. [closed/094-library-top-reveal.md]
 
 ## Not yet specified
 
@@ -95,7 +96,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 094 Library top reveal event
 - 095 Scenario schema additions
 - 096 Script-backed costs, or delete `invoke_cost`
 - 097 Permission choice and once-per-turn limits
@@ -121,3 +121,4 @@ Builds and audits:
 - 116 Build divided damage and counters
 - 117 Build effect-owned exile links and a library-top `ExileLinked`
 - 118 Build battlefield setup card scripts
+- 119 Build library top views and the shown-top event
