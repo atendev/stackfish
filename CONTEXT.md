@@ -122,3 +122,4 @@ _Avoid_: Exclusive mode, single mode
 
 - The engine's own doc comments say "the caller should prompt" a player. In host-facing language the engine opens a **Decision** and the player gives an **Answer**. "Prompt" stays a verb for what a UI does, never a noun for the engine's waiting point.
 - "Action" is overloaded. The engine's `PlayerAction` is one kind of **Answer**: the one given at a priority **Decision**.
+- "Card key" in `docs/scenario_format.md` means the `key` string of a scenario's `[[cards]]` entry, a fixture name local to one file. It is not a **Card key**, which is an `oracle_id`. New scenario docs say "fixture name".
