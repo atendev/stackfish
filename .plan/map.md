@@ -71,6 +71,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 098 Timing permission follow-ups. Conditional flash is built first, with a `condition` on the row, `&ScriptRuntime` on `can_cast_now` and an `own_card_only` flag for a card's own flash from hand. Instant-speed equip follows as a `TimingSubject` in the same list. "As though it were a main phase" and land-play timing are ruled out, with no printed card. Every refused duration stays refused on a Timing permission, and the CR 611.2b citation is corrected. Decided in auto mode. Builds are 125 then 126. [closed/098-timing-permission-follow-ups.md]
 - 099 Riders beyond leaving the stack. A Battlefield rider is a row in a new `GameState` list (object, die or leave shape, duration, `granted_at`), offered in the CR 616.1 choice as `Protection` is, and it shares no type with `LeaveStackRider`. Rows end with their object (CR 400.7), not their source. Lua gets `Game.Ops.ExileIfWouldDieThisTurn` and an `exile_if_leaves` return option, and The Eighth Doctor's permission rider stops under later ability removal (CR 613.1f, 613.7a). Unearth's end-step exile waits on delayed triggers. Decided in auto mode, then approved. Builds are 130 then 131. [closed/099-riders-beyond-leaving-the-stack.md]
 - 100 Reanimation options. `EnterOptions` on both ops adds fixed `counters`, `attacking` and `keywords`, and one `AwaitingEnterChoice` carries copy, Devour, Amplify, Aura host and defender choices with no stack object. Custom functions return entry moves through `ScriptZoneMoveKind::Enter`, and `Game.Ops.PutOntoBattlefield` covers hand picks. Persist and Undying move onto the Reanimate mover. Decided in auto mode, then approved. Builds are 133 to 138. [closed/100-reanimation-options.md]
+- 101 Ward costs and player hexproof. Ward takes a mana string or a list of `Game.Costs.*` values and can be granted through a layer-6 effect, with printed Ward moved onto that path. Players get hexproof and shroud from a new player static, "hexproof from" is a layer-6 list, and `IgnoreKeyword("Hexproof")` is a load error. [closed/101-ward-costs-and-player-hexproof.md](closed/101-ward-costs-and-player-hexproof.md)
 
 ## Not yet specified
 
@@ -103,6 +104,11 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Entering under an opponent's control. Plague Reaver and Sol'Kanar the Tainted are the printed cards, and Plague Reaver also needs a delayed return (found by 100).
 - Non-search library sources for entering the battlefield (found by 100).
 - Computed counter amounts on entry, such as "X additional" or "equal to that result" (CR 122.6) (found by 100).
+- Ward amounts computed at resolution, such as "Pay life equal to its power" and `ward {X}` (CR 702.21b). Raubahn, Phyrexian Fleshgorger and Minthara are the printed cards (found by 101).
+- A general primitive that grants any triggered ability to another permanent (found by 101).
+- A player-relative "as though it didn't have hexproof" permission, which must also cover "hexproof from" (CR 702.11e). Detection Tower, Glaring Spotlight and Kaya are the printed cards (found by 101).
+- "Hexproof from that color" and "hexproof from activated and triggered abilities" (found by 101).
+- A keyword read or keyword filter, once one exists, must report hexproof for an object with "hexproof from" (CR 702.11e) (found by 101).
 
 ## Out of scope
 
@@ -118,7 +124,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 101 Ward costs and player hexproof
 - 103 Damage redirect to another target
 - 102 Stun counters and tap hooks
 - 104 Fight and bite target shapes
@@ -147,3 +152,6 @@ Builds and audits:
 - 124 Build permission choice and once-per-turn limits
 - 125 Build conditional Timing permissions
 - 130 Build die and leave riders
+- 139 Build ward cost shapes
+- 141 Build player hexproof and shroud
+- 142 Build hexproof from
