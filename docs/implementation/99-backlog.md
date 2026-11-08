@@ -30,8 +30,9 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - A Timed linked grant matches nothing once its source leaves, so a spell's impulse draw has no exile link
     (CR 607.2a).
   - Leave-stack riders are built (see `38-zone-permission-riders.md`). Open: "if it would die or leave exile this way"
-    riders, battlefield-side exile such as unearth, a rider on a permanent spell's battlefield entry, a player
-    choice between matching permissions (CR 601.2), and once-per-turn permission limits.
+    riders, battlefield-side exile such as unearth, and a rider on a permanent spell's battlefield entry.
+  - A player choice between matching permissions (CR 601.2) and once-per-turn permission limits are not built.
+    Decided in ticket 097, and the build is ticket 124.
   - Face-down linked cards are never offered (CR 601.3f), since nothing makes a card face down yet.
   - Revealing the top applies only to permissions, not the stand-alone "play with the top card revealed" effect
     (CR 401.5). Decided in ticket 094 (library top views and a `LibraryTopShown` event), and the build is ticket 119.

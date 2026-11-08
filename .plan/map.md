@@ -67,6 +67,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 094 Library top views and the shown-top event. A new `LibraryTopView` row (reveal to everyone or look for some players, no card filter) replaces `reveals_top`, and a permission gives no implicit look. The engine stores each library's shown top, re-syncs it at the start and end of every step and after every accepted Answer, and freezes it while payment is pending (CR 401.5). A `LibraryTopShown` ledger event reaches Seats in the audience and a Seat just leaving it. Lua gets `Game.CreateLibraryTopView`. Decided in auto mode. Build is 119. [closed/094-library-top-reveal.md]
 - 095 Scenario schema assertions and fixture fields. `expect_error` takes a Rust variant name, and the schema gains `damage_marked`, `event_count` (through a new `GameEventKind::name()`), `stack_targets`, `stack_size` and `characteristics` assertions, setup-order timestamps (CR 613.7a, 613.7d), and `alternative_cost` and `pay_buyback` on `cast_spell` with script cost loading. A TOML resolution effect, a state-edit step, cost tables and chain fields stay out, since inline scripts and response spells cover them. 27 of the 28 Rust tests move, and the CDA test stays. Decided in auto mode. Builds are 120 then 121. [closed/095-scenario-schema-additions.md]
 - 096 Script-backed costs. Costs stay structured data, so `invoke_cost` goes and no Lua callback or check-only predicate replaces it: a function gives a Payment Decision no candidate list, and no command restores state after a mutation (CR 118.3, 601.2h). The four `Other` cost variants go too, with `PROTOCOL_VERSION` still 1. `Game.Costs.*` does not cover every card's costs, so 123 decides the missing shapes. Decided in auto mode. Build is 122. [closed/096-script-backed-costs.md]
+- 097 Permission choice and once-per-turn limits. The player chooses, with a `permission` index on `CastSpell` and `PlayLand` into a `permissions` list on the entry, required with two or more options and no permission ids. A limit is a Use group on the row, spent uses are `GameState.zone_permission_uses` keyed by source and group and cleared every turn, and `your_turns_only` is a separate flag. A use counts when payment completes, and an internal cast spends none. Timed grants refuse a limit. Decided in auto mode. Build is 124. [closed/097-permission-choice-and-limits.md]
 
 ## Not yet specified
 
@@ -84,6 +85,10 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Several pending kinds in one custom operation outcome. A `Chain` holds one pending kind today (`not-available-yet.md`).
 - A grant lasting "until the end of your next turn" (Light Up the Stage). No `EffectDuration` expresses it (found by 092).
 - A precise check for a scripted battlefield setup card that also sets a harness shortcut. The 093 check rejects the pair even when the script registers nothing. Narrow it only once a fixture needs the pair.
+- Once-per-turn alternative-cost grants (Zaffai, Vision, Demon of Fate's Design, One with the Multiverse). These are not Zone permissions (found by 097).
+- A use limit on Timing permissions and on Timed grants (found by 097).
+- An alternative cost used through a Zone permission, such as evoke through Muldrotha. `AlternativeCost` is bound to its own `from_zone` (found by 097).
+- Zone permissions with extra costs or a rider on the permanent (Kotis, Festival of Embers, Edgar, Serra Paragon's exile clause) (found by 097).
 
 ## Out of scope
 
@@ -98,7 +103,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 097 Permission choice and once-per-turn limits
 - 098 Timing permission follow-ups
 - 099 Riders beyond leaving the stack
 - 100 Reanimation options
@@ -125,3 +129,4 @@ Builds and audits:
 - 119 Build library top views and the shown-top event
 - 120 Build scenario assertions and fixture fields
 - 122 Delete `invoke_cost` and the unpayable `Other` cost
+- 124 Build permission choice and once-per-turn limits
