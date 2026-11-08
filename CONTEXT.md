@@ -69,7 +69,7 @@ _Avoid_: Mode, ruleset
 ### Rules primitives
 
 **Timing permission**:
-A standing grant that lets a player cast matching spells as though they had flash. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it. Where a card may be played or cast from is a Zone permission. A static one lasts while its source is on the battlefield, and a Timed grant lasts its `duration`.
+A standing grant that lets a player cast matching spells as though they had flash, or activate equip abilities any time they could cast an instant. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it for a cast. Where a card may be played or cast from is a Zone permission. A static one lasts while its source is on the battlefield and may hold only while a condition is true, and a card can hold one for itself in hand ("you may cast this spell as though it had flash if..."). A Timed grant lasts its `duration` and has no condition.
 _Avoid_: Flash grant, flash effect, timing modifier
 
 **Zone permission**:

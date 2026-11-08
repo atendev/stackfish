@@ -68,6 +68,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 095 Scenario schema assertions and fixture fields. `expect_error` takes a Rust variant name, and the schema gains `damage_marked`, `event_count` (through a new `GameEventKind::name()`), `stack_targets`, `stack_size` and `characteristics` assertions, setup-order timestamps (CR 613.7a, 613.7d), and `alternative_cost` and `pay_buyback` on `cast_spell` with script cost loading. A TOML resolution effect, a state-edit step, cost tables and chain fields stay out, since inline scripts and response spells cover them. 27 of the 28 Rust tests move, and the CDA test stays. Decided in auto mode. Builds are 120 then 121. [closed/095-scenario-schema-additions.md]
 - 096 Script-backed costs. Costs stay structured data, so `invoke_cost` goes and no Lua callback or check-only predicate replaces it: a function gives a Payment Decision no candidate list, and no command restores state after a mutation (CR 118.3, 601.2h). The four `Other` cost variants go too, with `PROTOCOL_VERSION` still 1. `Game.Costs.*` does not cover every card's costs, so 123 decides the missing shapes. Decided in auto mode. Build is 122. [closed/096-script-backed-costs.md]
 - 097 Permission choice and once-per-turn limits. The player chooses, with a `permission` index on `CastSpell` and `PlayLand` into a `permissions` list on the entry, required with two or more options and no permission ids. A limit is a Use group on the row, spent uses are `GameState.zone_permission_uses` keyed by source and group and cleared every turn, and `your_turns_only` is a separate flag. A use counts when payment completes, and an internal cast spends none. Timed grants refuse a limit. Decided in auto mode. Build is 124. [closed/097-permission-choice-and-limits.md]
+- 098 Timing permission follow-ups. Conditional flash is built first, with a `condition` on the row, `&ScriptRuntime` on `can_cast_now` and an `own_card_only` flag for a card's own flash from hand. Instant-speed equip follows as a `TimingSubject` in the same list. "As though it were a main phase" and land-play timing are ruled out, with no printed card. Every refused duration stays refused on a Timing permission, and the CR 611.2b citation is corrected. Decided in auto mode. Builds are 125 then 126. [closed/098-timing-permission-follow-ups.md]
 
 ## Not yet specified
 
@@ -89,6 +90,10 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - A use limit on Timing permissions and on Timed grants (found by 097).
 - An alternative cost used through a Zone permission, such as evoke through Muldrotha. `AlternativeCost` is bound to its own `from_zone` (found by 097).
 - Zone permissions with extra costs or a rider on the permanent (Kotis, Festival of Embers, Edgar, Serra Paragon's exile clause) (found by 097).
+- Flash conditions that depend on cast choices, such as targets or X (Flash Photography, Timely Ward, Silver Scrutiny, Quantum Reduction, CR 601.3b) (found by 098).
+- "Next spell" flash grants that a cast uses up (Quicken, Ride the Avalanche, Savage Summoning, Scout's Warning) (found by 098).
+- Flash through a Zone permission cast (Elsha of the Infinite, Primal Prayers) (found by 098).
+- Conditional grants the Lua snapshot cannot read: Kianne needs current power, and Captain Mar-Vell needs a spells-cast-this-turn count. Azula needs an exile link (found by 098).
 
 ## Out of scope
 
@@ -96,6 +101,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Netcode, matchmaking and lobbies. These belong to the host application, per DESIGN.md.
 - Answering several Decisions in parallel (for example, simultaneous mulligans). Ruled out in favour of one Decision at a time.
 - Godot export and web builds (a copy step into `res://`, a macOS `.framework`, an emscripten target). The destination only needs the adapter to load and step a game, so these go with the Godot UI effort. [closed/033-godot-smoke-test-ci.md]
+- "As though it were a main phase" and timing grants for land plays. No printed card uses either. [closed/098-timing-permission-follow-ups.md]
 
 ## Frontier
 
@@ -103,7 +109,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 098 Timing permission follow-ups
 - 099 Riders beyond leaving the stack
 - 100 Reanimation options
 - 101 Ward costs and player hexproof
@@ -112,6 +117,8 @@ Decisions (HITL):
 - 104 Fight and bite target shapes
 - 112 Which non-goal cards the loader rejects
 - 123 Cost shapes past the current set
+- 127 Activate only as a sorcery on any ability
+- 128 Flash bought with an extra cost
 
 Builds and audits:
 
@@ -130,3 +137,4 @@ Builds and audits:
 - 120 Build scenario assertions and fixture fields
 - 122 Delete `invoke_cost` and the unpayable `Other` cost
 - 124 Build permission choice and once-per-turn limits
+- 125 Build conditional Timing permissions
