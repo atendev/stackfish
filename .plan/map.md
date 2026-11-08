@@ -69,6 +69,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 096 Script-backed costs. Costs stay structured data, so `invoke_cost` goes and no Lua callback or check-only predicate replaces it: a function gives a Payment Decision no candidate list, and no command restores state after a mutation (CR 118.3, 601.2h). The four `Other` cost variants go too, with `PROTOCOL_VERSION` still 1. `Game.Costs.*` does not cover every card's costs, so 123 decides the missing shapes. Decided in auto mode. Build is 122. [closed/096-script-backed-costs.md]
 - 097 Permission choice and once-per-turn limits. The player chooses, with a `permission` index on `CastSpell` and `PlayLand` into a `permissions` list on the entry, required with two or more options and no permission ids. A limit is a Use group on the row, spent uses are `GameState.zone_permission_uses` keyed by source and group and cleared every turn, and `your_turns_only` is a separate flag. A use counts when payment completes, and an internal cast spends none. Timed grants refuse a limit. Decided in auto mode. Build is 124. [closed/097-permission-choice-and-limits.md]
 - 098 Timing permission follow-ups. Conditional flash is built first, with a `condition` on the row, `&ScriptRuntime` on `can_cast_now` and an `own_card_only` flag for a card's own flash from hand. Instant-speed equip follows as a `TimingSubject` in the same list. "As though it were a main phase" and land-play timing are ruled out, with no printed card. Every refused duration stays refused on a Timing permission, and the CR 611.2b citation is corrected. Decided in auto mode. Builds are 125 then 126. [closed/098-timing-permission-follow-ups.md]
+- 099 Riders beyond leaving the stack. A Battlefield rider is a row in a new `GameState` list (object, die or leave shape, duration, `granted_at`), offered in the CR 616.1 choice as `Protection` is, and it shares no type with `LeaveStackRider`. Rows end with their object (CR 400.7), not their source. Lua gets `Game.Ops.ExileIfWouldDieThisTurn` and an `exile_if_leaves` return option, and The Eighth Doctor's permission rider stops under later ability removal (CR 613.1f, 613.7a). Unearth's end-step exile waits on delayed triggers. Decided in auto mode, then approved. Builds are 130 then 131. [closed/099-riders-beyond-leaving-the-stack.md]
 
 ## Not yet specified
 
@@ -94,6 +95,9 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - "Next spell" flash grants that a cast uses up (Quicken, Ride the Avalanche, Savage Summoning, Scout's Warning) (found by 098).
 - Flash through a Zone permission cast (Elsha of the Infinite, Primal Prayers) (found by 098).
 - Conditional grants the Lua snapshot cannot read: Kianne needs current power, and Captain Mar-Vell needs a spells-cast-this-turn count. Azula needs an exile link (found by 098).
+- Escape's linked "when it enters this way" trigger (CR 702.138c, 603.11). The counters are built (found by 099).
+- Finality counters (CR 122.1h) generate one replacement effect from the counters on the permanent, not from a state row (found by 099).
+- Effects that say an object can't have an ability (CR 613.1f). The engine cannot express them, so they do not stop a granted Battlefield rider (found by 099).
 
 ## Out of scope
 
@@ -109,7 +113,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 099 Riders beyond leaving the stack
 - 100 Reanimation options
 - 101 Ward costs and player hexproof
 - 103 Damage redirect to another target
@@ -119,6 +122,7 @@ Decisions (HITL):
 - 123 Cost shapes past the current set
 - 127 Activate only as a sorcery on any ability
 - 128 Flash bought with an extra cost
+- 132 Delayed triggered abilities
 
 Builds and audits:
 
@@ -138,3 +142,4 @@ Builds and audits:
 - 122 Delete `invoke_cost` and the unpayable `Other` cost
 - 124 Build permission choice and once-per-turn limits
 - 125 Build conditional Timing permissions
+- 130 Build die and leave riders
