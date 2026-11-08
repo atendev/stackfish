@@ -123,6 +123,15 @@ _Avoid_: Option, choice, charm
 A mode that can be chosen on its own but not together with any other mode of the same spell or ability. No rule forbids choosing it with other modes, so this is a limit of the engine, not of the game, and a Decision says which modes it applies to.
 _Avoid_: Exclusive mode, single mode
 
+
+**Enter options**:
+What a reanimation effect says about how a card comes onto the battlefield: who controls it, whether it is tapped or attacking, what counters it has and what keywords it gains. They come from the effect, not from the card.
+_Avoid_: Entry options, return flags
+
+**Enter choice**:
+A choice a player makes as a permanent comes onto the battlefield with no spell behind it, such as what a returned Clone copies or what a returned Aura enchants (CR 614.12a, 303.4f). It is one open Decision, answered like the same choice on a resolving spell.
+_Avoid_: Entry choice, entry pause
+
 ## Relationships
 
 - A **Session** runs exactly one game and has one or more **Seats**
