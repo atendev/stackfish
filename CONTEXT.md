@@ -75,6 +75,14 @@ _Avoid_: Flash grant, flash effect, timing modifier
 **Zone permission**:
 A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. A library-top permission opens only the top card of a library. Who may see that card is a Library top view, not the permission. A linked permission opens only the cards exiled with its source. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. Like a Timing permission, it is static or a Timed grant. A Cast permission may carry a Leave-stack rider. A card's own alternative cost, such as flashback, is not a Zone permission.
 
+**Permission option**:
+One way that Zone permissions let a player cast a card or play a land: the Leave-stack rider it applies and the use it spends, if any. Permissions with the same rider and the same use to spend are one option, labelled with the first matching permission's source. A player names an option in the action when an Entry lists two or more. A card's own alternative cost is not a Permission option.
+_Avoid_: Permission choice, grant
+
+**Use group**:
+The name that makes a Zone permission once per turn. Permissions from one source with the same Use group share one use each turn, so "play a land or cast a spell" spends one use whichever the player does. A new source object starts with an unspent limit (CR 400.7), and every Use group resets when the turn changes. A cast counts as a use when its payment completes.
+_Avoid_: Limit key, counter, usage
+
 **Library top view**:
 A standing effect that opens the top card of matching libraries to an audience: everyone for "play with the top card of your library revealed", or some players for "you may look at the top card of your library any time" (CR 401.5). It has no card filter. Like a Zone permission, it is static or a Timed grant.
 _Avoid_: Reveal permission, top reveal, reveals_top
