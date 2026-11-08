@@ -70,6 +70,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 097 Permission choice and once-per-turn limits. The player chooses, with a `permission` index on `CastSpell` and `PlayLand` into a `permissions` list on the entry, required with two or more options and no permission ids. A limit is a Use group on the row, spent uses are `GameState.zone_permission_uses` keyed by source and group and cleared every turn, and `your_turns_only` is a separate flag. A use counts when payment completes, and an internal cast spends none. Timed grants refuse a limit. Decided in auto mode. Build is 124. [closed/097-permission-choice-and-limits.md]
 - 098 Timing permission follow-ups. Conditional flash is built first, with a `condition` on the row, `&ScriptRuntime` on `can_cast_now` and an `own_card_only` flag for a card's own flash from hand. Instant-speed equip follows as a `TimingSubject` in the same list. "As though it were a main phase" and land-play timing are ruled out, with no printed card. Every refused duration stays refused on a Timing permission, and the CR 611.2b citation is corrected. Decided in auto mode. Builds are 125 then 126. [closed/098-timing-permission-follow-ups.md]
 - 099 Riders beyond leaving the stack. A Battlefield rider is a row in a new `GameState` list (object, die or leave shape, duration, `granted_at`), offered in the CR 616.1 choice as `Protection` is, and it shares no type with `LeaveStackRider`. Rows end with their object (CR 400.7), not their source. Lua gets `Game.Ops.ExileIfWouldDieThisTurn` and an `exile_if_leaves` return option, and The Eighth Doctor's permission rider stops under later ability removal (CR 613.1f, 613.7a). Unearth's end-step exile waits on delayed triggers. Decided in auto mode, then approved. Builds are 130 then 131. [closed/099-riders-beyond-leaving-the-stack.md]
+- 100 Reanimation options. `EnterOptions` on both ops adds fixed `counters`, `attacking` and `keywords`, and one `AwaitingEnterChoice` carries copy, Devour, Amplify, Aura host and defender choices with no stack object. Custom functions return entry moves through `ScriptZoneMoveKind::Enter`, and `Game.Ops.PutOntoBattlefield` covers hand picks. Persist and Undying move onto the Reanimate mover. Decided in auto mode, then approved. Builds are 133 to 138. [closed/100-reanimation-options.md]
 
 ## Not yet specified
 
@@ -98,6 +99,10 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Escape's linked "when it enters this way" trigger (CR 702.138c, 603.11). The counters are built (found by 099).
 - Finality counters (CR 122.1h) generate one replacement effect from the counters on the permanent, not from a state row (found by 099).
 - Effects that say an object can't have an ability (CR 613.1f). The engine cannot express them, so they do not stop a granted Battlefield rider (found by 099).
+- Entering blocking (CR 506.3e, 508.4). Aetherplasm is the only printed card (found by 100).
+- Entering under an opponent's control. Plague Reaver and Sol'Kanar the Tainted are the printed cards, and Plague Reaver also needs a delayed return (found by 100).
+- Non-search library sources for entering the battlefield (found by 100).
+- Computed counter amounts on entry, such as "X additional" or "equal to that result" (CR 122.6) (found by 100).
 
 ## Out of scope
 
@@ -113,7 +118,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 100 Reanimation options
 - 101 Ward costs and player hexproof
 - 103 Damage redirect to another target
 - 102 Stun counters and tap hooks
