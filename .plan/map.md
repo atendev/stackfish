@@ -66,6 +66,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 093 Scenario battlefield setup runs card scripts. Every scripted battlefield setup card runs `register_abilities` once through a new `pub Engine::run_battlefield_card_scripts`, which the harness calls after `Engine::new` and the `Pending*` registrations. ETB triggers register and never fire, a failure panics with the card key, and a script with `trigger_operation`, `mana_ability` or `continuous_effect` on one battlefield card panics. No existing scenario changes. Decided in auto mode. Build is 118. [closed/093-scenario-battlefield-scripts.md]
 - 094 Library top views and the shown-top event. A new `LibraryTopView` row (reveal to everyone or look for some players, no card filter) replaces `reveals_top`, and a permission gives no implicit look. The engine stores each library's shown top, re-syncs it at the start and end of every step and after every accepted Answer, and freezes it while payment is pending (CR 401.5). A `LibraryTopShown` ledger event reaches Seats in the audience and a Seat just leaving it. Lua gets `Game.CreateLibraryTopView`. Decided in auto mode. Build is 119. [closed/094-library-top-reveal.md]
 - 095 Scenario schema assertions and fixture fields. `expect_error` takes a Rust variant name, and the schema gains `damage_marked`, `event_count` (through a new `GameEventKind::name()`), `stack_targets`, `stack_size` and `characteristics` assertions, setup-order timestamps (CR 613.7a, 613.7d), and `alternative_cost` and `pay_buyback` on `cast_spell` with script cost loading. A TOML resolution effect, a state-edit step, cost tables and chain fields stay out, since inline scripts and response spells cover them. 27 of the 28 Rust tests move, and the CDA test stays. Decided in auto mode. Builds are 120 then 121. [closed/095-scenario-schema-additions.md]
+- 096 Script-backed costs. Costs stay structured data, so `invoke_cost` goes and no Lua callback or check-only predicate replaces it: a function gives a Payment Decision no candidate list, and no command restores state after a mutation (CR 118.3, 601.2h). The four `Other` cost variants go too, with `PROTOCOL_VERSION` still 1. `Game.Costs.*` does not cover every card's costs, so 123 decides the missing shapes. Decided in auto mode. Build is 122. [closed/096-script-backed-costs.md]
 
 ## Not yet specified
 
@@ -97,7 +98,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 096 Script-backed costs, or delete `invoke_cost`
 - 097 Permission choice and once-per-turn limits
 - 098 Timing permission follow-ups
 - 099 Riders beyond leaving the stack
@@ -107,6 +107,7 @@ Decisions (HITL):
 - 102 Stun counters and tap hooks
 - 104 Fight and bite target shapes
 - 112 Which non-goal cards the loader rejects
+- 123 Cost shapes past the current set
 
 Builds and audits:
 
@@ -123,3 +124,4 @@ Builds and audits:
 - 118 Build battlefield setup card scripts
 - 119 Build library top views and the shown-top event
 - 120 Build scenario assertions and fixture fields
+- 122 Delete `invoke_cost` and the unpayable `Other` cost
