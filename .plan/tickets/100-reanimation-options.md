@@ -23,6 +23,7 @@ Which options does `Game.Ops.ReturnToBattlefield` and `ReturnAllToBattlefield` g
   - Hand and library sources.
   - A pause for entry choices that is not tied to a stack object, including the Aura host choice (CR 303.4f).
   - The all-form entering simultaneously, and Persist and Undying skipping replacement checks.
+- "Riders beyond leaving the stack" decided that `exile_if_leaves = true` joins both operations, built by "Build die and leave riders". Keep it. Its leave rider does not include the end-step exile, which waits on "Delayed triggered abilities".
 - This is large. Split it in the Resolution if one build slice cannot hold it.
 - Use the `grilling` and `domain-modeling` skills.
 

@@ -95,6 +95,10 @@ _Avoid_: Revealed top, visible top
 Where a spell goes in place of its usual zone when it leaves the stack, such as flashback's "exile it instead" (CR 702.34a) or Kess, Dissident Mage's "if a spell cast this way would be put into your graveyard, exile it instead" (CR 608.2n). It is `StackObject.leave_stack_rider`, copied at cast from the chosen alternative cost or the Zone permission the spell was cast through, so it is a fact about that one cast and outlives the permission. `StackObject::leave_destination` is the one reader.
 _Avoid_: Play-from-zone effect, zone grant
 
+**Battlefield rider**:
+What happens in place of one named permanent's move off the battlefield, for a set duration, such as "if that creature would die this turn, exile it instead" or "if it would leave the battlefield, exile it instead of putting it anywhere else". It competes with other replacement effects on that move (CR 616.1) and ends when the permanent moves (CR 400.7), so it can outlast whatever created it. A Leave-stack rider is a separate thing that applies to a spell.
+_Avoid_: Leave-stack rider, exile clause
+
 **Timed grant**:
 A Timing or Zone permission installed by a resolving spell or ability through `Game.Ops.GrantTimingPermission` or `GrantZonePermission`, with `UntilEndOfTurn`, `UntilYourNextTurn` or `UntilEndOfCombat` (CR 611.2a). It is independent of its source, so it survives the source leaving, and the turn drains remove it.
 _Avoid_: Temporary permission, one-shot permission
