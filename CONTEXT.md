@@ -99,6 +99,10 @@ _Avoid_: Play-from-zone effect, zone grant
 What happens in place of one named permanent's move off the battlefield, for a set duration, such as "if that creature would die this turn, exile it instead" or "if it would leave the battlefield, exile it instead of putting it anywhere else". It competes with other replacement effects on that move (CR 616.1) and ends when the permanent moves (CR 400.7), so it can outlast whatever created it. A Leave-stack rider is a separate thing that applies to a spell.
 _Avoid_: Leave-stack rider, exile clause
 
+**Redirect shield**:
+A redirection effect made by a resolved spell or ability, such as "the next 1 damage that would be dealt to this creature this turn is dealt to target creature instead" (CR 614.9). It lasts for the turn and outlives whatever created it (CR 611.2a). A redirect written on a permanent, such as Pariah's, is a static replacement effect and not a shield.
+_Avoid_: Redirection row, damage rider
+
 **Timed grant**:
 A Timing or Zone permission installed by a resolving spell or ability through `Game.Ops.GrantTimingPermission` or `GrantZonePermission`, with `UntilEndOfTurn`, `UntilYourNextTurn` or `UntilEndOfCombat` (CR 611.2a). It is independent of its source, so it survives the source leaving, and the turn drains remove it.
 _Avoid_: Temporary permission, one-shot permission
