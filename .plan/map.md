@@ -6,7 +6,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 ## Notes
 
-- Execution happens inside this map. Decision tickets come first. Each build ticket is a `phase5/<name>` slice that follows the CLAUDE.md slice workflow: a requirements report first, approval before every commit, a closing report, and the user merges.
+- Execution happens inside this map. Decision tickets come first. Each build ticket is a `phase5/<name>` slice that follows the CLAUDE.md slice workflow: a requirements report first, commits on the branch without asking, a closing report, and the user merges.
 - Build tickets graduate from Not yet specified only after the decisions they depend on are closed.
 - Use the vocabulary in `CONTEXT.md` (Session, Seat, Decision, Answer). Grilling tickets use the `grilling` and `domain-modeling` skills. Update `CONTEXT.md` as terms settle.
 - The protocol supports any number of players from the start. Exactly one Decision is open at a time, answered in APNAP order, even for secret choices.
