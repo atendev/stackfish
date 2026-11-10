@@ -9,6 +9,11 @@
 
 - `create(setup: PackedByteArray) -> PackedByteArray` builds the Session. It returns the `created` response, or an error
   response if the setup was refused. A refused setup leaves the object without a Session, so `create` can be tried again.
+- `create_with_db(setup: PackedByteArray, db_path: String) -> PackedByteArray` is `create` with cards from the SQLite
+  database at `db_path`, keyed by `oracle_id`. A relative path resolves against the process's working directory, so the
+  view passes an absolute one from `ProjectSettings.globalize_path`. A missing file or a failed open returns a
+  `setup_error` response naming the path. `Core::create_with_db` checks the file exists first, because SQLite would
+  create an empty one.
 - `handle(request: PackedByteArray) -> PackedByteArray` passes an `advance`, `answer` or `poll` request to the Session.
 - `last_error() -> String` is the reason for the last empty return: `panicked`, `not_created` or `already_created`. It is
   empty if the last call worked. It also has a `wrong_thread` code, but a host does not see it in a default build (see

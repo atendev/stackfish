@@ -40,27 +40,16 @@ impl StackfishSession {
         into_bytes(result)
     }
 
-    /// Builds the game from a `setup` request using the card database at
-    /// `../stackfish-db/stackfish.db`, relative to the process's working directory.
-    /// Returns the `created` response, or an error response if the database is missing.
-    // TODO: take the database path as a parameter instead of assuming the launch directory
+    /// Builds the game from a `setup` request using the card database at `db_path`. A
+    /// relative path resolves against the process's working directory, so pass an absolute
+    /// one, such as from `ProjectSettings.globalize_path`. Returns the `created` response,
+    /// or a `setup_error` response naming the path if the database cannot be opened.
     #[func]
-    fn create_with_db(&mut self, setup: PackedByteArray) -> PackedByteArray {
-        match stackfish_host::CardDbCardSource::open("../stackfish-db/stackfish.db") {
-            Ok(source) => into_bytes(self.core.create(setup.as_slice(), &source)),
-            Err(e) => {
-                // No Session exists to build the error response, so build one by hand.
-                let body = serde_json::json!({
-                    "v": stackfish_host::PROTOCOL_VERSION,
-                    "kind": "response",
-                    "body": {
-                        "status": "error",
-                        "error": { "code": "setup_error", "message": format!("could not open card database: {e}") }
-                    }
-                });
-                PackedByteArray::from(body.to_string().into_bytes())
-            }
-        }
+    fn create_with_db(&mut self, setup: PackedByteArray, db_path: GString) -> PackedByteArray {
+        let result = self
+            .core
+            .create_with_db(setup.as_slice(), &db_path.to_string());
+        into_bytes(result)
     }
 
     /// Passes one `advance`, `answer` or `poll` request to the game.
