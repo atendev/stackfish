@@ -23,6 +23,10 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 
 ## Live TODOs / unresolved gaps
 
+- **Card view identity (`phase5/card-view-identity`)**: see `18-host-session.md` and `20-godot-adapter.md`. Open items:
+  - The carddb loader ignores `cards.color_indicator`, so a card with an indicator has only its cost colors (CR 204.2). Reading it changes rules behaviour, and the test fixture DBs lack the column.
+  - Creature tokens send `oracle_text: ""`, even with keywords.
+  - The wire identity applies copy effects only, no other layers (CR 613.1).
 - **Timing permissions (`phase5/timing-permissions`)**: see `35-timing-permissions.md`. Open items:
   - Conditional flash, "as though it were a main phase" and instant-speed equip are not built.
   - `Permanent`, `WhileConditionHolds` and "until the source leaves" durations are refused for a grant (CR 611.2b).

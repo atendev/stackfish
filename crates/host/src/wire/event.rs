@@ -1,7 +1,8 @@
 use serde::Serialize;
 use stackfish_engine::turn::{Phase, Step};
 use stackfish_engine::{
-    CounterKind, GameEvent, GameEventKind, GameObject, PTValue, PlayerId, SupertypeSet,
+    CardDefinition, ColorSet, CounterKind, GameEvent, GameEventKind, GameObject, PTValue, PlayerId,
+    SupertypeSet,
 };
 
 use super::mana::{WireManaUnit, mana_cost_string};
@@ -130,12 +131,38 @@ fn pt_text(value: &Option<PTValue>) -> Option<String> {
     })
 }
 
+// CR 105.1
+// Matches `stackfish-db`'s `cards.colors`, so the view parses both alike.
+fn colors_text(colors: ColorSet) -> String {
+    [
+        (ColorSet::WHITE, 'W'),
+        (ColorSet::BLUE, 'U'),
+        (ColorSet::BLACK, 'B'),
+        (ColorSet::RED, 'R'),
+        (ColorSet::GREEN, 'G'),
+    ]
+    .into_iter()
+    .filter(|(color, _)| colors.contains(*color))
+    .map(|(_, letter)| letter)
+    .collect()
+}
+
+// CR 707.2, 613.1a
+fn copiable_values(object: &GameObject) -> &CardDefinition {
+    object
+        .copiable_override
+        .as_ref()
+        .unwrap_or(&object.definition)
+}
+
 /// The last known information (CR 603.10) of an object an event moved or
-/// consumed: the printed characteristics from its definition, plus the state it
-/// had. Layer effects are not applied.
+/// consumed: its copiable values (CR 707.2), plus the state it had. No other
+/// layer effect is applied.
 #[derive(Serialize, Clone, Debug)]
 pub(crate) struct WireObjectSummary {
     pub object: U64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oracle_id: Option<String>,
     pub name: String,
     pub owner: u32,
     pub controller: u32,
@@ -146,6 +173,8 @@ pub(crate) struct WireObjectSummary {
     pub subtypes: Vec<String>,
     pub power: Option<String>,
     pub toughness: Option<String>,
+    pub colors: String,
+    pub oracle_text: String,
     pub tapped: bool,
     pub is_token: bool,
     pub is_commander: bool,
@@ -154,9 +183,10 @@ pub(crate) struct WireObjectSummary {
 
 impl From<&GameObject> for WireObjectSummary {
     fn from(object: &GameObject) -> Self {
-        let definition = &object.definition;
+        let definition = copiable_values(object);
         WireObjectSummary {
             object: object.object_id.into(),
+            oracle_id: definition.oracle_id.clone(),
             name: definition.name.clone(),
             owner: object.owner.0,
             controller: object.controller.0,
@@ -167,6 +197,8 @@ impl From<&GameObject> for WireObjectSummary {
             subtypes: definition.subtypes.iter().map(|s| s.0.clone()).collect(),
             power: pt_text(&definition.power),
             toughness: pt_text(&definition.toughness),
+            colors: colors_text(definition.colors()),
+            oracle_text: definition.oracle_text.clone(),
             tapped: object.tapped,
             is_token: object.is_token,
             is_commander: object.is_commander,
@@ -183,11 +215,15 @@ impl From<&GameObject> for WireObjectSummary {
     }
 }
 
-/// What a card is, with no id and no game state: its printed characteristics.
+/// What a card is, with no id and no game state: its copiable values (CR 707.2).
 /// A Seat that may not see an object's id can still learn its identity, such as
-/// an opponent watching a card leave a hand.
+/// an opponent watching a card leave a hand. `oracle_id` is absent for a card
+/// with no database row, such as a token.
+// TODO: no layer-applied characteristics beyond copy effects (CR 613.1)
 #[derive(Serialize, Clone, Debug)]
 pub(crate) struct WireIdentity {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oracle_id: Option<String>,
     pub name: String,
     pub mana_cost: String,
     pub supertypes: Vec<WireSupertype>,
@@ -195,14 +231,18 @@ pub(crate) struct WireIdentity {
     pub subtypes: Vec<String>,
     pub power: Option<String>,
     pub toughness: Option<String>,
+    /// WUBRG letters with no separator, `""` for colorless (CR 105.2c).
+    pub colors: String,
+    pub oracle_text: String,
     pub is_token: bool,
     pub is_commander: bool,
 }
 
 impl From<&GameObject> for WireIdentity {
     fn from(object: &GameObject) -> Self {
-        let definition = &object.definition;
+        let definition = copiable_values(object);
         WireIdentity {
+            oracle_id: definition.oracle_id.clone(),
             name: definition.name.clone(),
             mana_cost: mana_cost_string(&definition.mana_cost),
             supertypes: supertypes(definition.supertypes),
@@ -210,6 +250,8 @@ impl From<&GameObject> for WireIdentity {
             subtypes: definition.subtypes.iter().map(|s| s.0.clone()).collect(),
             power: pt_text(&definition.power),
             toughness: pt_text(&definition.toughness),
+            colors: colors_text(definition.colors()),
+            oracle_text: definition.oracle_text.clone(),
             is_token: object.is_token,
             is_commander: object.is_commander,
         }
@@ -655,5 +697,91 @@ impl WireEvent {
             parent_event: event.parent_event.map(|id| U64(id.0)),
             kind,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stackfish_engine::{CardTypeSet, ManaCost, ObjectId, ZoneKind};
+
+    fn cost(text: &str) -> ManaCost {
+        ManaCost::parse(text).unwrap()
+    }
+
+    fn creature(id: u64, oracle_id: &str, name: &str, mana: &str, pt: i32) -> CardDefinition {
+        CardDefinition {
+            oracle_id: Some(oracle_id.to_string()),
+            power: Some(PTValue::Fixed(pt)),
+            toughness: Some(PTValue::Fixed(pt)),
+            ..stackfish_testutil::minimal_card_definition(
+                id,
+                name,
+                "unused",
+                cost(mana),
+                CardTypeSet::CREATURE,
+            )
+        }
+    }
+
+    // CR 202.2, 204.2
+    #[test]
+    fn colors_are_wubrg_letters_from_the_cost_or_the_indicator() {
+        let colors = |mana: &str| colors_text(cost(mana).colors());
+        assert_eq!(colors("{3}"), "");
+        assert_eq!(colors("{W}"), "W");
+        assert_eq!(colors("{1}{R}{G}"), "RG");
+        assert_eq!(colors("{G}{R}"), "RG");
+        assert_eq!(colors("{U/B}"), "UB");
+        assert_eq!(colors("{W/P}"), "W");
+
+        let mut indicated = creature(1, "x", "X", "{R}", 1);
+        indicated.color_indicator = Some(ColorSet::BLUE);
+        assert_eq!(colors_text(indicated.colors()), "U");
+    }
+
+    // CR 707.2
+    #[test]
+    fn a_copy_reports_the_copied_card() {
+        let mut object = stackfish_testutil::card_object(
+            ObjectId(5),
+            creature(1, "shifter-1", "Shifter", "{3}{U}", 0),
+            PlayerId(0),
+            ZoneKind::Battlefield,
+        );
+        object.copiable_override = Some(creature(2, "bears-1", "Grizzly Bears", "{1}{G}", 2));
+
+        let identity = WireIdentity::from(&object);
+        assert_eq!(identity.oracle_id.as_deref(), Some("bears-1"));
+        assert_eq!(identity.name, "Grizzly Bears");
+        assert_eq!(identity.colors, "G");
+        assert_eq!(identity.power.as_deref(), Some("2"));
+        assert_eq!(identity.toughness.as_deref(), Some("2"));
+
+        let summary = WireObjectSummary::from(&object);
+        assert_eq!(summary.oracle_id.as_deref(), Some("bears-1"));
+        assert_eq!(summary.name, "Grizzly Bears");
+        assert_eq!(summary.mana_cost, "{1}{G}");
+        assert_eq!(summary.colors, "G");
+        assert_eq!(summary.power.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn a_card_with_no_oracle_id_omits_the_key_but_keeps_colors_and_text() {
+        let mut definition = creature(1, "unused", "Soldier", "{W}", 1);
+        definition.oracle_id = None;
+        let object = stackfish_testutil::card_object(
+            ObjectId(5),
+            definition,
+            PlayerId(0),
+            ZoneKind::Battlefield,
+        );
+        let json = serde_json::to_value(WireIdentity::from(&object)).unwrap();
+        assert!(json.get("oracle_id").is_none(), "{json}");
+        assert_eq!(json["colors"], "W");
+        assert_eq!(json["oracle_text"], "");
+        let json = serde_json::to_value(WireObjectSummary::from(&object)).unwrap();
+        assert!(json.get("oracle_id").is_none(), "{json}");
+        assert_eq!(json["colors"], "W");
     }
 }
