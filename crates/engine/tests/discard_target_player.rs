@@ -14,6 +14,7 @@ use stackfish_testutil::{
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -41,6 +42,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
 fn mind_rot_definition(count: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Mind Rot".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

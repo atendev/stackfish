@@ -25,6 +25,7 @@ return s
 fn bear_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Bear".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -52,6 +53,7 @@ fn bear_definition() -> CardDefinition {
 fn salamander_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Salamander".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -79,6 +81,7 @@ fn salamander_definition() -> CardDefinition {
 fn doppelganger_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 3,
+        oracle_id: None,
         name: "Doppelganger".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -107,6 +110,7 @@ fn doppelganger_definition() -> CardDefinition {
 fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

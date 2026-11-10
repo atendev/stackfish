@@ -9,6 +9,7 @@ use stackfish_engine::*;
 fn card(name: &str, mana_cost: &str, oracle_text: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost::parse(mana_cost).unwrap(),
         color_indicator: None,

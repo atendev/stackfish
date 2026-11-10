@@ -31,6 +31,7 @@ fn creature_definition_pt(
 ) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

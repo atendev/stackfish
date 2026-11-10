@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn land_definition(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -39,6 +40,7 @@ fn land_definition(name: &str) -> CardDefinition {
 fn drawcards_spell_definition(amount: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Draw".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -66,6 +68,7 @@ fn drawcards_spell_definition(amount: u32) -> CardDefinition {
 fn ward_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 999,
+        oracle_id: None,
         name: "Ward".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -577,6 +580,7 @@ fn a_turn_based_draw_is_skipped_once_the_limit_was_already_met_this_turn() {
 fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Destroy Permanent".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

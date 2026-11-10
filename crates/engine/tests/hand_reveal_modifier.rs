@@ -24,6 +24,7 @@ return s
 fn aura_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Enchant Player Hand Reveal Aura".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -211,6 +212,7 @@ fn two_independent_reveal_sources_never_conflict() {
 fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Destroy Permanent".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

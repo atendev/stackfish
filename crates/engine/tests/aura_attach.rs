@@ -16,6 +16,7 @@ use stackfish_testutil::{
 fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -43,6 +44,7 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
 fn aura_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Aura".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -86,6 +88,7 @@ fn aura_definition() -> CardDefinition {
 fn plain_enchantment_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 31,
+        oracle_id: None,
         name: "Test Plain Enchantment".to_string(),
         subtypes: Vec::new(),
         ..aura_definition()

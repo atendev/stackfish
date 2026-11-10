@@ -24,6 +24,7 @@ fn creature_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -51,6 +52,7 @@ fn creature_definition(
 fn planeswalker_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

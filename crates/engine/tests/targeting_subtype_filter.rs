@@ -14,6 +14,7 @@ use stackfish_testutil::{
 fn creature_definition(id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -49,6 +50,7 @@ fn zombie(id: u64, name: &str) -> CardDefinition {
 fn human_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Human Bolt".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -103,6 +105,7 @@ return s
 fn equipment_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
+        oracle_id: None,
         name: "Test Dragon Equipment".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

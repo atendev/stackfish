@@ -7,6 +7,7 @@ use stackfish_testutil::{card_object, drain, two_player_state as base_two_player
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
     let definition = CardDefinition {
         definition_id: id.0,
+        oracle_id: None,
         name: "Test Card".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

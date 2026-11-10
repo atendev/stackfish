@@ -15,6 +15,7 @@ use stackfish_testutil::{
 fn library_card_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -42,6 +43,7 @@ fn library_card_definition(definition_id: u64, name: &str) -> CardDefinition {
 fn scry_spell_definition(n: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Scry Spell".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -69,6 +71,7 @@ fn scry_spell_definition(n: u32) -> CardDefinition {
 fn surveil_spell_definition(n: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 31,
+        oracle_id: None,
         name: "Test Surveil Spell".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

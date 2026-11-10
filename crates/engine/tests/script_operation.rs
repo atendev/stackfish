@@ -221,6 +221,7 @@ fn script_only_definition(definition_id: u64, name: &str, source: &str) -> CardD
         .expect("script should load");
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -249,6 +250,7 @@ fn script_only_definition(definition_id: u64, name: &str, source: &str) -> CardD
 fn pending_script_only_definition(definition_id: u64, name: &str, source: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -276,6 +278,7 @@ fn pending_script_only_definition(definition_id: u64, name: &str, source: &str) 
 fn creature_definition(definition_id: u64) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

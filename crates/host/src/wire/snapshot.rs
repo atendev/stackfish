@@ -62,7 +62,7 @@ pub(crate) struct WireZoneView {
 }
 
 /// An object as it stands now. `identity` is absent for a face-down object the Seat may
-/// not identify. Layer effects are not applied, as in `WireObjectSummary`.
+/// not identify. Only copy effects apply, as in `WireObjectSummary`.
 #[derive(Serialize, Clone, Debug)]
 pub(crate) struct WireObjectView {
     pub object: U64,

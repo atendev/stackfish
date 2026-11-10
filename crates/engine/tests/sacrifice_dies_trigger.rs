@@ -13,6 +13,7 @@ use stackfish_testutil::{
 fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

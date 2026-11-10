@@ -9,6 +9,7 @@ use stackfish_testutil::{card_object, two_player_state as base_two_player_state,
 fn creature_definition(power: i32, toughness: i32, script_ref: ScriptReference) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

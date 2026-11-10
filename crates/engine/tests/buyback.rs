@@ -39,6 +39,7 @@ use stackfish_testutil::{
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Buyback Bolt".to_string(),
         mana_cost: ManaCost {
             symbols: vec![
@@ -97,6 +98,7 @@ fn no_buyback_bolt_definition() -> CardDefinition {
 fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Bear".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

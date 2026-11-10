@@ -39,6 +39,7 @@ return s
 fn escaper_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Escaper".to_string(),
         mana_cost: ManaCost {
             symbols: vec![
@@ -89,6 +90,7 @@ fn escaper_definition() -> CardDefinition {
 fn filler_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

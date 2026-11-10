@@ -5,7 +5,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::{self, ThreadId};
 
-use stackfish_host::{CardSource, Session};
+use std::path::Path;
+
+use stackfish_host::{CardDbCardSource, CardSource, Session};
 
 static OFF_THREAD_DROPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -91,6 +93,31 @@ impl Core {
         }
     }
 
+    /// `create` with cards from the database at `db_path`. A missing or unreadable
+    /// database returns a `setup_error` response that names the path.
+    pub(crate) fn create_with_db(
+        &mut self,
+        request: &[u8],
+        db_path: &str,
+    ) -> Result<Vec<u8>, Failure> {
+        self.guard()?;
+        if self.session.is_some() {
+            return self.fail(Failure::AlreadyCreated);
+        }
+        // SQLite creates a missing file, which would fail later with no path in the message.
+        let opened = if Path::new(db_path).is_file() {
+            CardDbCardSource::open(db_path).map_err(|e| e.to_string())
+        } else {
+            Err("no such file".to_string())
+        };
+        match opened {
+            Ok(source) => self.create(request, &source),
+            Err(reason) => self.succeed(setup_error(&format!(
+                "could not open card database {db_path:?}: {reason}"
+            ))),
+        }
+    }
+
     pub(crate) fn handle(&mut self, request: &[u8]) -> Result<Vec<u8>, Failure> {
         self.run(|session| session.handle(request))
     }
@@ -142,6 +169,20 @@ impl Core {
         self.last_failure = None;
         Ok(response)
     }
+}
+
+// No Session exists to build the error response, so build one by hand.
+fn setup_error(message: &str) -> Vec<u8> {
+    serde_json::json!({
+        "v": stackfish_host::PROTOCOL_VERSION,
+        "kind": "response",
+        "body": {
+            "status": "error",
+            "error": { "code": "setup_error", "message": message }
+        }
+    })
+    .to_string()
+    .into_bytes()
 }
 
 #[cfg(test)]
@@ -272,6 +313,91 @@ mod tests {
         assert_eq!(
             core.create(&proof_setup_request(2, 4), &proof_cards()),
             Err(Failure::Panicked)
+        );
+    }
+
+    fn fixture_db() -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "stackfish-godot-carddb-test-{}.sqlite",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE cards (
+                oracle_id TEXT PRIMARY KEY, script_id TEXT UNIQUE, name TEXT NOT NULL,
+                mana_cost TEXT, type_line TEXT, oracle_text TEXT, power TEXT, toughness TEXT,
+                loyalty TEXT, defense TEXT, has_multiple_faces INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE keywords (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE card_keywords (
+                oracle_id TEXT NOT NULL, keyword_id INTEGER NOT NULL,
+                PRIMARY KEY (oracle_id, keyword_id)
+            );
+            CREATE TABLE card_scripts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, oracle_id TEXT NOT NULL,
+                version INTEGER NOT NULL, script_source TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO cards (oracle_id, script_id, name, mana_cost, type_line, oracle_text, power, toughness)
+            VALUES ('alpha-1', 'alpha', 'Alpha Bear', '{1}{G}', 'Creature — Bear', '', '2', '2');
+            ",
+        )
+        .unwrap();
+        path
+    }
+
+    fn db_setup_request() -> Vec<u8> {
+        let deck = serde_json::json!([{ "card": "alpha-1", "count": 40 }]);
+        serde_json::to_vec(&serde_json::json!({
+            "v": stackfish_host::PROTOCOL_VERSION,
+            "kind": "setup",
+            "body": {
+                "players": [{ "deck": deck }, { "deck": deck }],
+                "format": "standard",
+                "seed": "1",
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn create_with_db_opens_an_absolute_path() {
+        let db_path = fixture_db();
+        let mut core = Core::default();
+        let response = core
+            .create_with_db(&db_setup_request(), db_path.to_str().unwrap())
+            .expect("the call works");
+        assert_eq!(status(&response), "created");
+        std::fs::remove_file(db_path).unwrap();
+    }
+
+    #[test]
+    fn create_with_db_names_a_missing_path_and_leaves_no_file() {
+        let db_path = std::env::temp_dir().join(format!(
+            "stackfish-godot-missing-{}.sqlite",
+            std::process::id()
+        ));
+        let db_path = db_path.to_str().unwrap();
+        let mut core = Core::default();
+        let response = core
+            .create_with_db(&db_setup_request(), db_path)
+            .expect("the call works");
+        let value: serde_json::Value = serde_json::from_slice(&response).unwrap();
+        assert_eq!(value["body"]["error"]["code"], "setup_error");
+        assert!(
+            value["body"]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(db_path),
+            "{value}"
+        );
+        assert!(!std::path::Path::new(db_path).exists());
+        // A refused setup leaves no Session, so `handle` still fails.
+        assert_eq!(
+            core.handle(br#"{"v":1,"kind":"advance","body":{}}"#),
+            Err(Failure::NotCreated)
         );
     }
 }

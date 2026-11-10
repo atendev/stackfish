@@ -125,3 +125,33 @@ fn missing_db_card_returns_setup_error() {
             .contains("not-in-db")
     );
 }
+
+#[test]
+fn a_moved_card_reports_its_decklist_oracle_id() {
+    let db_path = fixture_db();
+    let source = CardDbCardSource::open(&db_path).unwrap();
+    let (mut session, _) =
+        Session::create(&setup_request(1), &source).expect("setup should succeed");
+
+    let advance = serde_json::to_vec(
+        &serde_json::json!({ "v": stackfish_host::PROTOCOL_VERSION, "kind": "advance", "seat": 0, "body": {} })
+    )
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&session.handle(&advance)).unwrap();
+    let identities: Vec<&serde_json::Value> = value["body"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "zone_change")
+        .filter_map(|e| e.get("identity"))
+        .collect();
+    assert!(!identities.is_empty(), "{value}");
+    for identity in identities {
+        assert!(
+            identity["oracle_id"] == "alpha-1" || identity["oracle_id"] == "beta-1",
+            "{identity}"
+        );
+        assert_eq!(identity["colors"], "G");
+        assert_eq!(identity["oracle_text"], "");
+    }
+}

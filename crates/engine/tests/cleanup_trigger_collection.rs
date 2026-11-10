@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

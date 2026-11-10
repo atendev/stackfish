@@ -35,6 +35,7 @@ fn creature_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -79,6 +80,7 @@ fn vanilla_creature(
 fn artifact_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Artifact Bolt".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -122,6 +124,7 @@ fn artifact_bolt_definition() -> CardDefinition {
 fn plain_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
+        oracle_id: None,
         name: "Test Plain Bolt".to_string(),
         card_types: CardTypeSet::INSTANT,
         ..artifact_bolt_definition()

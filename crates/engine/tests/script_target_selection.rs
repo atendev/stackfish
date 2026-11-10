@@ -66,6 +66,7 @@ return s
 fn land_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Select-Target Land".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -93,6 +94,7 @@ fn land_definition(script: &str) -> CardDefinition {
 fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -120,6 +122,7 @@ fn creature_definition() -> CardDefinition {
 fn non_creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 3,
+        oracle_id: None,
         name: "Test Non-Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

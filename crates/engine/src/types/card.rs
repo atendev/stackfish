@@ -202,6 +202,9 @@ pub enum ScriptReference {
 pub struct CardDefinition {
     /// External DB's stable card identifier.
     pub definition_id: u64,
+    /// The external DB's `oracle_id` that `definition_id` hashes. `None` for a
+    /// card with no DB row, such as a proof card or an engine-built token.
+    pub oracle_id: Option<String>,
     pub name: String,
     pub mana_cost: ManaCost,
     pub color_indicator: Option<ColorSet>,
@@ -352,6 +355,7 @@ mod tests {
     fn minimal_definition() -> CardDefinition {
         CardDefinition {
             definition_id: 1,
+            oracle_id: None,
             name: "Test".to_string(),
             mana_cost: ManaCost {
                 symbols: Vec::new(),

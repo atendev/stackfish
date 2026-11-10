@@ -10,6 +10,7 @@ use stackfish_testutil::{card_object, drain, single_player_state};
 fn spell_definition(mana_cost: ManaCost, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Spell".to_string(),
         mana_cost,
         color_indicator: None,
@@ -272,6 +273,7 @@ fn restricted_mana_cannot_fund_an_activated_ability_cost() {
 
     let source_definition = CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Artifact Source".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -20,6 +20,7 @@ fn creature_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -47,6 +48,7 @@ fn creature_definition(
 fn become_blocked_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 99,
+        oracle_id: None,
         name: "Test Fog Effect".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

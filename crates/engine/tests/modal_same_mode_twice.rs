@@ -13,6 +13,7 @@ use stackfish_testutil::{
 fn repeatable_definition(mode_choice: ModeChoice) -> CardDefinition {
     CardDefinition {
         definition_id: 50,
+        oracle_id: None,
         name: "Test Repeatable".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -201,6 +202,7 @@ fn repeated_mode_with_a_target_allows_choosing_different_targets() {
             target,
             CardDefinition {
                 definition_id: 1,
+                oracle_id: None,
                 name: "Test Bear".to_string(),
                 mana_cost: ManaCost {
                     symbols: Vec::new(),

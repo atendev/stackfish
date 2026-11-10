@@ -123,6 +123,7 @@ fn armageddon_definition(definition_id: u64, source: &str) -> CardDefinition {
     let effect = effect.or(Some(AbilityEffect::Script(handle)));
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: "Test Armageddon".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -150,6 +151,7 @@ fn armageddon_definition(definition_id: u64, source: &str) -> CardDefinition {
 fn land_definition(definition_id: u64, name: &str, indestructible: bool) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -198,6 +200,7 @@ fn supertyped_creature_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

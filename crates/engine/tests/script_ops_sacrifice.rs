@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -39,6 +40,7 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
 fn sacrifice_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Sacrifice".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

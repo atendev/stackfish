@@ -19,6 +19,7 @@ fn creature_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -46,6 +47,7 @@ fn creature_definition(
 fn threaten_definition(duration: EffectDuration) -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Threaten".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -13,6 +13,7 @@ use stackfish_testutil::{
 fn creature_definition(definition_id: u64, name: &str, colors: ColorSet) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -40,6 +41,7 @@ fn creature_definition(definition_id: u64, name: &str, colors: ColorSet) -> Card
 fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -107,6 +109,7 @@ fn land_word() -> TargetRequirement {
 fn plague_spores_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Plague Spores".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

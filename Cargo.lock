@@ -486,6 +486,7 @@ name = "stackfish-godot"
 version = "0.1.0"
 dependencies = [
  "godot",
+ "rusqlite",
  "serde_json",
  "stackfish-host",
 ]

@@ -14,6 +14,7 @@ use stackfish_testutil::{
 fn escape_creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Escape Creature".to_string(),
         mana_cost: ManaCost {
             symbols: vec![
@@ -69,6 +70,7 @@ fn escape_creature_definition() -> CardDefinition {
 fn filler_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

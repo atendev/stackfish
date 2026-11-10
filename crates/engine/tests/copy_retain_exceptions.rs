@@ -13,6 +13,7 @@ use stackfish_testutil::{card_object, drain};
 fn doppelganger_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Doppelganger".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -42,6 +43,7 @@ fn doppelganger_definition() -> CardDefinition {
 fn bear_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Bear".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

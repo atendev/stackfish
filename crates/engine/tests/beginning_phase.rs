@@ -9,6 +9,7 @@ use stackfish_testutil::{
 fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -36,6 +37,7 @@ fn creature_definition(name: &str) -> CardDefinition {
 fn land_definition(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

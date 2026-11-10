@@ -24,6 +24,7 @@ return s
 fn flying_creature(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -51,6 +52,7 @@ fn flying_creature(id: u64, name: &str) -> CardDefinition {
 fn trample_creature(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -98,6 +100,7 @@ fn creature_word() -> TargetRequirement {
 fn exchange_of_words_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Exchange of Words".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -39,6 +40,7 @@ fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinit
 fn bear_definition(id: u64, name: &str, script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -23,6 +23,7 @@ return s
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -50,6 +51,7 @@ fn creature_definition(toughness: i32) -> CardDefinition {
 fn wheel_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Wheel of Sun and Moon".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

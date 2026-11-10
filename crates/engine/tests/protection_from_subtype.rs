@@ -35,6 +35,7 @@ fn creature_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -93,6 +94,7 @@ fn plain_creature(id: u64, name: &str, power: i32, toughness: i32) -> CardDefini
 fn arcane_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Arcane Bolt".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -136,6 +138,7 @@ fn arcane_bolt_definition() -> CardDefinition {
 fn plain_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
+        oracle_id: None,
         name: "Test Plain Bolt".to_string(),
         subtypes: Vec::new(),
         ..arcane_bolt_definition()

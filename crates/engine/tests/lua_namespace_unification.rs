@@ -8,6 +8,7 @@ use stackfish_testutil::{card_object, two_player_state, zones};
 fn definition(register_body: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Scripted".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -11,6 +11,7 @@ pub fn minimal_card_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.into(),
         mana_cost,
         color_indicator: None,

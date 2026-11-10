@@ -14,6 +14,7 @@ use stackfish_testutil::{
 fn creature_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -41,6 +42,7 @@ fn creature_definition(id: u64, name: &str) -> CardDefinition {
 fn land_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -68,6 +70,7 @@ fn land_definition(id: u64, name: &str) -> CardDefinition {
 fn equipment_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -95,6 +98,7 @@ fn equipment_definition(id: u64, name: &str) -> CardDefinition {
 fn fortification_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -122,6 +126,7 @@ fn fortification_definition(id: u64, name: &str) -> CardDefinition {
 fn search_spell_definition(destination: SearchDestination) -> CardDefinition {
     CardDefinition {
         definition_id: 40,
+        oracle_id: None,
         name: "Test Search Spell".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

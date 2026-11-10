@@ -10,6 +10,7 @@ use stackfish_testutil::{drain, pass_both_and_drain, permanent, two_player_main_
 fn creature_definition(id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -38,6 +39,7 @@ fn creature_definition(id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefin
 fn equipment_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
+        oracle_id: None,
         name: "Test Dual Equipment".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

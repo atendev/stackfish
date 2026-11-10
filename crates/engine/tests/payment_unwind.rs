@@ -7,6 +7,7 @@ use stackfish_testutil::{card_object, drain, single_player_state};
 fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Spell".to_string(),
         mana_cost,
         color_indicator: None,
@@ -32,6 +33,7 @@ fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
 fn permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Permanent".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

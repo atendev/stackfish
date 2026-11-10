@@ -145,6 +145,7 @@ pub(super) fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::
         lineage: crate::types::ids::ObjectLineage { previous: None },
         definition: crate::types::card::CardDefinition {
             definition_id: 1,
+            oracle_id: None,
             name: "Test Object".to_string(),
             mana_cost: crate::types::mana::ManaCost {
                 symbols: Vec::new(),

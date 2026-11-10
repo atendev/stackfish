@@ -158,8 +158,10 @@ impl CardDb {
 
         Ok(CardDefinition {
             definition_id: hash_oracle_id(&row.oracle_id),
+            oracle_id: Some(row.oracle_id.clone()),
             name: row.name.clone(),
             mana_cost,
+            // TODO: read `cards.color_indicator`, so such a card has only its cost colors (CR 204.2)
             color_indicator: None,
             supertypes,
             card_types,

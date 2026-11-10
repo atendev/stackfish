@@ -133,6 +133,22 @@ fn definition_id_is_stable_across_loads() {
 }
 
 #[test]
+fn oracle_id_is_the_row_key_whatever_the_lookup() {
+    let db = open_fixture();
+    assert_eq!(
+        db.load_by_oracle_id("bear-1").unwrap().oracle_id.as_deref(),
+        Some("bear-1")
+    );
+    assert_eq!(
+        db.load_by_script_id("lightning_bolt")
+            .unwrap()
+            .oracle_id
+            .as_deref(),
+        Some("bolt-1")
+    );
+}
+
+#[test]
 fn multi_face_card_is_rejected() {
     let db = open_fixture();
     let err = db.load_by_oracle_id("dfc-1").unwrap_err();

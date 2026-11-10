@@ -26,6 +26,7 @@ return s
 fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -53,6 +54,7 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
 fn equipment_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
+        oracle_id: None,
         name: "Test Equipment".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

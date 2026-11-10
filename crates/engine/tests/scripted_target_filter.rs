@@ -30,6 +30,7 @@ return s
 fn land_definition(id: u64, script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: "Test Ability Land".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -57,6 +58,7 @@ fn land_definition(id: u64, script: &str) -> CardDefinition {
 fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

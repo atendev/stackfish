@@ -33,6 +33,7 @@ fn vanilla_hand_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let mut obj = hand_card_with_discarded_trigger(id, owner);
     obj.definition = CardDefinition {
         definition_id: id.0,
+        oracle_id: None,
         name: "Vanilla".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

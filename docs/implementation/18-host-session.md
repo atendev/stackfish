@@ -75,6 +75,11 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   object's full snapshot, with its old id) appears when the Seat could see the old object. The Session finds the old
   id, owner and identity by reading the state right after the step that wrote the event, because the engine event
   holds only the new id. If the lookup fails it hides rather than guesses.
+- `identity` and `last_known_info` read the object's copiable values (CR 707.2): `copiable_override` if it is a copy,
+  else `definition`. No other layer effect applies. Each carries `oracle_id` (the DB key from `CardDefinition.oracle_id`,
+  absent for proof cards and engine-built tokens), `colors` (WUBRG letters, `""` for colorless, from the mana cost or
+  color indicator, the `stackfish-db` `cards.colors` format) and `oracle_text` (`""` when empty). The carddb loader
+  reads no color indicator, so a DB card with one reports its cost colors; the view can use the DB row instead.
 - `cycled` and `madness_exiled` always carry `identity`. Their `last_known_info` goes only to a Seat that could see
   the hand.
 - `trigger_queued` and `replacement_applied` drop `source` for a Seat that cannot see the source, including a card
