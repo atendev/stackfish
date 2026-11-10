@@ -136,6 +136,10 @@ _Avoid_: Entry options, return flags
 A choice a player makes as a permanent comes onto the battlefield with no spell behind it, such as what a returned Clone copies or what a returned Aura enchants (CR 614.12a, 303.4f). It is one open Decision, answered like the same choice on a resolving spell.
 _Avoid_: Entry choice, entry pause
 
+**Untap attempt**:
+The moment a tapped permanent would become untapped, from the untap step or from an effect (CR 701.26b). A stun counter replaces the attempt with removing that counter, so the permanent stays tapped (CR 122.1d). A "doesn't untap" effect stops the attempt from happening at all, so no stun counter is removed. A permanent that is already untapped, or phased out, makes no attempt.
+_Avoid_: Untap event, stun check
+
 ## Relationships
 
 - A **Session** runs exactly one game and has one or more **Seats**

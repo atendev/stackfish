@@ -73,6 +73,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 100 Reanimation options. `EnterOptions` on both ops adds fixed `counters`, `attacking` and `keywords`, and one `AwaitingEnterChoice` carries copy, Devour, Amplify, Aura host and defender choices with no stack object. Custom functions return entry moves through `ScriptZoneMoveKind::Enter`, and `Game.Ops.PutOntoBattlefield` covers hand picks. Persist and Undying move onto the Reanimate mover. Decided in auto mode, then approved. Builds are 133 to 138. [closed/100-reanimation-options.md]
 - 101 Ward costs and player hexproof. Ward takes a mana string or a list of `Game.Costs.*` values and can be granted through a layer-6 effect, with printed Ward moved onto that path. Players get hexproof and shroud from a new player static, "hexproof from" is a layer-6 list, and `IgnoreKeyword("Hexproof")` is a load error. [closed/101-ward-costs-and-player-hexproof.md](closed/101-ward-costs-and-player-hexproof.md)
 - 103 Damage redirected to another target. Static redirects stay `ReplacementEffect` rows with a `RedirectRecipient`, and resolved effects make rows in a new list of redirect shields with their own id. A chosen recipient is a normal target picked on cast or activation. Players and creatures are in scope. Each effect applies once per event, so a chain ends (CR 614.5, 616.1f). A budget smaller than the damage splits the event. Decided in auto mode, then approved. Builds are 143 to 146. [closed/103-damage-redirect-to-another-target.md](closed/103-damage-redirect-to-another-target.md)
+- 102 Stun counters and tap hooks. Stun is a rule check in one engine helper that every untap attempt goes through, not a general would-untap filter. A replaced untap writes no `Untapped` event and proposes a `CounterAdded { Stun, -1 }`, removing at most one counter per attempt (CR 122.1d, 614.5). Phased-out permanents make no attempt. `CounterKind::Stun` gets an additive wire arm. "Would become tapped" is dropped, since no card uses it. Decided in auto mode, then approved. Build is 147. [closed/102-stun-counters-and-tap-hooks.md](closed/102-stun-counters-and-tap-hooks.md)
 
 ## Not yet specified
 
@@ -115,6 +116,8 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Excess damage dealt to another recipient (CR 120.4a), such as Flame Spill and Pigment Storm (found by 103).
 - Prevention shields made by a resolved spell or ability, including amounts (CR 615.7). No Lua op exists (found by 103).
 - Damage that can't be redirected (Whippoorwill) (found by 103).
+- "Doesn't untap during its controller's untap step" effects and "can't untap more than N" limits (CR 502.3), such as Winter Orb and Static Orb. A permanent that doesn't untap keeps its stun counter (found by 102).
+- Non-stun would-untap replacements and their CR 616.1 order with stun, such as Bewitching Leechcraft and Edge of Malacol (found by 102).
 
 ## Out of scope
 
@@ -123,6 +126,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Answering several Decisions in parallel (for example, simultaneous mulligans). Ruled out in favour of one Decision at a time.
 - Godot export and web builds (a copy step into `res://`, a macOS `.framework`, an emscripten target). The destination only needs the adapter to load and step a game, so these go with the Godot UI effort. [closed/033-godot-smoke-test-ci.md]
 - "As though it were a main phase" and timing grants for land plays. No printed card uses either. [closed/098-timing-permission-follow-ups.md]
+- A "would become tapped" replacement hook. No printed card uses it. [closed/102-stun-counters-and-tap-hooks.md]
 
 ## Frontier
 
@@ -130,7 +134,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 102 Stun counters and tap hooks
 - 104 Fight and bite target shapes
 - 112 Which non-goal cards the loader rejects
 - 123 Cost shapes past the current set
@@ -161,3 +164,4 @@ Builds and audits:
 - 141 Build player hexproof and shroud
 - 142 Build hexproof from
 - 143 Build static redirect recipients
+- 147 Build stun counters
