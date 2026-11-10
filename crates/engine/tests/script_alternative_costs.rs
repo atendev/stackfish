@@ -249,6 +249,7 @@ fn buyback_cost_function_surfaces_a_real_parse_error() {
 fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Bear".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -277,6 +278,7 @@ fn creature_definition() -> CardDefinition {
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Script Flashback Bolt".to_string(),
         mana_cost: ManaCost {
             symbols: vec![

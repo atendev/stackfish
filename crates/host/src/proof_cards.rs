@@ -86,6 +86,7 @@ fn base(
 ) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: cost(mana_cost),
         color_indicator: None,

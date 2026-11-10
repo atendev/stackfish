@@ -36,6 +36,7 @@ return s
 fn land_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test May-Choose Land".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -104,6 +105,7 @@ fn base_state() -> GameState {
 fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Shield".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

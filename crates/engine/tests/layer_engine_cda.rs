@@ -26,6 +26,7 @@ fn cda_creature_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test CDA Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -67,6 +68,7 @@ fn cda_creature(
 fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

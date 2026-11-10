@@ -16,6 +16,7 @@ use stackfish_testutil::{
 fn chosen_by_opponent_definition(mode_choice: ModeChoice) -> CardDefinition {
     CardDefinition {
         definition_id: 60,
+        oracle_id: None,
         name: "Test Chosen By Opponent".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

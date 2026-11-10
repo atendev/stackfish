@@ -8,6 +8,7 @@ use stackfish_testutil::{card_object, two_player_state as base_two_player_state,
 fn ward_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 999,
+        oracle_id: None,
         name: "Test Exploration".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -122,6 +123,7 @@ fn a_land_play_modifier_from_a_real_script_lets_a_second_land_through() {
 
     let land_definition = |id: u64, name: &str| CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -198,6 +200,7 @@ fn a_land_play_modifier_from_a_real_script_lets_a_second_land_through() {
 fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Destroy Permanent".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

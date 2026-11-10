@@ -209,6 +209,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
         ),
         TokenSpec::Named(NamedToken::Clue) => CardDefinition {
             definition_id: 0,
+            oracle_id: None,
             name: "Clue".to_string(),
             mana_cost: ManaCost {
                 symbols: Vec::new(),
@@ -233,6 +234,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
         },
         TokenSpec::Named(NamedToken::Food) => CardDefinition {
             definition_id: 0,
+            oracle_id: None,
             name: "Food".to_string(),
             mana_cost: ManaCost {
                 symbols: Vec::new(),
@@ -257,6 +259,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
         },
         TokenSpec::Named(NamedToken::Treasure) => CardDefinition {
             definition_id: 0,
+            oracle_id: None,
             name: "Treasure".to_string(),
             mana_cost: ManaCost {
                 symbols: Vec::new(),
@@ -288,6 +291,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
             };
             CardDefinition {
                 definition_id: 0,
+                oracle_id: None,
                 name,
                 mana_cost: ManaCost {
                     symbols: Vec::new(),
@@ -296,6 +300,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
                 supertypes: spec.additional_supertypes,
                 card_types: CardTypeSet::CREATURE | spec.additional_types,
                 subtypes: spec.subtypes.iter().map(|s| Subtype(s.clone())).collect(),
+                // TODO: creature tokens carry no rules text for their keywords
                 oracle_text: String::new(),
                 power: Some(PTValue::Fixed(spec.power)),
                 toughness: Some(PTValue::Fixed(spec.toughness)),
@@ -391,5 +396,41 @@ fn register_token_abilities(
         TokenSpec::Creature(_) => {}
         // A copy token's abilities come from `run_card_script`, not this path.
         TokenSpec::CopyOf(_, _) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ability::CreatureTokenSpec;
+
+    // CR 111.10f
+    #[test]
+    fn a_clue_has_no_oracle_id_no_color_and_its_rules_text() {
+        let clue = build_token_definition(&TokenSpec::Named(NamedToken::Clue));
+        assert_eq!(clue.oracle_id, None);
+        assert_eq!(clue.colors(), ColorSet::empty());
+        assert_eq!(
+            clue.oracle_text,
+            "{2}, Sacrifice this artifact: Draw a card."
+        );
+    }
+
+    // CR 111.3
+    #[test]
+    fn a_white_soldier_token_is_white_with_no_rules_text() {
+        let soldier = build_token_definition(&TokenSpec::Creature(CreatureTokenSpec {
+            subtypes: vec!["Soldier".to_string()],
+            colors: ColorSet::WHITE,
+            power: 1,
+            toughness: 1,
+            keywords: KeywordSet::empty(),
+            additional_types: CardTypeSet::empty(),
+            additional_supertypes: SupertypeSet::empty(),
+            name: None,
+        }));
+        assert_eq!(soldier.oracle_id, None);
+        assert_eq!(soldier.colors(), ColorSet::WHITE);
+        assert_eq!(soldier.oracle_text, "");
     }
 }

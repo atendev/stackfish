@@ -11,6 +11,7 @@ use stackfish_testutil::{
 fn heal_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Heal".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

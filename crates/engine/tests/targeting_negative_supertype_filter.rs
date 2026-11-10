@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn creature_definition(id: u64, name: &str, supertypes: SupertypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -39,6 +40,7 @@ fn creature_definition(id: u64, name: &str, supertypes: SupertypeSet) -> CardDef
 fn purge_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Purge".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -82,6 +84,7 @@ fn purge_definition() -> CardDefinition {
 fn smite_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
+        oracle_id: None,
         name: "Test Smite".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

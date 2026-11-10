@@ -15,6 +15,7 @@ use stackfish_testutil::{
 fn creature_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -470,6 +471,7 @@ fn interveningif_upkeep_ability_script(
 fn heal_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Heal".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -696,6 +698,7 @@ return s
     let bear = ObjectId(0);
     let definition = CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Bear".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

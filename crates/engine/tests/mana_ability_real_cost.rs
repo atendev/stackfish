@@ -84,6 +84,7 @@ return s
 fn artifact_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Mana Rock".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -111,6 +112,7 @@ fn artifact_definition(script: &str) -> CardDefinition {
 fn land_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Mana Land".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -15,6 +15,7 @@ use stackfish_testutil::{
 fn aura_enchant_player_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Enchant Player".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

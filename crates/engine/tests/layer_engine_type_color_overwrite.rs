@@ -17,6 +17,7 @@ use stackfish_testutil::{
 fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -53,6 +54,7 @@ fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameOb
 fn land_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Land".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

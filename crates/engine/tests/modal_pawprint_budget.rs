@@ -13,6 +13,7 @@ use stackfish_testutil::{
 fn pawprint_budget_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 41,
+        oracle_id: None,
         name: "Test Pawprint Budget".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -9,6 +9,7 @@ use stackfish_testutil::{card_object, drain, two_player_state as base_two_player
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: id.0,
+        oracle_id: None,
         name: "Test Card".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -206,6 +207,7 @@ fn opponent_scoped_modifier_does_not_affect_its_own_controller() {
 fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Destroy Permanent".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

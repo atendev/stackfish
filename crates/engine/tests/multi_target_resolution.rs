@@ -10,6 +10,7 @@ use stackfish_testutil::{
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -37,6 +38,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
 fn doom_blast_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Doom Blast".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -80,6 +82,7 @@ fn doom_blast_definition() -> CardDefinition {
 fn slay_two_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
+        oracle_id: None,
         name: "Test Slay Two".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

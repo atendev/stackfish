@@ -1599,6 +1599,7 @@ mod tests {
             lineage: ObjectLineage { previous: None },
             definition: CardDefinition {
                 definition_id: 1,
+                oracle_id: None,
                 name: "Test Creature".to_string(),
                 mana_cost: ManaCost {
                     symbols: Vec::new(),
@@ -2191,6 +2192,7 @@ mod tests {
             lineage: ObjectLineage { previous: None },
             definition: CardDefinition {
                 definition_id: 1,
+                oracle_id: None,
                 name: "Test Permanent".to_string(),
                 mana_cost: ManaCost {
                     symbols: Vec::new(),

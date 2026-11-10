@@ -63,6 +63,7 @@ fn destroy_target_creature_trigger(source: ObjectId, exclude_source: bool) -> Re
 fn land_definition(name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

@@ -25,6 +25,7 @@ return s
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: id.0,
+        oracle_id: None,
         name: "Test Card".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -56,6 +57,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
 fn aura_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Enchant Player Hand Size Aura".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

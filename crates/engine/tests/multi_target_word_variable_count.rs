@@ -13,6 +13,7 @@ use stackfish_testutil::{
 fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -40,6 +41,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
 fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -125,6 +127,7 @@ fn land_word() -> TargetRequirement {
 fn up_to_then_exact_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Up To Then Exact".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -155,6 +158,7 @@ fn up_to_then_exact_definition() -> CardDefinition {
 fn exact_then_up_to_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
+        oracle_id: None,
         name: "Test Exact Then Up To".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -185,6 +189,7 @@ fn exact_then_up_to_definition() -> CardDefinition {
 fn at_least_then_exact_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 22,
+        oracle_id: None,
         name: "Test At Least Then Exact".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -222,6 +227,7 @@ fn two_variable_words_definition() -> CardDefinition {
     };
     CardDefinition {
         definition_id: 23,
+        oracle_id: None,
         name: "Test Two Variable Words".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -669,6 +675,7 @@ fn two_at_least_two_creatures_definition() -> CardDefinition {
     };
     CardDefinition {
         definition_id: 24,
+        oracle_id: None,
         name: "Test Two At Least Two Creatures".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

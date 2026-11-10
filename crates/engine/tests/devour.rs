@@ -14,6 +14,7 @@ use stackfish_testutil::{
 fn creature_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost,
         color_indicator: None,
@@ -50,6 +51,7 @@ fn subtyped_creature_definition(
 fn artifact_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost,
         color_indicator: None,

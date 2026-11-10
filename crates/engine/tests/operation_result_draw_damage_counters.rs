@@ -13,6 +13,7 @@ use stackfish_testutil::{
 fn creature_definition(definition_id: u64, name: &str, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -40,6 +41,7 @@ fn creature_definition(definition_id: u64, name: &str, toughness: i32) -> CardDe
 fn library_card_definition(definition_id: u64) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: "Test Library Card".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -68,6 +70,7 @@ fn library_card_definition(definition_id: u64) -> CardDefinition {
 fn pending_script_only_definition(definition_id: u64, name: &str, source: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

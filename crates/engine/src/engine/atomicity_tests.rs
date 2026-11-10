@@ -56,6 +56,7 @@ fn ids(list: &[u64]) -> Vec<ObjectId> {
 pub(super) fn definition(modes: Vec<SpellMode>, mode_choice: ModeChoice) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Charm".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

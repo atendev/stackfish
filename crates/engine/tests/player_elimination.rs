@@ -29,6 +29,7 @@ fn player_state(id: PlayerId, life: i32) -> PlayerState {
 fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Creature".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

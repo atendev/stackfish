@@ -14,6 +14,7 @@ use stackfish_testutil::{
 fn basic_land_definition(definition_id: u64, name: &str, subtype: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -43,6 +44,7 @@ fn basic_land_definition(definition_id: u64, name: &str, subtype: &str) -> CardD
 fn nonbasic_land_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -87,6 +89,7 @@ fn search_spell_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id: 40,
+        oracle_id: None,
         name: "Test Search Spell".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

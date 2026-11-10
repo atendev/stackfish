@@ -10,6 +10,7 @@ use stackfish_testutil::{
 fn mode_cost_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
+        oracle_id: None,
         name: "Test Mode Cost".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -250,6 +251,7 @@ fn non_modal_spell_is_unaffected_by_mode_additional_cost_plumbing() {
             target,
             CardDefinition {
                 definition_id: 1,
+                oracle_id: None,
                 name: "Test Bear".to_string(),
                 mana_cost: ManaCost {
                     symbols: Vec::new(),
@@ -279,6 +281,7 @@ fn non_modal_spell_is_unaffected_by_mode_additional_cost_plumbing() {
     let card = ObjectId(2);
     let shock = CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Shock".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

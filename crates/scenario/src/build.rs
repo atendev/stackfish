@@ -107,6 +107,7 @@ pub(crate) fn card_definition_from_spec(
     let symbols = mana_symbols(spec.generic_cost, &spec.colors, spec.has_x);
     CardDefinition {
         definition_id: placeholder_definition_id,
+        oracle_id: None,
         name: spec.name.clone(),
         mana_cost: ManaCost { symbols },
         color_indicator: None,

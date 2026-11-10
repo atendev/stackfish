@@ -702,6 +702,7 @@ mod tests {
             lineage: crate::types::ids::ObjectLineage { previous: None },
             definition: CardDefinition {
                 definition_id: 1,
+                oracle_id: None,
                 name: "Test Object".to_string(),
                 mana_cost: crate::types::mana::ManaCost {
                     symbols: Vec::new(),

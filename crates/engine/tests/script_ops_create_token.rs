@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -39,6 +40,7 @@ fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinit
 fn creature_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -66,6 +68,7 @@ fn creature_definition(id: u64, name: &str) -> CardDefinition {
 fn land_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -959,6 +962,7 @@ fn clue_ability_cannot_be_paid_by_sacrificing_a_different_artifact() {
             decoy_id,
             CardDefinition {
                 definition_id: 2,
+                oracle_id: None,
                 card_types: CardTypeSet::ARTIFACT,
                 ..instant_definition(2, "Decoy", AbilityEffect::GainLife(0))
             },

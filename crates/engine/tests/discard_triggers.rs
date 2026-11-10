@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: id.0,
+        oracle_id: None,
         name: "Test Card".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

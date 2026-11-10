@@ -176,6 +176,7 @@ return s
 fn wall_definition(definition_id: u64) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: "Test Wall".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -216,6 +217,7 @@ fn enchant_wall_definition() -> CardDefinition {
         .expect("script declares a target_requirement");
     CardDefinition {
         definition_id: 30,
+        oracle_id: None,
         name: "Test Enchant Wall".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -358,6 +360,7 @@ fn creature_definition_pt(
 ) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -386,6 +389,7 @@ fn creature_definition_pt(
 fn enchant_power_four_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 31,
+        oracle_id: None,
         name: "Test Enchant Power Four".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

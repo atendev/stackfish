@@ -9,6 +9,7 @@ use stackfish_testutil::{card_object, drain, single_player_state};
 fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test X Spell".to_string(),
         mana_cost,
         color_indicator: None,

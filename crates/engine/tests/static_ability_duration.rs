@@ -76,6 +76,7 @@ return s
 fn bear_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Bear".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

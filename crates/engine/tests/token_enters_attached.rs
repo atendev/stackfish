@@ -12,6 +12,7 @@ use stackfish_testutil::{
 fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -39,6 +40,7 @@ fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinit
 fn creature_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -66,6 +68,7 @@ fn creature_definition(id: u64, name: &str) -> CardDefinition {
 fn aura_source_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -122,6 +125,7 @@ fn aura_source_enchant_player_definition(id: u64, name: &str) -> CardDefinition 
 fn equipment_source_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

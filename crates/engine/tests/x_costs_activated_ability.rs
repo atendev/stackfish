@@ -8,6 +8,7 @@ use stackfish_testutil::{card_object, drain, single_player_state};
 fn ability_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test X Source".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

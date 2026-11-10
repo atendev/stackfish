@@ -54,6 +54,7 @@ return s
 fn land_definition(script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Cost-Reducing Land".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -81,6 +82,7 @@ fn land_definition(script: &str) -> CardDefinition {
 fn bear_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
+        oracle_id: None,
         name: "Test Bear".to_string(),
         mana_cost: ManaCost {
             symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(1))],
@@ -108,6 +110,7 @@ fn bear_definition() -> CardDefinition {
 fn white_bear_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 3,
+        oracle_id: None,
         name: "Test White Bear".to_string(),
         mana_cost: ManaCost {
             symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White))],

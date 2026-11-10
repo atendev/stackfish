@@ -55,6 +55,7 @@ fn state_at_end_of_combat() -> GameState {
 fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Permanent".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

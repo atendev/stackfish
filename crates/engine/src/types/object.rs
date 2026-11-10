@@ -173,6 +173,7 @@ mod tests {
     fn dummy_definition() -> CardDefinition {
         CardDefinition {
             definition_id: 1,
+            oracle_id: None,
             name: "Test".to_string(),
             mana_cost: ManaCost {
                 symbols: Vec::new(),

@@ -15,6 +15,7 @@ use stackfish_testutil::{
 fn cascade_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
+        oracle_id: None,
         name: "Test Cascade Beast".to_string(),
         mana_cost: ManaCost {
             symbols: vec![
@@ -45,6 +46,7 @@ fn cascade_spell_definition() -> CardDefinition {
 fn filler_creature(definition_id: u64, name: &str, generic_mv: u32) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(generic_mv))],

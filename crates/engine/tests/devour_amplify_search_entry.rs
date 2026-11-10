@@ -20,6 +20,7 @@ fn creature_definition(
 ) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -47,6 +48,7 @@ fn creature_definition(
 fn shield_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -134,6 +136,7 @@ fn creature_filter() -> FilterSpec {
 fn search_spell_definition(destination: SearchDestination) -> CardDefinition {
     CardDefinition {
         definition_id: 50,
+        oracle_id: None,
         name: "Test Creature Tutor".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

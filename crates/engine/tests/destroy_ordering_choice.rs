@@ -16,6 +16,7 @@ use stackfish_testutil::{
 fn creature_definition(definition_id: u64, name: &str, toughness: i32) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -43,6 +44,7 @@ fn creature_definition(definition_id: u64, name: &str, toughness: i32) -> CardDe
 fn shield_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -117,6 +119,7 @@ fn exile_instead_effect(
 fn destroy_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Destroy".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -160,6 +163,7 @@ fn destroy_spell_definition() -> CardDefinition {
 fn slay_two_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
+        oracle_id: None,
         name: "Test Slay Two".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -203,6 +207,7 @@ fn slay_two_definition() -> CardDefinition {
 fn sacrifice_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 22,
+        oracle_id: None,
         name: "Test Sacrifice".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),

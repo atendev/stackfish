@@ -37,6 +37,7 @@ return s
 fn creature_definition(definition_id: u64, name: &str, script: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
+        oracle_id: None,
         name: name.to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
@@ -64,6 +65,7 @@ fn creature_definition(definition_id: u64, name: &str, script: &str) -> CardDefi
 fn exile_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
+        oracle_id: None,
         name: "Test Exile".to_string(),
         mana_cost: ManaCost {
             symbols: Vec::new(),
