@@ -18,6 +18,7 @@ Build the load step `Engine::new_game` lacks. It loads a script's `operation()` 
 - Write the failing test first, with a flashback card loaded through `new_game`. Use the `tdd` skill. Follow the CLAUDE.md implementation loop on a `phase5/` branch.
 - Check whether the replay pin moves. If it does, bump `BEHAVIOUR_REV`.
 - Removing the gap also lets the proof game offer `may_cast` at the byte level, which ticket 109 can use.
+- If "Build flash costs" lands first, load `flash_cost()` here as well (decided in 128).
 
 ## Resolution
 

@@ -69,8 +69,12 @@ _Avoid_: Mode, ruleset
 ### Rules primitives
 
 **Timing permission**:
-A standing grant that lets a player cast matching spells as though they had flash, or activate equip abilities any time they could cast an instant. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it for a cast. Where a card may be played or cast from is a Zone permission. A static one lasts while its source is on the battlefield and may hold only while a condition is true, and a card can hold one for itself in hand ("you may cast this spell as though it had flash if..."). A Timed grant lasts its `duration` and has no condition.
+A standing grant that lets a player cast matching spells as though they had flash, or activate equip abilities any time they could cast an instant. It is kept in `GameState.timing_permissions`, not on the layered `continuous_effects`, and it does not give the card the Flash keyword. `can_cast_now` is the one place that reads it for a cast. Where a card may be played or cast from is a Zone permission. A static one lasts while its source is on the battlefield and may hold only while a condition is true, and a card can hold one for itself in hand ("you may cast this spell as though it had flash if..."). A Timed grant lasts its `duration` and has no condition. Flash a card buys with a cost ("if you pay {2} more") is a Flash cost, not a Timing permission.
 _Avoid_: Flash grant, flash effect, timing modifier
+
+**Flash cost**:
+An optional additional cost printed on a card that lets that card be cast any time its controller could cast an instant, for the one cast that pays it (CR 601.3c). The player announces it with the cast, and it adds to whatever cost the cast pays. It is not a Timing permission, and the spell does not gain flash.
+_Avoid_: Flash grant, flash tax, extra cost
 
 **Zone permission**:
 A standing grant that lets a player play a land or cast a spell from a zone other than hand, such as "play lands from your graveyard". It is kept in `GameState.zone_permissions` and names the zone, whose cards it covers and whether it plays lands or casts spells. A library-top permission opens only the top card of a library. Who may see that card is a Library top view, not the permission. A linked permission opens only the cards exiled with its source. `can_cast_from_zone` and `can_play_land_from_zone` are the places that read it. It says where, not when, so timing stays with the Timing permission and `can_cast_now`. Like a Timing permission, it is static or a Timed grant. A Cast permission may carry a Leave-stack rider. A card's own alternative cost, such as flashback, is not a Zone permission.
@@ -141,7 +145,7 @@ The moment a tapped permanent would become untapped, from the untap step or from
 _Avoid_: Untap event, stun check
 
 **Additional cost**:
-A cost paid on top of the mana cost or an alternative cost, such as "sacrifice a creature" or "pay 3 life" (CR 118.8). It comes from the card's own text, a chosen mode or an activated ability's cost. It is always data about named objects or amounts, never a script.
+A cost paid on top of the mana cost or an alternative cost, such as "sacrifice a creature" or "pay 3 life" (CR 118.8). It comes from the card's own text, a chosen mode or an activated ability's cost. It is always data about named objects or amounts, never a script. A Flash cost is an optional one that changes when the spell may be cast.
 _Avoid_: Extra cost, side cost
 
 **Cost subject**:

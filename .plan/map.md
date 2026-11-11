@@ -80,6 +80,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 123 Cost shapes past the current set. Spells get `CardDefinition.additional_costs` from `s.additional_costs()`. New variants take a `CostSubject` (source or chosen), and the set adds remove counters, put counter, untap `{Q}`, energy, exile, return to hand, put on library, mill and reveal. An "A or B" cost is a `OneOf` whose branch is announced with the action (CR 601.2b), and counted shapes take a fixed amount or the announced X (CR 107.3a). One object pays at most one moving cost. Wire changes are additive. Decided in auto mode, then approved. Builds are 151 to 158, and optional costs and kicker go to 159. [closed/123-cost-shapes-past-the-current-set.md](closed/123-cost-shapes-past-the-current-set.md)
 - 127 Activate only as a sorcery on any ability. `RegisteredAbility` gains `activation: ActivationRestriction { sorcery_speed, condition }`, a field rather than a side map. `Register` sets `sorcery_speed` for `Game.Ops.Attach`, so Equip and Fortify move onto it. One `can_activate_now` helper serves `activate.rs` and the entries scan and reads the `EquipAbilities` exemption. "During" and "if" restrictions are an `InterveningIfSpec` checked only when activation begins. Lua gets `:SetSorcerySpeed()` and `:SetActivationCondition`. Builds are 160 then 161, and once-per-turn limits go to 162. [closed/127-activate-only-as-a-sorcery.md]
 - 107 `remap_abilities` purges cost modifiers. A cast, land play or other hand-built move drops every cost and player modifier keyed to the old id, as `retire_object` does. The script's registration for the new zone stays, and a card's own cast keeps its reduction. Built in auto mode, then merged. [closed/107-remap-abilities-purge-cost-modifiers.md](closed/107-remap-abilities-purge-cost-modifiers.md)
+- 128 Flash bought with an extra cost. A Flash cost is an optional additional cost on the card, `FlashCost { mana, additional }`, announced by `CastSpell.pay_flash_cost` and not a Timing permission (CR 601.3c). `can_cast_now` is unchanged: with priority and a failed timing check, the cast is legal only with the cost, and the Entry says `Required`. The cost goes on top of any cost path, after modifiers and tax, and nothing records it on the stack. `s.flash_cost()` returns a `Game.Costs.*` list. Decided in auto mode, then approved. Build is 163. [closed/128-flash-bought-with-an-extra-cost.md](closed/128-flash-bought-with-an-extra-cost.md)
 
 ## Not yet specified
 
@@ -128,7 +129,8 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Non-stun would-untap replacements and their CR 616.1 order with stun, such as Bewitching Leechcraft and Edge of Malacol (found by 102).
 - Set-level cost constraints: Illuminated Folio's "two cards that share a color" and collect evidence's total mana value (CR 701.59a). A Payment Decision lists candidates one object at a time (found by 123).
 - Exert as a cost (CR 701.43a). It waits on "doesn't untap" effects (found by 123).
-- Behold, blight and forage as costs. Each is a keyword action with few cards (found by 123).
+- Behold, blight and forage as costs. Each is a keyword action with few cards (found by 123). Molten Exhale's Flash cost waits on behold (found by 128).
+- Offering (CR 702.48a, 6 cards such as Blast-Furnace Hellkite). It buys flash with an optional sacrifice, but the cost reduction comes from the sacrificed object (found by 128).
 - Moving `TapSelf`, `SacrificeSelf`, `DiscardSelf` and their filtered pairs onto `CostSubject`. It renames wire and script names, so it waits for a reason (found by 123).
 - "Fights each creature" and "each fights a different one of those creatures" (Ezuri's Predation). They need a pairing choice (found by 104).
 - Damage equal to something other than power, such as toughness. This is a dynamic-amount `DealDamage` question, not a Bite parameter (found by 104).
@@ -150,7 +152,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 128 Flash bought with an extra cost
 - 132 Delayed triggered abilities
 - 159 Optional additional costs and kicker
 - 162 Activation limits per turn
@@ -182,3 +183,4 @@ Builds and audits:
 - 150 Build non-goal card rejection in the loader
 - 151 Build spell additional costs
 - 152 One object pays one moving cost
+- 163 Build flash costs
