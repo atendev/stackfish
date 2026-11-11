@@ -156,7 +156,7 @@ pub(crate) struct WireStackEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ability_text: Option<String>,
     /// The ability's position among its source's abilities when it was put on the
-    /// stack, as `activate_ability` counts them. Absent for a spell or a departed source.
+    /// stack, as `find_ability` counts them. Absent for a spell or a departed source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ability_index: Option<u32>,
     /// The source's identity, sent only when `source` is withheld from this Seat and

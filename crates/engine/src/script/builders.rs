@@ -260,11 +260,6 @@ pub(crate) struct TriggeredAbilityBuilder {
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
-/// `:SetFunctionsFrom("Graveyard")` (CR 113.6): declares the one zone this
-/// ability functions from, shared by the triggered and activated builders. An
-/// ability declaring a zone is registered only while its source is there and
-/// is dropped when it leaves.
-// CR 405.4
 // A second call is refused so a script cannot overwrite its own text by mistake.
 fn ability_text(current: &Option<String>, text: String) -> mlua::Result<Option<String>> {
     if current.is_some() {
@@ -280,6 +275,10 @@ fn ability_text(current: &Option<String>, text: String) -> mlua::Result<Option<S
     Ok(Some(text))
 }
 
+/// `:SetFunctionsFrom("Graveyard")` (CR 113.6): declares the one zone this
+/// ability functions from, shared by the triggered and activated builders. An
+/// ability declaring a zone is registered only while its source is there and
+/// is dropped when it leaves.
 fn function_zone_name(name: &str) -> Result<ZoneKind, mlua::Error> {
     let zone = super::decode::parse_zone_kind_name(name).map_err(to_lua_err)?;
     match zone {
