@@ -22,6 +22,7 @@ Build `CardDefinition.optional_costs: Vec<OptionalCost>`, announced by `CastSpel
 - Wire: `optional_costs` on the cast action, offers on the Entry, and paid counts on the public stack object, all additive and defaulted. `PROTOCOL_VERSION` stays 1.
 - TODOs: a spell copy keeps `optional_paid` (CR 707.10), and repeatable non-mana costs (CR 702.33c).
 - Prove it with a kicker spell (Vines of Vastwood with `IfPaid`), a multikicker count, a "you may" sacrifice cost, and buyback through the new path.
+- `Engine::new_game` loads `s.buyback_cost()` in `load_script_declarations` (`engine/pregame.rs`). Load `s.optional_costs()` there in its place when buyback moves into the list (found by 108).
 
 ## Resolution
 

@@ -84,6 +84,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 132 Delayed triggered abilities. A delayed trigger is a row in a new `GameState.delayed_triggers` list, since its source is usually a spell that has left the stack (CR 603.7d). The first build covers only "at the beginning of the next end step", about 506 cards. Rows match only events after they were made (CR 603.7a, 513.2), trigger once (CR 603.7b), and act on referenced objects still in their recorded zone at resolution (CR 603.7c). Lua gets `Game.Ops.AtNextEndStep(op, "targets" | "self" | "entered")` as a Chain entry. Unearth is its own build. Decided in auto mode, then approved. Builds are 164 then 165. [closed/132-delayed-triggered-abilities.md](closed/132-delayed-triggered-abilities.md)
 - 159 Optional additional costs and kicker. One `CardDefinition.optional_costs` list holds kicker, multikicker (a mana-only repeatable entry), plain "you may" costs and buyback, announced as a count per index on `CastSpell.optional_costs`. The mana joins before cost modifiers and tax (CR 601.2f), which also moves buyback there. `StackObject.optional_paid` records the counts, and a permanent and its abilities carry them through `GameObject.optional_paid` (CR 707.2 keeps them off permanent copies). Lua gets `s.optional_costs()`, a fourth `cast` argument, `Game.Ops.IfPaid`, `Game.Conditions.Kicked` and `EntersWithCountersKicked`. The wire keeps `pay_buyback` and stays at version 1. Decided in auto mode, then approved. Builds are 166 to 168. [closed/159-optional-additional-costs-and-kicker.md](closed/159-optional-additional-costs-and-kicker.md)
 - 162 Activation limits per turn. `ActivationRestriction` gains `limit: Option<ActivationLimit { uses, period: Turn | ObjectLifetime }>`, set from Lua by `:SetActivationsPerTurn(n)` or `:SetActivateOnlyOnce()`. Spent uses are keyed by `(ObjectId, AbilityId)` with no controller (CR 602.5b, 400.7), in a per-turn count map cleared on turn change and a lifetime set. A use counts when its activation begins and is refunded only if that payment unwinds, so a costed mana ability cannot exceed its limit through a nested activation. A permanent that becomes a copy in place gets a fresh limit, marked by a TODO. Loyalty (CR 606.3) and exhaust stay out. Decided in auto mode. The build is 169. [closed/162-activation-limits-per-turn.md](closed/162-activation-limits-per-turn.md)
+- 108 `new_game` loads alternative costs and buyback. `load_script_declarations` copies `s.alternative_costs()` and `s.buyback_cost()` with `operation()` and `target_requirement()`, once per script, with a Rust-set value winning per field. A card skips the loader only when all four are set. The replay pin did not move. Built in auto mode, then merged. [closed/108-new-game-loads-alternative-costs.md](closed/108-new-game-loads-alternative-costs.md)
 
 ## Not yet specified
 
@@ -161,7 +162,6 @@ Decisions (HITL):
 
 Builds and audits:
 
-- 108 `new_game` loads alternative costs and buyback
 - 109 Proof game coverage gaps
 - 110 Stale note sweep (AFK)
 - 111 Echo sacrifice checks control
