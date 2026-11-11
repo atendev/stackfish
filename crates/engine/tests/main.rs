@@ -1,5 +1,6 @@
 //! Integration test suite for `stackfish-engine`. See `docs/DESIGN.md`.
 
+mod ability_text;
 mod activate_ability_costs;
 mod activate_ability_mana;
 mod activate_ability_non_mana;
