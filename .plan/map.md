@@ -81,6 +81,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 127 Activate only as a sorcery on any ability. `RegisteredAbility` gains `activation: ActivationRestriction { sorcery_speed, condition }`, a field rather than a side map. `Register` sets `sorcery_speed` for `Game.Ops.Attach`, so Equip and Fortify move onto it. One `can_activate_now` helper serves `activate.rs` and the entries scan and reads the `EquipAbilities` exemption. "During" and "if" restrictions are an `InterveningIfSpec` checked only when activation begins. Lua gets `:SetSorcerySpeed()` and `:SetActivationCondition`. Builds are 160 then 161, and once-per-turn limits go to 162. [closed/127-activate-only-as-a-sorcery.md]
 - 107 `remap_abilities` purges cost modifiers. A cast, land play or other hand-built move drops every cost and player modifier keyed to the old id, as `retire_object` does. The script's registration for the new zone stays, and a card's own cast keeps its reduction. Built in auto mode, then merged. [closed/107-remap-abilities-purge-cost-modifiers.md](closed/107-remap-abilities-purge-cost-modifiers.md)
 - 128 Flash bought with an extra cost. A Flash cost is an optional additional cost on the card, `FlashCost { mana, additional }`, announced by `CastSpell.pay_flash_cost` and not a Timing permission (CR 601.3c). `can_cast_now` is unchanged: with priority and a failed timing check, the cast is legal only with the cost, and the Entry says `Required`. The cost goes on top of any cost path, after modifiers and tax, and nothing records it on the stack. `s.flash_cost()` returns a `Game.Costs.*` list. Decided in auto mode, then approved. Build is 163. [closed/128-flash-bought-with-an-extra-cost.md](closed/128-flash-bought-with-an-extra-cost.md)
+- 132 Delayed triggered abilities. A delayed trigger is a row in a new `GameState.delayed_triggers` list, since its source is usually a spell that has left the stack (CR 603.7d). The first build covers only "at the beginning of the next end step", about 506 cards. Rows match only events after they were made (CR 603.7a, 513.2), trigger once (CR 603.7b), and act on referenced objects still in their recorded zone at resolution (CR 603.7c). Lua gets `Game.Ops.AtNextEndStep(op, "targets" | "self" | "entered")` as a Chain entry. Unearth is its own build. Decided in auto mode, then approved. Builds are 164 then 165. [closed/132-delayed-triggered-abilities.md](closed/132-delayed-triggered-abilities.md)
 
 ## Not yet specified
 
@@ -152,7 +153,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 132 Delayed triggered abilities
 - 159 Optional additional costs and kicker
 - 162 Activation limits per turn
 
@@ -184,3 +184,4 @@ Builds and audits:
 - 151 Build spell additional costs
 - 152 One object pays one moving cost
 - 163 Build flash costs
+- 164 Build delayed end-step triggers

@@ -103,6 +103,10 @@ _Avoid_: Play-from-zone effect, zone grant
 What happens in place of one named permanent's move off the battlefield, for a set duration, such as "if that creature would die this turn, exile it instead" or "if it would leave the battlefield, exile it instead of putting it anywhere else". It competes with other replacement effects on that move (CR 616.1) and ends when the permanent moves (CR 400.7), so it can outlast whatever created it. A Leave-stack rider is a separate thing that applies to a spell.
 _Avoid_: Leave-stack rider, exile clause
 
+**Delayed trigger**:
+A one-shot triggered ability made by a resolving spell or ability, such as "exile it at the beginning of the next end step" (CR 603.7). It is kept in `GameState.delayed_triggers` because no object carries it, and its source has usually left the stack. It triggers once and acts only on referenced objects still in the zone it recorded (CR 603.7c).
+_Avoid_: Delayed effect, end-step rider
+
 **Redirect shield**:
 A redirection effect made by a resolved spell or ability, such as "the next 1 damage that would be dealt to this creature this turn is dealt to target creature instead" (CR 614.9). It lasts for the turn and outlives whatever created it (CR 611.2a). A redirect written on a permanent, such as Pariah's, is a static replacement effect and not a shield.
 _Avoid_: Redirection row, damage rider
