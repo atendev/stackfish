@@ -39,6 +39,9 @@ cost — that distinction matters if you're later checking whether the ability h
 **`:SetTarget(value)`** — gives the ability a real target. See [Targeting](#targeting) below.
 Optional — omitting it keeps the ability targetless.
 
+**`:SetText(text)`** — CR 405.4, the ability's rules text, such as `"{2}: Draw a card."`. A Seat
+sees it with the ability on the stack. Optional. Empty text or a second call is a script error.
+
 **`:SetFunctionsFrom(zoneName)`** — CR 113.6, for an ability that functions from a zone other than
 the battlefield, e.g. "{2}{B}: Return this card from your graveyard to your hand." `zoneName` is
 `"Hand"`, `"Graveyard"` or `"Exile"` (anything else is a script error; Stack, Library and Command have no
