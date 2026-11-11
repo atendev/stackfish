@@ -77,6 +77,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 104 Fight and bite target shapes. A self-source fight with a departed creature correctly deals nothing (CR 701.14b), so the LKI TODO goes. A one-word bite whose source left uses its last known power (CR 608.2h). Count-1 `up_to` words work in the one-word shape and as the second word, and every other unsupported shape becomes a load error from one shared check. Modes come with 114, and TOML and the glossary do not change. Decided in auto mode. Build is 148. [closed/104-fight-and-bite-target-shapes.md](closed/104-fight-and-bite-target-shapes.md)
 - 106 Remaining order leaks. No hash container leaks its order. Lua `pairs` over string keys varies per Lua state, so three key checks name a different bad key in `ScriptError` text on each run. State, Decisions and replay are unaffected. Replacing `pairs` in the sandbox was ruled out. Decided in auto mode. Build is 149. [closed/106-audit-remaining-order-leaks.md](closed/106-audit-remaining-order-leaks.md)
 - 112 Which non-goal cards the loader rejects. The loader rejects planeswalkers, battles, sagas, Class cards and the 73 Manifest, Manifest dread and Cloak producers with a new `CardLoadError::NonGoal { name, kind }`. The 229 Morph, Megamorph and Disguise cards load, since only the optional face-down cast is missing. Ixidron-type cards load too, as a stated exception because no keyword marks them. Melds and the other unflagged layouts load. Decided in auto mode, then approved. Build is 150. [closed/112-which-non-goal-cards-the-loader-rejects.md](closed/112-which-non-goal-cards-the-loader-rejects.md)
+- 123 Cost shapes past the current set. Spells get `CardDefinition.additional_costs` from `s.additional_costs()`. New variants take a `CostSubject` (source or chosen), and the set adds remove counters, put counter, untap `{Q}`, energy, exile, return to hand, put on library, mill and reveal. An "A or B" cost is a `OneOf` whose branch is announced with the action (CR 601.2b), and counted shapes take a fixed amount or the announced X (CR 107.3a). One object pays at most one moving cost. Wire changes are additive. Decided in auto mode, then approved. Builds are 151 to 158, and optional costs and kicker go to 159. [closed/123-cost-shapes-past-the-current-set.md](closed/123-cost-shapes-past-the-current-set.md)
 
 ## Not yet specified
 
@@ -123,6 +124,10 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Damage that can't be redirected (Whippoorwill) (found by 103).
 - "Doesn't untap during its controller's untap step" effects and "can't untap more than N" limits (CR 502.3), such as Winter Orb and Static Orb. A permanent that doesn't untap keeps its stun counter (found by 102).
 - Non-stun would-untap replacements and their CR 616.1 order with stun, such as Bewitching Leechcraft and Edge of Malacol (found by 102).
+- Set-level cost constraints: Illuminated Folio's "two cards that share a color" and collect evidence's total mana value (CR 701.59a). A Payment Decision lists candidates one object at a time (found by 123).
+- Exert as a cost (CR 701.43a). It waits on "doesn't untap" effects (found by 123).
+- Behold, blight and forage as costs. Each is a keyword action with few cards (found by 123).
+- Moving `TapSelf`, `SacrificeSelf`, `DiscardSelf` and their filtered pairs onto `CostSubject`. It renames wire and script names, so it waits for a reason (found by 123).
 - "Fights each creature" and "each fights a different one of those creatures" (Ezuri's Predation). They need a pairing choice (found by 104).
 - Damage equal to something other than power, such as toughness. This is a dynamic-amount `DealDamage` question, not a Bite parameter (found by 104).
 - A departed damage source's last known keywords. `apply_damage_event` reads the current object, so lifelink, deathtouch, wither and infect from a source that left do not apply (found by 104).
@@ -142,10 +147,10 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 123 Cost shapes past the current set
 - 127 Activate only as a sorcery on any ability
 - 128 Flash bought with an extra cost
 - 132 Delayed triggered abilities
+- 159 Optional additional costs and kicker
 
 Builds and audits:
 
@@ -173,3 +178,5 @@ Builds and audits:
 - 148 Build fight and bite target shapes
 - 149 Fix Lua key-error order and lint hash set algebra (AFK)
 - 150 Build non-goal card rejection in the loader
+- 151 Build spell additional costs
+- 152 One object pays one moving cost
