@@ -140,6 +140,18 @@ _Avoid_: Entry choice, entry pause
 The moment a tapped permanent would become untapped, from the untap step or from an effect (CR 701.26b). A stun counter replaces the attempt with removing that counter, so the permanent stays tapped (CR 122.1d). A "doesn't untap" effect stops the attempt from happening at all, so no stun counter is removed. A permanent that is already untapped, or phased out, makes no attempt.
 _Avoid_: Untap event, stun check
 
+**Additional cost**:
+A cost paid on top of the mana cost or an alternative cost, such as "sacrifice a creature" or "pay 3 life" (CR 118.8). It comes from the card's own text, a chosen mode or an activated ability's cost. It is always data about named objects or amounts, never a script.
+_Avoid_: Extra cost, side cost
+
+**Cost subject**:
+Which object an additional cost acts on: the source itself, or objects the payer chooses that match a filter. A cost on a chosen object lists its candidates in the Payment Decision.
+_Avoid_: Cost target, cost object
+
+**Cost choice**:
+The branch a player announces for an "A or B" additional cost, such as "discard a card or pay 3 life". It is announced with the spell or ability, like X, so the Payment Decision only ever asks for one branch. It is not an alternative cost, which replaces the mana cost.
+_Avoid_: Cost mode, optional cost
+
 ## Relationships
 
 - A **Session** runs exactly one game and has one or more **Seats**
