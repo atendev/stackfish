@@ -79,6 +79,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 112 Which non-goal cards the loader rejects. The loader rejects planeswalkers, battles, sagas, Class cards and the 73 Manifest, Manifest dread and Cloak producers with a new `CardLoadError::NonGoal { name, kind }`. The 229 Morph, Megamorph and Disguise cards load, since only the optional face-down cast is missing. Ixidron-type cards load too, as a stated exception because no keyword marks them. Melds and the other unflagged layouts load. Decided in auto mode, then approved. Build is 150. [closed/112-which-non-goal-cards-the-loader-rejects.md](closed/112-which-non-goal-cards-the-loader-rejects.md)
 - 123 Cost shapes past the current set. Spells get `CardDefinition.additional_costs` from `s.additional_costs()`. New variants take a `CostSubject` (source or chosen), and the set adds remove counters, put counter, untap `{Q}`, energy, exile, return to hand, put on library, mill and reveal. An "A or B" cost is a `OneOf` whose branch is announced with the action (CR 601.2b), and counted shapes take a fixed amount or the announced X (CR 107.3a). One object pays at most one moving cost. Wire changes are additive. Decided in auto mode, then approved. Builds are 151 to 158, and optional costs and kicker go to 159. [closed/123-cost-shapes-past-the-current-set.md](closed/123-cost-shapes-past-the-current-set.md)
 - 127 Activate only as a sorcery on any ability. `RegisteredAbility` gains `activation: ActivationRestriction { sorcery_speed, condition }`, a field rather than a side map. `Register` sets `sorcery_speed` for `Game.Ops.Attach`, so Equip and Fortify move onto it. One `can_activate_now` helper serves `activate.rs` and the entries scan and reads the `EquipAbilities` exemption. "During" and "if" restrictions are an `InterveningIfSpec` checked only when activation begins. Lua gets `:SetSorcerySpeed()` and `:SetActivationCondition`. Builds are 160 then 161, and once-per-turn limits go to 162. [closed/127-activate-only-as-a-sorcery.md]
+- 107 `remap_abilities` purges cost modifiers. A cast, land play or other hand-built move drops every cost and player modifier keyed to the old id, as `retire_object` does. The script's registration for the new zone stays, and a card's own cast keeps its reduction. Built in auto mode, then merged. [closed/107-remap-abilities-purge-cost-modifiers.md](closed/107-remap-abilities-purge-cost-modifiers.md)
 
 ## Not yet specified
 
@@ -156,7 +157,6 @@ Decisions (HITL):
 
 Builds and audits:
 
-- 107 `remap_abilities` purges cost modifiers
 - 108 `new_game` loads alternative costs and buyback
 - 109 Proof game coverage gaps
 - 110 Stale note sweep (AFK)
