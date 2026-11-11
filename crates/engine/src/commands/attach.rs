@@ -75,7 +75,14 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     state
         .exiled_with
         .retain(|link| link.source != old_id && link.exiled != old_id);
-    // TODO: cost modifiers and player modifier lists are not purged here, so a modifier that functions from hand outlives its source's cast (CR 611.3b)
+    // CR 611.3b, 400.7
+    // A modifier has no duration, so every row keyed to the old id ends. A cast
+    // fixes its cost before this call, so a card's own reduction still applies.
+    state.cost_modifiers.retain(|m| m.source != old_id);
+    state.hand_size_modifiers.retain(|m| m.source != old_id);
+    state.hand_reveal_modifiers.retain(|m| m.source != old_id);
+    state.draw_limit_modifiers.retain(|m| m.source != old_id);
+    state.land_play_modifiers.retain(|m| m.source != old_id);
 }
 
 /// CR 707.2a: removes every `RegisteredAbility`, `ContinuousEffect` and

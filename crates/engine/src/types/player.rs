@@ -256,9 +256,9 @@ pub enum LandPlayAffected {
 /// CR 305.2: a static "play an additional land" effect (Exploration, Azusa).
 /// Not a CR 613 layer. Unlike `DrawLimitModifier`, increases stack (two
 /// Explorations give 3 land plays), so `effective_land_play_limit` sums them
-/// and there is no `timestamp`. `commands::retire_object` purges this list
-/// and its sibling modifier lists by `source` once the permanent leaves the
-/// battlefield (CR 611.3b).
+/// and there is no `timestamp`. `commands::retire_object` and
+/// `commands::remap_abilities` purge this list and its sibling modifier lists
+/// by `source` once the source changes zones (CR 611.3b).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LandPlayModifier {
     pub source: ObjectId,
@@ -285,8 +285,8 @@ pub fn effective_land_play_limit(modifiers: &[LandPlayModifier], player: PlayerI
 /// CR 601.3b: a "you may cast spells as though they had flash" effect, static
 /// (Vedalken Orrery) or a Timed grant from a resolving effect. A permission, not
 /// the FLASH keyword, so no keyword reader sees it. `commands::can_cast_now`
-/// reads it, and `commands::retire_object` purges a static one by `source`
-/// (CR 611.3b).
+/// reads it, and `commands::retire_object` and `commands::remap_abilities`
+/// purge a static one by `source` (CR 611.3b).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimingPermission {
     pub source: ObjectId,
@@ -338,7 +338,7 @@ pub enum ZonePermissionKind {
 /// (Crucible of Worlds) or a Timed grant. It answers where a card may come
 /// from, and `TimingPermission` answers when. `commands::can_cast_from_zone` and
 /// `commands::can_play_land_from_zone` read it, and `commands::retire_object`
-/// purges a static one by `source` (CR 611.3b).
+/// and `commands::remap_abilities` purge a static one by `source` (CR 611.3b).
 // TODO: Permanent, WhileConditionHolds and UntilSourceLeaves durations are rejected for permissions (CR 611.2b)
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZonePermission {

@@ -42,8 +42,6 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     (CR 401.5). Decided in ticket 094 (library top views and a `LibraryTopShown` event), and the build is ticket 119.
   - Linked records do not cover cards exiled by a replaced source copy, and `ExileLinked` has no untargeted or
     library form (CR 607.2a).
-  - `remap_abilities` drops timing permissions but not cost modifiers or the player modifier lists, so one that
-    functions from hand outlives its source's cast or land play.
   - No proof-game assertion checks that the bot ever casts off-turn under Vedalken Orrery.
 - **Chain operations (`phase5/chain-operations`, `phase5/chain-per-entry-targets`)**: see `25-chain-operations.md`. Open items:
   - A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode
