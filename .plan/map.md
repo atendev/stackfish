@@ -76,6 +76,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 102 Stun counters and tap hooks. Stun is a rule check in one engine helper that every untap attempt goes through, not a general would-untap filter. A replaced untap writes no `Untapped` event and proposes a `CounterAdded { Stun, -1 }`, removing at most one counter per attempt (CR 122.1d, 614.5). Phased-out permanents make no attempt. `CounterKind::Stun` gets an additive wire arm. "Would become tapped" is dropped, since no card uses it. Decided in auto mode, then approved. Build is 147. [closed/102-stun-counters-and-tap-hooks.md](closed/102-stun-counters-and-tap-hooks.md)
 - 104 Fight and bite target shapes. A self-source fight with a departed creature correctly deals nothing (CR 701.14b), so the LKI TODO goes. A one-word bite whose source left uses its last known power (CR 608.2h). Count-1 `up_to` words work in the one-word shape and as the second word, and every other unsupported shape becomes a load error from one shared check. Modes come with 114, and TOML and the glossary do not change. Decided in auto mode. Build is 148. [closed/104-fight-and-bite-target-shapes.md](closed/104-fight-and-bite-target-shapes.md)
 - 106 Remaining order leaks. No hash container leaks its order. Lua `pairs` over string keys varies per Lua state, so three key checks name a different bad key in `ScriptError` text on each run. State, Decisions and replay are unaffected. Replacing `pairs` in the sandbox was ruled out. Decided in auto mode. Build is 149. [closed/106-audit-remaining-order-leaks.md](closed/106-audit-remaining-order-leaks.md)
+- 112 Which non-goal cards the loader rejects. The loader rejects planeswalkers, battles, sagas, Class cards and the 73 Manifest, Manifest dread and Cloak producers with a new `CardLoadError::NonGoal { name, kind }`. The 229 Morph, Megamorph and Disguise cards load, since only the optional face-down cast is missing. Ixidron-type cards load too, as a stated exception because no keyword marks them. Melds and the other unflagged layouts load. Decided in auto mode, then approved. Build is 150. [closed/112-which-non-goal-cards-the-loader-rejects.md](closed/112-which-non-goal-cards-the-loader-rejects.md)
 
 ## Not yet specified
 
@@ -89,7 +90,9 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Enchanting or equipping a player. Attachment targets a permanent only.
 - Splice (CR 601.2b, 702.47). `PlayerAction` and `StackObject` cannot say which cards are spliced.
 - Restricted mana beyond a card-type filter (CR 106.11). Object-specific and activation restrictions are not modeled.
-- The loader rejection build. Its card set and error shape wait on 112.
+- Face-down permanents made without a keyword (Ixidron and similar). The loader cannot see them, and 97 of the 244 text matches were never classified by hand (found by 112).
+- Layouts the database does not flag as multi-face: meld (20 besides Urza), mutate (34), leveler (26), prototype (21), case (15), augment (14) and host (20). They load and play face up without their extra mechanic. Leveler and case are the nearest to silent breakage (found by 112).
+- Empty-string loyalty and defense load as `CharacteristicDefining`. Fixing `parse_pt` moves the definition fingerprint of every card, so bump its version with the fix (found by 112).
 - Several pending kinds in one custom operation outcome. A `Chain` holds one pending kind today (`not-available-yet.md`).
 - A grant lasting "until the end of your next turn" (Light Up the Stage). No `EffectDuration` expresses it (found by 092).
 - A precise check for a scripted battlefield setup card that also sets a harness shortcut. The 093 check rejects the pair even when the script registers nothing. Narrow it only once a fixture needs the pair.
@@ -139,7 +142,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 112 Which non-goal cards the loader rejects
 - 123 Cost shapes past the current set
 - 127 Activate only as a sorcery on any ability
 - 128 Flash bought with an extra cost
@@ -170,3 +172,4 @@ Builds and audits:
 - 147 Build stun counters
 - 148 Build fight and bite target shapes
 - 149 Fix Lua key-error order and lint hash set algebra (AFK)
+- 150 Build non-goal card rejection in the loader
