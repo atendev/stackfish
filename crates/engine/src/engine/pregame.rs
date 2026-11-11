@@ -10,11 +10,12 @@ use crate::types::ability::AbilityEffect;
 use crate::types::card::ScriptReference;
 use crate::types::command::{PlayerAction, PlayerActionKind};
 use crate::types::config::GameConfig;
+use crate::types::cost::AlternativeCost;
 use crate::types::counter::CounterSet;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, SequenceNo};
-use crate::types::mana::ManaPool;
+use crate::types::mana::{ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::PlayerState;
 use crate::types::target::TargetSpec;
@@ -22,6 +23,14 @@ use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
 
 use super::{BottomCardsError, Engine, MulliganError, ProcessState};
+
+#[derive(Clone)]
+struct Declarations {
+    effect: Option<AbilityEffect>,
+    requirement: Option<TargetSpec>,
+    alternative_costs: Vec<AlternativeCost>,
+    buyback_cost: Option<ManaCost>,
+}
 
 impl Engine {
     /// Builds an `Engine` from `config`, starting in `Phase::PreGame`. The first
@@ -210,33 +219,37 @@ impl Engine {
         engine
     }
 
-    /// Copies a script's `operation()` and `target_requirement()` onto each card's
-    /// definition once per distinct script, since a spell is cast from hand before
-    /// any script has run. A value already set in Rust wins. Values must come from
-    /// this engine's runtime because a custom-function `ScriptHandle` is only valid there.
-    // TODO: load `alternative_costs()` and `buyback_cost()` script declarations
+    /// Copies a script's `operation()`, `target_requirement()`, `alternative_costs()`
+    /// and `buyback_cost()` onto each card's definition once per distinct script,
+    /// since a spell is cast before any script has run. A value already set in Rust
+    /// wins. Values must come from this engine's runtime because a custom-function
+    /// `ScriptHandle` is only valid there.
     fn load_script_declarations(&mut self) {
         // Sorted by id: a failing script logs an event.
         let mut ids: Vec<ObjectId> = self.state.objects.keys().copied().collect();
         ids.sort();
-        let mut loaded: HashMap<String, (Option<AbilityEffect>, Option<TargetSpec>)> =
-            HashMap::new();
+        let mut loaded: HashMap<String, Declarations> = HashMap::new();
         for id in ids {
             let definition = &self.state.objects[&id].definition;
             let ScriptReference::Inline(source) = &definition.script_ref else {
                 continue;
             };
             if source.trim().is_empty()
-                || (definition.effect.is_some() && definition.target_requirement.is_some())
+                || (definition.effect.is_some()
+                    && definition.target_requirement.is_some()
+                    && !definition.alternative_costs.is_empty()
+                    && definition.buyback_cost.is_some())
             {
                 continue;
             }
             let (script_ref, source) = (definition.script_ref.clone(), source.clone());
-            let (effect, requirement) = match loaded.get(&source) {
+            let declarations = match loaded.get(&source) {
                 Some(found) => found.clone(),
                 None => {
                     let operation = self.script_runtime.build_operation(&source);
                     let requirement = self.script_runtime.build_target_requirement(&source);
+                    let alternative_costs = self.script_runtime.build_alternative_costs(&source);
+                    let buyback_cost = self.script_runtime.build_buyback_cost(&source);
                     // A `ChainEach` must own exactly the words the card declares.
                     let words_check = match (&operation, &requirement) {
                         (Ok(Some((Some(effect), _))), Ok(requirement)) => {
@@ -244,7 +257,11 @@ impl Engine {
                         }
                         _ => Ok(()),
                     };
-                    let failed = operation.is_err() || requirement.is_err() || words_check.is_err();
+                    let failed = operation.is_err()
+                        || requirement.is_err()
+                        || words_check.is_err()
+                        || alternative_costs.is_err()
+                        || buyback_cost.is_err();
                     let effect = match &operation {
                         // A chain whose word counts don't match resolves nothing.
                         _ if words_check.is_err() => None,
@@ -253,15 +270,22 @@ impl Engine {
                         }
                         _ => None,
                     };
-                    let requirement_ok = requirement.as_ref().ok().cloned().flatten();
+                    let declarations = Declarations {
+                        effect,
+                        requirement: requirement.as_ref().ok().cloned().flatten(),
+                        alternative_costs: alternative_costs.as_ref().cloned().unwrap_or_default(),
+                        buyback_cost: buyback_cost.as_ref().ok().cloned().flatten(),
+                    };
                     self.record_script_error(id, &script_ref, operation.map(|_| ()));
                     self.record_script_error(id, &script_ref, requirement.map(|_| ()));
                     self.record_script_error(id, &script_ref, words_check);
+                    self.record_script_error(id, &script_ref, alternative_costs.map(|_| ()));
+                    self.record_script_error(id, &script_ref, buyback_cost.map(|_| ()));
                     // A script that failed is not cached, so every copy logs it.
                     if !failed {
-                        loaded.insert(source, (effect.clone(), requirement_ok.clone()));
+                        loaded.insert(source, declarations.clone());
                     }
-                    (effect, requirement_ok)
+                    declarations
                 }
             };
             let definition = &mut self
@@ -271,10 +295,16 @@ impl Engine {
                 .expect("id came from the map")
                 .definition;
             if definition.effect.is_none() {
-                definition.effect = effect;
+                definition.effect = declarations.effect;
             }
             if definition.target_requirement.is_none() {
-                definition.target_requirement = requirement;
+                definition.target_requirement = declarations.requirement;
+            }
+            if definition.alternative_costs.is_empty() {
+                definition.alternative_costs = declarations.alternative_costs;
+            }
+            if definition.buyback_cost.is_none() {
+                definition.buyback_cost = declarations.buyback_cost;
             }
         }
     }

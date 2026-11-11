@@ -21,6 +21,7 @@ Build `FlashCost { mana: Option<ManaCost>, additional: Vec<AdditionalCost> }` as
 - Lua API change: `s.flash_cost()` returns a list of `Game.Costs.*` values through `decode_cost_component_value`, with `Game.Costs.Mana` at most once and an empty list a load error. Update `docs/lua/card-script-basics.md` beside `buyback_cost()` and `docs/lua/stubs/game.lua`.
 - Wire: both fields are additive with serde defaults (`none`, false), so `PROTOCOL_VERSION` stays 1. The bot pays on `Required` only, so the replay pin should not move.
 - Prove it with a Breaking Wave scenario cast on an opponent's turn, plus the unit, Lua and wire tests the decision lists.
+- `Engine::new_game` loads script declarations in `load_script_declarations` (`engine/pregame.rs`). Load `s.flash_cost()` there too, with a value set in Rust winning (found by 108).
 
 ## Resolution
 

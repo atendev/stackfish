@@ -307,11 +307,12 @@ end
 return s
 ```
 
-`Engine::new_game` reads `operation()` and `target_requirement()` once for each distinct script
-and copies the results onto every copy of the card's `CardDefinition`. A value already set in Rust
-(`effect`, `target_requirement`) wins over the script. The scenario crate does the same for its own
-fixtures. Before this, a host that built cards through `new_game` cast a script-only spell with no
-target and resolved it doing nothing.
+`Engine::new_game` reads `operation()`, `target_requirement()`, `alternative_costs()` and
+`buyback_cost()` once for each distinct script and copies the results onto every copy of the card's
+`CardDefinition`. A value already set in Rust (`effect`, `target_requirement`, a non-empty
+`alternative_costs`, a `buyback_cost`) wins over the script. The scenario crate loads only
+`operation()` and `target_requirement()` for its own fixtures. Before this, a host that built cards
+through `new_game` cast a script-only spell with no target and resolved it doing nothing.
 
 A card with no `operation()` function at all keeps the pre-existing default: its effect can only
 be a Rust-native primitive supplied some other way (direct construction today; TOML has no field

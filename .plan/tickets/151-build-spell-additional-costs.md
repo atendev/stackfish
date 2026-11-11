@@ -19,6 +19,7 @@ Build `CardDefinition.additional_costs: Vec<AdditionalCost>`, declared by `s.add
 - The field touches every `CardDefinition` literal. Check whether a constructor or `Default` keeps the ripple small.
 - The cost applies whether the mana cost or an alternative cost is paid. A free cast still pays it (CR 118.9d, 601.2f).
 - Lua API change: `docs/lua/card-script-basics.md` beside `buyback_cost()`, `docs/lua/game-constants.md` and `docs/lua/stubs/game.lua`.
+- `Engine::new_game` loads script declarations in `load_script_declarations` (`engine/pregame.rs`). Load `s.additional_costs()` there too, with a value set in Rust winning (found by 108).
 
 ## Resolution
 
