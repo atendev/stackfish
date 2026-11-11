@@ -31,6 +31,34 @@ end
 return s
 "#;
 
+const HAND_CREATURES_COST_ONE_LESS: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local m = Game.CreateCostModifier(c)
+    m:SetFilter(Game.Filter({ card_types = { "Creature" } }))
+    m:SetAmount(-1)
+    m:SetFunctionsFrom("Hand")
+    m:Register()
+end
+return s
+"#;
+
+const HAND_AND_BATTLEFIELD_CREATURES_COST_ONE_LESS: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local from_hand = Game.CreateCostModifier(c)
+    from_hand:SetFilter(Game.Filter({ card_types = { "Creature" } }))
+    from_hand:SetAmount(-1)
+    from_hand:SetFunctionsFrom("Hand")
+    from_hand:Register()
+    local in_play = Game.CreateCostModifier(c)
+    in_play:SetFilter(Game.Filter({ card_types = { "Creature" } }))
+    in_play:SetAmount(-1)
+    in_play:Register()
+end
+return s
+"#;
+
 const NO_SET_FILTER: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -133,6 +161,54 @@ fn white_bear_definition() -> CardDefinition {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     }
+}
+
+fn hand_reducer_definition() -> CardDefinition {
+    CardDefinition {
+        definition_id: 4,
+        name: "Test Hand Reducer".to_string(),
+        oracle_text: "Creature spells you cast cost {1} less while this is in your hand."
+            .to_string(),
+        script_ref: ScriptReference::Inline(HAND_CREATURES_COST_ONE_LESS.to_string()),
+        ..bear_definition()
+    }
+}
+
+fn put_in_hand(state: &mut GameState, id: ObjectId, definition: CardDefinition, owner: PlayerId) {
+    state
+        .objects
+        .insert(id, card_object(id, definition, owner, ZoneKind::Hand));
+    state
+        .zone_mut(ZoneKind::Hand, Some(owner))
+        .unwrap()
+        .push_bottom(id);
+}
+
+// Stands in for the engine's off-battlefield script sweep so the hand-time
+// modifier exists before the first action.
+fn run_hand_script(state: &mut GameState, id: ObjectId) {
+    let definition = state.object(id).unwrap().definition.clone();
+    ScriptRuntime::new()
+        .run_card_script(state, &definition, id)
+        .expect("hand script registers cleanly");
+    state.off_battlefield_scripts_run.insert(id);
+}
+
+fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) -> StepStatus {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell {
+                card,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
+        })
+        .expect("caster holds priority, card is in hand");
+    drain(engine)
 }
 
 fn pass(engine: &mut Engine, player: PlayerId) {
@@ -404,5 +480,103 @@ fn play_land_self_registered_colored_cost_modifier_reduces_a_matching_spells_cos
     assert_eq!(
         creatures_on_battlefield, 1,
         "the white bear resolved and entered the battlefield"
+    );
+}
+
+// CR 611.3b, 400.7
+// The land's battlefield modifier registers under the new id after the move,
+// so only the hand-time one may be purged.
+#[test]
+fn play_land_drops_the_cost_modifier_registered_from_hand() {
+    let p0 = PlayerId(0);
+    let land = ObjectId(0);
+    let mut state = two_player_main_phase_state();
+    put_in_hand(
+        &mut state,
+        land,
+        land_definition(HAND_AND_BATTLEFIELD_CREATURES_COST_ONE_LESS),
+        p0,
+    );
+    run_hand_script(&mut state, land);
+    let sources: Vec<ObjectId> = state.cost_modifiers.iter().map(|m| m.source).collect();
+    assert_eq!(
+        sources,
+        vec![land],
+        "only the hand-time modifier registers in hand"
+    );
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::PlayLand { card: land },
+        })
+        .expect("p0 holds priority, land is in hand");
+    drain(&mut engine);
+
+    let played = engine
+        .state()
+        .objects
+        .values()
+        .find(|o| o.zone == ZoneKind::Battlefield)
+        .expect("the land is on the battlefield")
+        .object_id;
+    let sources: Vec<ObjectId> = engine
+        .state()
+        .cost_modifiers
+        .iter()
+        .map(|m| m.source)
+        .collect();
+    assert_eq!(sources, vec![played]);
+}
+
+// CR 611.3b, 400.7, 601.2f
+#[test]
+fn casting_a_hand_cost_reducer_ends_its_reduction() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let reducer = ObjectId(0);
+    let bear = ObjectId(1);
+    let mut state = two_player_main_phase_state();
+    put_in_hand(&mut state, reducer, hand_reducer_definition(), p0);
+    put_in_hand(&mut state, bear, bear_definition(), p0);
+    run_hand_script(&mut state, reducer);
+    assert_eq!(state.cost_modifiers.len(), 1);
+
+    let mut engine = Engine::new(state);
+    let status = cast(&mut engine, p0, reducer);
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the reducer's cast cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan {
+            payments: Vec::new(),
+        })
+        .expect("the cost is locked in before the card leaves hand, so its own reduction applies");
+    drain(&mut engine);
+    pass(&mut engine, p0);
+    drain(&mut engine);
+    pass(&mut engine, p1);
+    drain(&mut engine);
+    assert!(engine.state().stack.is_empty());
+    assert!(
+        engine.state().cost_modifiers.is_empty(),
+        "the hand-time modifier left with its card, got {:?}",
+        engine.state().cost_modifiers
+    );
+
+    let status = cast(&mut engine, p0, bear);
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the bear's cast cost, got {status:?}"
+    );
+    assert!(
+        engine
+            .submit_payment(PaymentPlan {
+                payments: Vec::new()
+            })
+            .is_err(),
+        "the bear costs its full {{1}} once the reducer has left hand"
     );
 }

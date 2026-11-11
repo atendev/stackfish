@@ -26,7 +26,7 @@ An effect that lets a player cast spells as though they had flash (Vedalken Orre
 
 - `retire_object` drops a source's static permissions (`source_bound`), which covers every move through `commit_zone_move` (a bounce, a death).
 - Cast, land play, payment, library choices and pregame move an object by hand and call `remap_abilities`, which also drops permissions keyed to the old id. A script re-registers one for the new zone if it functions there.
-- The cost modifier and player modifier lists are not purged in `remap_abilities`. That is a TODO there.
+- `remap_abilities` also drops the old id's cost modifiers and player modifiers, which have no Timed form.
 
 ## Lua
 
@@ -35,7 +35,8 @@ An effect that lets a player cast spells as though they had flash (Vedalken Orre
 ## Tests
 
 - `legality.rs` unit tests for `can_cast_now`: own flash, no permission, affected You/Opponent/Any, spell filter and `extra`, no priority, the commander caster.
-- `commands/tests.rs`: `retire_object` and `remap_abilities` drop the old source's permission.
+- `commands/tests.rs`: `retire_object` and `remap_abilities` drop the old source's permission, and `remap_abilities` drops its cost and player modifiers.
+- `cost_modifier_builder.rs`: a hand-time cost modifier ends when its land is played or its card is cast, the battlefield modifier the script re-registers stays, and a reducer's own cast still gets its reduction.
 - `timing_permissions.rs`: an off-turn sorcery refused and unlisted without a permission, cast and listed with one, Opponent and You affected, the spell filter, flashback from the graveyard, a land still refused, a hand-sourced permission dropped when its source is cast, and a bounced Orrery taking its permission with it.
 - `script_timing_permission.rs`: the Lua round trip, `:SetFilter`, the required `:SetAffected`, the rejected `EnchantedPlayer` and plain table, and function zones.
 

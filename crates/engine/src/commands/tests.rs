@@ -304,6 +304,49 @@ fn remap_abilities_drops_the_old_objects_timing_permission() {
     assert_eq!(sources, vec![ObjectId(2)]);
 }
 
+// CR 611.3b, 400.7
+#[test]
+fn remap_abilities_drops_the_old_objects_modifiers() {
+    let mut state = minimal_state();
+    for source in [ObjectId(1), ObjectId(2)] {
+        state.cost_modifiers.push(dummy_cost_modifier(source));
+        state
+            .hand_size_modifiers
+            .push(dummy_hand_size_modifier(source));
+        state
+            .hand_reveal_modifiers
+            .push(dummy_hand_reveal_modifier(source));
+        state
+            .draw_limit_modifiers
+            .push(dummy_draw_limit_modifier(source));
+        state
+            .land_play_modifiers
+            .push(dummy_land_play_modifier(source));
+    }
+
+    remap_abilities(&mut state, ObjectId(1), ObjectId(3));
+
+    let remaining = vec![ObjectId(2)];
+    let sources: Vec<ObjectId> = state.cost_modifiers.iter().map(|m| m.source).collect();
+    assert_eq!(sources, remaining);
+    let sources: Vec<ObjectId> = state.hand_size_modifiers.iter().map(|m| m.source).collect();
+    assert_eq!(sources, remaining);
+    let sources: Vec<ObjectId> = state
+        .hand_reveal_modifiers
+        .iter()
+        .map(|m| m.source)
+        .collect();
+    assert_eq!(sources, remaining);
+    let sources: Vec<ObjectId> = state
+        .draw_limit_modifiers
+        .iter()
+        .map(|m| m.source)
+        .collect();
+    assert_eq!(sources, remaining);
+    let sources: Vec<ObjectId> = state.land_play_modifiers.iter().map(|m| m.source).collect();
+    assert_eq!(sources, remaining);
+}
+
 #[test]
 fn retire_object_purges_only_the_retired_source() {
     let mut state = minimal_state();
