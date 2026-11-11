@@ -23,6 +23,7 @@ Build the spell and trigger half of what 090 decided: the mode-table decoder, th
 - Handle 0: re-check every reader of the placeholder (`script/decode.rs`, `engine/resolve/misc_effects.rs`), narrow or remove the TODO at `misc_effects.rs:199`, and add the test where a function mode is the runtime's first function.
 - `ManaAbilityBuilder` gets no `:SetModes`. Add `// TODO: modal mana abilities` with CR 605.3b beside it, and say in `mana-abilities.md` that modes are not available.
 - Proof deck: a modal instant and a modal enters trigger, inline Lua in `crates/host/src/proof_cards.rs`.
+- Add one Fight mode test and one Bite mode test, and fix the "neither op can be one mode" line in `not-available-yet.md`. If "Build fight and bite target shapes" has landed, call its shape check when building a mode (found by 104).
 - Docs beyond the Lua pages: a `DESIGN.md` note on where mode declarations come from, and a `scenario_format.md` note that a scripted fixture can use `s.modes()`.
 
 ## Resolution
