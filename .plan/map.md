@@ -75,6 +75,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 103 Damage redirected to another target. Static redirects stay `ReplacementEffect` rows with a `RedirectRecipient`, and resolved effects make rows in a new list of redirect shields with their own id. A chosen recipient is a normal target picked on cast or activation. Players and creatures are in scope. Each effect applies once per event, so a chain ends (CR 614.5, 616.1f). A budget smaller than the damage splits the event. Decided in auto mode, then approved. Builds are 143 to 146. [closed/103-damage-redirect-to-another-target.md](closed/103-damage-redirect-to-another-target.md)
 - 102 Stun counters and tap hooks. Stun is a rule check in one engine helper that every untap attempt goes through, not a general would-untap filter. A replaced untap writes no `Untapped` event and proposes a `CounterAdded { Stun, -1 }`, removing at most one counter per attempt (CR 122.1d, 614.5). Phased-out permanents make no attempt. `CounterKind::Stun` gets an additive wire arm. "Would become tapped" is dropped, since no card uses it. Decided in auto mode, then approved. Build is 147. [closed/102-stun-counters-and-tap-hooks.md](closed/102-stun-counters-and-tap-hooks.md)
 - 104 Fight and bite target shapes. A self-source fight with a departed creature correctly deals nothing (CR 701.14b), so the LKI TODO goes. A one-word bite whose source left uses its last known power (CR 608.2h). Count-1 `up_to` words work in the one-word shape and as the second word, and every other unsupported shape becomes a load error from one shared check. Modes come with 114, and TOML and the glossary do not change. Decided in auto mode. Build is 148. [closed/104-fight-and-bite-target-shapes.md](closed/104-fight-and-bite-target-shapes.md)
+- 106 Remaining order leaks. No hash container leaks its order. Lua `pairs` over string keys varies per Lua state, so three key checks name a different bad key in `ScriptError` text on each run. State, Decisions and replay are unaffected. Replacing `pairs` in the sandbox was ruled out. Decided in auto mode. Build is 149. [closed/106-audit-remaining-order-leaks.md](closed/106-audit-remaining-order-leaks.md)
 
 ## Not yet specified
 
@@ -146,7 +147,6 @@ Decisions (HITL):
 
 Builds and audits:
 
-- 106 Audit remaining order leaks (AFK)
 - 107 `remap_abilities` purges cost modifiers
 - 108 `new_game` loads alternative costs and buyback
 - 109 Proof game coverage gaps
@@ -169,3 +169,4 @@ Builds and audits:
 - 143 Build static redirect recipients
 - 147 Build stun counters
 - 148 Build fight and bite target shapes
+- 149 Fix Lua key-error order and lint hash set algebra (AFK)
