@@ -104,6 +104,7 @@ fn discard_self_cost() -> CostSpec {
 
 fn cycling_ability(source: ObjectId, effect: AbilityEffect) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -401,6 +402,7 @@ fn an_ordinary_battlefield_ability_still_requires_the_battlefield_not_hand() {
         .unwrap()
         .push_bottom(card);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -796,6 +798,7 @@ fn a_tutored_card_gets_its_cycling_ability_registered_in_hand() {
         .unwrap()
         .push_bottom(cycler);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

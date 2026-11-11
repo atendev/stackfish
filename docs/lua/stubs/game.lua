@@ -166,6 +166,12 @@ function TriggeredAbilityBuilder:SetInterveningIf(value) end
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetFunctionsFrom(zoneName) end
 
+--- CR 405.4: the ability's rules text, shown with it on the stack. Optional. Empty
+--- text or a second call is an error.
+---@param text string
+---@return TriggeredAbilityBuilder
+function TriggeredAbilityBuilder:SetText(text) end
+
 --- What this ability does when it resolves. Required before :Register().
 ---@param value GameOpsValue|OperationFn
 ---@return TriggeredAbilityBuilder
@@ -236,6 +242,12 @@ function ActivatedAbilityBuilder:AddCost(value) end
 ---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetFunctionsFrom(zoneName) end
+
+--- CR 405.4: the ability's rules text, shown with it on the stack. Optional. Empty
+--- text or a second call is an error.
+---@param text string
+---@return ActivatedAbilityBuilder
+function ActivatedAbilityBuilder:SetText(text) end
 
 --- What this ability does when it resolves. Required before :Register().
 ---@param value GameOpsValue|OperationFn

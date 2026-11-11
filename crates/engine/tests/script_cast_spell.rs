@@ -125,6 +125,7 @@ fn etb_trigger_casts_an_exiled_card_for_free_via_game_ops_cast_spell() {
         .load_script(OPERATION_CAST_EXILED_CANDIDATE)
         .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -254,6 +255,7 @@ fn casting_a_nonexistent_object_does_not_panic_and_the_triggering_ability_still_
         )
         .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

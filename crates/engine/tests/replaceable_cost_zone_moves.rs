@@ -129,6 +129,7 @@ fn state_with_cost_and_ward(
             Zone::new(ZoneKind::Exile, None),
         ],
         abilities: vec![RegisteredAbility {
+            text: None,
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(0),

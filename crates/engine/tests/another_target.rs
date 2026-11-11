@@ -43,6 +43,7 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
 
 fn another_target_creature_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

@@ -81,6 +81,7 @@ fn equipment_definition() -> CardDefinition {
 
 fn equip_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -301,6 +302,8 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
         ),
     );
     state.stack.push(StackObject {
+        ability_index: None,
+        ability_text: None,
         stack_id: already_on_stack,
         kind: StackEntryKind::Spell,
         source: already_on_stack,

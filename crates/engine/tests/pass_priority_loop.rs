@@ -141,6 +141,8 @@ fn all_pass_with_nonempty_stack_resolves_top_instead_of_advancing_step() {
     let mut state = two_player_state();
     let stack_id = ObjectId(0);
     state.stack.push(StackObject {
+        ability_index: None,
+        ability_text: None,
         stack_id,
         kind: StackEntryKind::Spell,
         source: stack_id,

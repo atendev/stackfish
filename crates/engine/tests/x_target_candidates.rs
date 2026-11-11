@@ -109,6 +109,8 @@ fn push_spell(state: &mut GameState, id: u64, mana_value: u32) {
         ),
     );
     state.stack.push(StackObject {
+        ability_index: None,
+        ability_text: None,
         stack_id: id,
         kind: StackEntryKind::Spell,
         source: id,
@@ -303,6 +305,7 @@ fn an_activated_ability_with_an_x_cost_lists_the_superset_and_rechecks() {
         ),
     );
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(7),

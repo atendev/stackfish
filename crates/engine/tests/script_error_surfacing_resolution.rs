@@ -287,6 +287,7 @@ fn a_triggered_abilitys_erroring_operation_logs_a_script_error_and_still_resolve
         .load_script(OPERATION_ALWAYS_ERRORS)
         .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -465,6 +466,7 @@ fn a_script_requested_cast_that_targets_a_nonexistent_object_logs_a_script_error
         .load_script(OPERATION_CASTS_A_NONEXISTENT_OBJECT)
         .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

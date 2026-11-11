@@ -5,15 +5,16 @@
 use std::collections::HashMap;
 
 use stackfish_engine::decision::{Candidate, Decision};
+use stackfish_engine::triggers::find_departed_lki;
 use stackfish_engine::{
-    GameEvent, GameEventKind, GameObject, GameState, ObjectId, PlayerId, Target, ZoneKind,
-    library_top_visible_to,
+    GameEvent, GameEventKind, GameObject, GameState, ObjectId, PlayerId, StackObject, Target,
+    ZoneKind, library_top_visible_to,
 };
 
 use crate::wire::{
     U64, WireCardIdentity, WireCommanderDamage, WireDecision, WireEventKind, WireIdentity,
     WireObjectSummary, WireObjectView, WirePlayerView, WireRevealedCard, WireSnapshot,
-    WireStackEntry, WireZone, WireZoneView, counters, offered_objects,
+    WireStackEntry, WireStackKind, WireZone, WireZoneView, copy_of, counters, offered_objects,
 };
 
 /// One Seat's point of view.
@@ -557,12 +558,35 @@ pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observe
             })
         })
         .collect();
+    // CR 602.2a, 701.20a
+    // A card whose ability was activated from a hidden zone stays revealed until the ability leaves the stack.
+    // CR 113.7a, 405.4
+    // A triggered ability is public on the stack apart from its source, so its source is named too.
+    let source_identity = |entry: &StackObject| {
+        let kind = WireStackKind::from(&entry.kind);
+        let is_spell =
+            kind == WireStackKind::Spell || copy_of(&entry.kind) == Some(WireStackKind::Spell);
+        if is_spell || visible(entry.source) {
+            return None;
+        }
+        let departed;
+        let object = match state.object(entry.source).or(entry.source_lki.as_ref()) {
+            Some(object) => object,
+            None => {
+                // TODO: a hidden source whose zone change kept no last known information has no identity (CR 602.2a)
+                departed = find_departed_lki(state, entry.source)?;
+                &departed
+            }
+        };
+        (!object.face_down).then(|| WireIdentity::from(object))
+    };
     let stack = state
         .stack
         .iter()
         .map(|entry| WireStackEntry {
             stack_id: entry.stack_id.into(),
             kind: (&entry.kind).into(),
+            copy_of: copy_of(&entry.kind),
             source: visible(entry.source).then_some(U64::from(entry.source)),
             owner: entry.owner.0,
             controller: entry.controller.0,
@@ -581,6 +605,9 @@ pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observe
                 .object(entry.stack_id)
                 .filter(|o| o.zone == ZoneKind::Stack)
                 .map(view_of),
+            ability_text: entry.ability_text.clone(),
+            ability_index: entry.ability_index,
+            source_identity: source_identity(entry),
         })
         .collect();
     WireSnapshot {
@@ -862,6 +889,161 @@ mod tests {
                 }
                 other => panic!("expected zone_change, got {other:?}"),
             }
+        }
+    }
+
+    fn hand_card(id: u64, owner: PlayerId) -> GameObject {
+        let definition = stackfish_testutil::minimal_card_definition(
+            id,
+            "Hidden Ninja",
+            "hidden_ninja",
+            stackfish_engine::ManaCost {
+                symbols: Vec::new(),
+            },
+            stackfish_engine::CardTypeSet::CREATURE,
+        );
+        stackfish_testutil::card_object(ObjectId(id), definition, owner, ZoneKind::Hand)
+    }
+
+    fn stack_entry(kind: stackfish_engine::StackEntryKind, source: u64) -> StackObject {
+        let mut entry = StackObject::new(
+            ObjectId(50),
+            kind,
+            ObjectId(source),
+            PlayerId(0),
+            PlayerId(0),
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            None,
+            false,
+            false,
+            stackfish_engine::ScriptHandle(0),
+            None,
+            None,
+            None,
+            None,
+        );
+        entry.ability_index = Some(0);
+        entry.ability_text = Some("Ninjutsu {U}".to_string());
+        entry
+    }
+
+    // Player 0 activates an ability of object 7, a card in their own hand.
+    fn hand_source_state(face_down: bool) -> GameState {
+        let mut state = stackfish_testutil::two_player_state(stackfish_testutil::zones(
+            PlayerId(0),
+            PlayerId(1),
+            &[ZoneKind::Hand],
+        ));
+        let mut card = hand_card(7, PlayerId(0));
+        card.face_down = face_down;
+        state.objects.insert(ObjectId(7), card);
+        state
+            .zone_mut(ZoneKind::Hand, Some(PlayerId(0)))
+            .unwrap()
+            .push_bottom(ObjectId(7));
+        state.stack.push(stack_entry(
+            stackfish_engine::StackEntryKind::ActivatedAbility,
+            7,
+        ));
+        state
+    }
+
+    fn stack_of(viewer: Viewer, state: &GameState, observer: &Observer) -> serde_json::Value {
+        let snapshot = snapshot_for(viewer, state, observer);
+        serde_json::to_value(&snapshot.stack).unwrap()
+    }
+
+    // CR 602.2a, 701.20a
+    #[test]
+    fn an_opponent_sees_the_identity_of_a_hidden_source_but_not_its_id() {
+        let state = hand_source_state(false);
+        let observer = Observer::default();
+        let opponent = &stack_of(Viewer::Player(PlayerId(1)), &state, &observer)[0];
+        assert!(opponent.get("source").is_none(), "{opponent}");
+        assert_eq!(opponent["source_identity"]["name"], "Hidden Ninja");
+        assert_eq!(opponent["ability_text"], "Ninjutsu {U}");
+        assert_eq!(opponent["ability_index"], 0);
+
+        let activator = &stack_of(Viewer::Player(PlayerId(0)), &state, &observer)[0];
+        assert_eq!(activator["source"], "7");
+        assert!(activator.get("source_identity").is_none(), "{activator}");
+    }
+
+    // CR 708.5
+    #[test]
+    fn a_face_down_hidden_source_gives_no_identity() {
+        let state = hand_source_state(true);
+        let entry = &stack_of(Viewer::Player(PlayerId(1)), &state, &Observer::default())[0];
+        assert!(entry.get("source").is_none(), "{entry}");
+        assert!(entry.get("source_identity").is_none(), "{entry}");
+    }
+
+    // CR 113.7a
+    // The source left the hand as a cost, so its identity comes from the zone change's last known information.
+    #[test]
+    fn a_source_that_left_a_hand_is_named_from_its_last_known_information() {
+        let mut state = hand_source_state(false);
+        let in_hand = state.objects.remove(&ObjectId(7)).unwrap();
+        state
+            .zone_mut(ZoneKind::Hand, Some(PlayerId(0)))
+            .unwrap()
+            .contents
+            .clear();
+        let event = GameEvent::new(
+            EventId(0),
+            SequenceNo(0),
+            GameEventKind::ZoneChange {
+                object: ObjectId(8),
+                from: ZoneKind::Hand,
+                to: ZoneKind::Graveyard,
+                last_known_info: Some(in_hand),
+            },
+        );
+        let mut observer = Observer::default();
+        observer.observe(&state, &event);
+        state.ledger.push(event);
+        let entry = &stack_of(Viewer::Player(PlayerId(1)), &state, &observer)[0];
+        assert!(entry.get("source").is_none(), "{entry}");
+        assert_eq!(entry["source_identity"]["name"], "Hidden Ninja");
+    }
+
+    // CR 707.10
+    #[test]
+    fn a_copy_names_the_kind_it_copies() {
+        use stackfish_engine::StackEntryKind::{Copy, Spell, TriggeredAbility};
+        let mut state = stackfish_testutil::two_player_state(Vec::new());
+        for kind in [
+            Copy {
+                of: Box::new(Copy {
+                    of: Box::new(TriggeredAbility),
+                }),
+            },
+            Copy {
+                of: Box::new(Spell),
+            },
+            Spell,
+        ] {
+            let mut entry = stack_entry(kind, 1);
+            if matches!(entry.kind, Spell) {
+                entry.ability_index = None;
+                entry.ability_text = None;
+            }
+            state.stack.push(entry);
+        }
+        let stack = stack_of(Viewer::Player(PlayerId(0)), &state, &Observer::default());
+        assert_eq!(stack[0]["kind"], "copy");
+        assert_eq!(stack[0]["copy_of"], "triggered_ability");
+        assert_eq!(stack[1]["copy_of"], "spell");
+        for field in [
+            "copy_of",
+            "ability_text",
+            "ability_index",
+            "source_identity",
+        ] {
+            assert!(stack[2].get(field).is_none(), "{field}: {}", stack[2]);
         }
     }
 }

@@ -297,6 +297,7 @@ fn pawprint_budget_upkeep_ability(
         modes.push(mode);
     }
     RegisteredAbility {
+        text: None,
         modes,
         mode_choice: ModeChoice::PawprintBudget(3),
         id: AbilityId(0),

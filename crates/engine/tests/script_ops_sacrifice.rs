@@ -97,6 +97,7 @@ fn card_object_controlled_by(
 
 fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -240,6 +241,7 @@ fn sacrifice_activated_ability_also_works() {
         .unwrap()
         .push_bottom(target);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),

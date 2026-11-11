@@ -13,6 +13,7 @@ fn modal_upkeep_ability_chosen_by_opponent(
     mode_choice: ModeChoice,
 ) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: vec![
             SpellMode {
                 target_requirement: None,
@@ -44,6 +45,7 @@ fn modal_upkeep_ability_chosen_by_opponent(
 
 fn modal_upkeep_ability_chosen_by_opponent_with_a_target(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: vec![
             SpellMode {
                 target_requirement: None,

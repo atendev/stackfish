@@ -78,6 +78,7 @@ fn stifle_definition() -> CardDefinition {
 
 fn damage_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

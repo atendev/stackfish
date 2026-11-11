@@ -279,6 +279,7 @@ fn shuffle_ability_works_the_same_as_a_shuffle_spell() {
         .unwrap()
         .push_bottom(source);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

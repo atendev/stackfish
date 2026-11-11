@@ -96,6 +96,7 @@ fn drawcards_spell_definition(amount: u32) -> CardDefinition {
 
 fn draws_card_trigger_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

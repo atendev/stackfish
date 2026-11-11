@@ -465,6 +465,7 @@ e:SetCondition(game_conditions_value)
 e:SetInterveningIf(state_condition_value)
 e:SetOperation(game_ops_value)
 e:SetTarget(target_spec)
+e:SetText(text)
 e:Register()
 ```
 
@@ -515,6 +516,7 @@ e:SetFunctionsFrom(zone)
 e:AddCost(game_costs_value)
 e:SetOperation(game_ops_value)
 e:SetTarget(target_spec)
+e:SetText(text)
 e:Register()
 ```
 

@@ -58,6 +58,7 @@ fn combat_damage_state(combat: CombatState) -> GameState {
 
 fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -259,6 +260,7 @@ fn deals_damage_and_dies_triggers_both_fire_from_the_same_combat_damage_step() {
     put_on_battlefield(&mut state, creature(attacker, p0, 5, 0));
     put_on_battlefield(&mut state, creature(blocker, p1, 1, 0)); // dies to 3 damage
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),

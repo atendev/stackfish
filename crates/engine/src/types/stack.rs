@@ -62,6 +62,12 @@ pub struct StackObject {
     /// placeholders until `Engine::submit_mode_choice` fills them in and
     /// clears this. `ResolveStackTop` pauses on `AwaitingModeChoice` while set.
     pub pending_mode_choice: Option<PendingModeChoice>,
+    /// The ability's position among its source's abilities at push, as
+    /// `find_ability` counts them. `None` for a spell or a departed source.
+    pub ability_index: Option<u32>,
+    /// CR 405.4, 113.7a: the ability's text, captured at push because the
+    /// ability exists apart from its source. `None` for a spell.
+    pub ability_text: Option<String>,
 }
 
 /// CR 702.34a, 608.2n: where a spell goes in place of its usual zone when it
@@ -108,6 +114,8 @@ impl StackObject {
         source_lki: Option<GameObject>,
     ) -> Self {
         StackObject {
+            ability_index: None,
+            ability_text: None,
             stack_id,
             kind,
             source,

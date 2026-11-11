@@ -328,6 +328,8 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
         card_object(already_on_stack, sorcery_definition(), p0, ZoneKind::Stack),
     );
     state.stack.push(StackObject {
+        ability_index: None,
+        ability_text: None,
         stack_id: already_on_stack,
         kind: StackEntryKind::Spell,
         source: already_on_stack,

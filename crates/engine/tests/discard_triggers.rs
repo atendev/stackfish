@@ -124,6 +124,7 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
         .unwrap()
         .push_bottom(watcher);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -201,6 +202,7 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
         .unwrap()
         .push_bottom(watcher);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),

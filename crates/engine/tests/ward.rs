@@ -599,6 +599,7 @@ fn an_activated_ability_targeting_a_ward_permanent_triggers_ward_and_can_be_coun
     );
     run_battlefield_scripts(&mut state, &[bear]);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(900),
@@ -713,6 +714,7 @@ fn a_triggered_ability_targeting_a_ward_permanent_triggers_ward() {
     );
     run_battlefield_scripts(&mut state, &[bear]);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(900),

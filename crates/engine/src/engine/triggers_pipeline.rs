@@ -317,6 +317,14 @@ impl Engine {
             None => (ability.target.clone(), ability.effect.clone()),
         };
         let intervening_if = ability.intervening_if.clone();
+        let ability_text = ability.text.clone();
+        let ability_index = self
+            .state
+            .abilities
+            .iter()
+            .filter(|a| a.source == trigger.source)
+            .position(|a| a.id == trigger.ability)
+            .and_then(|i| u32::try_from(i).ok());
         let stack_id = self.state.allocate_object_id();
         // CR 800.4a: a departed source has no live owner, so fall back to `controller`.
         let source_is_live = self.state.object(trigger.source).is_some();
@@ -331,7 +339,7 @@ impl Engine {
         } else {
             None
         };
-        self.state.stack.push(StackObject::new(
+        let mut entry = StackObject::new(
             stack_id,
             StackEntryKind::TriggeredAbility,
             trigger.source,
@@ -352,7 +360,10 @@ impl Engine {
             // CR 700.2e: only a modal spell defers its mode choice.
             None,
             source_lki,
-        ));
+        );
+        entry.ability_index = ability_index;
+        entry.ability_text = ability_text;
+        self.state.stack.push(entry);
         let event_id = self.state.allocate_event_id();
         let sequence_no = self.state.allocate_sequence_no();
         self.state.ledger.push(GameEvent {

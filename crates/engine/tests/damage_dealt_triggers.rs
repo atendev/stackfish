@@ -74,6 +74,7 @@ fn deals_damage_trigger_fires_when_the_attacker_connects() {
         permanent(attacker, creature_definition("Bear", 3, 3), p0),
     );
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -139,6 +140,7 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
         permanent(bystander, creature_definition("Sprout", 0, 1), p0),
     );
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -186,6 +188,7 @@ fn is_dealt_damage_trigger_fires_on_the_creature_taking_damage() {
         permanent(blocker, creature_definition("Wall", 2, 5), p1),
     );
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),

@@ -97,6 +97,7 @@ impl AsLand for CardDefinition {
 // Registered on the predicted stack object id: next_object_id starts at 1000 and nothing allocates before the cast.
 fn cascade_trigger(source: ObjectId, _controller: PlayerId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),

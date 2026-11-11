@@ -28,6 +28,7 @@ fn two_player_state() -> GameState {
 
 fn destroy_target_creature_trigger(source: ObjectId, exclude_source: bool) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -130,6 +131,7 @@ fn land_target_word() -> TargetRequirement {
 
 fn destroy_creature_and_land_trigger(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -372,6 +374,7 @@ fn vesuvans_granted_upkeep_ability_now_really_fires_and_becomes_a_copy() {
         ..CopyExceptions::default()
     };
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

@@ -81,6 +81,7 @@ fn collect_triggers_matches_a_real_condition_script() {
         .unwrap()
         .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -122,6 +123,7 @@ fn collect_triggers_condition_false_on_a_different_object() {
         .unwrap()
         .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -163,6 +165,7 @@ fn collect_triggers_condition_false_on_wrong_destination_zone() {
         .unwrap()
         .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),
@@ -198,6 +201,7 @@ fn collect_triggers_none_condition_matches_any_event() {
         .unwrap()
         .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(3),
@@ -270,6 +274,7 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
         .load_script(OPERATION_GAIN_LIFE_1)
         .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(4),
@@ -390,6 +395,7 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
         .expect("operation script loads");
     // The ability is registered to bear, so another creature with the same definition does not fire it.
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(5),

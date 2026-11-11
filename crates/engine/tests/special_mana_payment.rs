@@ -251,6 +251,7 @@ fn engine_with_land(land: GameObject) -> Engine {
     Engine::new(GameState {
         objects,
         abilities: vec![RegisteredAbility {
+            text: None,
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(0),

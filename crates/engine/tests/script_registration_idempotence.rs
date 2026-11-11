@@ -221,6 +221,7 @@ fn a_hand_built_ability_still_carries_across_a_zone_change() {
     );
     put_in_hand(&mut state, card, &definition, p0);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(9999),

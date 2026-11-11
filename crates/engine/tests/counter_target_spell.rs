@@ -177,6 +177,8 @@ fn push_creature_spell_on_stack(state: &mut GameState, stack_id: ObjectId, owner
         ),
     );
     state.stack.push(StackObject {
+        ability_index: None,
+        ability_text: None,
         stack_id,
         kind: StackEntryKind::Spell,
         source: stack_id,
@@ -214,6 +216,8 @@ fn push_spell_with_mana_value_on_stack(
         card_object(stack_id, definition, owner, ZoneKind::Stack),
     );
     state.stack.push(StackObject {
+        ability_index: None,
+        ability_text: None,
         stack_id,
         kind: StackEntryKind::Spell,
         source: stack_id,

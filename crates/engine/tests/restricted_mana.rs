@@ -330,6 +330,7 @@ fn restricted_mana_cannot_fund_an_activated_ability_cost() {
             ..stackfish_testutil::player_state(p0)
         }],
         abilities: vec![RegisteredAbility {
+            text: None,
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(0),

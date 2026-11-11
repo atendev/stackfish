@@ -291,7 +291,8 @@ pub(crate) fn apnap_player_order(state: &GameState) -> Vec<PlayerId> {
 
 /// CR 603.10: re-derives a departed source's last-known info from the ledger
 /// at stack-push time. `PendingTrigger` is `Copy`, so it cannot carry the snapshot.
-pub(crate) fn find_departed_lki(
+/// Public so a host can name a retired source. `None` when no zone change kept the info.
+pub fn find_departed_lki(
     state: &GameState,
     source: ObjectId,
 ) -> Option<crate::types::object::GameObject> {

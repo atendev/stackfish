@@ -38,6 +38,9 @@ Called with no event — it's a pure board-state check, evaluated both when the 
 happens and again right before the ability would resolve (an ability whose intervening-if has
 since gone false simply doesn't resolve).
 
+**`:SetText(text)`** — CR 405.4, the ability's rules text, such as `"Whenever you draw a card, you gain 1 life."`. A Seat
+sees it with the ability on the stack. Optional. Empty text or a second call is a script error.
+
 **`:SetFunctionsFrom(zoneName)`** — CR 113.6, for an ability that functions from a zone other than
 the battlefield, e.g. "{2}{B}: Return this card from your graveyard to your hand." `zoneName` is
 `"Hand"`, `"Graveyard"` or `"Exile"` (anything else is a script error; Stack, Library and Command have no

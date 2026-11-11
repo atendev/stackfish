@@ -107,7 +107,9 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   face-down object the Seat may not identify. Hands and libraries are sorted by id, and only an omniscient Seat gets
   libraries. `stack` lists the
   entries, top last, with `kind`, `owner`, `controller`, `targets`, `chosen_modes`, `x_value`, the spell's `card` and a
-  `source` that is absent where the Seat cannot see it. The open Decision is the response's `decision`, built by
+  `source` that is absent where the Seat cannot see it. An ability entry adds `ability_text` from the script's
+  `:SetText` and `ability_index`, both captured at push (CR 405.4, 113.7a). A copy adds `copy_of`, the copied kind.
+  An ability whose `source` is withheld adds `source_identity` unless the source was face down (CR 602.2a, 701.20a). The open Decision is the response's `decision`, built by
   `decision_for`.
 - The fold tests in `seat_visibility.rs` rebuild zones, counts, tapped, turn, phase, step, priority, life and poison
   from a first snapshot plus the Seat's events, and compare them with a later snapshot. They cover a bear game for all

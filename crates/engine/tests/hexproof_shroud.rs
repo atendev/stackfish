@@ -504,6 +504,7 @@ fn shroud_blocks_an_activated_ability_even_from_its_controller() {
 
 fn equip_ability(source: u64) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -662,6 +663,7 @@ fn lua_accepts_hexproof_and_shroud_but_still_rejects_ward() {
 
 fn upkeep_destroy_trigger(source: u64, exclude_source: bool) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(
             ConditionPrimitive::BeginningOfYourUpkeep,

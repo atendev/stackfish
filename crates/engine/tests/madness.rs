@@ -107,6 +107,7 @@ fn discard_outlet_definition(definition_id: u64) -> CardDefinition {
 
 fn discard_outlet_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),
@@ -161,6 +162,7 @@ fn madness_redirect(source: ObjectId) -> ReplacementEffect {
 // CR 702.35a
 fn madness_trigger(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),

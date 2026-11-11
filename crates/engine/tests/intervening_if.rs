@@ -38,6 +38,7 @@ fn heal_spell_definition() -> CardDefinition {
 
 fn interveningif_upkeep_ability(source: ObjectId, threshold: i32) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

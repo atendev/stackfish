@@ -1124,6 +1124,7 @@ pub(crate) fn bind_game_globals(
                 operation: None,
                 intervening_if: None,
                 function_zone: None,
+                text: None,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -1190,6 +1191,7 @@ pub(crate) fn bind_game_globals(
                 target: None,
                 operation: None,
                 function_zone: None,
+                text: None,
                 registry: Rc::clone(&registry),
             })
         })?

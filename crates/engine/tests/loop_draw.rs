@@ -47,6 +47,7 @@ fn ability(
     effect: AbilityEffect,
 ) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(source.0),
@@ -162,6 +163,7 @@ fn a_mana_ability_with_a_sacrifice_cost_keeps_the_game_going() {
         ),
     );
     state.abilities.push(RegisteredAbility {
+        text: None,
         kind: AbilityKind::Activated,
         condition: None,
         cost: Some(CostSpec {
@@ -198,6 +200,7 @@ fn a_plain_tap_mana_ability_does_not_stop_the_draw() {
         ),
     );
     state.abilities.push(RegisteredAbility {
+        text: None,
         kind: AbilityKind::Activated,
         condition: None,
         cost: Some(CostSpec {

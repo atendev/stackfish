@@ -115,6 +115,7 @@ fn activate(source: ObjectId) -> PlayerActionKind {
 
 fn ability(source: ObjectId, cost: Option<CostSpec>, effect: AbilityEffect) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(source.0),

@@ -256,7 +256,23 @@ pub(crate) struct TriggeredAbilityBuilder {
     pub(crate) intervening_if: Option<InterveningIfSpec>,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_method`.
     pub(crate) function_zone: Option<ZoneKind>,
+    pub(crate) text: Option<String>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+// A second call is refused so a script cannot overwrite its own text by mistake.
+fn ability_text(current: &Option<String>, text: String) -> mlua::Result<Option<String>> {
+    if current.is_some() {
+        return Err(mlua::Error::RuntimeError(
+            "SetText called twice - an ability has one text".to_string(),
+        ));
+    }
+    if text.trim().is_empty() {
+        return Err(mlua::Error::RuntimeError(
+            "SetText needs non-empty text".to_string(),
+        ));
+    }
+    Ok(Some(text))
 }
 
 /// `:SetFunctionsFrom("Graveyard")` (CR 113.6): declares the one zone this
@@ -278,6 +294,10 @@ impl UserData for TriggeredAbilityBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
             this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
+        methods.add_method_mut("SetText", |_, this, text: String| {
+            this.text = ability_text(&this.text, text)?;
             Ok(())
         });
         methods.add_method_mut("SetCondition", |lua, this, value: Value| {
@@ -319,6 +339,7 @@ impl UserData for TriggeredAbilityBuilder {
             let target = this.target.clone();
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
+                text: this.text.clone(),
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
                 // The real id is allocated at drain time (`run_card_script`), since the builder has no `&mut GameState`.
@@ -372,6 +393,7 @@ pub(crate) struct ActivatedAbilityBuilder {
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
     pub(crate) function_zone: Option<ZoneKind>,
+    pub(crate) text: Option<String>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
@@ -379,6 +401,10 @@ impl UserData for ActivatedAbilityBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
             this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
+        methods.add_method_mut("SetText", |_, this, text: String| {
+            this.text = ability_text(&this.text, text)?;
             Ok(())
         });
         methods.add_method_mut("AddCost", |_, this, value: Value| {
@@ -429,6 +455,7 @@ impl UserData for ActivatedAbilityBuilder {
             let target = this.target.clone();
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
+                text: this.text.clone(),
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
                 // The real id is allocated at drain time; see `TriggeredAbilityBuilder::Register`.
@@ -531,6 +558,7 @@ impl UserData for ManaAbilityBuilder {
                 Some(this.cost.clone())
             };
             let ability = RegisteredAbility {
+                text: None,
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
                 id: AbilityId(0),

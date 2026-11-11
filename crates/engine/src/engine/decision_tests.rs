@@ -964,6 +964,7 @@ fn a_payment_lists_mana_abilities_only_while_the_payer_holds_priority() {
     land.definition.card_types = CardTypeSet::LAND;
     state.objects.insert(ObjectId(1), land);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

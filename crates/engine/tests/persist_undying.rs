@@ -70,6 +70,7 @@ fn base_state() -> GameState {
 
 fn persist_undying_ability(source: ObjectId, kind: CounterKind) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

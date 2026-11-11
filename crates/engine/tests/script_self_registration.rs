@@ -256,6 +256,7 @@ fn dying_creatures_registered_ability_is_purged_by_sba() {
         .push_bottom(bear);
     // Simulates the ability the creature would have self-registered on an earlier battlefield entry.
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

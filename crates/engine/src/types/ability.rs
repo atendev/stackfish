@@ -1354,6 +1354,10 @@ pub struct RegisteredAbility {
     /// `RegisteredAbility` has no `Default`.
     // TODO: CR 700.2e opponent-chosen modes for a triggered ability; `push_ordered_triggers` doesn't special-case `ExactlyChosenByOpponent` or `UpToChosenByOpponent`, so the controller would be asked instead of the other player
     pub mode_choice: ModeChoice,
+    /// CR 405.4: the ability's text, set by a script's `:SetText`. Copied onto
+    /// the `StackObject` at push so it outlives the ability.
+    // TODO: abilities made without a script, such as tokens' and scenario abilities, have no text (CR 405.4)
+    pub text: Option<String>,
 }
 
 #[cfg(test)]

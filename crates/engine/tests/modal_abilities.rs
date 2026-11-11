@@ -88,6 +88,7 @@ fn modal_upkeep(
     mode_choice: ModeChoice,
 ) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes,
         mode_choice,
         id: AbilityId(0),

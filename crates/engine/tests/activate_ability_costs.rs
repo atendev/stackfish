@@ -112,6 +112,7 @@ fn state_with_cost(
             Zone::new(ZoneKind::Graveyard, Some(p0)),
         ],
         abilities: vec![RegisteredAbility {
+            text: None,
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(0),

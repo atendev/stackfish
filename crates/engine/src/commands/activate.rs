@@ -49,6 +49,7 @@ pub(crate) enum ActivatePlan {
         operation: ScriptHandle,
         effect: Option<AbilityEffect>,
         cost: CostSpec,
+        ability_index: u32,
     },
 }
 
@@ -414,6 +415,7 @@ pub(super) fn validate_activate_ability(
                 operation,
                 effect: non_mana_effect,
                 cost,
+                ability_index,
             })))
         }
     }
@@ -496,9 +498,12 @@ pub(super) fn apply_activate_ability(
             operation,
             effect,
             cost,
+            ability_index,
         } => {
+            let ability_text =
+                find_ability(state, source, ability_index).and_then(|a| a.text.clone());
             let stack_id = state.allocate_object_id();
-            state.stack.push(StackObject::new(
+            let mut entry = StackObject::new(
                 stack_id,
                 StackEntryKind::ActivatedAbility,
                 source,
@@ -526,7 +531,10 @@ pub(super) fn apply_activate_ability(
                 None,
                 // An activation always comes from a live object, so there is no departed source.
                 None,
-            ));
+            );
+            entry.ability_index = Some(ability_index);
+            entry.ability_text = ability_text;
+            state.stack.push(entry);
 
             Ok(CommandOutcome {
                 events: vec![GameEventKind::StackObjectPushed { stack_id }],
