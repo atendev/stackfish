@@ -57,6 +57,8 @@ fn the_fingerprint_relabels_fresh_ids_and_drops_counters() {
 
 fn trigger_on_stack(stack_id: u64, source: u64) -> StackObject {
     StackObject {
+        ability_index: None,
+        ability_text: None,
         stack_id: ObjectId(stack_id),
         kind: StackEntryKind::TriggeredAbility,
         source: ObjectId(source),

@@ -433,6 +433,7 @@ fn a_multi_word_mode_works_on_a_modal_triggered_ability() {
     engine.state_mut().phase = Phase::PreGame;
     engine.state_mut().step = Step::Upkeep;
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: vec![
             mode(two_creatures(), AbilityEffect::Fight),
             mode(None, AbilityEffect::GainLife(3)),

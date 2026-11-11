@@ -84,6 +84,7 @@ fn exile_spell_definition() -> CardDefinition {
 
 fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -225,6 +226,7 @@ fn exile_activated_ability_also_works() {
         .unwrap()
         .push_bottom(target);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),

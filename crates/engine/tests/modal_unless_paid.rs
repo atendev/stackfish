@@ -138,6 +138,8 @@ fn push_victim_spell(state: &mut GameState) {
         ),
     );
     state.stack.push(StackObject {
+        ability_index: None,
+        ability_text: None,
         stack_id: VICTIM,
         kind: StackEntryKind::Spell,
         source: VICTIM,
@@ -487,6 +489,7 @@ fn echo_trigger_engine() -> Engine {
         .unwrap()
         .push_bottom(SOURCE);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: vec![
             mode(
                 None,

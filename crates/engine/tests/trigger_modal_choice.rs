@@ -53,6 +53,7 @@ fn modal_upkeep_ability(
     destroy_excludes_source: bool,
 ) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: vec![
             SpellMode {
                 target_requirement: None,

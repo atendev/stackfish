@@ -278,6 +278,7 @@ fn the_facade_and_the_engine_accept_the_same_selections() {
 
 fn modal_upkeep(modes: Vec<SpellMode>) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes,
         mode_choice: ModeChoice::Exactly(2),
         id: AbilityId(0),

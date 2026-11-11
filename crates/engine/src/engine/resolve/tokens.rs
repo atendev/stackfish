@@ -331,6 +331,7 @@ fn register_token_abilities(
         TokenSpec::Named(NamedToken::Clue) => {
             let id = state.allocate_ability_id();
             state.abilities.push(RegisteredAbility {
+                text: None,
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
                 id,
@@ -351,6 +352,7 @@ fn register_token_abilities(
         TokenSpec::Named(NamedToken::Food) => {
             let id = state.allocate_ability_id();
             state.abilities.push(RegisteredAbility {
+                text: None,
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
                 id,
@@ -372,6 +374,7 @@ fn register_token_abilities(
         TokenSpec::Named(NamedToken::Treasure) => {
             let id = state.allocate_ability_id();
             state.abilities.push(RegisteredAbility {
+                text: None,
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
                 id,

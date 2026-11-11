@@ -144,6 +144,7 @@ fn become_copy_ability_with_exceptions(
     exceptions: CopyExceptions,
 ) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -817,6 +818,7 @@ fn become_copy_with_no_object_target_is_a_no_op() {
             card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
         ],
         vec![RegisteredAbility {
+            text: None,
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(1),

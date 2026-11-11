@@ -212,6 +212,7 @@ fn a_bounced_token_ceases_to_exist() {
 fn bounce_fires_a_leaves_the_battlefield_trigger() {
     let mut engine = setup("return {}", P0, false);
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

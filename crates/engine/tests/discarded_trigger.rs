@@ -61,6 +61,7 @@ fn vanilla_hand_card(id: ObjectId, owner: PlayerId) -> GameObject {
 
 fn discarded_trigger(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -139,6 +140,7 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
         .unwrap()
         .push_bottom(source);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),

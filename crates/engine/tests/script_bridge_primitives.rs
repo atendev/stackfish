@@ -84,6 +84,7 @@ fn primitive_enters_condition_matches_the_bear_entering_the_battlefield() {
         .unwrap()
         .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -124,6 +125,7 @@ fn primitive_enters_condition_false_on_a_different_object() {
         .unwrap()
         .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -164,6 +166,7 @@ fn primitive_enters_condition_false_on_wrong_destination_zone() {
         .unwrap()
         .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),
@@ -211,6 +214,7 @@ fn primitive_always_condition_matches_an_unrelated_event() {
         .unwrap()
         .push_bottom(bear);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(3),
@@ -316,6 +320,7 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
         .expect("poison-pill script loads");
 
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(4),
@@ -400,6 +405,7 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
         .load_condition("return Game.Conditions.Enters")
         .expect("condition primitive loads");
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(5),
@@ -420,6 +426,7 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
         .load_script(OPERATION_GAIN_LIFE_1)
         .expect("operation script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(6),

@@ -177,6 +177,7 @@ fn damage_ability_with_lifelink_source_gains_its_controller_life() {
         .unwrap()
         .push_bottom(source);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

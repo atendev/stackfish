@@ -310,6 +310,7 @@ fn counters_ability_works_the_same_as_a_counters_spell() {
         .unwrap()
         .push_bottom(target);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

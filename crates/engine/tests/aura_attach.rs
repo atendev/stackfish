@@ -451,6 +451,7 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
     aura_obj.attached_to = Some(bear);
     put_on_battlefield(&mut state, aura_obj);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

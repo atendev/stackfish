@@ -205,6 +205,7 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
         .unwrap()
         .push_bottom(source);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

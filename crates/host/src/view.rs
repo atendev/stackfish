@@ -5,15 +5,16 @@
 use std::collections::HashMap;
 
 use stackfish_engine::decision::{Candidate, Decision};
+use stackfish_engine::triggers::find_departed_lki;
 use stackfish_engine::{
-    GameEvent, GameEventKind, GameObject, GameState, ObjectId, PlayerId, Target, ZoneKind,
-    library_top_visible_to,
+    GameEvent, GameEventKind, GameObject, GameState, ObjectId, PlayerId, StackObject, Target,
+    ZoneKind, library_top_visible_to,
 };
 
 use crate::wire::{
     U64, WireCardIdentity, WireCommanderDamage, WireDecision, WireEventKind, WireIdentity,
     WireObjectSummary, WireObjectView, WirePlayerView, WireRevealedCard, WireSnapshot,
-    WireStackEntry, WireZone, WireZoneView, counters, offered_objects,
+    WireStackEntry, WireStackKind, WireZone, WireZoneView, copy_of, counters, offered_objects,
 };
 
 /// One Seat's point of view.
@@ -557,12 +558,35 @@ pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observe
             })
         })
         .collect();
+    // CR 602.2a, 701.20a
+    // A card whose ability was activated from a hidden zone stays revealed until the ability leaves the stack.
+    // CR 113.7a, 405.4
+    // A triggered ability is public on the stack apart from its source, so its source is named too.
+    let source_identity = |entry: &StackObject| {
+        let kind = WireStackKind::from(&entry.kind);
+        let is_spell =
+            kind == WireStackKind::Spell || copy_of(&entry.kind) == Some(WireStackKind::Spell);
+        if is_spell || visible(entry.source) {
+            return None;
+        }
+        let departed;
+        let object = match state.object(entry.source).or(entry.source_lki.as_ref()) {
+            Some(object) => object,
+            None => {
+                // TODO: a hidden source whose zone change kept no last known information has no identity (CR 602.2a)
+                departed = find_departed_lki(state, entry.source)?;
+                &departed
+            }
+        };
+        (!object.face_down).then(|| WireIdentity::from(object))
+    };
     let stack = state
         .stack
         .iter()
         .map(|entry| WireStackEntry {
             stack_id: entry.stack_id.into(),
             kind: (&entry.kind).into(),
+            copy_of: copy_of(&entry.kind),
             source: visible(entry.source).then_some(U64::from(entry.source)),
             owner: entry.owner.0,
             controller: entry.controller.0,
@@ -581,6 +605,9 @@ pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observe
                 .object(entry.stack_id)
                 .filter(|o| o.zone == ZoneKind::Stack)
                 .map(view_of),
+            ability_text: entry.ability_text.clone(),
+            ability_index: entry.ability_index,
+            source_identity: source_identity(entry),
         })
         .collect();
     WireSnapshot {

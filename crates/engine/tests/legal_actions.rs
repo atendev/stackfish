@@ -296,6 +296,7 @@ fn a_modal_spell_lists_the_range_and_slots_per_mode() {
 
 fn tap_ability(source: u64, effect: AbilityEffect, cost: Option<CostSpec>) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(source),

@@ -38,6 +38,7 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
     GameState {
         objects,
         abilities: vec![RegisteredAbility {
+            text: None,
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(0),
@@ -339,6 +340,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
         .push_bottom(source_b);
     // source_a gets a second ability (index 1) that adds colorless.
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -352,6 +354,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
         intervening_if: None,
     });
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),

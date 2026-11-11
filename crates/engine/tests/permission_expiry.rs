@@ -401,6 +401,7 @@ fn a_grant_from_an_activated_ability_takes_the_permanent_as_its_source() {
         .unwrap()
         .push_bottom(source);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),

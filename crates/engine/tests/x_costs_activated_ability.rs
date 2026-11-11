@@ -43,6 +43,7 @@ fn state_with_ability_cost(mana_cost: ManaCost, pool: ManaPool) -> (GameState, P
             ..stackfish_testutil::player_state(p0)
         }],
         abilities: vec![RegisteredAbility {
+            text: None,
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(0),

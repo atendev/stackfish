@@ -40,6 +40,7 @@ fn beginning_of_your_untap_trigger_is_already_on_the_stack_by_the_time_upkeep_pr
         .unwrap()
         .push_bottom(permanent);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -101,6 +102,7 @@ fn beginning_of_your_untap_trigger_does_not_fire_for_a_different_controller() {
         .unwrap()
         .push_bottom(permanent);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -147,6 +149,7 @@ fn beginning_of_each_untap_trigger_fires_regardless_of_whose_turn_it_is() {
         .unwrap()
         .push_bottom(permanent);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),

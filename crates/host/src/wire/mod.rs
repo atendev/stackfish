@@ -15,7 +15,7 @@ pub(crate) use event::{
 pub(crate) use reply::AnswerBody;
 pub(crate) use snapshot::{
     WireCommanderDamage, WireObjectView, WirePlayerView, WireSnapshot, WireStackEntry,
-    WireZoneView, counters,
+    WireStackKind, WireZoneView, copy_of, counters,
 };
 
 use serde::de::Error as _;

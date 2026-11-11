@@ -66,6 +66,7 @@ fn equipment_definition() -> CardDefinition {
 
 fn equip_any(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -98,6 +99,7 @@ fn equip_any(source: ObjectId) -> RegisteredAbility {
 
 fn equip_dragon(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),

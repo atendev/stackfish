@@ -127,6 +127,7 @@ pub(crate) fn build_new_game_engine(
                     .collect();
                 let id = engine.state_mut().allocate_ability_id();
                 engine.state_mut().abilities.push(RegisteredAbility {
+                    text: None,
                     modes: Vec::new(),
                     mode_choice: ModeChoice::Exactly(1),
                     id,

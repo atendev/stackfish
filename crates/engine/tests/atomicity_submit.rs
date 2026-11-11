@@ -448,6 +448,7 @@ fn madness_engine() -> Engine {
         consumption: ConsumptionPolicy::Repeatable,
     });
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -562,6 +563,7 @@ fn cascade_engine() -> Engine {
     );
     // The cast takes the first id the fixture hands out.
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),

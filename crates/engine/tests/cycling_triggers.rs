@@ -63,6 +63,7 @@ fn discard_self_cost() -> CostSpec {
 
 fn cycling_ability(source: ObjectId, effect: AbilityEffect) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -79,6 +80,7 @@ fn cycling_ability(source: ObjectId, effect: AbilityEffect) -> RegisteredAbility
 
 fn cycled_trigger(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -408,6 +410,7 @@ fn cycles_or_discards_condition_already_fires_for_a_cycling_discard() {
         .unwrap()
         .push_bottom(watcher);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),

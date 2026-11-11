@@ -133,6 +133,7 @@ pub(crate) fn grant_linked_copy_ability(
     }
     let id = state.allocate_ability_id();
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id,

@@ -115,6 +115,7 @@ fn collect_triggers_condition_script_error_falls_back_to_no_match_and_is_reporte
         .unwrap()
         .push_bottom(source);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
@@ -178,6 +179,7 @@ fn collect_triggers_intervening_if_script_error_falls_back_to_not_holding() {
         .unwrap()
         .push_bottom(source);
     state.abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(1),
@@ -224,6 +226,7 @@ fn collect_triggers_departed_loop_intervening_if_script_error_falls_back() {
     let source = ObjectId(0);
     let state = two_player_state(20);
     let departed = vec![RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(2),
@@ -306,6 +309,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
         .load_script(ERRORS_BELOW_TEN_LIFE)
         .expect("script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(3),

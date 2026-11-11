@@ -597,6 +597,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> InitialState {
                 .map(|s| parse_mana_unit(s))
                 .collect();
             abilities.push(RegisteredAbility {
+                text: None,
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
                 id: AbilityId(next_ability_id),
@@ -732,6 +733,7 @@ pub(crate) fn register_trigger_ability(
     });
     let id = engine.state_mut().allocate_ability_id();
     engine.state_mut().abilities.push(RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id,

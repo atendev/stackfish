@@ -65,6 +65,7 @@ fn treasure_definition() -> CardDefinition {
 
 fn mana_ability(id: u64, source: ObjectId, colors: Vec<ManaUnit>) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(id),
@@ -81,6 +82,7 @@ fn mana_ability(id: u64, source: ObjectId, colors: Vec<ManaUnit>) -> RegisteredA
 
 fn non_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(id),
@@ -101,6 +103,7 @@ fn non_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
 
 fn sacrifice_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        text: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(id),
