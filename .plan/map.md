@@ -74,6 +74,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 101 Ward costs and player hexproof. Ward takes a mana string or a list of `Game.Costs.*` values and can be granted through a layer-6 effect, with printed Ward moved onto that path. Players get hexproof and shroud from a new player static, "hexproof from" is a layer-6 list, and `IgnoreKeyword("Hexproof")` is a load error. [closed/101-ward-costs-and-player-hexproof.md](closed/101-ward-costs-and-player-hexproof.md)
 - 103 Damage redirected to another target. Static redirects stay `ReplacementEffect` rows with a `RedirectRecipient`, and resolved effects make rows in a new list of redirect shields with their own id. A chosen recipient is a normal target picked on cast or activation. Players and creatures are in scope. Each effect applies once per event, so a chain ends (CR 614.5, 616.1f). A budget smaller than the damage splits the event. Decided in auto mode, then approved. Builds are 143 to 146. [closed/103-damage-redirect-to-another-target.md](closed/103-damage-redirect-to-another-target.md)
 - 102 Stun counters and tap hooks. Stun is a rule check in one engine helper that every untap attempt goes through, not a general would-untap filter. A replaced untap writes no `Untapped` event and proposes a `CounterAdded { Stun, -1 }`, removing at most one counter per attempt (CR 122.1d, 614.5). Phased-out permanents make no attempt. `CounterKind::Stun` gets an additive wire arm. "Would become tapped" is dropped, since no card uses it. Decided in auto mode, then approved. Build is 147. [closed/102-stun-counters-and-tap-hooks.md](closed/102-stun-counters-and-tap-hooks.md)
+- 104 Fight and bite target shapes. A self-source fight with a departed creature correctly deals nothing (CR 701.14b), so the LKI TODO goes. A one-word bite whose source left uses its last known power (CR 608.2h). Count-1 `up_to` words work in the one-word shape and as the second word, and every other unsupported shape becomes a load error from one shared check. Modes come with 114, and TOML and the glossary do not change. Decided in auto mode. Build is 148. [closed/104-fight-and-bite-target-shapes.md](closed/104-fight-and-bite-target-shapes.md)
 
 ## Not yet specified
 
@@ -118,6 +119,9 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Damage that can't be redirected (Whippoorwill) (found by 103).
 - "Doesn't untap during its controller's untap step" effects and "can't untap more than N" limits (CR 502.3), such as Winter Orb and Static Orb. A permanent that doesn't untap keeps its stun counter (found by 102).
 - Non-stun would-untap replacements and their CR 616.1 order with stun, such as Bewitching Leechcraft and Edge of Malacol (found by 102).
+- "Fights each creature" and "each fights a different one of those creatures" (Ezuri's Predation). They need a pairing choice (found by 104).
+- Damage equal to something other than power, such as toughness. This is a dynamic-amount `DealDamage` question, not a Bite parameter (found by 104).
+- A departed damage source's last known keywords. `apply_damage_event` reads the current object, so lifelink, deathtouch, wither and infect from a source that left do not apply (found by 104).
 
 ## Out of scope
 
@@ -134,7 +138,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 104 Fight and bite target shapes
 - 112 Which non-goal cards the loader rejects
 - 123 Cost shapes past the current set
 - 127 Activate only as a sorcery on any ability
@@ -165,3 +168,4 @@ Builds and audits:
 - 142 Build hexproof from
 - 143 Build static redirect recipients
 - 147 Build stun counters
+- 148 Build fight and bite target shapes
