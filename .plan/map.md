@@ -82,6 +82,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 107 `remap_abilities` purges cost modifiers. A cast, land play or other hand-built move drops every cost and player modifier keyed to the old id, as `retire_object` does. The script's registration for the new zone stays, and a card's own cast keeps its reduction. Built in auto mode, then merged. [closed/107-remap-abilities-purge-cost-modifiers.md](closed/107-remap-abilities-purge-cost-modifiers.md)
 - 128 Flash bought with an extra cost. A Flash cost is an optional additional cost on the card, `FlashCost { mana, additional }`, announced by `CastSpell.pay_flash_cost` and not a Timing permission (CR 601.3c). `can_cast_now` is unchanged: with priority and a failed timing check, the cast is legal only with the cost, and the Entry says `Required`. The cost goes on top of any cost path, after modifiers and tax, and nothing records it on the stack. `s.flash_cost()` returns a `Game.Costs.*` list. Decided in auto mode, then approved. Build is 163. [closed/128-flash-bought-with-an-extra-cost.md](closed/128-flash-bought-with-an-extra-cost.md)
 - 132 Delayed triggered abilities. A delayed trigger is a row in a new `GameState.delayed_triggers` list, since its source is usually a spell that has left the stack (CR 603.7d). The first build covers only "at the beginning of the next end step", about 506 cards. Rows match only events after they were made (CR 603.7a, 513.2), trigger once (CR 603.7b), and act on referenced objects still in their recorded zone at resolution (CR 603.7c). Lua gets `Game.Ops.AtNextEndStep(op, "targets" | "self" | "entered")` as a Chain entry. Unearth is its own build. Decided in auto mode, then approved. Builds are 164 then 165. [closed/132-delayed-triggered-abilities.md](closed/132-delayed-triggered-abilities.md)
+- 159 Optional additional costs and kicker. One `CardDefinition.optional_costs` list holds kicker, multikicker (a mana-only repeatable entry), plain "you may" costs and buyback, announced as a count per index on `CastSpell.optional_costs`. The mana joins before cost modifiers and tax (CR 601.2f), which also moves buyback there. `StackObject.optional_paid` records the counts, and a permanent and its abilities carry them through `GameObject.optional_paid` (CR 707.2 keeps them off permanent copies). Lua gets `s.optional_costs()`, a fourth `cast` argument, `Game.Ops.IfPaid`, `Game.Conditions.Kicked` and `EntersWithCountersKicked`. The wire keeps `pay_buyback` and stays at version 1. Decided in auto mode, then approved. Builds are 166 to 168. [closed/159-optional-additional-costs-and-kicker.md](closed/159-optional-additional-costs-and-kicker.md)
 
 ## Not yet specified
 
@@ -137,6 +138,8 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Damage equal to something other than power, such as toughness. This is a dynamic-amount `DealDamage` question, not a Bite parameter (found by 104).
 - A departed damage source's last known keywords. `apply_damage_event` reads the current object, so lifelink, deathtouch, wither and infect from a source that left do not apply (found by 104).
 - Activation conditions the Lua snapshot cannot read: card types beyond creature, subtypes, colors, current power, spells cast this turn and creatures that died this turn (found by 127).
+- Chosen-count optional costs ("you may sacrifice one or more creatures", "tap any number"), where the effect reads how many were paid (found by 159).
+- A computed amount for `EntersWithCounters` in general, past the per-kick payload (found by 159).
 
 ## Out of scope
 
@@ -153,7 +156,6 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 159 Optional additional costs and kicker
 - 162 Activation limits per turn
 
 Builds and audits:
