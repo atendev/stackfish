@@ -3,9 +3,9 @@ id: 170
 title: Build ability text, copy kind and hidden-source identity on stack entries
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question
@@ -72,4 +72,4 @@ Build the three stack-entry fields asked for by the view's engine brief (`stackf
 
 ## Resolution
 
-<Filled in at close: the decision and the reason for it.>
+Built as the report says. `:SetText` on the triggered and activated builders fills `RegisteredAbility::text`, and both push sites copy the text and the ability's index onto `StackObject`. A Seat's snapshot sends `ability_text`, `ability_index`, `copy_of` and, for a hidden non-face-down source, `source_identity`. `ability_text` is optional on the wire so missing text stays distinct from empty text. The activation looks its text up at apply time, because carrying it in `ActivatePlan::Stack` tripped clippy's large-variant lint. No card script sets text yet, so real cards send none until `stackfish-db` scripts call `:SetText`.
