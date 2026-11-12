@@ -943,6 +943,7 @@ impl Engine {
 
             ProcessState::AwaitingUnlessPaidChoice {
                 payer_queue,
+                controller,
                 cost,
                 otherwise,
                 target_id,
@@ -961,6 +962,7 @@ impl Engine {
                 };
                 self.process_state = ProcessState::AwaitingUnlessPaidChoice {
                     payer_queue,
+                    controller,
                     cost,
                     otherwise,
                     target_id,

@@ -102,6 +102,7 @@ impl Engine {
         };
         self.process_state = ProcessState::AwaitingUnlessPaidChoice {
             payer_queue: VecDeque::from([payer]),
+            controller: top.controller,
             cost: cost.clone(),
             otherwise: otherwise.clone(),
             target_id,

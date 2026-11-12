@@ -14,6 +14,27 @@ use crate::types::zone::ZoneKind;
 use super::super::{Engine, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatus};
 
 impl Engine {
+    /// CR 701.21a: the sacrifice queue for "sacrifice this permanent". Empty when
+    /// `source` is on the battlefield under someone other than `controller`.
+    pub(in crate::engine) fn sacrifice_self_queue(
+        &self,
+        source: ObjectId,
+        controller: PlayerId,
+    ) -> VecDeque<ObjectId> {
+        let on_battlefield = self
+            .state
+            .object(source)
+            .is_some_and(|o| o.zone == ZoneKind::Battlefield);
+        let controlled = !on_battlefield
+            || crate::layers::effective_controller(&self.state, &self.script_runtime, source)
+                == controller;
+        if controlled {
+            VecDeque::from([source])
+        } else {
+            VecDeque::new()
+        }
+    }
+
     pub(super) fn resolve_sacrifice_effect(
         &mut self,
         top: &StackObject,
@@ -45,21 +66,9 @@ impl Engine {
         top: &StackObject,
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        let on_battlefield = self
-            .state
-            .object(top.source)
-            .is_some_and(|o| o.zone == ZoneKind::Battlefield);
-        let controlled = !on_battlefield
-            || crate::layers::effective_controller(&self.state, &self.script_runtime, top.source)
-                == top.controller;
-        let targets: VecDeque<ObjectId> = if controlled {
-            VecDeque::from([top.source])
-        } else {
-            VecDeque::new()
-        };
         self.process_state = self.continue_scripted_zone_move(
             ScriptedZoneMoveKind::Sacrifice,
-            targets,
+            self.sacrifice_self_queue(top.source, top.controller),
             ScriptedZoneMoveThen::StackResolution {
                 stack_id: top.stack_id,
             },
