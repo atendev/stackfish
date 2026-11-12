@@ -512,10 +512,14 @@ fn priority_window(engine: &Engine) -> (PlayerId, &'static str, ReplyShape, Rout
     }
     if let Some(player) = commands::next_blocking_player(state, engine.script_runtime()) {
         let blockers = engine.legal_blockers(player);
+        let min_blockers = engine.legal_block_minimums(&blockers);
         return (
             player,
             "Declare blockers",
-            ReplyShape::DeclareBlockers { blockers },
+            ReplyShape::DeclareBlockers {
+                blockers,
+                min_blockers,
+            },
             Route::DeclareBlockers,
         );
     }

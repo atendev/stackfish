@@ -2,7 +2,7 @@
 //! candidates each Decision lists. It biases toward passing and playing lands so games end.
 //! See `docs/DESIGN.md`.
 
-// TODO: spend more than life minus one on a Phyrexian symbol, and learn the starting life instead of assuming 20
+// TODO: spend more than life minus one on a Phyrexian symbol
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -97,9 +97,10 @@ pub struct Outcome {
 pub struct Bot {
     rng: Rng,
     pools: HashMap<u32, Pool>,
-    /// Each Seat's life, from `life_changed` events on top of `starting_life`.
+    /// Each Seat's life: a snapshot read before the first `advance`, plus every
+    /// `life_changed` event after it.
     life: HashMap<u32, i64>,
-    starting_life: i64,
+    life_read: bool,
     /// The source of the last ability the bot activated. A self cost
     /// (`tap_self`, `sacrifice_self`, `discard_self`) names it in the plan.
     last_source: Option<Value>,
@@ -112,6 +113,7 @@ pub struct Bot {
     /// Illegal Answers turned down, by the shape and mechanic of the Decision they answered, such as `partition (Scry)`.
     illegal_by_shape: BTreeMap<String, usize>,
     mechanics_seen: BTreeMap<String, usize>,
+    costs_paid: BTreeMap<String, usize>,
     /// The mana cost of each card the bot has seen, by object id. A move event
     /// carries the identity of every card its Seat may see, including the
     /// Seat's own hand.
@@ -133,7 +135,7 @@ impl Bot {
             rng: Rng(seed ^ 0xA5A5_5A5A_DEAD_BEEF),
             pools: HashMap::new(),
             life: HashMap::new(),
-            starting_life: 20,
+            life_read: false,
             last_source: None,
             last_decision: None,
             answers: 0,
@@ -143,19 +145,13 @@ impl Bot {
             illegal_rejected: 0,
             illegal_by_shape: BTreeMap::new(),
             mechanics_seen: BTreeMap::new(),
+            costs_paid: BTreeMap::new(),
             costs: HashMap::new(),
             seats: BTreeSet::new(),
             record: false,
             watchers: Vec::new(),
             events: HashMap::new(),
         }
-    }
-
-    /// Tells the bot the life each player starts with. The default is 20, so a
-    /// commander game needs 40 for the bot to pay Phyrexian symbols with life.
-    pub fn with_starting_life(mut self, life: u32) -> Bot {
-        self.starting_life = i64::from(life);
-        self
     }
 
     /// Keeps every event each Seat receives, for `events`. `watchers` are Seats
@@ -184,6 +180,12 @@ impl Bot {
     /// Tests read it to see which choices a game reached; the bot never branches on it.
     pub fn mechanics_seen(&self) -> &BTreeMap<String, usize> {
         &self.mechanics_seen
+    }
+
+    /// How many payments of each kind (`mana`, `sacrifice`, `discard`, ...) the
+    /// Session accepted. Tests read it; the bot never branches on it.
+    pub fn costs_paid(&self) -> &BTreeMap<String, usize> {
+        &self.costs_paid
     }
 
     /// The events `seat` received, in order. Empty unless `recording` was set.
@@ -218,6 +220,9 @@ impl Bot {
 
     /// Finds the open Decision, reads it as its chooser, and answers it.
     pub fn step(&mut self, session: &mut Session) -> Result<Progress, BotError> {
+        if !self.life_read {
+            self.read_life(session)?;
+        }
         let body = self.send(
             session,
             json!({ "v": PROTOCOL_VERSION, "kind": "advance", "body": {} }),
@@ -305,6 +310,32 @@ impl Bot {
         Ok(body)
     }
 
+    // CR 103.4
+    // A variant or an override sets the starting life, so the bot reads it.
+    // Polling seat 0 first empties its outbox, so the snapshot drops no event.
+    fn read_life(&mut self, session: &mut Session) -> Result<(), BotError> {
+        self.poll(session, 0)?;
+        let body = self.send(
+            session,
+            json!({ "v": PROTOCOL_VERSION, "kind": "snapshot", "seat": 0, "body": {} }),
+        )?;
+        if body["status"] == "error" {
+            return Err(self.failure(&body));
+        }
+        let players = body["snapshot"]["players"]
+            .as_array()
+            .ok_or_else(|| protocol("a snapshot lists no players"))?;
+        for player in players {
+            let (Some(seat), Some(life)) = (player["player"].as_u64(), player["life"].as_i64())
+            else {
+                return Err(protocol("a snapshot player has no seat or life"));
+            };
+            self.life.insert(seat as u32, life);
+        }
+        self.life_read = true;
+        Ok(())
+    }
+
     fn failure(&self, body: &Value) -> BotError {
         let error = &body["error"];
         let text = format!("{}: {}", error["code"], error["message"]);
@@ -321,7 +352,7 @@ impl Bot {
 
     // A payment plan may spend all but the last point of life.
     fn life_budget(&self, seat: u32) -> u32 {
-        let life = self.starting_life + self.life.get(&seat).copied().unwrap_or(0);
+        let life = self.life.get(&seat).copied().unwrap_or(0);
         (life - 1).max(0) as u32
     }
 
@@ -472,6 +503,11 @@ impl Bot {
     fn accepted(&mut self, seat: u32, reply: &Reply, body: &Value) {
         if let Some(spent) = &reply.spent {
             self.pool(seat).spend(spent);
+        }
+        if let Some(payments) = reply.value["plan"]["payments"].as_array() {
+            for kind in payments.iter().filter_map(|p| p["kind"].as_str()) {
+                *self.costs_paid.entry(kind.to_string()).or_default() += 1;
+            }
         }
         self.take_events(seat, body);
     }
@@ -858,6 +894,7 @@ impl Bot {
         json!({ "kind": "declare_attackers", "attackers": attacks })
     }
 
+    // TODO: the bot drops a short menace block instead of adding a second blocker
     fn blockers(&mut self, decision: &Value) -> Value {
         let entries = decision["blockers"].as_array().cloned().unwrap_or_default();
         let mut blocks = Vec::new();
@@ -868,6 +905,22 @@ impl Bot {
                 blocks.push(json!({ "blocker": entry["blocker"], "attacker": attacker }));
             }
         }
+        // CR 509.1b
+        let short: Vec<Value> = decision["min_blockers"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter(|need| {
+                let count = blocks
+                    .iter()
+                    .filter(|block| block["attacker"] == need["attacker"])
+                    .count() as u64;
+                count < need["count"].as_u64().unwrap_or(1)
+            })
+            .map(|need| need["attacker"].clone())
+            .collect();
+        blocks.retain(|block| !short.contains(&block["attacker"]));
         json!({ "kind": "declare_blockers", "blocks": blocks })
     }
 
@@ -1015,5 +1068,82 @@ mod tests {
         for seed in 0..10 {
             assert_eq!(Bot::new(seed).may_cast(&decision)["cast"], Value::Null);
         }
+    }
+
+    fn session_with_life(life: u32) -> Session {
+        let mut request: Value = serde_json::from_slice(&crate::proof_setup_request(2, 1)).unwrap();
+        request["body"]["overrides"] = json!({ "starting_life": life });
+        let bytes = serde_json::to_vec(&request).unwrap();
+        Session::create(&bytes, &crate::proof_cards()).unwrap().0
+    }
+
+    // CR 103.4
+    #[test]
+    fn the_bot_reads_the_starting_life_before_the_first_advance() {
+        let mut session = session_with_life(25);
+        let mut bot = Bot::new(1);
+        bot.read_life(&mut session).unwrap();
+        assert_eq!((bot.life[&0], bot.life[&1]), (25, 25));
+        let body = json!({ "events": [{ "kind": "life_changed", "player": 0, "delta": -3 }] });
+        bot.take_events(0, &body);
+        assert_eq!(bot.life[&0], 22);
+        assert_eq!(bot.life_budget(0), 21);
+
+        let mut stepped = Bot::new(1);
+        stepped.step(&mut session_with_life(25)).unwrap();
+        assert!(stepped.life_read);
+        assert_eq!(stepped.life[&1], 25);
+    }
+
+    // CR 508.1d
+    #[test]
+    fn a_required_attacker_always_attacks_and_an_optional_one_may_stay_home() {
+        let decision = json!({
+            "shape": "declare_attackers",
+            "attackers": [
+                { "attacker": "1", "defenders": [{ "kind": "player", "id": 1 }], "required": true },
+                { "attacker": "2", "defenders": [{ "kind": "player", "id": 1 }], "required": false },
+            ],
+        });
+        let mut optional_home = false;
+        for seed in 0..200 {
+            let reply = Bot::new(seed).attackers(&decision);
+            let attackers: Vec<&Value> = reply["attackers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| &a["attacker"])
+                .collect();
+            assert!(attackers.contains(&&json!("1")), "seed {seed}: {reply}");
+            optional_home |= !attackers.contains(&&json!("2"));
+        }
+        assert!(optional_home);
+    }
+
+    // CR 702.111b
+    #[test]
+    fn the_bot_never_leaves_one_blocker_on_a_menace_attacker() {
+        let decision = json!({
+            "shape": "declare_blockers",
+            "blockers": [
+                { "blocker": "3", "attackers": ["1", "2"] },
+                { "blocker": "4", "attackers": ["1", "2"] },
+                { "blocker": "5", "attackers": ["1", "2"] },
+            ],
+            "min_blockers": [{ "attacker": "1", "count": 2 }],
+        });
+        let mut menace_blocked = false;
+        for seed in 0..200 {
+            let reply = Bot::new(seed).blockers(&decision);
+            let on_menace = reply["blocks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|b| b["attacker"] == "1")
+                .count();
+            assert_ne!(on_menace, 1, "seed {seed}: {reply}");
+            menace_blocked |= on_menace >= 2;
+        }
+        assert!(menace_blocked);
     }
 }

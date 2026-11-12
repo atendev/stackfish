@@ -40,7 +40,8 @@ are in `crates/engine/src/decision/entry.rs`. The builders are in `commands/entr
   out of `execute_declare_attackers` and `execute_declare_blockers`, so the command and the entries share one rule.
 - The whole-declaration rules (menace, "attacks each combat if able") live in `commands/combat/predicate.rs` and are
   shared the same way. An `AttackerEntry` has `required`, and a menace attacker is listed only when two creatures could
-  block it. See `23-combat-predicates.md`.
+  block it. `legal_block_minimums(&blockers)` lists the listed attackers that need more than one blocker, so the
+  block Decision carries `min_blockers` (`{ attacker, count }`). See `23-combat-predicates.md`.
 - Splits use `plan_damage_splits`, pulled out of `execute_assign_combat_damage` the same way.
 
 ## Combat Decisions

@@ -32,7 +32,7 @@ pub(crate) use attach::{
 };
 pub(crate) use combat::{
     attacker_entries, band_entries, blocker_entries, damage_split_entries,
-    execute_assign_combat_damage, mark_effect_blocked, next_blocking_player,
+    execute_assign_combat_damage, mark_effect_blocked, min_blockers, next_blocking_player,
 };
 pub(crate) use entries::{cast_options, mana_ability_entries, priority_entries};
 pub(crate) use legality::{

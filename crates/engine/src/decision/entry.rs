@@ -143,6 +143,15 @@ pub struct BlockerEntry {
     pub attackers: Vec<ObjectId>,
 }
 
+/// An attacker that needs `count` blockers if it is blocked at all (CR 509.1b,
+/// 702.111b). Each `BlockerEntry` lists one creature, so this is the only place
+/// a client learns the count before the engine checks the whole declaration.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MinBlockers {
+    pub attacker: ObjectId,
+    pub count: usize,
+}
+
 /// An attacker or blocker whose damage the player splits (CR 510.1c). The
 /// Answer gives an amount, possibly zero, for every recipient.
 #[derive(Clone, PartialEq, Eq, Debug)]

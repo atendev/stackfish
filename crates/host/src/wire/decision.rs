@@ -1,8 +1,8 @@
 use serde::Serialize;
 use stackfish_engine::decision::{
     ActivateEntry, AttackerEntry, BlockerEntry, Candidate, CastEntry, CastOptions,
-    DamageSplitEntry, Decision, Entry, EntryTargets, ModeRange, PartitionRest, ReplyShape,
-    TargetSlot,
+    DamageSplitEntry, Decision, Entry, EntryTargets, MinBlockers, ModeRange, PartitionRest,
+    ReplyShape, TargetSlot,
 };
 use stackfish_engine::triggers::PendingTrigger;
 use stackfish_engine::{AdditionalCost, CostSpec, ObjectId, Target, TargetRequirement, TargetSpec};
@@ -370,6 +370,21 @@ impl From<&BlockerEntry> for WireBlocker {
 }
 
 #[derive(Serialize, Clone, Debug)]
+pub(crate) struct WireMinBlockers {
+    pub attacker: U64,
+    pub count: usize,
+}
+
+impl From<&MinBlockers> for WireMinBlockers {
+    fn from(need: &MinBlockers) -> Self {
+        WireMinBlockers {
+            attacker: need.attacker.into(),
+            count: need.count,
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
 pub(crate) struct WireDamageSplit {
     pub source: U64,
     pub power: u32,
@@ -442,6 +457,8 @@ pub(crate) enum WireShape {
     },
     DeclareBlockers {
         blockers: Vec<WireBlocker>,
+        /// Attackers that need more than one blocker if blocked at all (CR 509.1b).
+        min_blockers: Vec<WireMinBlockers>,
     },
     AssignDamage {
         splits: Vec<WireDamageSplit>,
@@ -516,8 +533,12 @@ impl From<&ReplyShape> for WireShape {
             ReplyShape::DeclareBands { attackers } => WireShape::DeclareBands {
                 attackers: attackers.iter().map(|a| (*a).into()).collect(),
             },
-            ReplyShape::DeclareBlockers { blockers } => WireShape::DeclareBlockers {
+            ReplyShape::DeclareBlockers {
+                blockers,
+                min_blockers,
+            } => WireShape::DeclareBlockers {
                 blockers: blockers.iter().map(WireBlocker::from).collect(),
+                min_blockers: min_blockers.iter().map(WireMinBlockers::from).collect(),
             },
             ReplyShape::AssignDamage { splits } => WireShape::AssignDamage {
                 splits: splits.iter().map(WireDamageSplit::from).collect(),
@@ -612,7 +633,7 @@ fn option_count(shape: &ReplyShape) -> usize {
         ReplyShape::Action { entries } => entries.len(),
         ReplyShape::DeclareAttackers { attackers } => attackers.len(),
         ReplyShape::DeclareBands { attackers } => attackers.len(),
-        ReplyShape::DeclareBlockers { blockers } => blockers.len(),
+        ReplyShape::DeclareBlockers { blockers, .. } => blockers.len(),
         ReplyShape::AssignDamage { splits } => splits.len(),
         ReplyShape::YesNo
         | ReplyShape::Modes { .. }

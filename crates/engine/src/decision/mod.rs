@@ -10,7 +10,7 @@ mod open;
 
 pub use entry::{
     ActivateEntry, AttackerEntry, BlockerEntry, CastEntry, CastOptions, ColorChoice,
-    DamageSplitEntry, Entry, EntryTargets, ModeRange, TargetSlot,
+    DamageSplitEntry, Entry, EntryTargets, MinBlockers, ModeRange, TargetSlot,
 };
 
 use crate::replacement::ReplacementCandidate;
@@ -116,7 +116,11 @@ pub enum ReplyShape {
     /// `attackers` lists those that can join some band. The reply may be empty.
     DeclareBands { attackers: Vec<ObjectId> },
     /// A defending player declares blockers (CR 509.1). The reply may be empty.
-    DeclareBlockers { blockers: Vec<BlockerEntry> },
+    /// `min_blockers` lists the listed attackers that need more than one blocker.
+    DeclareBlockers {
+        blockers: Vec<BlockerEntry>,
+        min_blockers: Vec<MinBlockers>,
+    },
     /// Split combat damage (CR 510.1c). The reply covers every entry.
     AssignDamage { splits: Vec<DamageSplitEntry> },
 }

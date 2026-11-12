@@ -15,4 +15,4 @@ pub use types::*;
 
 /// Raised by hand in any change that alters the events or Decisions a given setup and
 /// Answers produce, so a replay from an older engine is refused and not replayed wrong.
-pub const BEHAVIOUR_REV: u32 = 8;
+pub const BEHAVIOUR_REV: u32 = 9;

@@ -35,5 +35,5 @@ Ticket 026, branch `phase5/combat-predicates`. Ticket 024 decided that menace an
 
 - `TODO(026-followup)`: "blocks if able" (CR 509.1c) and the maximum-requirements search. A menace attacker beside a "blocks if able" creature forces every legal blocker to block, which needs it.
 - `TODO(026-followup)`: "attacks a specific player if able", costs to attack (CR 508.1g to 508.1j), and restrictions on the whole declaration ("can't attack alone"). Nothing in the engine produces them.
-- The proof set has no menace or must-attack card, so the proof-game bot does not exercise either rule.
+- The proof set has Night Stalker (menace) and Raging Boar (attacks each combat). The block Decision lists `min_blockers`, the bot drops a block that leaves a menace attacker short, and `illegal.rs` sends a one-blocker menace declaration that the engine must refuse. See `19-proof-game.md`.
 - A menace attacker that is `effect_blocked` (`BecomeBlocked`) is not special-cased.

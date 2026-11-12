@@ -18,7 +18,8 @@ const RED_GREEN: Deck = &[
     ("grizzly_bear", 1),
     ("crucible_of_worlds", 1),
     ("stone_giant", 1),
-    ("cinder_duelist", 3),
+    ("cinder_duelist", 1),
+    ("raging_boar", 2),
     ("ember_pinger", 1),
     ("mirror_sage", 1),
     ("ravenous_ooze", 2),
@@ -36,9 +37,10 @@ const BLUE_BLACK: Deck = &[
     ("island", 8),
     ("swamp", 8),
     ("future_sight", 1),
-    ("wind_drake", 2),
+    ("wind_drake", 1),
+    ("night_stalker", 2),
     ("vedalken_orrery", 1),
-    ("scholar_imp", 3),
+    ("scholar_imp", 2),
     ("grave_rat", 3),
     ("rat_herald", 2),
     ("mimic_pool", 2),
@@ -46,8 +48,9 @@ const BLUE_BLACK: Deck = &[
     ("bounce", 1),
     ("divination", 1),
     ("peek", 1),
-    ("drain_touch", 2),
-    ("doom_blade", 2),
+    ("drain_touch", 1),
+    ("doom_blade", 1),
+    ("bone_altar", 2),
     ("spark_stone", 1),
     ("iron_blade", 1),
 ];
@@ -266,6 +269,14 @@ pub fn proof_cards() -> FixtureCardSource {
         keywords: KeywordSet::FIRST_STRIKE,
         ..card
     };
+    let menace = |card: CardDefinition| CardDefinition {
+        keywords: KeywordSet::MENACE,
+        ..card
+    };
+    let attacks_each_combat = |card: CardDefinition| CardDefinition {
+        keywords: KeywordSet::ATTACKS_EACH_COMBAT,
+        ..card
+    };
 
     let mountain = land(1, "Mountain", "Mountain", 'R');
     let forest = land(2, "Forest", "Forest", 'G');
@@ -282,6 +293,15 @@ pub fn proof_cards() -> FixtureCardSource {
         2,
         1,
         "First strike",
+    ));
+    let night_stalker = menace(creature(33, "Night Stalker", "{1}{B}", 2, 1, "Menace"));
+    let raging_boar = attacks_each_combat(creature(
+        34,
+        "Raging Boar",
+        "{1}{R}",
+        3,
+        2,
+        "Raging Boar attacks each combat if able.",
     ));
 
     let scholar_imp = with_ability(
@@ -556,6 +576,21 @@ return s
     p:Register()"#,
     );
 
+    let bone_altar = with_ability(
+        base(
+            35,
+            "Bone Altar",
+            "{2}",
+            CardTypeSet::ARTIFACT,
+            "{1}, Sacrifice a creature: Draw a card.",
+        ),
+        r#"    local e = Game.CreateActivatedAbility(c)
+    e:AddCost(Game.Costs.Mana("{1}"))
+    e:AddCost(Game.Costs.Sacrifice({ card_types = { "Creature" } }))
+    e:SetOperation(Game.Ops.DrawCards(1))
+    e:Register()"#,
+    );
+
     let crucible_of_worlds = with_ability(
         base(
             31,
@@ -599,6 +634,8 @@ return s
         .with("stone_giant", stone_giant)
         .with("wind_drake", wind_drake)
         .with("cinder_duelist", cinder_duelist)
+        .with("night_stalker", night_stalker)
+        .with("raging_boar", raging_boar)
         .with("scholar_imp", scholar_imp)
         .with("grave_rat", grave_rat)
         .with("ember_pinger", ember_pinger)
@@ -622,6 +659,7 @@ return s
         .with("armory_call", armory_call)
         .with("vedalken_orrery", vedalken_orrery)
         .with("crucible_of_worlds", crucible_of_worlds)
+        .with("bone_altar", bone_altar)
         .with("future_sight", future_sight)
 }
 
