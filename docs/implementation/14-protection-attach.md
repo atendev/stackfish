@@ -17,7 +17,7 @@ All applied in layer 6; `RemoveAllAbilities` clears all six fields. `apply_prote
 
 Protection from player uses the protected object's own controller as the reference point; no true arbitrary `PlayerId` binding yet.
 
-Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a protection-specific gap.
+Protection against Auras and Equipment (CR 702.16c, 702.16d) runs through the attachment checks below. An Aura or Equipment grants protection with a static ability whose `affected` is `AffectedFilter::EnchantedOnly`.
 
 ## Hexproof and Shroud vs attachment (`phase5/hexproof-shroud`)
 
@@ -26,8 +26,8 @@ attachment-legality callers use `attachment_target_is_legal` instead, a sibling 
 check but keeps protection: both `sba.rs` Aura rechecks (`collect_illegally_attached_auras`), the
 Equipment recheck (`collect_illegally_attached_equipment`), and `attach::legal_aura_entry_candidates`
 (CR 303.4f entry). An Aura permanent doesn't target (CR 115.1b), and SBA or entry attachment isn't
-targeting, so a hexproof or shroud creature keeps its Auras and Equipment. Protection still
-unattaches them (CR 702.16d). Casting an Aura spell and activating Equip do target, so they go
+targeting, so a hexproof or shroud creature keeps its Auras and Equipment. Protection still puts
+an attached Aura into the graveyard (CR 702.16c) and unattaches Equipment (CR 702.16d). Casting an Aura spell and activating Equip do target, so they go
 through the full `target_is_legal`.
 
 ## Aura attach (CR 303.4)

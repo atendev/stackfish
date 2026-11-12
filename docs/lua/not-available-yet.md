@@ -77,8 +77,6 @@ name.
   instances aren't modeled — see [game-constants.md](game-constants.md#gamereplacementpayloads).
 - **Damage redirection only supports "to this permanent."** Redirecting to some other chosen
   target isn't available — see [replacement-effects.md](replacement-effects.md).
-- **Protection from an attached Aura/Equipment.** CR 702.16b — attaching works, but doesn't grant
-  protection on its own yet.
 - **Hexproof and Shroud work only on permanents, in their plain forms.** `"Hexproof"` and
   `"Shroud"` are real keywords (see [game-constants.md](game-constants.md#supported-keyword-names-addkeywordremovekeywordignorekeyword)).
   Not available: hexproof/shroud on a player ("You have hexproof"), "hexproof from [quality]",
@@ -88,7 +86,6 @@ name.
   through `AddKeyword`. Only a mana cost works: no "Ward—Pay N life", discard or sacrifice cost, and no
   cost that depends on X. It can only be registered when the card's script runs, not granted to another
   permanent by a continuous effect. See [game-constants.md](game-constants.md#gameconditions).
-- **Enchanting/equipping a player** isn't modeled — attachment only ever targets a permanent.
 - **"Counter unless that player pays {X}" only supports a fixed printed amount.** Mana Leak's own
   shape (`Game.Ops.CounterUnlessPaid("{3}")`) is real now — see
   [game-constants.md](game-constants.md#gameops). Condescend's own `{X}` (an amount announced when
@@ -100,8 +97,7 @@ name.
 - **Mill and life loss have no trigger or replacement hooks.** `Game.Ops.Mill` and `Game.Ops.LoseLife`
   work (see [game-constants.md](game-constants.md#gameops)), but no `Game.Conditions.*` entry listens
   for "whenever a card is milled" or "whenever you lose life", and there is no "would lose life"
-  replacement or "can't lose life" restriction (CR 119.8). `Game.Ops.GainLife`, damage to a player and
-  lifelink do not emit the `LifeChanged` event `LoseLife` emits. There is no way to act on "the milled
+  replacement or "can't lose life" restriction (CR 119.8). There is no way to act on "the milled
   card" (CR 701.17c/d), no mill as a cost, no dredge and no rad counters.
 - **Echo's sacrifice does not check control.** `Game.Ops.SacrificeSelf` checks that the ability's
   controller still controls the permanent (CR 701.21a). The sacrifice an unpaid Echo trigger makes

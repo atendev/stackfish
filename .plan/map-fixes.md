@@ -129,10 +129,4 @@ Ticket types and modes follow `README.md`.
 
 ## Frontier
 
-Open tickets, unblocked and unclaimed. 034 is research, so a subagent can take it alone.
-
-- 031, 032, 033, 034, 072, 073
-
-Blocked:
-
-- 074, 075 (by 073)
+None. Every ticket on this map is closed. Open work lives on `map.md`.

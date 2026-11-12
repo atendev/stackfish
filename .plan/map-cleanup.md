@@ -9,7 +9,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - All build and task work follows the `CLAUDE.md` vertical slice workflow: requirements report first, `phase5/<name>` branch, user check before commit, merge and push when instructed.
 - Every comment pass is checked with `python3 tools/comment_diff.py` so no code changes slip in and no `TODO` is lost.
 - Current counts from discovery: `crates/engine/src/engine/mod.rs` is 9,593 lines, `crates/engine/src/script/globals.rs` is 2,340 lines, `crates/scenario/src/lib.rs` is 1,924 lines, `crates/engine/tests/` holds 224 files, and `phase5_` starts 229 test file names.
-- Every ticket on `map.md` is closed. `map-fixes.md` still has open tickets, so check its frontier too. Numbering continues at 038.
+- Every ticket on this map and on `map-fixes.md` is closed. Open work lives on `map.md`.
 - Closed tickets on `map-fixes.md` cover:
   - 026: The 12 combat evasion failure scenarios in `cards/tests/failure_scenarios/combat_evasion/`. Audited the 12 combat evasion failure scenarios, rewrote the 4 scenarios that failed for unrelated deck/setup reasons (`393593f`), and deleted the obsolete `combat_evasion` failure bundle (`ee60676`); all 11 remaining scenarios pass.
   - 036: Replacing the `stackfish-carddb` test script fixture so tests stop depending on the live `cards/scripts/` tree (`a45158e`).
