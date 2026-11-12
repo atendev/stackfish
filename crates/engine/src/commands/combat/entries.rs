@@ -61,7 +61,7 @@ pub(crate) fn band_entries(state: &GameState, script_runtime: &ScriptRuntime) ->
     if combat.bands_declared {
         return Vec::new();
     }
-    // TODO: a creature that leaves the battlefield stays in `CombatState`; only regeneration removes it from combat CR 506.4
+    // TODO: remove a creature that leaves the battlefield from `CombatState` CR 506.4
     let mut attackers: Vec<ObjectId> = combat
         .attackers
         .iter()

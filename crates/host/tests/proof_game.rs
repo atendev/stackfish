@@ -214,7 +214,7 @@ fn cast_off_turn_under_orrery(events: &[Value]) -> bool {
 }
 
 #[test]
-fn the_games_reach_menace_must_attack_sacrifice_and_off_turn_casts() {
+fn the_games_reach_attacks_sacrifice_and_off_turn_casts() {
     let mut attacked = HashSet::new();
     let mut sacrificed = 0;
     let mut off_turn = false;

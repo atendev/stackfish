@@ -143,7 +143,7 @@ pub struct BlockerEntry {
     pub attackers: Vec<ObjectId>,
 }
 
-/// An attacker that needs `count` blockers once any block it (CR 509.1b,
+/// An attacker that needs `count` blockers if it is blocked at all (CR 509.1b,
 /// 702.111b). Each `BlockerEntry` lists one creature, so this is the only place
 /// a client learns the count before the engine checks the whole declaration.
 #[derive(Clone, PartialEq, Eq, Debug)]

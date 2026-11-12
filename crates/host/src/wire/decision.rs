@@ -457,7 +457,7 @@ pub(crate) enum WireShape {
     },
     DeclareBlockers {
         blockers: Vec<WireBlocker>,
-        /// Attackers that need more than one blocker once any block it (CR 509.1b).
+        /// Attackers that need more than one blocker if blocked at all (CR 509.1b).
         min_blockers: Vec<WireMinBlockers>,
     },
     AssignDamage {
