@@ -27,8 +27,8 @@ check but keeps protection: both `sba.rs` Aura rechecks (`collect_illegally_atta
 Equipment recheck (`collect_illegally_attached_equipment`), and `attach::legal_aura_entry_candidates`
 (CR 303.4f entry). An Aura permanent doesn't target (CR 115.1b), and SBA or entry attachment isn't
 targeting, so a hexproof or shroud creature keeps its Auras and Equipment. Protection still puts
-an attached Aura into the graveyard (CR 702.16c) and unattaches Equipment (CR 702.16d). Casting an Aura spell and activating Equip do target, so they go
-through the full `target_is_legal`.
+an attached Aura into the graveyard (CR 702.16c) and unattaches Equipment (CR 702.16d). Casting an
+Aura spell and activating Equip do target, so they go through the full `target_is_legal`.
 
 ## Aura attach (CR 303.4)
 
