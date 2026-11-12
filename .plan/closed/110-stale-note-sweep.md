@@ -3,7 +3,7 @@ id: 110
 title: Sweep stale notes and plan prose
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: []
 claimed: false
 ---
@@ -25,4 +25,10 @@ Which statements in the notes and plans no longer match the code, and what do th
 
 ## Resolution
 
-<Filled in at close.>
+Every claim was checked against master before editing. The five known points were stale, plus four found along the way.
+
+- `docs/lua/not-available-yet.md`: removed the attached Aura/Equipment protection bullet and the enchanting-a-player bullet, and the sentence saying `GainLife`, damage to a player and lifelink emit no `LifeChanged`. An Aura grants protection through `Game.Affected.Enchanted` (a throwaway test passed and was reverted). Protection removes attachments through `attachment_target_is_legal`, and `attached_to_player` exists.
+- `docs/lua/static-abilities.md`, `docs/lua/game-constants.md`, `14-protection-attach.md`: protection against attachments cites CR 702.16c (an Aura goes to the graveyard) and 702.16d (Equipment unattaches), not 702.16b, and nothing is listed as open.
+- `99-backlog.md`: the priority list marks merged branches as merged, item 5 and loop detection as done, and the line 860 citation as CR 702.16c, 702.16d.
+- `map-fixes.md`, `map-cleanup.md`, `README.md`: neither older map has an open ticket, and the README lists all three maps.
+- The Rust comments cite CR 702.16c for targeting and 702.16d for blocking. Ticket 171 fixes them, since this ticket changes prose only.

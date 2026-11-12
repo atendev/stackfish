@@ -1,11 +1,13 @@
 # Plan layout
 
-This folder holds the Wayfinder map for the project. Commit it. It is the record of why decisions were made.
+This folder holds the project's Wayfinder maps. Commit it. It is the record of why decisions were made.
 
 ```
 .plan/
   README.md              this file
-  map.md                 the map, one per project
+  map.md                 the current map
+  map-fixes.md           older map, every ticket closed
+  map-cleanup.md         older map, every ticket closed
   TICKET.template.md     copy this to start a ticket
   tickets/               open tickets, one file each
   closed/                resolved tickets
@@ -13,7 +15,7 @@ This folder holds the Wayfinder map for the project. Commit it. It is the record
 
 ## Rules
 
-- Load `map.md` and the one ticket being worked. Never read the whole folder.
+- Load `map.md` and the one ticket being worked. Never read the whole folder. Open the older maps only to look up a past decision.
 - Resolve one ticket per session. Research tickets are the exception.
 - Name tickets `NNN-short-slug.md` with a three digit number. The next number is the highest number in `tickets/` and `closed/`, plus one.
 - A ticket is on the frontier when its status is open, every ticket in `blocked_by` is closed, and `claimed` is false.

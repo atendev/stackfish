@@ -190,8 +190,9 @@ prevention, illegal targeting, and illegal blocking — you don't need to do any
 registered. "Protection from any player" isn't a real quality on its own — use
 `AddProtectionEverything` for "protection from everything," which covers that and more.
 
-Not yet modeled: protection granted by an Aura/Equipment attachment (CR 702.16b — attach machinery
-exists but doesn't hook into protection yet).
+An Aura or Equipment grants protection to the object it is attached to with
+`:SetAffected(Game.Affected.Enchanted)`. Protection puts an attached Aura with the stated quality
+into the graveyard (CR 702.16c) and unattaches such Equipment (CR 702.16d).
 
 ## Registering more than one static ability on a card
 

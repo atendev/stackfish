@@ -382,7 +382,7 @@ works, and `RemoveKeyword("Hexproof")` or `RemoveAllAbilities` turns it off. The
 permanents on the battlefield. They don't stop anything that doesn't target (`DestroyAll`, `TapAll`,
 `ExileAll`, `ReturnAllToHand`, `ReturnAllToBattlefield`, the `*Self` forms; CR 601.2c). They also don't make an attached Aura
 or Equipment fall off, and they don't stop an Aura from entering the battlefield attached to a
-permanent: attaching that way isn't targeting. Protection does (CR 702.16d). Not modeled:
+permanent: attaching that way isn't targeting. Protection does (CR 702.16c, 702.16d). Not modeled:
 hexproof/shroud on a player (CR 702.11c), "hexproof from [quality]" (CR 702.11d), and "can be the
 target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is stored but nothing reads
 it yet).
