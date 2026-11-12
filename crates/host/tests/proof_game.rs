@@ -1,7 +1,7 @@
 //! A random bot plays full games over bytes with the proof card set, reading nothing but
 //! the Decisions it is sent.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde_json::{Value, json};
 use stackfish_host::{Bot, Outcome, Session, proof_cards, proof_setup_request};
@@ -82,8 +82,11 @@ fn a_bot_plays_thirty_two_player_games_to_the_end() {
     );
 }
 
-const SPELLS: [&str; 27] = [
+const SPELLS: [&str; 30] = [
     "Grizzly Bear",
+    "Night Stalker",
+    "Raging Boar",
+    "Bone Altar",
     "Crucible of Worlds",
     "Future Sight",
     "Stone Giant",
@@ -162,6 +165,89 @@ fn the_games_cast_every_card_of_the_set_and_play_every_land() {
     for land in ["Mountain", "Forest", "Island", "Swamp"] {
         assert!(lands.contains(land), "no game played {land}");
     }
+}
+
+// Only Vedalken Orrery's grant lets a non-instant reach the stack off its owner's turn.
+fn cast_off_turn_under_orrery(events: &[Value]) -> bool {
+    let mut active = None;
+    let mut orreries: BTreeMap<String, u64> = BTreeMap::new();
+    for event in events {
+        match event["kind"].as_str() {
+            Some("turn_started") => active = event["player"].as_u64(),
+            Some("zone_change") => {
+                // A move off the stack names its owner only in `last_known_info`.
+                let owner = event["owner"]
+                    .as_u64()
+                    .or_else(|| event["last_known_info"]["owner"].as_u64());
+                if event["from"] == "battlefield" {
+                    for id in [&event["object"], &event["previous"]] {
+                        if let Some(id) = id.as_str() {
+                            orreries.remove(id);
+                        }
+                    }
+                }
+                if let (Some(id), Some(owner), "battlefield", Some("Vedalken Orrery")) = (
+                    event["object"].as_str(),
+                    owner,
+                    event["to"].as_str().unwrap_or(""),
+                    event["identity"]["name"].as_str(),
+                ) {
+                    orreries.insert(id.to_string(), owner);
+                }
+                let instant = event["identity"]["card_types"]
+                    .as_array()
+                    .is_some_and(|types| types.contains(&json!("instant")));
+                if event["to"] == "stack"
+                    && event["identity"].is_object()
+                    && !instant
+                    && owner.is_some()
+                    && owner != active
+                    && orreries.values().any(|o| Some(*o) == owner)
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+#[test]
+fn the_games_reach_menace_must_attack_sacrifice_and_off_turn_casts() {
+    let mut attacked = HashSet::new();
+    let mut sacrificed = 0;
+    let mut off_turn = false;
+    for seed in 0..30 {
+        let (_, bot) = play_recorded(2, seed);
+        sacrificed += bot.costs_paid().get("sacrifice").copied().unwrap_or(0);
+        for seat in 0..2 {
+            let events = bot.events(seat);
+            off_turn |= cast_off_turn_under_orrery(events);
+            let mut names = HashMap::new();
+            for event in events {
+                if let (Some(object), Some(name)) =
+                    (event["object"].as_str(), event["identity"]["name"].as_str())
+                {
+                    names.insert(object.to_string(), name.to_string());
+                }
+                if let (Some(name), "attacker_declared") = (
+                    event["attacker"].as_str().and_then(|a| names.get(a)),
+                    event["kind"].as_str().unwrap_or(""),
+                ) {
+                    attacked.insert(name.clone());
+                }
+            }
+        }
+    }
+    for card in ["Night Stalker", "Raging Boar"] {
+        assert!(attacked.contains(card), "no game attacked with {card}");
+    }
+    assert!(sacrificed > 0, "no game paid Bone Altar's sacrifice");
+    assert!(
+        off_turn,
+        "no game cast a non-instant off-turn under Vedalken Orrery"
+    );
 }
 
 // The four mechanics build their candidate lists by walking every object.

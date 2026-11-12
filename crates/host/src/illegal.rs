@@ -111,6 +111,21 @@ pub(crate) fn illegal_replies(decision: &Value, legal: &Value) -> Vec<Value> {
                 .expect("a blockers reply has blocks")
                 .push(json!({ "blocker": BOGUS, "attacker": "999998" }));
             extend(reply);
+            // Each block is listed, so only the engine's whole-declaration check refuses this.
+            let short = decision["min_blockers"].as_array().and_then(|needs| {
+                needs.iter().find_map(|need| {
+                    let attacker = &need["attacker"];
+                    decision["blockers"].as_array()?.iter().find_map(|entry| {
+                        entry["attackers"]
+                            .as_array()?
+                            .contains(attacker)
+                            .then(|| json!({ "blocker": entry["blocker"], "attacker": attacker }))
+                    })
+                })
+            });
+            if let Some(block) = short {
+                extend(json!({ "kind": "declare_blockers", "blocks": [block] }));
+            }
         }
         "assign_damage" => {
             let mut reply = legal.clone();
