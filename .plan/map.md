@@ -86,6 +86,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 162 Activation limits per turn. `ActivationRestriction` gains `limit: Option<ActivationLimit { uses, period: Turn | ObjectLifetime }>`, set from Lua by `:SetActivationsPerTurn(n)` or `:SetActivateOnlyOnce()`. Spent uses are keyed by `(ObjectId, AbilityId)` with no controller (CR 602.5b, 400.7), in a per-turn count map cleared on turn change and a lifetime set. A use counts when its activation begins and is refunded only if that payment unwinds, so a costed mana ability cannot exceed its limit through a nested activation. A permanent that becomes a copy in place gets a fresh limit, marked by a TODO. Loyalty (CR 606.3) and exhaust stay out. Decided in auto mode. The build is 169. [closed/162-activation-limits-per-turn.md](closed/162-activation-limits-per-turn.md)
 - 108 `new_game` loads alternative costs and buyback. `load_script_declarations` copies `s.alternative_costs()` and `s.buyback_cost()` with `operation()` and `target_requirement()`, once per script, with a Rust-set value winning per field. A card skips the loader only when all four are set. The replay pin did not move. Built in auto mode, then merged. [closed/108-new-game-loads-alternative-costs.md](closed/108-new-game-loads-alternative-costs.md)
 - 170 Build stack entry ability text. Ability entries carry `ability_text` from a script's `:SetText` and `ability_index`, both captured at push. A copy carries `copy_of`, and an ability whose source id is hidden carries `source_identity` unless the source was face down. [closed/170-build-stack-entry-ability-text.md]
+- 109 Close the proof game coverage gaps. Night Stalker (menace), Raging Boar (attacks each combat) and Bone Altar (sacrifice cost) join the main decks. The block Decision lists `min_blockers` so the bot never leaves a menace attacker short. The bot reads starting life from a snapshot, and the 30-seed loop asserts an off-turn cast under Vedalken Orrery. `band_entries` skips departed attackers; CR 506.4 removal from combat stays a TODO. `BEHAVIOUR_REV` is 9. Built in auto mode, then merged. [closed/109-proof-game-coverage-gaps.md](closed/109-proof-game-coverage-gaps.md)
 
 ## Not yet specified
 
@@ -163,7 +164,6 @@ Decisions (HITL):
 
 Builds and audits:
 
-- 109 Proof game coverage gaps
 - 110 Stale note sweep (AFK)
 - 111 Echo sacrifice checks control
 - 113 Bridge condition events into Lua
