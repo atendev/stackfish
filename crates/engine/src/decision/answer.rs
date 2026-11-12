@@ -122,7 +122,7 @@ impl Engine {
                 .map_err(invalid)
             }
             (Route::DeclareBlockers, Reply::DeclareBlockers(blocks)) => {
-                let ReplyShape::DeclareBlockers { blockers } = &shape else {
+                let ReplyShape::DeclareBlockers { blockers, .. } = &shape else {
                     unreachable!("route and shape come from the same pause");
                 };
                 check::check_blockers(blockers, &blocks)?;

@@ -6,7 +6,7 @@ use crate::commands;
 use crate::engine::Engine;
 use crate::types::ids::{ObjectId, PlayerId};
 
-use super::{AttackerEntry, BlockerEntry, DamageSplitEntry, Entry};
+use super::{AttackerEntry, BlockerEntry, DamageSplitEntry, Entry, MinBlockers};
 
 impl Engine {
     /// Everything the player who holds priority may do: play a land, cast a
@@ -33,6 +33,12 @@ impl Engine {
     /// with the attackers it may block. Empty otherwise.
     pub fn legal_blockers(&self, player: PlayerId) -> Vec<BlockerEntry> {
         commands::blocker_entries(self.state(), self.script_runtime(), player)
+    }
+
+    /// The attackers in `blockers` that need more than one blocker, such as a
+    /// menace attacker (CR 702.111b). Empty when every attacker needs one.
+    pub fn legal_block_minimums(&self, blockers: &[BlockerEntry]) -> Vec<MinBlockers> {
+        commands::min_blockers(self.state(), self.script_runtime(), blockers)
     }
 
     /// The player who chooses next in this combat damage step and the splits

@@ -2,17 +2,18 @@
 //! matching command, and the whole-declaration rules come from `predicate`. See
 //! `DESIGN.md` for the rest.
 
-use crate::decision::{AttackerEntry, BlockerEntry, DamageSplitEntry};
+use crate::decision::{AttackerEntry, BlockerEntry, DamageSplitEntry, MinBlockers};
 use crate::script::ScriptRuntime;
 use crate::types::card::KeywordSet;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId};
 use crate::types::turn::{Phase, Step};
+use crate::types::zone::ZoneKind;
 
 use super::super::legality::{effective_keywords, effective_power};
 use super::damage::plan_damage_splits;
 use super::declare::{attacker_can_attack, is_defending_player, validate_declare_bands};
-use super::predicate::{blockable_attackers, legal_defenders, required_attackers};
+use super::predicate::{blockable_attackers, blockers_needed, legal_defenders, required_attackers};
 
 /// The active player's attackers while attackers can still be declared, or
 /// an empty list. An empty list means no Decision is needed. An attacker that
@@ -60,7 +61,17 @@ pub(crate) fn band_entries(state: &GameState, script_runtime: &ScriptRuntime) ->
     if combat.bands_declared {
         return Vec::new();
     }
-    let mut attackers: Vec<ObjectId> = combat.attackers.iter().map(|(id, _)| *id).collect();
+    // TODO: a creature that leaves the battlefield stays in `CombatState`; only regeneration removes it from combat CR 506.4
+    let mut attackers: Vec<ObjectId> = combat
+        .attackers
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| {
+            state
+                .object(*id)
+                .is_some_and(|o| o.zone == ZoneKind::Battlefield)
+        })
+        .collect();
     attackers.sort();
     attackers
         .iter()
@@ -116,6 +127,28 @@ pub(crate) fn blocker_entries(
                 .map(|(attacker, _)| *attacker)
                 .collect(),
         })
+        .collect()
+}
+
+/// The attackers in `entries` that need more than one blocker, in id order.
+pub(crate) fn min_blockers(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    entries: &[BlockerEntry],
+) -> Vec<MinBlockers> {
+    let mut attackers: Vec<ObjectId> = entries
+        .iter()
+        .flat_map(|entry| entry.attackers.iter().copied())
+        .collect();
+    attackers.sort();
+    attackers.dedup();
+    attackers
+        .into_iter()
+        .map(|attacker| MinBlockers {
+            attacker,
+            count: blockers_needed(state, script_runtime, attacker),
+        })
+        .filter(|need| need.count > 1)
         .collect()
 }
 

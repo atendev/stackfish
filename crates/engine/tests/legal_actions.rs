@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 
 use stackfish_engine::decision::{
-    Answer, AttackerEntry, BlockerEntry, Entry, EntryTargets, RejectionCode, Reply, ReplyShape,
+    Answer, AttackerEntry, BlockerEntry, Entry, EntryTargets, MinBlockers, RejectionCode, Reply,
+    ReplyShape,
 };
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -788,7 +789,7 @@ fn a_defending_player_declares_blockers_before_priority_and_may_declare_none() {
         "the defender answers although P0 holds priority"
     );
     assert!(
-        matches!(&decision.shape, ReplyShape::DeclareBlockers { blockers } if blockers.len() == 1)
+        matches!(&decision.shape, ReplyShape::DeclareBlockers { blockers, .. } if blockers.len() == 1)
     );
 
     let unlisted = Reply::DeclareBlockers(vec![(ObjectId(1), ObjectId(1))]);
@@ -807,6 +808,96 @@ fn a_defending_player_declares_blockers_before_priority_and_may_declare_none() {
         engine.open_decision().unwrap().shape,
         ReplyShape::Action { .. }
     ));
+}
+
+#[test]
+fn the_block_decision_names_the_menace_attacker_and_refuses_one_blocker() {
+    // CR 702.111b
+    let mut state = combat_state(Step::DeclareBlockers);
+    on_battlefield(
+        &mut state,
+        1,
+        P0,
+        CardDefinition {
+            keywords: KeywordSet::MENACE,
+            ..definition("Stalker", CardTypeSet::CREATURE)
+        },
+    );
+    on_battlefield(&mut state, 2, P0, definition("Bear", CardTypeSet::CREATURE));
+    on_battlefield(&mut state, 3, P1, definition("Elk", CardTypeSet::CREATURE));
+    on_battlefield(&mut state, 4, P1, definition("Ox", CardTypeSet::CREATURE));
+    state.combat = Some(CombatState {
+        attackers: vec![
+            (ObjectId(1), Target::Player(P1)),
+            (ObjectId(2), Target::Player(P1)),
+        ],
+        blocks: Vec::new(),
+        declared_defenders: Vec::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        bands_declared: false,
+        damage_assigned_this_step: false,
+        pending_damage_splits: HashMap::new(),
+    });
+    let mut engine = Engine::new(state);
+    let decision = engine.open_decision().unwrap();
+    let ReplyShape::DeclareBlockers { min_blockers, .. } = &decision.shape else {
+        panic!("expected a block Decision, got {:?}", decision.shape);
+    };
+    assert_eq!(
+        min_blockers,
+        &vec![MinBlockers {
+            attacker: ObjectId(1),
+            count: 2
+        }]
+    );
+
+    let short = Reply::DeclareBlockers(vec![(ObjectId(3), ObjectId(1))]);
+    assert_eq!(
+        rejection_code(answer(&mut engine, P1, short)),
+        RejectionCode::InvalidChoice
+    );
+    answer(
+        &mut engine,
+        P1,
+        Reply::DeclareBlockers(vec![(ObjectId(3), ObjectId(1)), (ObjectId(4), ObjectId(1))]),
+    )
+    .unwrap();
+    assert!(!matches!(drain(&mut engine), StepStatus::Error(_)));
+}
+
+#[test]
+fn an_attacker_that_left_the_battlefield_is_not_offered_for_a_band() {
+    // CR 506.4
+    // Object 9 was sacrificed after attacking, so its id names nothing.
+    let mut state = combat_state(Step::DeclareAttackers);
+    for id in [1, 2] {
+        on_battlefield(
+            &mut state,
+            id,
+            P0,
+            CardDefinition {
+                keywords: KeywordSet::BANDING,
+                ..definition("Knight", CardTypeSet::CREATURE)
+            },
+        );
+    }
+    state.combat = Some(CombatState {
+        attackers: vec![
+            (ObjectId(1), Target::Player(P1)),
+            (ObjectId(2), Target::Player(P1)),
+            (ObjectId(9), Target::Player(P1)),
+        ],
+        blocks: Vec::new(),
+        declared_defenders: Vec::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        bands_declared: false,
+        damage_assigned_this_step: false,
+        pending_damage_splits: HashMap::new(),
+    });
+    let engine = Engine::new(state);
+    assert_eq!(engine.legal_bands(), vec![ObjectId(1), ObjectId(2)]);
 }
 
 fn double_blocked_state() -> GameState {
