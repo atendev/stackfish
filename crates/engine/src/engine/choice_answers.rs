@@ -1,7 +1,7 @@
 //! Answers to the mid-resolution pauses raised by `ResolveStackTop`: attach,
 //! script, devour, amplify, madness, cascade, modal and copy choices. See `DESIGN.md`.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 use crate::commands;
 use crate::engine_context::PipelineContext;
@@ -678,7 +678,7 @@ impl Engine {
     /// Declines an "unless paid" pause (CR 118.12). Pops the front of `payer_queue`
     /// and re-raises for the next payer, or dispatches `otherwise` when none remain.
     /// Neither branch is a CR 601.6 unwind. The stack object was popped before the
-    /// pause, so `SacrificeSelf` calls `continue_scripted_zone_move` with the saved id.
+    /// pause, so `SacrificeSelf` checks the saved source against the saved controller.
     pub fn decline_unless_paid(&mut self, payer: PlayerId) -> Result<(), UnlessPaidError> {
         let ProcessState::AwaitingUnlessPaidChoice { payer_queue, .. } = &self.process_state else {
             return Err(UnlessPaidError::NotAwaitingChoice);
@@ -688,6 +688,7 @@ impl Engine {
         }
         let ProcessState::AwaitingUnlessPaidChoice {
             mut payer_queue,
+            controller,
             cost,
             otherwise,
             target_id,
@@ -702,6 +703,7 @@ impl Engine {
         if !payer_queue.is_empty() {
             self.process_state = ProcessState::AwaitingUnlessPaidChoice {
                 payer_queue,
+                controller,
                 cost,
                 otherwise,
                 target_id,
@@ -725,7 +727,7 @@ impl Engine {
             UnlessPaidConsequence::SacrificeSelf => {
                 self.process_state = self.continue_scripted_zone_move(
                     ScriptedZoneMoveKind::Sacrifice,
-                    VecDeque::from([source]),
+                    self.sacrifice_self_queue(source, controller),
                     ScriptedZoneMoveThen::StackResolution { stack_id },
                     events_so_far,
                 );

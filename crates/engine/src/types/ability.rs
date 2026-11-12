@@ -205,7 +205,6 @@ pub enum AbilityEffect {
     /// battlefield under a different effective controller, nothing happens. A
     /// source that already left is a new object (CR 400.7), so its old id
     /// doesn't resolve and nothing happens.
-    // TODO: `UnlessPaidConsequence::SacrificeSelf` (Echo) goes through `resolve_sacrifice_effect` and makes no controller check
     // TODO: "sacrifice a permanent you control" with a player choice needs a choice pause (see `Sacrifice`)
     SacrificeSelf,
     /// `Game.Ops.Exile()` (CR 701.18): exiles the first chosen battlefield
@@ -396,8 +395,8 @@ pub enum AbilityEffect {
     /// no cast-style unwind, since declining unwinds nothing (CR 601.6 doesn't
     /// apply). Declining advances `payer_queue`, and an empty queue dispatches
     /// `otherwise`: `Counter` reuses `counter_stack_object`, and
-    /// `SacrificeSelf` reuses `resolve_sacrifice_effect` against the ability's
-    /// source through `ScriptedZoneMoveThen::StackResolution`.
+    /// `SacrificeSelf` sacrifices the ability's source through
+    /// `sacrifice_self_queue`, the CR 701.21a check `SacrificeSelf` also uses.
     // TODO: Condescend's {X} is an amount announced when the countering spell was cast; `ManaCost` can't parse `{X}` from a Lua string and this variant can't read `top.x_value` at resolution, so only Mana Leak's fixed number works
     // TODO: `payer_queue` has one element for both producers (Ward's targeted player, Echo's controller); an "any player may pay" or "each opponent may pay" keyword isn't wired from Lua or TOML
     UnlessPaid {

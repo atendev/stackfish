@@ -584,6 +584,64 @@ fn declining_the_echo_cost_sacrifices_the_source_permanent() {
     );
 }
 
+// CR 701.21a
+#[test]
+fn an_echo_trigger_does_not_sacrifice_a_permanent_its_controller_lost() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let bear = ObjectId(0);
+    put_on_battlefield(
+        &mut state,
+        card_object(
+            bear,
+            creature_definition(1, "Bear"),
+            p1,
+            ZoneKind::Battlefield,
+        ),
+    );
+    let echo_trigger = ObjectId(1);
+    push_echo_trigger_on_stack(&mut state, echo_trigger, bear, p1, "{2}");
+
+    let mut engine = Engine::new(state);
+    engine
+        .state_mut()
+        .objects
+        .get_mut(&bear)
+        .unwrap()
+        .controller = p0;
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    assert!(
+        matches!(status, StepStatus::AwaitingUnlessPaidChoice { payer, .. } if payer == p1),
+        "got {status:?}"
+    );
+    let before = engine.state().object(bear).unwrap();
+    assert_eq!(before.zone, ZoneKind::Battlefield);
+    assert_eq!(before.controller, p0);
+
+    engine
+        .decline_unless_paid(p1)
+        .expect("declining is always legal");
+    drain(&mut engine);
+
+    assert_eq!(
+        engine.state().object(bear).map(|o| o.zone),
+        Some(ZoneKind::Battlefield),
+        "p1 no longer controls the bear"
+    );
+    assert!(
+        engine
+            .state()
+            .zone(ZoneKind::Graveyard, Some(p1))
+            .unwrap()
+            .contents
+            .is_empty()
+    );
+    let resolved =
+        engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::StackObjectResolved { stack_id } if stack_id == echo_trigger));
+    assert!(resolved, "the Echo trigger still finishes resolving");
+}
+
 #[test]
 fn paying_the_echo_cost_spares_the_permanent() {
     let mut state = two_player_state_with_p1_colorless(2);

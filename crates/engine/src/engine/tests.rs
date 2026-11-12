@@ -463,6 +463,7 @@ fn unless_paid_choice(
     stack_id: ObjectId,
 ) -> ProcessState {
     ProcessState::AwaitingUnlessPaidChoice {
+        controller: payer_queue[0],
         payer_queue,
         cost: one_generic_cost(),
         otherwise: crate::types::ability::UnlessPaidConsequence::SacrificeSelf,

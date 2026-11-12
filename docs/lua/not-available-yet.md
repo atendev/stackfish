@@ -99,6 +99,3 @@ name.
   for "whenever a card is milled" or "whenever you lose life", and there is no "would lose life"
   replacement or "can't lose life" restriction (CR 119.8). There is no way to act on "the milled
   card" (CR 701.17c/d), no mill as a cost, no dredge and no rad counters.
-- **Echo's sacrifice does not check control.** `Game.Ops.SacrificeSelf` checks that the ability's
-  controller still controls the permanent (CR 701.21a). The sacrifice an unpaid Echo trigger makes
-  does not make that check yet.

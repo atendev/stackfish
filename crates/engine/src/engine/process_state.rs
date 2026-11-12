@@ -604,9 +604,11 @@ pub(crate) enum ProcessState {
     /// CR 118.12: `payer_queue` is built in APNAP order (CR 101.4), and only its
     /// front may answer; a decline pops it and dispatches `otherwise` once empty.
     /// `target_id` (the targeted stack object, for `Counter`) and `source` (for
-    /// `SacrificeSelf`) are resolved once up front.
+    /// `SacrificeSelf`) are resolved once up front. `controller` is the resolving
+    /// ability's controller, which `SacrificeSelf` checks against (CR 701.21a).
     AwaitingUnlessPaidChoice {
         payer_queue: VecDeque<PlayerId>,
+        controller: PlayerId,
         cost: CostSpec,
         otherwise: UnlessPaidConsequence,
         target_id: Option<ObjectId>,

@@ -293,6 +293,7 @@ fn cases() -> Vec<Case> {
     };
     let unless_paid = || ProcessState::AwaitingUnlessPaidChoice {
         payer_queue: VecDeque::from([P1]),
+        controller: P1,
         cost: one_generic(),
         otherwise: UnlessPaidConsequence::SacrificeSelf,
         target_id: None,

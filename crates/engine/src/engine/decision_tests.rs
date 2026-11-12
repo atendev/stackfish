@@ -330,6 +330,7 @@ fn payment_pauses_name_the_payer() {
 
     let unless_paid = ProcessState::AwaitingUnlessPaidChoice {
         payer_queue: VecDeque::from([P1, P0]),
+        controller: P1,
         cost: free_cost(),
         otherwise: UnlessPaidConsequence::SacrificeSelf,
         target_id: None,
@@ -450,6 +451,7 @@ fn an_unless_paid_payment_lists_objects_for_the_payer_at_the_front() {
     let mut engine = Engine::new(cost_state());
     engine.process_state = ProcessState::AwaitingUnlessPaidChoice {
         payer_queue: VecDeque::from([P1, P0]),
+        controller: P1,
         cost: cost_with(filtered_costs()),
         otherwise: UnlessPaidConsequence::SacrificeSelf,
         target_id: None,
@@ -1002,6 +1004,7 @@ fn a_payment_lists_mana_abilities_only_while_the_payer_holds_priority() {
 fn an_unless_paid_payment_lists_no_mana_abilities_and_refuses_an_action() {
     let unless_paid = ProcessState::AwaitingUnlessPaidChoice {
         payer_queue: VecDeque::from([P0]),
+        controller: P0,
         cost: free_cost(),
         otherwise: UnlessPaidConsequence::SacrificeSelf,
         target_id: None,
