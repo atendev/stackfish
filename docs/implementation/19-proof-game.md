@@ -1,34 +1,36 @@
 # 19-proof-game
 
 B5 of the host protocol map (`phase5/proof-game-bot`). A random bot plays whole games through the byte interface of
-`crates/host`, using a fixture set of 31 cards. The design is in `.plan/closed/014-proof-game-bot.md`.
+`crates/host`, using a fixture set of 35 cards. The design is in `.plan/closed/014-proof-game-bot.md`.
 
 ## API
 
-- `stackfish_host::proof_cards() -> FixtureCardSource` serves the 31 cards by slug key (`grizzly_bear`, `shock`, ...).
+- `stackfish_host::proof_cards() -> FixtureCardSource` serves the 35 cards by slug key (`grizzly_bear`, `shock`, ...).
 - `stackfish_host::proof_setup_request(players, seed) -> Vec<u8>` is a `setup` request for the standard preset. Player
   `i` gets the red-green deck when `i` is even and the blue-black deck when it is odd, 40 cards each.
 - `stackfish_host::Bot` is a client of a `Session`. `Bot::new(seed).play(&mut session, max_answers)` plays to
   `game_over` and returns an `Outcome` (`winner`, `answers`, `rejected`, `transcript_hash`). `step` answers one
   Decision, which is what a host that runs a game across frames would call.
 - `Bot::recording(&[spectator seats])` keeps every event each Seat receives (`events(seat)`).
-- `Bot::mechanics_seen()` counts the Decisions the bot answered by `mechanic` label. Tests read it; the bot never
-  branches on it.
+- `Bot::mechanics_seen()` counts the Decisions the bot answered by `mechanic` label, and `Bot::costs_paid()` counts
+  accepted payments by kind (`mana`, `sacrifice`, `discard`, ...). Tests read both; the bot never branches on them.
 
 ## The card set
 
-Four basic lands with a `{T}` mana ability, eleven creatures, and fourteen other cards. All scripts are inline Lua that
+Four basic lands with a `{T}` mana ability, thirteen creatures, and eighteen other cards. All scripts are inline Lua that
 uses documented primitives, except Fork in the Road, whose modes are declared in Rust because a card script cannot
 declare modes.
 
-- Creatures: Grizzly Bear, Stone Giant (vanilla), Wind Drake (flying), Cinder Duelist (first strike), Scholar Imp
+- Creatures: Grizzly Bear, Stone Giant (vanilla), Wind Drake (flying), Cinder Duelist (first strike), Night Stalker
+  (menace), Raging Boar (attacks each combat if able), Scholar Imp
   (enters, draw), Grave Rat (a Rat; dies, gain 3), Ember Pinger (`{T}`: 1 damage to a creature), Mirror Sage (enters, may
   draw), Ravenous Ooze (Devour 1), Rat Herald (a Rat with Amplify 1), Mimic Pool (enters as a copy of a creature).
 - Instants and sorceries: Shock, Divination, Counterspell, Bounce, Fork in the Road (modal), Rampant Growth (search to
   the battlefield), Raise Militia (token), Peek (scry), Drain Touch, Doom Blade, Armory Call (search for an Equipment and put it onto the battlefield
   attached).
 - Permanents: Giant Growth Aura, Spark Stone (mana artifact), Iron Blade (equipment with equip `{1}`), Vedalken Orrery
-  (a timing permission) and Crucible of Worlds (a zone permission for graveyard lands).
+  (a timing permission), Crucible of Worlds (a zone permission for graveyard lands), Future Sight (library-top
+  permissions) and Bone Altar (`{1}`, sacrifice a creature: draw a card, the only sacrifice cost in the two decks).
 - Every card carries an inline script. A card with no abilities gets `local s = {} return s`, because a `ByKey` script
   fails to load on every zone change (the engine does not resolve keys).
 
@@ -46,8 +48,12 @@ declare modes.
   pay". Hybrid, Phyrexian, snow and `{X}` are planned as in `26-special-mana-payment.md`.
 - `may_cast`: with `options`, the bot casts 3 times in 4 with random modes and targets (X is 0), and otherwise
   declines. Without `options` it declines.
-- Combat: each attacker attacks with probability 1/2 at a random defender, each blocker blocks with probability 1/3, and
-  a creature gives all its damage to its first recipient.
+- Combat: each attacker attacks with probability 1/2 at a random defender, and always when its entry is `required`.
+  Each blocker blocks with probability 1/3, then the bot drops every block on an attacker that got fewer blockers than
+  its `min_blockers` count. A creature gives all its damage to its first recipient.
+- Life: before its first `advance` the bot polls seat 0 and then asks for seat 0's `snapshot`, and takes each player's
+  life from it. Polling first empties the outbox the snapshot drops. `life_changed` deltas add on top, so a variant or
+  a `starting_life` override needs no setting on the bot.
 - A rejected Answer is replaced once by a fallback that is always legal (pass priority, or "cannot pay") and counted
   in `Outcome::rejected`. Any other rejection, a pipeline error, a Decision id that does not go up, and an answer
   count over the limit are errors.
@@ -66,10 +72,12 @@ declare modes.
 
 ## Tests
 
-`crates/host/tests/phase5_proof_game.rs` (5, plus 1 ignored):
+`crates/host/tests/phase5_proof_game.rs` (6, plus 1 ignored):
 
 - 30 two-player games reach `game_over` with no rejected Answer and no `script_error`, and both players win some.
-- The 30 games cast all 26 non-land cards in `SPELLS` and play all four lands.
+- The 30 games cast all 30 cards in `SPELLS` and play all four lands.
+- The 30 games attack with Night Stalker and Raging Boar, pay Bone Altar's sacrifice, and cast a non-instant off its
+  owner's turn while that owner controls Vedalken Orrery.
 - Seeds 0 to 10 each give byte-identical transcripts on two runs, and between them open the Devour, Amplify, Copy and
   Attach on entry Decisions (see `33-ordered-choice-proof-cards.md`).
 - Three-player games finish.
@@ -89,7 +97,10 @@ Until the atomicity work (see `21-atomicity.md`), every spell in the set resolve
   fixture card can use. Engine and bot unit tests cover it.
 - TODO(proof bot): a pawprint mode budget (CR 700.2i) is read as a plain mode count, and attackers and blockers are
   chosen at random with no regard for the board.
-- The bot never spends its last point of life on a Phyrexian symbol and assumes 20 starting life unless told.
+- The bot never spends its last point of life on a Phyrexian symbol.
+- Nothing removes a creature from combat when it leaves the battlefield (CR 506.4). A Bone Altar sacrifice during the
+  declare attackers step left a dead id in `CombatState`, and `band_entries` panicked on it. `band_entries` now skips
+  attackers that are not on the battlefield; the general rule is a `TODO` there.
 - The bot tracks each Seat's life as the sum of its `life_changed` deltas. Damage, lifelink and life gain each write
   one, so it does not read `damage_dealt` (`31-snapshot-fold-events.md`). The fold test in `seat_visibility.rs` plays
   five proof games to the end, elimination included.

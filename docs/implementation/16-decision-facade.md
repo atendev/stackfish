@@ -28,7 +28,7 @@ methods. Those methods and the typed `ProcessState` pauses are unchanged. The de
 | `Action { entries }` | `Action(PlayerAction)` | priority, checked against the entries (see `17-legal-actions.md`) |
 | `DeclareAttackers { attackers }` | `DeclareAttackers(Vec<(ObjectId, Target)>)` | declare attackers step |
 | `DeclareBands { attackers }` | `DeclareBands(Vec<Vec<ObjectId>>)` | declare attackers step, once per combat, when some attacker can band (CR 508.1e, 702.22c). An empty reply declares no bands |
-| `DeclareBlockers { blockers }` | `DeclareBlockers(Vec<(ObjectId, ObjectId)>)` | declare blockers step, one defending player at a time |
+| `DeclareBlockers { blockers, min_blockers }` | `DeclareBlockers(Vec<(ObjectId, ObjectId)>)` | declare blockers step, one defending player at a time |
 | `AssignDamage { splits }` | `AssignDamage(Vec<(ObjectId, Vec<(ObjectId, u32)>)>)` | combat damage splits |
 
 `Candidate` is `Target(Target) | Replacement(ReplacementCandidate)`. It reuses the engine's `Target`, so it also covers

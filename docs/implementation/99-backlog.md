@@ -42,7 +42,6 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
     (CR 401.5). Decided in ticket 094 (library top views and a `LibraryTopShown` event), and the build is ticket 119.
   - Linked records do not cover cards exiled by a replaced source copy, and `ExileLinked` has no untargeted or
     library form (CR 607.2a).
-  - No proof-game assertion checks that the bot ever casts off-turn under Vedalken Orrery.
 - **Chain operations (`phase5/chain-operations`, `phase5/chain-per-entry-targets`)**: see `25-chain-operations.md`. Open items:
   - A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode
     are not built.
@@ -59,13 +58,15 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   `register_abilities` raised a `script_error`. Open items:
   - Done in ticket 030 (`30-payment-candidates.md`): the bot accepts `may_cast` and pays sacrifice, discard, tap and
     graveyard-exile costs from the Payment candidates. No byte-level game offers `may_cast` yet (no Lua constructor
-    for madness or cascade). Phyrexian stays partly open: the bot keeps 1 life and assumes 20 starting life.
+    for madness or cascade). Phyrexian stays partly open: the bot keeps 1 life. It reads starting life from a snapshot.
   - `GameState::objects` is a `BTreeMap`, so its walks are in `ObjectId` order (`32-objects-btreemap.md`). Other
     `HashMap` fields are keyed lookups. Clippy refuses a `for` loop or a walking method over a hash container
     (`28-module-layout.md`). `into_iter`, `extend`, `from_iter` and Lua `pairs` order are still unchecked.
-  - No main proof card uses a sacrifice or discard cost (`cost_proof_game.rs` has its own set), menace or a must-attack rule (the keyword exists since ticket
-    026, but no proof card has it), so the engine atomicity item (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it, and
-    `Bot::injecting_illegal_answers` now sends illegal Answers at every Decision (see `21-atomicity.md`).
+  - Night Stalker (menace), Raging Boar (attacks each combat) and Bone Altar (sacrifice cost) are in the main decks.
+    The block Decision lists `min_blockers`, and `Bot::injecting_illegal_answers` sends a one-blocker menace
+    declaration that only the engine's whole-declaration check refuses (see `21-atomicity.md`).
+  - Nothing removes a creature from combat when it leaves the battlefield (CR 506.4). `band_entries` skips departed
+    attackers so it cannot panic; blocks, damage and the other builders still see the stale id.
   - Proof spells were inert until `Engine::new_game` started loading a script's `operation()` and `target_requirement()`
     (see `19-proof-game.md`). It also loads `alternative_costs()` and `buyback_cost()`. A host that builds
     `CardDefinition`s without `new_game` gets none of the four.
