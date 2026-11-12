@@ -87,6 +87,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 108 `new_game` loads alternative costs and buyback. `load_script_declarations` copies `s.alternative_costs()` and `s.buyback_cost()` with `operation()` and `target_requirement()`, once per script, with a Rust-set value winning per field. A card skips the loader only when all four are set. The replay pin did not move. Built in auto mode, then merged. [closed/108-new-game-loads-alternative-costs.md](closed/108-new-game-loads-alternative-costs.md)
 - 170 Build stack entry ability text. Ability entries carry `ability_text` from a script's `:SetText` and `ability_index`, both captured at push. A copy carries `copy_of`, and an ability whose source id is hidden carries `source_identity` unless the source was face down. [closed/170-build-stack-entry-ability-text.md]
 - 109 Close the proof game coverage gaps. Night Stalker (menace), Raging Boar (attacks each combat) and Bone Altar (sacrifice cost) join the main decks. The block Decision lists `min_blockers` so the bot never leaves a menace attacker short. The bot reads starting life from a snapshot, and the 30-seed loop asserts an off-turn cast under Vedalken Orrery. `band_entries` skips departed attackers; CR 506.4 removal from combat stays a TODO. `BEHAVIOUR_REV` is 9. Built in auto mode, then merged. [closed/109-proof-game-coverage-gaps.md](closed/109-proof-game-coverage-gaps.md)
+- 110 Sweep stale notes and plan prose. The Lua gaps page drops attachment protection, enchanting a player and the missing `LifeChanged` claim, all of which work. Protection against attachments cites CR 702.16c and 702.16d, the backlog marks merged work as merged, and the older maps show no open tickets. Ticket 171 fixes the matching Rust citations. [closed/110-stale-note-sweep.md](closed/110-stale-note-sweep.md)
 
 ## Not yet specified
 
@@ -164,7 +165,6 @@ Decisions (HITL):
 
 Builds and audits:
 
-- 110 Stale note sweep (AFK)
 - 111 Echo sacrifice checks control
 - 113 Bridge condition events into Lua
 - 114 Build Lua modal spells and triggers
@@ -189,3 +189,4 @@ Builds and audits:
 - 152 One object pays one moving cost
 - 163 Build flash costs
 - 164 Build delayed end-step triggers
+- 171 Fix the CR 702.16 citations in Rust comments (AFK)
