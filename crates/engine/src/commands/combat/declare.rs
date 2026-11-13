@@ -549,7 +549,7 @@ pub(crate) fn attack_target_is_legal(
     Ok(())
 }
 
-/// Every per-pair rule for `blocker` blocking `attacker` (CR 509.1a, 702.9b, 702.13b, 702.14c, 702.16d,
+/// Every per-pair rule for `blocker` blocking `attacker` (CR 509.1a, 702.9b, 702.13b, 702.14c, 702.16f,
 /// 702.28b, 702.31b, 702.36b). The whole-declaration rules (menace, banding) are in
 /// `predicate` and `validate_declare_blockers`. Shared with the blocker entries a Decision lists.
 pub(crate) fn block_is_legal(
@@ -636,7 +636,7 @@ pub(crate) fn block_is_legal(
         ));
     }
 
-    // CR 702.16d's protection check below needs both objects'
+    // CR 702.16f's protection check below needs both objects'
     // effective_characteristics, so they are computed once here and Fear and
     // Intimidate reuse them.
     let attacker_characteristics =
@@ -736,7 +736,7 @@ pub(crate) fn block_is_legal(
         }
     }
 
-    // CR 702.16d
+    // CR 702.16f
     // An attacker with protection from a quality (color 702.16e, card type, subtype,
     // name 702.16a, everything 702.16j, or a specific player 702.16k) cannot be
     // blocked by a creature matching it. Reuses the characteristics computed above,

@@ -258,7 +258,7 @@ pub(in crate::commands) fn lethal_damage_needed(
     }
 }
 
-/// CR 702.16c: whether `target_id` cannot be the target of `source` because it
+/// CR 702.16b: whether `target_id` cannot be the target of `source` because it
 /// has protection from one of: color (702.16e), card type, subtype, name
 /// (702.16a), everything (702.16j) or a specific player (702.16k), as an OR over
 /// all six. Protection is judged on `source`'s qualities (the card cast or the
@@ -388,7 +388,7 @@ pub(crate) fn target_is_legal(
 /// thing to attach to" and not "may this target it": the CR 704.5m/704.5n
 /// rechecks of an attached Aura or Equipment and the CR 303.4f scan for an Aura
 /// entering uncast. An Aura permanent does not target (CR 115.1b), so hexproof
-/// and shroud do not apply. Protection still does (CR 702.16d).
+/// and shroud do not apply. Protection still does (CR 702.16c, 702.16d).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn attachment_target_is_legal(
     state: &GameState,

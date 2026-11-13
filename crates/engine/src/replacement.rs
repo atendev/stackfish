@@ -136,7 +136,7 @@ pub(crate) fn apply_one_replacement_or_protection(
     }
 }
 
-/// CR 702.16a: whether protection prevents `event`'s damage, across all six
+/// CR 702.16e: whether protection prevents `event`'s damage, across all six
 /// protected qualities. A predicate rather than a registered effect, because
 /// protection is a live characteristics query. `apply_replacements_from` folds
 /// the result into its candidate list so it joins the ordering choice (CR 616.1e).
@@ -279,7 +279,7 @@ pub(crate) fn apply_replacements_from(
         // CR 111.8
         event = apply_token_zone_lock(state, event);
 
-        // CR 702.16a, 616.1: protection joins `matching` as a candidate.
+        // CR 702.16e, 616.1: protection joins `matching` as a candidate.
         let protection_candidate = protection_prevents(state, script_runtime, &event)
             .map(ReplacementCandidate::Protection)
             .filter(|c| !excluded.contains(c));

@@ -161,7 +161,7 @@ bitflags! {
         /// activation, trigger scan and the CR 608.2b recheck) through
         /// `layers::effective_characteristics`, so granted and removed
         /// keywords count. It doesn't stop untargeted effects (CR 601.2c) or
-        /// detach an Aura or Equipment, unlike protection (CR 702.16d).
+        /// detach an Aura or Equipment, unlike protection (CR 702.16c, 702.16d).
         ///
         /// TODO: "hexproof from [quality]" needs a parameter, so it is not a plain bit (CR 702.11d-g)
         /// TODO: no hexproof on players, which have no keyword set here (CR 702.11c)
