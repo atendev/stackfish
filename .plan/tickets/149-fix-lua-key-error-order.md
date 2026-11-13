@@ -5,7 +5,7 @@ type: task
 mode: AFK
 status: open
 blocked_by: []
-claimed: false
+claimed: true
 ---
 
 ## Question
