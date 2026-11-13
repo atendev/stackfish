@@ -5,6 +5,7 @@
 use mlua::UserData;
 
 use crate::types::ability::{AbilityEffect, ConditionPrimitive, InterveningIfPrimitive, TokenSpec};
+use crate::types::card::ModeChoice;
 use crate::types::cost::AdditionalCost;
 use crate::types::cost::FilterController;
 use crate::types::counter::CounterKind;
@@ -133,6 +134,12 @@ pub(crate) enum ForEachPlayerTag {
     Static(AbilityEffect),
 }
 impl UserData for ForEachPlayerTag {}
+
+/// `Game.ModeChoice.*(n)`'s return value, the count half of `s.modes()` and
+/// `:SetModes`, decoded by `decode_mode_choice_value`.
+#[derive(Clone, Copy)]
+pub(crate) struct ModeChoiceTag(pub(crate) ModeChoice);
+impl UserData for ModeChoiceTag {}
 
 /// `Game.Tokens.*` return value, wrapping a `TokenSpec` so
 /// `Game.Ops.CreateToken` takes a typed argument and not a string.

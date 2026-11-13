@@ -10,7 +10,7 @@ use mlua::{Lua, UserData, UserDataMethods, Value};
 use crate::types::ability::{
     AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, RegisteredAbility,
 };
-use crate::types::card::ModeChoice;
+use crate::types::card::{ModeChoice, SpellMode};
 use crate::types::cost::{
     CostModifier, CostModifierTarget, CostSpec, FilterController, FilterSpec,
 };
@@ -30,9 +30,10 @@ use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::decode::{
-    check_chain_words, decode_affected_value, decode_condition_value, decode_cost_component_value,
-    decode_effect_value, decode_layer_value, decode_operation_value, decode_replacement_affected,
-    decode_target_spec_value, parse_single_color_letter,
+    ModeOwner, check_chain_words, decode_affected_value, decode_condition_value,
+    decode_cost_component_value, decode_effect_value, decode_layer_value, decode_mode_choice_value,
+    decode_modes, decode_operation_value, decode_replacement_affected, decode_target_spec_value,
+    parse_single_color_letter,
 };
 use super::tags::{
     AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind,
@@ -245,12 +246,16 @@ fn validate_replacement_filter_payload_pairing(
 /// target-selection pause (`AwaitingTriggerTargets`,
 /// `Engine::submit_trigger_targets`) reachable from a card script. Omitting it
 /// means `target: None`.
-// TODO: a mode-declaration method; CR 603.3c's modal choice works in the engine (`AwaitingTriggerModeChoice`) but has no Lua vocabulary, and modal spells have none either (see `docs/lua/not-available-yet.md`)
+///
+/// `:SetModes(choice, modes)` (CR 603.3c, 700.2) replaces `:SetOperation` and
+/// `:SetTarget`, since each mode owns its targets and operation. The ability
+/// keeps `target` and `effect` at `None` and the placeholder `operation`.
 pub(crate) struct TriggeredAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) condition: Option<ConditionSpec>,
     pub(crate) target: Option<TargetSpec>,
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
+    pub(crate) modes: Option<(Vec<SpellMode>, ModeChoice)>,
     /// CR 603.4's intervening-if clause (see `InterveningIfSpec`), set through
     /// `:SetInterveningIf(Game.Conditions.*)`, separate from `condition`.
     pub(crate) intervening_if: Option<InterveningIfSpec>,
@@ -327,21 +332,61 @@ impl UserData for TriggeredAbilityBuilder {
             this.target = Some(decoded);
             Ok(())
         });
-        methods.add_method_mut("Register", |_, this, ()| {
-            let (effect, operation) = this.operation.clone().ok_or_else(|| {
-                mlua::Error::RuntimeError(
-                    "Register() called with no SetOperation() - a triggered ability needs an \
-                     operation"
-                        .to_string(),
+        methods.add_method_mut(
+            "SetModes",
+            |lua, this, (choice, modes): (Value, mlua::Table)| {
+                let choice = decode_mode_choice_value(choice, "SetModes").map_err(to_lua_err)?;
+                let mut registry = this.registry.borrow_mut();
+                let decoded = decode_modes(
+                    lua,
+                    &mut registry,
+                    choice,
+                    modes,
+                    ModeOwner::Trigger,
+                    "SetModes",
                 )
-            })?;
+                .map_err(to_lua_err)?;
+                drop(registry);
+                this.modes = Some((decoded, choice));
+                Ok(())
+            },
+        );
+        methods.add_method_mut("Register", |_, this, ()| {
+            let ((effect, operation), (modes, mode_choice)) =
+                match (this.operation.clone(), this.modes.clone()) {
+                    (Some(_), Some(_)) => {
+                        return Err(mlua::Error::RuntimeError(
+                            "Register() called with both SetOperation() and SetModes() - each \
+                             mode owns its operation"
+                                .to_string(),
+                        ));
+                    }
+                    (Some(operation), None) => (operation, (Vec::new(), ModeChoice::Exactly(1))),
+                    (None, Some(modes)) => {
+                        if this.target.is_some() {
+                            return Err(mlua::Error::RuntimeError(
+                                "Register() called with both SetTarget() and SetModes() - each \
+                                 mode owns its targets"
+                                    .to_string(),
+                            ));
+                        }
+                        ((None, ScriptHandle(0)), modes)
+                    }
+                    (None, None) => {
+                        return Err(mlua::Error::RuntimeError(
+                            "Register() called with no SetOperation() or SetModes() - a \
+                             triggered ability needs an operation"
+                                .to_string(),
+                        ));
+                    }
+                };
             // CR 603.3d: the same single-exact-count wrapping as `ActivatedAbilityBuilder::Register`'s `:SetTarget`; nothing consumes "up to N" or `TargetSpec::Multiple` from this builder.
             let target = this.target.clone();
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
                 text: this.text.clone(),
-                modes: Vec::new(),
-                mode_choice: ModeChoice::Exactly(1),
+                modes,
+                mode_choice,
                 // The real id is allocated at drain time (`run_card_script`), since the builder has no `&mut GameState`.
                 id: AbilityId(0),
                 source: this.source,
@@ -502,6 +547,7 @@ impl UserData for ActivatedAbilityBuilder {
 /// `Game.Costs.TapSelf`) opts into a real payment pause, as for any ability
 /// (CR 118.5a). See `commands::PaymentResolution::ManaAbility` for how that
 /// pause still never reaches the stack (CR 605.3b).
+// TODO: modal mana abilities CR 605.3b
 pub(crate) struct ManaAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) cost: CostSpec,

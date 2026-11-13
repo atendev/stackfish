@@ -4,7 +4,7 @@
 use mlua::{Function, Lua, Table, Value};
 
 use crate::types::ability::{AbilityEffect, ConditionSpec, CopyExceptions, CounterAmount};
-use crate::types::card::{CardTypeSet, KeywordSet, Subtype, SupertypeSet};
+use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, SpellMode, Subtype, SupertypeSet};
 use crate::types::cost::{AlternativeCost, CostSpec, FilterController, FilterSpec};
 use crate::types::counter::CounterKind;
 use crate::types::effect::{AffectedFilter, EffectFilter, EffectPayload, LandwalkQuality, Layer};
@@ -18,7 +18,7 @@ use crate::types::zone::ZoneKind;
 
 use super::tags::{
     AffectedTag, ConditionTag, CostComponent, CostTag, CounterTag, EffectPrimitiveTag, FilterTag,
-    ForEachPlayerTag, InterveningIfTag, LayerTag, OncePerTurnTag, OperationTag,
+    ForEachPlayerTag, InterveningIfTag, LayerTag, ModeChoiceTag, OncePerTurnTag, OperationTag,
 };
 use super::types::{ScriptChoiceRequest, ScriptError, ScriptRegistry};
 
@@ -1414,6 +1414,171 @@ pub(crate) fn check_chain_words(
             "Game.Ops.ChainEach entries own {owned} target word(s) but the ability declares {declared}"
         )))
     }
+}
+
+/// Which declaration a mode list comes from. Per-mode costs and pawprints
+/// belong to casting (CR 700.2h, 700.2i), so only a spell accepts them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ModeOwner {
+    Spell,
+    Trigger,
+}
+
+/// A `Game.ModeChoice.*(n)` value. Anything else is a load error.
+pub(crate) fn decode_mode_choice_value(
+    value: Value,
+    context: &str,
+) -> Result<ModeChoice, ScriptError> {
+    match value {
+        Value::UserData(ud) if ud.is::<ModeChoiceTag>() => Ok(ud
+            .borrow::<ModeChoiceTag>()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?
+            .0),
+        other => Err(ScriptError::LoadError(format!(
+            "{context}: the mode choice must be a Game.ModeChoice.* value, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Decodes a mode list (`{ target, operation, cost, pawprint }` tables) for
+/// `s.modes()` and `:SetModes`, checking it against `choice`. `context` names
+/// the declaration in every error, and each per-mode error names the mode's
+/// 1-based index.
+pub(crate) fn decode_modes(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    choice: ModeChoice,
+    modes: Table,
+    owner: ModeOwner,
+    context: &str,
+) -> Result<Vec<SpellMode>, ScriptError> {
+    let count = sequence_len(&modes)
+        .ok_or_else(|| ScriptError::LoadError(format!("{context}: modes must be a plain array")))?;
+    // CR 700.2
+    if count < 2 {
+        return Err(ScriptError::LoadError(format!(
+            "{context}: a modal ability needs at least two modes, got {count}"
+        )));
+    }
+    let (n, repeatable, by_opponent) = match choice {
+        ModeChoice::Exactly(n) | ModeChoice::UpTo(n) => (n, false, false),
+        ModeChoice::ExactlyRepeatable(n) | ModeChoice::UpToRepeatable(n) => (n, true, false),
+        ModeChoice::ExactlyChosenByOpponent(n) | ModeChoice::UpToChosenByOpponent(n) => {
+            (n, false, true)
+        }
+        ModeChoice::PawprintBudget(n) => (n, true, false),
+    };
+    if n == 0 {
+        return Err(ScriptError::LoadError(format!(
+            "{context}: the mode choice count must be at least 1"
+        )));
+    }
+    // CR 700.2d: only a repeatable choice may pick more modes than the card has.
+    if !repeatable && n as usize > count {
+        return Err(ScriptError::LoadError(format!(
+            "{context}: the mode choice asks for {n} modes but only {count} are declared"
+        )));
+    }
+    let budget = matches!(choice, ModeChoice::PawprintBudget(_));
+    if budget && owner == ModeOwner::Trigger {
+        return Err(ScriptError::LoadError(format!(
+            "{context}: Game.ModeChoice.PawprintBudget is only for a spell's modes()"
+        )));
+    }
+    let mut decoded = Vec::with_capacity(count);
+    for index in 1..=count {
+        let at = format!("{context} mode {index}");
+        let entry: Value = modes.get(index).map_err(lua_load_err)?;
+        let Value::Table(entry) = entry else {
+            return Err(ScriptError::LoadError(format!(
+                "{at} must be a table, got {}",
+                entry.type_name()
+            )));
+        };
+        reject_unknown_keys(
+            &entry,
+            &["target", "operation", "cost", "pawprint"],
+            &[],
+            &at,
+        )?;
+        let target = match entry.get::<_, Value>("target").map_err(lua_load_err)? {
+            Value::Nil => None,
+            Value::Table(table) => Some(decode_target_spec_table(lua, registry, table)?),
+            other => Some(decode_target_spec_value(lua, registry, other)?),
+        };
+        let operation: Value = entry.get("operation").map_err(lua_load_err)?;
+        if matches!(operation, Value::Nil) {
+            return Err(ScriptError::LoadError(format!("{at} has no operation")));
+        }
+        let (primitive, handle) = decode_operation_value(lua, registry, operation)?;
+        let effect = AbilityEffect::packed(primitive, handle);
+        check_chain_words(Some(&effect), target.as_ref()).map_err(|e| match e {
+            ScriptError::LoadError(m) | ScriptError::RuntimeError(m) => {
+                ScriptError::LoadError(format!("{at}: {m}"))
+            }
+        })?;
+        let cost = match entry.get::<_, Value>("cost").map_err(lua_load_err)? {
+            Value::Nil => None,
+            _ if owner == ModeOwner::Trigger => {
+                return Err(ScriptError::LoadError(format!(
+                    "{at}: a per-mode cost is only for a spell's modes()"
+                )));
+            }
+            value => match decode_cost_component_value(value)? {
+                CostComponent::Additional(cost) => Some(cost),
+                // TODO: a per-mode mana cost (CR 700.2h)
+                CostComponent::Mana(_) => {
+                    return Err(ScriptError::LoadError(format!(
+                        "{at}: a per-mode cost can't be Game.Costs.Mana yet"
+                    )));
+                }
+            },
+        };
+        let pawprint: Option<u32> = entry.get("pawprint").map_err(lua_load_err)?;
+        let pawprint_weight = match (pawprint, budget) {
+            (Some(_), _) if owner == ModeOwner::Trigger => {
+                return Err(ScriptError::LoadError(format!(
+                    "{at}: pawprint is only for a spell's modes()"
+                )));
+            }
+            (Some(weight), true) if weight >= 1 => weight,
+            (_, true) => {
+                return Err(ScriptError::LoadError(format!(
+                    "{at} needs a pawprint of at least 1 under Game.ModeChoice.PawprintBudget"
+                )));
+            }
+            (Some(_), false) => {
+                return Err(ScriptError::LoadError(format!(
+                    "{at}: pawprint needs Game.ModeChoice.PawprintBudget"
+                )));
+            }
+            (None, false) => 0,
+        };
+        // CR 700.2e: the other player picks, so a mode can't ask the caster for targets or a cost.
+        if by_opponent && (target.is_some() || cost.is_some()) {
+            return Err(ScriptError::LoadError(format!(
+                "{at}: a mode chosen by an opponent can't have a target or a cost"
+            )));
+        }
+        decoded.push(SpellMode {
+            target_requirement: target,
+            effect: Some(effect),
+            additional_cost: cost,
+            pawprint_weight,
+        });
+    }
+    Ok(decoded)
+}
+
+/// The length of `table` when it is a gap-free array with no other keys.
+fn sequence_len(table: &Table) -> Option<usize> {
+    let mut keys = 0usize;
+    for pair in table.clone().pairs::<Value, Value>() {
+        pair.ok()?;
+        keys += 1;
+    }
+    (keys == table.raw_len()).then_some(keys)
 }
 
 /// `ActivatedAbilityBuilder::SetTarget`'s argument decoder, taking a `Value`

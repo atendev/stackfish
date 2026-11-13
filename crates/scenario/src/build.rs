@@ -793,8 +793,8 @@ pub(crate) fn register_script_target_requirement(
 }
 
 /// Sets `object`'s `effect` from the script's optional `s.operation()`, leaving it unchanged
-/// if there is none. A `Game.Ops.*` tag becomes its `AbilityEffect` variant; a custom function
-/// becomes `AbilityEffect::Script` so the cast can carry the handle onto the stack object.
+/// if there is none. `AbilityEffect::packed` folds a custom function into the effect so the cast
+/// can carry the handle onto the stack object.
 pub(crate) fn register_script_operation(engine: &mut Engine, object: ObjectId, source: &str) {
     let Some((primitive, handle)) = engine
         .build_operation(source)
@@ -802,7 +802,7 @@ pub(crate) fn register_script_operation(engine: &mut Engine, object: ObjectId, s
     else {
         return;
     };
-    let effect = primitive.or(Some(AbilityEffect::Script(handle)));
+    let effect = Some(AbilityEffect::packed(primitive, handle));
     engine
         .state_mut()
         .objects

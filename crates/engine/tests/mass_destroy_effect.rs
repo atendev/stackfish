@@ -120,7 +120,7 @@ fn armageddon_definition(definition_id: u64, source: &str) -> CardDefinition {
         .build_operation(source)
         .expect("script should load")
         .expect("script declares an operation");
-    let effect = effect.or(Some(AbilityEffect::Script(handle)));
+    let effect = Some(AbilityEffect::packed(effect, handle));
     CardDefinition {
         definition_id,
         oracle_id: None,

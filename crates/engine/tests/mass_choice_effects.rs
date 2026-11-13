@@ -132,7 +132,7 @@ fn register_script_operation(engine: &mut Engine, object: ObjectId, source: &str
     else {
         return;
     };
-    let effect = primitive.or(Some(AbilityEffect::Script(handle)));
+    let effect = Some(AbilityEffect::packed(primitive, handle));
     engine
         .state_mut()
         .objects

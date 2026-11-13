@@ -29,6 +29,7 @@ fn lua_api_doc_covers_all_bound_names() {
         "Costs",
         "Layers",
         "Durations",
+        "ModeChoice",
         "Effects",
         "EventFilters",
         "ReplacementPayloads",

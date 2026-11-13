@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::commands;
 use crate::engine_context::PipelineExit;
-use crate::script::ScriptRuntime;
+use crate::script::{ScriptError, ScriptRuntime};
 use crate::types::ability::AbilityEffect;
-use crate::types::card::ScriptReference;
+use crate::types::card::{ModeChoice, ScriptReference, SpellMode};
 use crate::types::command::{PlayerAction, PlayerActionKind};
 use crate::types::config::GameConfig;
 use crate::types::cost::AlternativeCost;
@@ -30,6 +30,7 @@ struct Declarations {
     requirement: Option<TargetSpec>,
     alternative_costs: Vec<AlternativeCost>,
     buyback_cost: Option<ManaCost>,
+    modes: Option<(Vec<SpellMode>, ModeChoice)>,
 }
 
 impl Engine {
@@ -219,8 +220,8 @@ impl Engine {
         engine
     }
 
-    /// Copies a script's `operation()`, `target_requirement()`, `alternative_costs()`
-    /// and `buyback_cost()` onto each card's definition once per distinct script,
+    /// Copies a script's `operation()`, `target_requirement()`, `alternative_costs()`,
+    /// `buyback_cost()` and `modes()` onto each card's definition once per distinct script,
     /// since a spell is cast before any script has run. A value already set in Rust
     /// wins. Values must come from this engine's runtime because a custom-function
     /// `ScriptHandle` is only valid there.
@@ -238,7 +239,8 @@ impl Engine {
                 || (definition.effect.is_some()
                     && definition.target_requirement.is_some()
                     && !definition.alternative_costs.is_empty()
-                    && definition.buyback_cost.is_some())
+                    && definition.buyback_cost.is_some()
+                    && !definition.modes.is_empty())
             {
                 continue;
             }
@@ -250,6 +252,7 @@ impl Engine {
                     let requirement = self.script_runtime.build_target_requirement(&source);
                     let alternative_costs = self.script_runtime.build_alternative_costs(&source);
                     let buyback_cost = self.script_runtime.build_buyback_cost(&source);
+                    let modes = self.script_runtime.build_modes(&source);
                     // A `ChainEach` must own exactly the words the card declares.
                     let words_check = match (&operation, &requirement) {
                         (Ok(Some((Some(effect), _))), Ok(requirement)) => {
@@ -257,7 +260,21 @@ impl Engine {
                         }
                         _ => Ok(()),
                     };
+                    // Each mode owns its targets and effect, so a card-level pair beside modes is ambiguous.
+                    let modes_check = match (&modes, &operation, &requirement) {
+                        (Ok(Some(_)), Ok(Some(_)), _) | (Ok(Some(_)), _, Ok(Some(_))) => {
+                            Err(ScriptError::LoadError(
+                                "modes() can't be declared beside operation() or \
+                                 target_requirement(), since each mode owns its targets and \
+                                 operation"
+                                    .to_string(),
+                            ))
+                        }
+                        _ => Ok(()),
+                    };
                     let failed = operation.is_err()
+                        || modes.is_err()
+                        || modes_check.is_err()
                         || requirement.is_err()
                         || words_check.is_err()
                         || alternative_costs.is_err()
@@ -266,7 +283,7 @@ impl Engine {
                         // A chain whose word counts don't match resolves nothing.
                         _ if words_check.is_err() => None,
                         Ok(Some((primitive, handle))) => {
-                            primitive.clone().or(Some(AbilityEffect::Script(*handle)))
+                            Some(AbilityEffect::packed(primitive.clone(), *handle))
                         }
                         _ => None,
                     };
@@ -275,12 +292,18 @@ impl Engine {
                         requirement: requirement.as_ref().ok().cloned().flatten(),
                         alternative_costs: alternative_costs.as_ref().cloned().unwrap_or_default(),
                         buyback_cost: buyback_cost.as_ref().ok().cloned().flatten(),
+                        modes: match &modes {
+                            Ok(found) if modes_check.is_ok() => found.clone(),
+                            _ => None,
+                        },
                     };
                     self.record_script_error(id, &script_ref, operation.map(|_| ()));
                     self.record_script_error(id, &script_ref, requirement.map(|_| ()));
                     self.record_script_error(id, &script_ref, words_check);
                     self.record_script_error(id, &script_ref, alternative_costs.map(|_| ()));
                     self.record_script_error(id, &script_ref, buyback_cost.map(|_| ()));
+                    self.record_script_error(id, &script_ref, modes.map(|_| ()));
+                    self.record_script_error(id, &script_ref, modes_check);
                     // A script that failed is not cached, so every copy logs it.
                     if !failed {
                         loaded.insert(source, declarations.clone());
@@ -305,6 +328,12 @@ impl Engine {
             }
             if definition.buyback_cost.is_none() {
                 definition.buyback_cost = declarations.buyback_cost;
+            }
+            if definition.modes.is_empty()
+                && let Some((modes, choice)) = declarations.modes
+            {
+                definition.modes = modes;
+                definition.mode_choice = choice;
             }
         }
     }

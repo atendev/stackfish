@@ -849,8 +849,10 @@ impl Engine {
         else {
             return Err(ModeChoiceError::NoSuchMode);
         };
+        let (operation, effect) = commands::unpack_script_effect(effect, top.operation);
         top.chosen_modes = chosen_indices;
         top.target_requirement = target_requirement;
+        top.operation = operation;
         top.effect = effect;
         top.pending_mode_choice = None;
 

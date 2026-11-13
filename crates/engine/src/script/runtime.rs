@@ -9,7 +9,7 @@ use mlua::{Function, Lua, Table, Thread, ThreadStatus, Value};
 use crate::types::ability::{
     AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility,
 };
-use crate::types::card::{CardDefinition, ScriptReference};
+use crate::types::card::{CardDefinition, ModeChoice, ScriptReference, SpellMode};
 use crate::types::cost::{AlternativeCost, CostModifier};
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::event::{GameEvent, GameEventKind};
@@ -24,8 +24,9 @@ use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::decode::{
-    decode_alternative_cost_table, decode_condition_value, decode_operation_value,
-    decode_script_choice_request, decode_target_spec_table,
+    ModeOwner, decode_alternative_cost_table, decode_condition_value, decode_mode_choice_value,
+    decode_modes, decode_operation_value, decode_script_choice_request, decode_target_spec_table,
+    reject_unknown_keys,
 };
 use super::encode::{event_to_lua, state_to_lua, target_to_lua};
 use super::globals::bind_game_globals;
@@ -516,6 +517,51 @@ impl ScriptRuntime {
         let mut registry = self.registry.borrow_mut();
         let decoded = decode_operation_value(&self.lua, &mut registry, value)?;
         Ok(Some(decoded))
+    }
+
+    /// CR 700.2, 601.2b: a modal spell's modes, declared by the optional
+    /// `s.modes()` convention, a sibling of `s.operation()`. It returns
+    /// `{ choice = Game.ModeChoice.*, modes = { mode, ... } }`, decoded by
+    /// `decode_modes`. A card with no `modes` function returns `Ok(None)`. The
+    /// same handle trap as `build_operation` applies to a function mode.
+    pub fn build_modes(
+        &self,
+        source: &str,
+    ) -> Result<Option<(Vec<SpellMode>, ModeChoice)>, ScriptError> {
+        let module: Table = self
+            .lua
+            .load(source)
+            .eval()
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> = module
+            .get("modes")
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else {
+            return Ok(None);
+        };
+        let declared: Table = function
+            .call(())
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        reject_unknown_keys(&declared, &["choice", "modes"], &[], "modes()")?;
+        let choice = decode_mode_choice_value(
+            declared
+                .get("choice")
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?,
+            "modes()",
+        )?;
+        let modes: Table = declared
+            .get("modes")
+            .map_err(|e| ScriptError::LoadError(format!("modes() needs a modes array: {e}")))?;
+        let mut registry = self.registry.borrow_mut();
+        let modes = decode_modes(
+            &self.lua,
+            &mut registry,
+            choice,
+            modes,
+            ModeOwner::Spell,
+            "modes()",
+        )?;
+        Ok(Some((modes, choice)))
     }
 
     /// CR 601.2b: a card's alternative costs (flashback, escape), declared by
