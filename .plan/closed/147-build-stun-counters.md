@@ -3,9 +3,9 @@ id: 147
 title: Build stun counters
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question

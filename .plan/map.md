@@ -91,6 +91,10 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 111 Echo sacrifice checks control. An unpaid Echo trigger makes the same CR 701.21a control check as `Game.Ops.SacrificeSelf`, through one shared helper. The unless-paid pause keeps the ability's controller. No Lua builder was added. Built in auto mode, then merged. [closed/111-echo-sacrifice-checks-control.md](closed/111-echo-sacrifice-checks-control.md)
 - 113 Bridge condition events into Lua. Conditions see ten event kinds as flat tables, mill writes `CardsMilled` per player, paying 0 life writes no event, and seven new `Game.Conditions` tags ship. `BEHAVIOUR_REV` stays 9. Built in auto mode, then merged. [closed/113-build-condition-events.md](closed/113-build-condition-events.md)
 - 114 Build Lua modal spells and triggers. `s.modes()` and `:SetModes` on triggers ship through one decoder with `Game.ModeChoice.*`. Handles start at 1, and a `ForEachPlayer` function packs into the effect, which fixed spell functions working only at handle 0. Function, chain and `ForEachPlayer` modes are solo only, and a per-mode mana cost is a load error. `BEHAVIOUR_REV` is 10. Built in auto mode, then merged. [closed/114-build-lua-modal-spells-triggers.md](closed/114-build-lua-modal-spells-triggers.md)
+- 171 Fix the CR 702.16 citations in Rust comments. Targeting cites 702.16b, Auras 702.16c, Equipment 702.16d, damage 702.16e and blocking 702.16f, in engine comments and the protection tests. A test assertion string is left to 172. Built by a wayfinder child. [closed/171-fix-protection-rule-citations.md](closed/171-fix-protection-rule-citations.md)
+- 150 Build non-goal card rejection in the loader. `CardLoadError::NonGoal { name, kind }` rejects planeswalkers, battles, sagas, Class cards and the Manifest, Manifest dread and Cloak producers, checked in that order in `build_definition`. Morph, Megamorph, Disguise, meld and Ixidron-type cards still load. Built by a wayfinder child. [closed/150-build-non-goal-card-rejection.md](closed/150-build-non-goal-card-rejection.md)
+- 147 Build stun counters. `Engine::attempt_untap` serves every untap attempt. A stunned permanent loses one stun counter, writes no `Untapped` (CR 122.1d, 614.5), and a phased-out permanent makes no attempt. `CounterKind::Stun` has Lua, scenario and additive wire names. `BEHAVIOUR_REV` stays 10. Built by a wayfinder child. [closed/147-build-stun-counters.md](closed/147-build-stun-counters.md)
+- 115 Build Lua modal activated abilities. The activation announces its modes (CR 602.2b, 700.2a), and cast and activation share `announced_modes_in_order`. The activated `:SetModes` refuses opponent-chosen modes, per-mode costs, pawprints and mana modes. The wire adds `modes` and `mode_targets` with `PROTOCOL_VERSION` still 1. Forked Totem joins the proof deck, and `BEHAVIOUR_REV` stays 10. Built by a wayfinder child. [closed/115-build-lua-modal-activated.md](closed/115-build-lua-modal-activated.md)
 
 ## Not yet specified
 
@@ -98,7 +102,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
 - Chain operation leftovers. A word shared by two entries, a chain inside `ForEachPlayer`, and a custom function as an entry are not built (`25-chain-operations.md`). A chain mode is solo only (090, 114), and combining it with other modes is not built.
-- Opponent-chosen modes with three or more players, where the controller picks the chooser (CR 700.2e), and repeatable pawprint-budget modes (CR 700.2i).
+- Opponent-chosen modes with three or more players, where the controller picks the chooser (CR 700.2e), opponent-chosen modes on an activated ability (refused by 115), and repeatable pawprint-budget modes (CR 700.2i).
 - Condescend's `{X}`. "Counter unless that player pays {X}" supports only a fixed printed amount, and an X announced on the countering spell has no representation yet.
 - Devour and Amplify quality restrictions, and a creature with several independent Amplify instances.
 - Enchanting or equipping a player. Attachment targets a permanent only.
@@ -164,11 +168,10 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- None open.
+- 174 Modal mana abilities
 
 Builds and audits:
 
-- 115 Build Lua modal activated abilities
 - 116 Build divided damage and counters
 - 117 Build effect-owned exile links and a library-top `ExileLinked`
 - 118 Build battlefield setup card scripts
@@ -182,12 +185,11 @@ Builds and audits:
 - 141 Build player hexproof and shroud
 - 142 Build hexproof from
 - 143 Build static redirect recipients
-- 147 Build stun counters
 - 148 Build fight and bite target shapes
 - 149 Fix Lua key-error order and lint hash set algebra (AFK)
-- 150 Build non-goal card rejection in the loader
 - 151 Build spell additional costs
 - 152 One object pays one moving cost
 - 163 Build flash costs
 - 164 Build delayed end-step triggers
-- 171 Fix the CR 702.16 citations in Rust comments (AFK)
+- 172 Fix the CR 702.16 citation in a hexproof test assertion (AFK)
+- 173 Narrow the stale becomes-tapped and becomes-untapped TODOs (AFK)

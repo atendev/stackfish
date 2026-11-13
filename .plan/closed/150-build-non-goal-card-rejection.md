@@ -3,9 +3,9 @@ id: 150
 title: Build non-goal card rejection in the loader
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: [112]
-claimed: true
+claimed: false
 ---
 
 ## Question
