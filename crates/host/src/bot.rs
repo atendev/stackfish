@@ -114,6 +114,7 @@ pub struct Bot {
     illegal_by_shape: BTreeMap<String, usize>,
     mechanics_seen: BTreeMap<String, usize>,
     costs_paid: BTreeMap<String, usize>,
+    modal_activations: usize,
     /// The mana cost of each card the bot has seen, by object id. A move event
     /// carries the identity of every card its Seat may see, including the
     /// Seat's own hand.
@@ -146,6 +147,7 @@ impl Bot {
             illegal_by_shape: BTreeMap::new(),
             mechanics_seen: BTreeMap::new(),
             costs_paid: BTreeMap::new(),
+            modal_activations: 0,
             costs: HashMap::new(),
             seats: BTreeSet::new(),
             record: false,
@@ -186,6 +188,12 @@ impl Bot {
     /// Session accepted. Tests read it; the bot never branches on it.
     pub fn costs_paid(&self) -> &BTreeMap<String, usize> {
         &self.costs_paid
+    }
+
+    /// How many activations announcing modes the Session accepted. Tests read
+    /// it; the bot never branches on it.
+    pub fn modal_activations(&self) -> usize {
+        self.modal_activations
     }
 
     /// The events `seat` received, in order. Empty unless `recording` was set.
@@ -503,6 +511,12 @@ impl Bot {
     fn accepted(&mut self, seat: u32, reply: &Reply, body: &Value) {
         if let Some(spent) = &reply.spent {
             self.pool(seat).spend(spent);
+        }
+        let action = &reply.value["action"];
+        if action["kind"] == "activate_ability"
+            && action["modes"].as_array().is_some_and(|m| !m.is_empty())
+        {
+            self.modal_activations += 1;
         }
         if let Some(payments) = reply.value["plan"]["payments"].as_array() {
             for kind in payments.iter().filter_map(|p| p["kind"].as_str()) {

@@ -82,7 +82,8 @@ fn a_bot_plays_thirty_two_player_games_to_the_end() {
     );
 }
 
-const SPELLS: [&str; 30] = [
+const SPELLS: [&str; 31] = [
+    "Forked Totem",
     "Grizzly Bear",
     "Night Stalker",
     "Raging Boar",
@@ -217,10 +218,12 @@ fn cast_off_turn_under_orrery(events: &[Value]) -> bool {
 fn the_games_reach_attacks_sacrifice_and_off_turn_casts() {
     let mut attacked = HashSet::new();
     let mut sacrificed = 0;
+    let mut modal_activations = 0;
     let mut off_turn = false;
     for seed in 0..30 {
         let (_, bot) = play_recorded(2, seed);
         sacrificed += bot.costs_paid().get("sacrifice").copied().unwrap_or(0);
+        modal_activations += bot.modal_activations();
         for seat in 0..2 {
             let events = bot.events(seat);
             off_turn |= cast_off_turn_under_orrery(events);
@@ -244,6 +247,11 @@ fn the_games_reach_attacks_sacrifice_and_off_turn_casts() {
         assert!(attacked.contains(card), "no game attacked with {card}");
     }
     assert!(sacrificed > 0, "no game paid Bone Altar's sacrifice");
+    // CR 602.2b, 700.2a
+    assert!(
+        modal_activations > 0,
+        "no game activated Forked Totem with a mode"
+    );
     assert!(
         off_turn,
         "no game cast a non-instant off-turn under Vedalken Orrery"
