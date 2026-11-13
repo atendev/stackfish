@@ -421,8 +421,10 @@ to `Game.Ops.Pump`/`Game.Ops.GainControl`/`Game.Ops.GrantTimingPermission`/`Game
 
 ## `Game.ModeChoice.*`
 
-The `choice` of a spell's [`s.modes()`](card-script-basics.md#writing-modes) or a trigger's
-[`:SetModes`](triggered-abilities.md#modal-triggered-abilities). Every one takes a count `n` of at
+The `choice` of a spell's [`s.modes()`](card-script-basics.md#writing-modes), a trigger's
+[`:SetModes`](triggered-abilities.md#modal-triggered-abilities) or an activated ability's
+[`:SetModes`](activated-abilities.md#modal-activated-abilities). An activated ability refuses
+`PawprintBudget` and the two `ChosenByOpponent` forms. Every one takes a count `n` of at
 least 1.
 
 | Name | Meaning |

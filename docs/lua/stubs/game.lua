@@ -330,7 +330,7 @@ function ActivatedAbilityBuilder:SetFunctionsFrom(zoneName) end
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetText(text) end
 
---- What this ability does when it resolves. Required before :Register().
+--- What this ability does when it resolves. Required before :Register() unless :SetModes is used.
 ---@param value GameOpsValue|OperationFn
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetOperation(value) end
@@ -340,7 +340,15 @@ function ActivatedAbilityBuilder:SetOperation(value) end
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetTarget(value) end
 
---- Finalizes and registers the ability. Requires :SetOperation.
+--- CR 602.2b, 700.2a: a modal activated ability. Replaces :SetOperation and :SetTarget, since each
+--- mode owns its targets and operation. The activation announces the modes. Modes take no `cost` or
+--- `pawprint`, can't add mana, and `choice` can't be PawprintBudget or *ChosenByOpponent.
+---@param choice ModeChoice
+---@param modes Mode[]
+---@return ActivatedAbilityBuilder
+function ActivatedAbilityBuilder:SetModes(choice, modes) end
+
+--- Finalizes and registers the ability. Requires exactly one of :SetOperation or :SetModes.
 function ActivatedAbilityBuilder:Register() end
 
 -- No :SetModes: a mana ability can't be modal here (CR 605.3b). Use AddManaChoice for a color choice.

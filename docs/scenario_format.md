@@ -263,6 +263,10 @@ the resolved total exactly like any other generic amount — no special X handli
 side. See `crates/engine/tests/scenarios/costs/x_costs.toml` for a full worked example
 (an `{X}{R}` sorcery cast with `x_value = 3`, paid with 3 generic + 1 red).
 
+`activate_ability` takes a `modes` list of chosen mode indices for a modal ability declared with
+`:SetModes`, announced with the targets of those modes (CR 602.2b, 700.2a). See
+`crates/engine/tests/scenarios/modal/modal_activated_ability.toml`.
+
 `activate_ability` takes the same `x_value` field (CR 107.3a/107.3k/602.2b — an ability's own X is
 independent of any other X on the same object, or on another instance of the same ability already
 on the stack), for an ability whose own activation cost has an `{X}` in it. There's no `[[cards]]`
