@@ -1160,7 +1160,7 @@ in one scenario.
 [[assertions]]
 type = "object_counters"
 card = "wall1"
-kind = "minus_one_minus_one"   # plus_one_plus_one/minus_one_minus_one/loyalty/poison/energy/charge, or any other string (Custom)
+kind = "minus_one_minus_one"   # plus_one_plus_one/minus_one_minus_one/loyalty/poison/energy/experience/charge/stun, or any other string (Custom)
 equals = 3
 ```
 

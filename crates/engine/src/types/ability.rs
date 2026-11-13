@@ -332,7 +332,7 @@ pub enum AbilityEffect {
     /// `Game.Ops.Untap` (CR 701.26b): the mirror of `Tap`. Only a tapped
     /// battlefield permanent changes, and `Untapped` is pushed only on a real
     /// flip.
-    // TODO: no stun counters and no "would become untapped" replacement event, so an untap always succeeds (CR 122.1d, 614)
+    // TODO: no non-stun "would become untapped" replacement event, so only a stun counter stops an untap (CR 614, 616.1)
     // TODO: no Lua `becomes untapped` condition (CR 603.2e)
     Untap,
     /// `Game.Ops.TapSelf` (CR 701.26a): taps the ability's own source. A
@@ -1070,6 +1070,7 @@ pub enum ConditionPrimitive {
 }
 
 // TODO: Each* siblings of BecomesTapped, BecomesUntapped, GainsLife, LosesLife, Attacks, Blocks and Mills
+// TODO: no condition tag for a counter being removed
 
 // TODO: `submit_discard`'s CR 514.1 hand-size discard and `draw_step`'s library-side retirement still discard their departed abilities outright; wiring them is inert today, since neither produces a Battlefield-departure LKI (CR 603.10)
 // TODO: untap-step events can't trigger anything (CR 502.4 grants no priority), and Cleanup's `CleanupSbaCheck` flow doesn't run `collect_triggers`

@@ -33,8 +33,12 @@ name.
   format itself still has no `[cards.alternative_costs]`/`buyback_cost` field, so a scenario
   fixture can't drive either without a script. Hybrid, Phyrexian, `{C}`, `{X}` and snow mana
   payment all work in the engine now (see [mana-abilities.md](mana-abilities.md#snow-mana)).
-- **No tap or untap replacements.** There is no replacement hook for "would become tapped/untapped"
-  and no stun counters (CR 122.1d), so an untap always succeeds.
+- **Stun is the only untap replacement.** Stun counters work (CR 122.1d): an untap attempt removes
+  one and the permanent stays tapped, with no `Untapped` event, so `BecomesUntapped` does not fire.
+  There is no "would become tapped" hook, and no other "would become untapped" replacement such as
+  Bewitching Leechcraft or Edge of Malacol. "Doesn't untap during your untap step" and "can't untap
+  more than N" effects (CR 502.3) are not supported either. A removal reaches a condition as
+  `counter_added` with a negative `amount`; there is no "counter removed" tag.
 - **No `Each*` versions of the newer event tags.** `BecomesTapped`, `BecomesUntapped`, `GainsLife`,
   `LosesLife`, `Attacks`, `Blocks` and `Mills` are about this permanent or you only. "Whenever a
   player loses life" or "whenever a creature attacks" needs a custom condition function reading

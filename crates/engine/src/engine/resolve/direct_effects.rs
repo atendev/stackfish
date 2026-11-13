@@ -214,7 +214,7 @@ impl Engine {
 
     /// CR 701.26: flips `id` if it is a battlefield permanent in the opposite state,
     /// pushing the event. Anything else is a no-op so a "becomes tapped" trigger
-    /// can't fire (CR 603.2e).
+    /// can't fire (CR 603.2e), and an untapped permanent keeps its stun counter.
     fn flip_tapped(&mut self, id: ObjectId, tap: bool, events: &mut Vec<GameEventKind>) {
         let Some(object) = self.state.object_mut(id) else {
             return;
@@ -222,12 +222,12 @@ impl Engine {
         if object.zone != ZoneKind::Battlefield || object.tapped == tap {
             return;
         }
-        object.tapped = tap;
-        events.push(if tap {
-            GameEventKind::Tapped { object: id }
-        } else {
-            GameEventKind::Untapped { object: id }
-        });
+        if !tap {
+            self.attempt_untap(id, events);
+            return;
+        }
+        object.tapped = true;
+        events.push(GameEventKind::Tapped { object: id });
     }
 
     /// CR 701.26: every legal object target; players are skipped.

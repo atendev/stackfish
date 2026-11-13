@@ -197,6 +197,7 @@ pub(crate) fn counter_kind_name(kind: &CounterKind) -> String {
         CounterKind::Energy => "Energy".to_string(),
         CounterKind::Experience => "Experience".to_string(),
         CounterKind::Charge => "Charge".to_string(),
+        CounterKind::Stun => "Stun".to_string(),
         CounterKind::Custom(name) => name.clone(),
     }
 }

@@ -78,6 +78,7 @@ pub(crate) enum WireCounterKind {
     Energy,
     Experience,
     Charge,
+    Stun,
     Custom { name: String },
 }
 
@@ -91,6 +92,7 @@ impl From<&CounterKind> for WireCounterKind {
             CounterKind::Energy => WireCounterKind::Energy,
             CounterKind::Experience => WireCounterKind::Experience,
             CounterKind::Charge => WireCounterKind::Charge,
+            CounterKind::Stun => WireCounterKind::Stun,
             CounterKind::Custom(name) => WireCounterKind::Custom { name: name.clone() },
         }
     }
@@ -773,6 +775,13 @@ mod tests {
         assert_eq!(summary.mana_cost, "{1}{G}");
         assert_eq!(summary.colors, "G");
         assert_eq!(summary.power.as_deref(), Some("2"));
+    }
+
+    // CR 122.1d
+    #[test]
+    fn a_stun_counter_has_its_own_wire_kind() {
+        let json = serde_json::to_value(WireCounterKind::from(&CounterKind::Stun)).unwrap();
+        assert_eq!(json, serde_json::json!({ "kind": "stun" }));
     }
 
     #[test]

@@ -118,6 +118,7 @@ for flavor counters.
 | `Energy` | Energy counters. |
 | `Experience` | Experience counters. |
 | `Charge` | Charge counters. |
+| `Stun` | Stun counters (CR 122.1d). An untap attempt on a tapped permanent removes one instead of untapping it. |
 | `Custom(name)` | Factory for any other counter kind; `name` is the flavor counter's name. |
 
 ## `Game.Affected.*`
