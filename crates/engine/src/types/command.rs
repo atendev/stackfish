@@ -27,6 +27,9 @@ pub enum PlayerActionKind {
     ActivateAbility {
         source: ObjectId,
         ability_index: u32,
+        /// CR 602.2b, 700.2a: a modal ability's chosen mode indices, announced
+        /// with its targets. Empty for a non-modal ability.
+        modes: Vec<u32>,
         targets: Vec<Target>,
         /// CR 602.2b: colors for an `AddManaChoice` mana ability, chosen at
         /// activation because a mana ability never uses the stack (CR 605.3b).

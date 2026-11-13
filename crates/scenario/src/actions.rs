@@ -62,6 +62,7 @@ pub(crate) fn to_player_action(
             player,
             source,
             ability_index,
+            modes,
             targets,
             chosen_colors,
             x_value,
@@ -71,6 +72,7 @@ pub(crate) fn to_player_action(
             PlayerActionKind::ActivateAbility {
                 source: resolve_card(source, card_ids),
                 ability_index: *ability_index,
+                modes: modes.clone(),
                 targets: targets
                     .iter()
                     .map(|t| resolve_target(t, card_ids))
@@ -90,6 +92,7 @@ pub(crate) fn to_player_action(
             PlayerActionKind::ActivateAbility {
                 source: resolve_card(source, card_ids),
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

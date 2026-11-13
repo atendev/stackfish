@@ -183,6 +183,7 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

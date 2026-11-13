@@ -313,6 +313,7 @@ fn a_commanders_non_combat_damage_does_not_count() {
             kind: PlayerActionKind::ActivateAbility {
                 source: commander,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![Target::Player(p1)],
                 chosen_colors: Vec::new(),
                 x_value: None,

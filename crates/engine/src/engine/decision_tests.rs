@@ -1024,6 +1024,7 @@ fn an_unless_paid_payment_lists_no_mana_abilities_and_refuses_an_action() {
         PlayerActionKind::ActivateAbility {
             source: ObjectId(1),
             ability_index: 0,
+            modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
             x_value: None,

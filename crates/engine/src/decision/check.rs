@@ -56,6 +56,7 @@ pub(super) fn check_action(entries: &[Entry], kind: &PlayerActionKind) -> Result
         PlayerActionKind::ActivateAbility {
             source,
             ability_index,
+            modes,
             targets,
             chosen_colors,
             x_value,
@@ -72,7 +73,7 @@ pub(super) fn check_action(entries: &[Entry], kind: &PlayerActionKind) -> Result
                     _ => None,
                 })
                 .ok_or_else(|| invalid("that ability cannot be activated now"))?;
-            check_activate(entry, targets, chosen_colors, *x_value)
+            check_activate(entry, modes, targets, chosen_colors, *x_value)
         }
         _ => Err(invalid("that action is not offered at a priority Decision")),
     }
@@ -109,10 +110,21 @@ fn check_cast(
             "an X value was announced but this spell's cost has no {X}"
         }));
     }
-    match (&entry.modes, &entry.targets) {
+    check_modes_and_targets(entry.modes.as_ref(), &entry.targets, modes, targets)
+}
+
+/// The announced modes fit the range, and the targets fit the chosen modes'
+/// slots, for a cast or an activation (CR 602.2b, 700.2a).
+fn check_modes_and_targets(
+    range: Option<&ModeRange>,
+    entry_targets: &EntryTargets,
+    modes: &[u32],
+    targets: &[Target],
+) -> Result<(), Rejection> {
+    match (range, entry_targets) {
         (None, EntryTargets::Fixed(slots)) => {
             if !modes.is_empty() {
-                return Err(invalid("this card is not modal"));
+                return Err(invalid("this is not modal"));
             }
             check_targets(slots.iter().collect(), targets)
         }
@@ -130,7 +142,7 @@ fn check_cast(
 
 fn check_modes(range: &ModeRange, modes: &[u32]) -> Result<(), Rejection> {
     if modes.iter().any(|&mode| mode as usize >= range.mode_count) {
-        return Err(invalid("no such mode on this card"));
+        return Err(invalid("no such mode"));
     }
     if modes.len() >= 2 && modes.iter().any(|mode| range.solo_only.contains(mode)) {
         return Err(invalid(
@@ -154,7 +166,7 @@ fn check_modes(range: &ModeRange, modes: &[u32]) -> Result<(), Rejection> {
             let count = modes.len() as u32;
             if count < range.min || count > range.max {
                 return Err(invalid(format!(
-                    "this spell takes between {} and {} modes, got {count}",
+                    "choose between {} and {} modes, got {count}",
                     range.min, range.max
                 )));
             }
@@ -165,6 +177,7 @@ fn check_modes(range: &ModeRange, modes: &[u32]) -> Result<(), Rejection> {
 
 fn check_activate(
     entry: &ActivateEntry,
+    modes: &[u32],
     targets: &[Target],
     chosen_colors: &[crate::types::mana::Color],
     x_value: Option<u32>,
@@ -191,7 +204,7 @@ fn check_activate(
         }
         _ => {}
     }
-    check_targets(entry.targets.iter().collect(), targets)
+    check_modes_and_targets(entry.modes.as_ref(), &entry.targets, modes, targets)
 }
 
 /// Every target is a candidate of some slot, and the count fits the slots.

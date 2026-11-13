@@ -17,7 +17,10 @@ are in `crates/engine/src/decision/entry.rs`. The builders are in `commands/entr
   an `x` flag, `normal` (castable for its normal cost), the valid `alternative_costs` indices and a `buyback` flag.
   `normal` is an addition to ticket 003. A flashback card in the graveyard is listed with `normal: false`.
 - An `ActivateEntry` has the source, the `ability_index` (counting every ability on the source, as `find_ability` does),
-  target slots, `x`, `mana_ability` and an optional `ColorChoice` for "add one mana of any color".
+  an optional `ModeRange`, target slots (`EntryTargets`, per mode for a modal ability), `x`, `mana_ability` and an
+  optional `ColorChoice` for "add one mana of any color". A modal ability is listed when some selection of modes has
+  its targets, as a modal spell is. An opponent-chosen or pawprint activated ability is not listed, since
+  `ActivateAbility` refuses both.
 - A `TargetSlot` has an explicit candidate list (objects by id, then players, then abilities on the stack), `min`, and
   `max` (`None` for "N or more"), and `x_dependent`.
 - A word whose `mana_value` filter mentions X (`ManaValueBound::X`) is `x_dependent`. The entry is listed before the

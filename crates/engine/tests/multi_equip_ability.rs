@@ -152,6 +152,7 @@ fn activate(
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index,
+                modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -172,6 +173,7 @@ fn try_activate(
         kind: PlayerActionKind::ActivateAbility {
             source,
             ability_index,
+            modes: Vec::new(),
             targets,
             chosen_colors: Vec::new(),
             x_value: None,

@@ -254,8 +254,8 @@ pub struct CardDefinition {
     /// Also covers pawprint budgets (CR 700.2i, `ModeChoice::PawprintBudget`),
     /// per-mode additional costs (CR 700.2h, `SpellMode::additional_cost`) and
     /// another player choosing (CR 700.2e, narrowly, see
-    /// `ModeChoice::ExactlyChosenByOpponent`).
-    /// TODO: CR 700.2b, a modal activated or triggered ability as opposed to a modal spell; `RegisteredAbility` has no `modes` field of its own
+    /// `ModeChoice::ExactlyChosenByOpponent`). A modal triggered or activated
+    /// ability keeps its own modes in `RegisteredAbility::modes`.
     pub modes: Vec<SpellMode>,
     /// How many of `modes` must be chosen. Set even when `modes` is empty,
     /// because `CardDefinition` has no `Default`.

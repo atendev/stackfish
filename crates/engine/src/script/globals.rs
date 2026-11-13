@@ -1223,6 +1223,7 @@ pub(crate) fn bind_game_globals(
                 },
                 target: None,
                 operation: None,
+                modes: None,
                 function_zone: None,
                 text: None,
                 registry: Rc::clone(&registry),

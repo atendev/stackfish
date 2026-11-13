@@ -225,6 +225,7 @@ pub(crate) fn validate_command(
         PlayerActionKind::ActivateAbility {
             source,
             ability_index,
+            modes,
             targets,
             chosen_colors,
             x_value,
@@ -234,6 +235,7 @@ pub(crate) fn validate_command(
             actor,
             source,
             ability_index,
+            modes,
             targets,
             chosen_colors,
             x_value,

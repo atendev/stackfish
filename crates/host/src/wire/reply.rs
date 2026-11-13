@@ -116,6 +116,8 @@ pub(crate) enum WireAction {
         source: U64,
         ability_index: u32,
         #[serde(default)]
+        modes: Vec<u32>,
+        #[serde(default)]
         targets: Vec<WireTarget>,
         #[serde(default)]
         chosen_colors: Vec<WireColor>,
@@ -149,12 +151,14 @@ impl WireAction {
             WireAction::ActivateAbility {
                 source,
                 ability_index,
+                modes,
                 targets,
                 chosen_colors,
                 x_value,
             } => Kind::ActivateAbility {
                 source: source.into(),
                 ability_index,
+                modes,
                 targets: targets.into_iter().map(Into::into).collect(),
                 chosen_colors: chosen_colors.into_iter().map(Into::into).collect(),
                 x_value,
@@ -326,5 +330,35 @@ mod tests {
                 vec![ObjectId(4), ObjectId(5)]
             ]
         );
+    }
+
+    // CR 602.2b, 700.2a
+    #[test]
+    fn an_activate_reply_carries_its_modes_and_they_default_to_none() {
+        let action = |extra: serde_json::Value| {
+            let mut action = serde_json::json!({
+                "kind": "activate_ability",
+                "source": "3",
+                "ability_index": 1,
+                "x_value": null,
+            });
+            action
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let wire: WireReply =
+                serde_json::from_value(serde_json::json!({ "kind": "action", "action": action }))
+                    .unwrap();
+            let Reply::Action(action) = wire.into_reply(PlayerId(0)) else {
+                panic!("expected an Action reply");
+            };
+            let stackfish_engine::PlayerActionKind::ActivateAbility { modes, .. } = action.kind
+            else {
+                panic!("expected an activation");
+            };
+            modes
+        };
+        assert_eq!(action(serde_json::json!({ "modes": [1, 0] })), vec![1, 0]);
+        assert!(action(serde_json::json!({})).is_empty());
     }
 }

@@ -1411,13 +1411,13 @@ pub struct RegisteredAbility {
     /// onto the `StackObject` (`PutTriggersApnap`) for `ResolveStackTop` to
     /// recheck (CR 608.2a).
     pub intervening_if: Option<InterveningIfSpec>,
-    /// CR 603.3c, 700.2b: a modal triggered ability's modes, empty for
-    /// non-modal ones. It reuses `SpellMode` and `ModeChoice`, since the shape
-    /// matches a spell's. Only the timing differs: the choice is made as the
-    /// ability goes on the stack (CR 603.3c, `AwaitingTriggerModeChoice` and
-    /// `Engine::submit_trigger_mode_choice`). `SpellMode::additional_cost` is
-    /// never set or read here, since CR 700.2h's cost text belongs to casting
-    /// (CR 601.2b, 601.2f-h).
+    /// CR 603.3c, 700.2a, 700.2b: a modal triggered or activated ability's
+    /// modes, empty for non-modal ones. It reuses `SpellMode` and `ModeChoice`,
+    /// since the shape matches a spell's. A trigger's modes are chosen as it
+    /// goes on the stack (`AwaitingTriggerModeChoice`), and an activated
+    /// ability's in the `ActivateAbility` action (CR 602.2b).
+    /// `SpellMode::additional_cost` is never set or read here, since CR
+    /// 700.2h's cost text belongs to casting (CR 601.2b, 601.2f-h).
     pub modes: Vec<SpellMode>,
     /// Meaningless when `modes` is empty, but must be set since
     /// `RegisteredAbility` has no `Default`.

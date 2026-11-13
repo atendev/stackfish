@@ -343,6 +343,7 @@ fn play_land_self_registered_mana_ability_with_no_cost_resolves_instantly() {
             kind: PlayerActionKind::ActivateAbility {
                 source: new_land_id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -397,6 +398,7 @@ fn activated_mana_ability_with_explicit_tap_cost_pauses_for_payment() {
             kind: PlayerActionKind::ActivateAbility {
                 source: rock,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -468,6 +470,7 @@ fn activated_mana_ability_with_sacrifice_cost_resolves_without_ever_using_the_st
             kind: PlayerActionKind::ActivateAbility {
                 source: rock,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: vec![Color::Blue],
                 x_value: None,

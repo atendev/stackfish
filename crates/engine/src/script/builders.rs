@@ -295,6 +295,35 @@ fn function_zone_name(name: &str) -> Result<ZoneKind, mlua::Error> {
     }
 }
 
+type DecodedOperation = (Option<AbilityEffect>, ScriptHandle);
+
+/// `:Register()`'s check that a triggered or activated ability has exactly one
+/// of `:SetOperation` or `:SetModes`, and no `:SetTarget` beside `:SetModes`. A
+/// modal ability keeps the placeholder operation, since each mode owns its own.
+fn operation_or_modes(
+    operation: Option<DecodedOperation>,
+    modes: Option<(Vec<SpellMode>, ModeChoice)>,
+    has_target: bool,
+    kind: &str,
+) -> mlua::Result<(DecodedOperation, (Vec<SpellMode>, ModeChoice))> {
+    match (operation, modes) {
+        (Some(_), Some(_)) => Err(mlua::Error::RuntimeError(
+            "Register() called with both SetOperation() and SetModes() - each mode owns its \
+             operation"
+                .to_string(),
+        )),
+        (Some(operation), None) => Ok((operation, (Vec::new(), ModeChoice::Exactly(1)))),
+        (None, Some(_)) if has_target => Err(mlua::Error::RuntimeError(
+            "Register() called with both SetTarget() and SetModes() - each mode owns its targets"
+                .to_string(),
+        )),
+        (None, Some(modes)) => Ok(((None, ScriptHandle(0)), modes)),
+        (None, None) => Err(mlua::Error::RuntimeError(format!(
+            "Register() called with no SetOperation() or SetModes() - {kind} needs an operation"
+        ))),
+    }
+}
+
 impl UserData for TriggeredAbilityBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
@@ -352,34 +381,12 @@ impl UserData for TriggeredAbilityBuilder {
             },
         );
         methods.add_method_mut("Register", |_, this, ()| {
-            let ((effect, operation), (modes, mode_choice)) =
-                match (this.operation.clone(), this.modes.clone()) {
-                    (Some(_), Some(_)) => {
-                        return Err(mlua::Error::RuntimeError(
-                            "Register() called with both SetOperation() and SetModes() - each \
-                             mode owns its operation"
-                                .to_string(),
-                        ));
-                    }
-                    (Some(operation), None) => (operation, (Vec::new(), ModeChoice::Exactly(1))),
-                    (None, Some(modes)) => {
-                        if this.target.is_some() {
-                            return Err(mlua::Error::RuntimeError(
-                                "Register() called with both SetTarget() and SetModes() - each \
-                                 mode owns its targets"
-                                    .to_string(),
-                            ));
-                        }
-                        ((None, ScriptHandle(0)), modes)
-                    }
-                    (None, None) => {
-                        return Err(mlua::Error::RuntimeError(
-                            "Register() called with no SetOperation() or SetModes() - a \
-                             triggered ability needs an operation"
-                                .to_string(),
-                        ));
-                    }
-                };
+            let ((effect, operation), (modes, mode_choice)) = operation_or_modes(
+                this.operation.clone(),
+                this.modes.clone(),
+                this.target.is_some(),
+                "a triggered ability",
+            )?;
             // CR 603.3d: the same single-exact-count wrapping as `ActivatedAbilityBuilder::Register`'s `:SetTarget`; nothing consumes "up to N" or `TargetSpec::Multiple` from this builder.
             let target = this.target.clone();
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
@@ -431,11 +438,16 @@ impl UserData for TriggeredAbilityBuilder {
 /// `function(object, source, controller, state) return ... end` (CR 601.2c,
 /// 602.2b). Always a single exact-count target (`count: 1, up_to: false`),
 /// since nothing consumes more.
+///
+/// `:SetModes(choice, modes)` (CR 602.2b, 700.2a) replaces `:SetOperation` and
+/// `:SetTarget` as on the triggered builder. The activation announces the
+/// modes, and per-mode costs, pawprints and an opponent's choice are refused.
 pub(crate) struct ActivatedAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) cost: CostSpec,
     pub(crate) target: Option<TargetSpec>,
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
+    pub(crate) modes: Option<(Vec<SpellMode>, ModeChoice)>,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
     pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) text: Option<String>,
@@ -483,14 +495,32 @@ impl UserData for ActivatedAbilityBuilder {
             this.target = Some(decoded);
             Ok(())
         });
-        methods.add_method_mut("Register", |_, this, ()| {
-            let (effect, operation) = this.operation.clone().ok_or_else(|| {
-                mlua::Error::RuntimeError(
-                    "Register() called with no SetOperation() - an activated ability needs an \
-                     operation"
-                        .to_string(),
+        methods.add_method_mut(
+            "SetModes",
+            |lua, this, (choice, modes): (Value, mlua::Table)| {
+                let choice = decode_mode_choice_value(choice, "SetModes").map_err(to_lua_err)?;
+                let mut registry = this.registry.borrow_mut();
+                let decoded = decode_modes(
+                    lua,
+                    &mut registry,
+                    choice,
+                    modes,
+                    ModeOwner::Activated,
+                    "SetModes",
                 )
-            })?;
+                .map_err(to_lua_err)?;
+                drop(registry);
+                this.modes = Some((decoded, choice));
+                Ok(())
+            },
+        );
+        methods.add_method_mut("Register", |_, this, ()| {
+            let ((effect, operation), (modes, mode_choice)) = operation_or_modes(
+                this.operation.clone(),
+                this.modes.clone(),
+                this.target.is_some(),
+                "an activated ability",
+            )?;
             // `None` means no cost, treated as an empty `CostSpec` (see `RegisteredAbility::cost`); it spares `ActivateAbility` from building the empty `CostSpec`.
             let cost = if this.cost.additional.is_empty() && this.cost.mana.is_none() {
                 None
@@ -501,8 +531,8 @@ impl UserData for ActivatedAbilityBuilder {
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
                 text: this.text.clone(),
-                modes: Vec::new(),
-                mode_choice: ModeChoice::Exactly(1),
+                modes,
+                mode_choice,
                 // The real id is allocated at drain time; see `TriggeredAbilityBuilder::Register`.
                 id: AbilityId(0),
                 source: this.source,

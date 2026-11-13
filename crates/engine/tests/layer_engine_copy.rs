@@ -273,6 +273,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -482,6 +483,7 @@ fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_
             kind: PlayerActionKind::ActivateAbility {
                 source: doppel,
                 ability_index: 1,
+                modes: Vec::new(),
                 targets: vec![Target::Object(target_b)],
                 chosen_colors: Vec::new(),
                 x_value: None,

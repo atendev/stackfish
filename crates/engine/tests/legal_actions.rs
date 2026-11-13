@@ -512,6 +512,7 @@ fn every_listed_entry_is_accepted_by_the_engine() {
             Entry::Activate(activate) => PlayerActionKind::ActivateAbility {
                 source: activate.source,
                 ability_index: activate.ability_index,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

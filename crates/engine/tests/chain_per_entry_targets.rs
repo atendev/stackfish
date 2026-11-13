@@ -694,6 +694,7 @@ fn an_activated_ability_with_two_words_runs_each_entry_on_its_own_word() {
             kind: PlayerActionKind::ActivateAbility {
                 source: id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![Target::Object(BEAR), Target::Player(P1)],
                 chosen_colors: Vec::new(),
                 x_value: None,

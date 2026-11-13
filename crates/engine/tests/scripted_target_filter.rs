@@ -195,6 +195,7 @@ fn try_play_land_and_activate(
         kind: PlayerActionKind::ActivateAbility {
             source: new_land_id,
             ability_index: 0,
+            modes: Vec::new(),
             targets: vec![Target::Object(target)],
             chosen_colors: Vec::new(),
             x_value: None,
@@ -284,6 +285,7 @@ fn a_player_target_is_rejected_outright_by_a_script_filter() {
             kind: PlayerActionKind::ActivateAbility {
                 source: new_land_id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![Target::Player(p1)],
                 chosen_colors: Vec::new(),
                 x_value: None,

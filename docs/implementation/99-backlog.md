@@ -14,7 +14,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 4. Remaining `legal_actions` gaps (ticket 031). Done: target candidates that mention X, a `DeclareBands` Decision, mana abilities through a Payment Decision, and `Target::Ability` candidates for script picks (see `17-legal-actions.md`). Timing grants ("as though it had flash") are built as timing permissions (see `35-timing-permissions.md`).
 5. Done: late join, replay and wire versioning. Tickets 020 (decision), 021 (Seat snapshot), 022 (replay export and card-data version), 023 (`v` bump and outbox bound) and 028 (`HashMap` ordering audit) are closed.
 6. Merged from `phase5/condition-events`: Lua conditions see damage, life, tap/untap, counter, attack, block and mill events, and seven new `Game.Conditions.*` tags ship. See `10-triggers.md`, "Condition events". Still open: `Each*` siblings of the new tags.
-7. Modal builders in Lua. Merged from `phase5/lua-modal-spells-triggers`: `s.modes()` for spells and `:SetModes` for triggered abilities (ticket 114). See `39-lua-modes.md`. Still open: modal activated abilities in `commands/activate.rs` and `:SetModes` on the activated builder.
+7. Modal builders in Lua. `s.modes()` for spells and `:SetModes` for triggered abilities (ticket 114, merged), and `:SetModes` for activated abilities with modes announced in `ActivateAbility` (ticket 115, `phase5/lua-modal-activated`). See `39-lua-modes.md`. Still open: opponent-chosen activated modes (CR 700.2e).
 8. CR 601.2d division of damage or counters among targets, then subtype and exclusion keys on `DestroyAll` filters.
 9. Merged from `phase5/revealed-face-down-producers`: ticket 027, `Revealed` from a revealing search and from amplify, the free-text event rule in `DESIGN.md`, and the `ScriptError` redaction. `face_down` has no producer, since the loader rejects the Manifest, Manifest dread and Cloak cards (item 12).
 10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target and Condescend's X. CR 104.4b loop detection is merged (ticket 029, `30-loop-detection.md`), and so is Echo's control check (ticket 111).
@@ -129,8 +129,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   one, and the four "unsupported kind" rejection tests now use `Cascade` (a keyword ability's effect, not a
   card-text mode). Left open: a mode that owns `up_to` or `at_least` words next to other modes relies on the
   existing backtracking assignment of targets to words (it is not retested per mode); the scenario TOML still has
-  no field for a mode's own effect or target requirement; modal activated abilities (no modes in
-  `commands/activate.rs`); nothing is rejected at cast time any more except the non-mode kinds (`ForEachPlayer`,
+  no field for a mode's own effect or target requirement; nothing is rejected at cast time any more except the non-mode kinds (`ForEachPlayer`,
   `Cascade`, `MadnessCastOrDiscard`, `ReturnSelfWithCounter`, `AddMana*`, `Script`, a nested `Modal`).
 
 - **Modal unless-paid (`phase5/modal-unless-paid`)**: `UnlessPaid` joins `is_modal_resolvable`, for both consequences
@@ -151,8 +150,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Modal abilities (`phase5/modal-abilities`)**: `BecomeCopy` and `Attach` join `is_modal_resolvable`; `SacrificeSelf`,
   `Fight` and `Bite` were already in it. They act on the ability's own source permanent, so they only mean something on
   a modal triggered ability (a spell's source is not a permanent). The vehicle is a modal upkeep trigger
-  (`RegisteredAbility::modes`). **There is no modal activated ability**: `commands/activate.rs` has no modes (its CR
-  700.2b TODO is still open), so that is its own feature. No engine change was needed beyond the gate. Tests:
+  (`RegisteredAbility::modes`). Modal activated abilities came later (see `39-lua-modes.md`, "Activation"). No engine change was needed beyond the gate. Tests:
   `phase5_modal_abilities.rs` (11): sacrifice self before and after a synchronous mode, before a draw; a fight mode
   (the source and the target both take damage) and a bite mode (one-sided), each with `GainLife`; a fight followed by
   a draw (the damage is committed before the draw, checked by ledger order); a become-copy mode (`BecameCopy` logged,

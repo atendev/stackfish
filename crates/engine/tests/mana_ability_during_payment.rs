@@ -137,6 +137,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId) -> Result<(
         kind: PlayerActionKind::ActivateAbility {
             source,
             ability_index: 0,
+            modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
             x_value: None,
@@ -509,6 +510,7 @@ fn activate_reply(player: PlayerId, source: ObjectId) -> decision::Reply {
         kind: PlayerActionKind::ActivateAbility {
             source,
             ability_index: 0,
+            modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
             x_value: None,

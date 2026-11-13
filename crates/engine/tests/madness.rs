@@ -549,6 +549,7 @@ fn a_cost_payment_discard_also_triggers_madness() {
             kind: PlayerActionKind::ActivateAbility {
                 source: outlet,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

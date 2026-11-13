@@ -65,9 +65,10 @@ name.
   last known information (CR 608.2h). Either op can be one mode of a modal spell or trigger, with
   the mode's own `target` in one of the shapes above. A
   scenario TOML `[cards.target_requirement]` cannot declare two words (use the script array form).
-- **Modes have gaps.** A spell's `s.modes()` and a trigger's `:SetModes` work (see
-  [card-script-basics.md](card-script-basics.md#writing-modes)). Not available: modal activated
-  abilities, and so opponent-chosen activated modes (CR 700.2e); modal mana abilities (CR 605.3b);
+- **Modes have gaps.** A spell's `s.modes()` and the `:SetModes` of a trigger or activated ability
+  work (see [card-script-basics.md](card-script-basics.md#writing-modes) and
+  [activated-abilities.md](activated-abilities.md#modal-activated-abilities)). Not available:
+  opponent-chosen modes on an activated ability (CR 700.2e); modal mana abilities (CR 605.3b);
   a mana cost on one mode (CR 700.2h, only `Game.Costs.*` additional costs work); and mode text,
   since a host labels modes from the card text. A function operation, a `Chain` or `ChainEach`
   and a `ForEachPlayer` are solo-only modes: each can be the one chosen mode, but not join another.

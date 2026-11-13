@@ -18,7 +18,8 @@ const RED_GREEN: Deck = &[
     ("crucible_of_worlds", 1),
     ("stone_giant", 1),
     ("cinder_duelist", 1),
-    ("raging_boar", 2),
+    ("raging_boar", 1),
+    ("forked_totem", 1),
     ("ember_pinger", 1),
     ("mirror_sage", 1),
     ("ravenous_ooze", 2),
@@ -575,6 +576,27 @@ return s
     e:Register()"#,
     );
 
+    let forked_totem = with_ability(
+        base(
+            37,
+            "Forked Totem",
+            "{2}",
+            CardTypeSet::ARTIFACT,
+            "{1}, {T}: Choose one: Forked Totem deals 1 damage to target creature; or you gain 2 life.",
+        ),
+        r#"    local e = Game.CreateActivatedAbility(c)
+    e:AddCost(Game.Costs.Mana("{1}"))
+    e:AddCost(Game.Costs.TapSelf)
+    e:SetModes(Game.ModeChoice.Exactly(1), {
+        {
+            target = { type = "object", card_types = { "Creature" }, count = 1 },
+            operation = Game.Ops.Damage(1),
+        },
+        { operation = Game.Ops.GainLife(2) },
+    })
+    e:Register()"#,
+    );
+
     let bone_altar = with_ability(
         base(
             35,
@@ -660,6 +682,7 @@ return s
         .with("crucible_of_worlds", crucible_of_worlds)
         .with("bone_altar", bone_altar)
         .with("crossroads_scout", crossroads_scout)
+        .with("forked_totem", forked_totem)
         .with("future_sight", future_sight)
 }
 
