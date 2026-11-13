@@ -27,11 +27,6 @@ name.
   not a key into an external registry.
 - **No script-backed costs.** `Game.Costs.*` covers every structured cost shape without needing a
   custom function; there's no way to write an arbitrary custom-function cost.
-- **Triggered abilities can't have modes declared from a card script.** The engine itself genuinely
-  supports CR 603.3c's modal choice, but there's no builder method to reach it from Lua yet (modal
-  spells don't have one either — modes in general aren't part of this scripting API yet), only by
-  constructing a `RegisteredAbility` directly in Rust. `:SetTarget` (CR 603.3d) *is* available now —
-  see [triggered-abilities.md](triggered-abilities.md#whats-not-available-on-this-builder).
 - **Alternative costs (flashback/escape-style) and Buyback have no TOML scenario-fixture field.**
   A card script *can* declare both now (`s.alternative_costs()`/`s.buyback_cost()` — see
   [card-script-basics.md](card-script-basics.md#writing-alternative_costs)), but the TOML scenario
@@ -63,13 +58,16 @@ name.
   and, for a two-word fight on a triggered or activated ability, any test (`:SetTarget` takes an array of
   filters now, but only `Game.Ops.ChainEach` is exercised with it). A
   self-source fight or a bite whose creature left the battlefield does nothing instead of using
-  last known information (CR 608.2h). Neither op can be one mode of a multi-mode spell, and a
+  last known information (CR 608.2h). Either op can be one mode of a modal spell or trigger, with
+  the mode's own `target` in one of the shapes above. A
   scenario TOML `[cards.target_requirement]` cannot declare two words (use the script array form).
-- **Modal spells ("choose one —") aren't driven by a card script at all.** The mode is chosen
-  before the spell goes on the stack, as part of casting it — a fundamentally different mechanism
-  from the mid-resolution `Game.SelectTargets`/`Game.MayChoose` asks documented in
-  [targeting-and-choices.md](targeting-and-choices.md). A card with modes is declared through its
-  card definition directly, outside this scripting API.
+- **Modes have gaps.** A spell's `s.modes()` and a trigger's `:SetModes` work (see
+  [card-script-basics.md](card-script-basics.md#writing-modes)). Not available: modal activated
+  abilities, and so opponent-chosen activated modes (CR 700.2e); modal mana abilities (CR 605.3b);
+  a mana cost on one mode (CR 700.2h, only `Game.Costs.*` additional costs work); and mode text,
+  since a host labels modes from the card text. A function operation, a `Chain` or `ChainEach`
+  and a `ForEachPlayer` are solo-only modes: each can be the one chosen mode, but not join another.
+  With three or more players the controller can't yet pick which opponent chooses (CR 700.2e).
 - **`Game.Costs.Other`** (an unstructured, free-text additional cost) doesn't exist — every cost
   has to be one of the structured shapes in [game-constants.md](game-constants.md#gamecosts).
 - **Devour/Amplify quality restrictions.** "Devour [quality] N" (sacrificing only permanents of a

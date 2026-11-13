@@ -116,7 +116,7 @@ fn build_pending_operation(engine: &mut Engine, card: ObjectId, source: &str) {
         .build_operation(source)
         .expect("script should load")
         .expect("script declares an operation");
-    let effect = primitive.or(Some(AbilityEffect::Script(handle)));
+    let effect = Some(AbilityEffect::packed(primitive, handle));
     engine
         .state_mut()
         .objects

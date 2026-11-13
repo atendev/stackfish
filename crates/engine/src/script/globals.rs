@@ -10,7 +10,7 @@ use crate::types::ability::{
     AbilityEffect, ConditionPrimitive, CreatureTokenSpec, EntryControl, InterveningIfPrimitive,
     NamedToken, SearchDestination, TokenSpec, UnlessPaidConsequence,
 };
-use crate::types::card::{CardTypeSet, KeywordSet, Subtype};
+use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, Subtype};
 use crate::types::cost::{AdditionalCost, CostModifierTarget, CostSpec, FilterController};
 use crate::types::counter::CounterKind;
 use crate::types::effect::{
@@ -38,7 +38,7 @@ use super::decode::{
 use super::tags::{
     AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, CounterTag,
     DurationTag, EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, FilterTag,
-    ForEachPlayerTag, HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag,
+    ForEachPlayerTag, HandSizeEffectTag, InterveningIfTag, LayerTag, ModeChoiceTag, OncePerTurnTag,
     OperationResultTag, OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, ResultItem,
     TokenTag, result_items,
 };
@@ -733,6 +733,25 @@ pub(crate) fn bind_game_globals(
         })?,
     )?;
 
+    // CR 700.2a, 700.2d, 700.2e, 700.2i: one constructor per `ModeChoice` variant, checked against the mode list by `decode_modes`.
+    let mode_choice = lua.create_table()?;
+    let choice = |constructor: fn(u32) -> ModeChoice| {
+        lua.create_function(move |_, n: u32| Ok(ModeChoiceTag(constructor(n))))
+    };
+    mode_choice.set("Exactly", choice(ModeChoice::Exactly)?)?;
+    mode_choice.set("UpTo", choice(ModeChoice::UpTo)?)?;
+    mode_choice.set("ExactlyRepeatable", choice(ModeChoice::ExactlyRepeatable)?)?;
+    mode_choice.set("UpToRepeatable", choice(ModeChoice::UpToRepeatable)?)?;
+    mode_choice.set(
+        "ExactlyChosenByOpponent",
+        choice(ModeChoice::ExactlyChosenByOpponent)?,
+    )?;
+    mode_choice.set(
+        "UpToChosenByOpponent",
+        choice(ModeChoice::UpToChosenByOpponent)?,
+    )?;
+    mode_choice.set("PawprintBudget", choice(ModeChoice::PawprintBudget)?)?;
+
     // Only the 4 durations with a drain path are exposed; see `DurationTag`.
     let durations = lua.create_table()?;
     durations.set(
@@ -1135,6 +1154,7 @@ pub(crate) fn bind_game_globals(
                 condition: None,
                 target: None,
                 operation: None,
+                modes: None,
                 intervening_if: None,
                 function_zone: None,
                 text: None,
@@ -1594,6 +1614,7 @@ pub(crate) fn bind_game_globals(
     game.set("Costs", costs)?;
     game.set("Layers", layers)?;
     game.set("Durations", durations)?;
+    game.set("ModeChoice", mode_choice)?;
     game.set("Effects", effects)?;
     game.set("EventFilters", event_filters)?;
     game.set("ReplacementPayloads", replacement_payloads)?;

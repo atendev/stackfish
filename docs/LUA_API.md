@@ -387,6 +387,37 @@ Use these with `:SetDuration` on static abilities or as the `duration` argument 
 | `UntilEndOfCombat` | Until end of current combat. |
 | `Permanent` | Never expires. |
 
+## `Game.ModeChoice.*`
+
+The `choice` of a spell's `s.modes()` or a trigger's `:SetModes`. Each takes a count `n` of at least 1. Only the repeatable forms and `PawprintBudget` may ask for more modes than are declared.
+
+```lua
+Game.ModeChoice.Exactly(n)                  -- CR 700.2a, "choose one", "choose two"
+Game.ModeChoice.UpTo(n)                     -- "choose one or more", "choose up to two"
+Game.ModeChoice.ExactlyRepeatable(n)        -- CR 700.2d, "you may choose the same mode more than once"
+Game.ModeChoice.UpToRepeatable(n)
+Game.ModeChoice.ExactlyChosenByOpponent(n)  -- CR 700.2e, "an opponent chooses one"
+Game.ModeChoice.UpToChosenByOpponent(n)
+Game.ModeChoice.PawprintBudget(n)           -- CR 700.2i, s.modes() only
+```
+
+An opponent-chosen mode has no target and no cost. With two players the one other player chooses.
+
+A mode is a plain table. Only `operation` is required.
+
+```lua
+{
+    target = target_spec,      -- this mode's own targets, same shape as s.target_requirement() or :SetTarget
+    operation = op_or_function,
+    cost = Game.Costs.Sacrifice(filter), -- s.modes() only; any Game.Costs.* value except Mana
+    pawprint = 2,              -- s.modes() only; required and at least 1 under PawprintBudget
+}
+```
+
+A spell returns `{ choice = Game.ModeChoice.Exactly(1), modes = { mode, mode, ... } }` from `s.modes()`. A function operation, a `Game.Ops.Chain` or `ChainEach`, and a `Game.Ops.ForEachPlayer` are solo-only modes: each can be the one chosen mode, but a cast or trigger that picks it beside another mode is refused.
+
+Load errors: fewer than two modes, `n` of 0, `n` above the mode count for `Exactly` or `UpTo`, a mode with no `operation`, an unknown key, a `ChainEach` whose words don't match the mode's `target`, an opponent-chosen mode with a target or cost, a `Game.Costs.Mana` cost, a `pawprint` without `PawprintBudget`, and `cost`, `pawprint` or `PawprintBudget` on a trigger. `s.modes()` beside `s.operation()` or `s.target_requirement()` logs a script error and loads no modes.
+
 ## `Game.EventFilters.*`
 
 Use these with `:SetFilter` on replacement effects.
@@ -472,9 +503,12 @@ e:SetCondition(game_conditions_value)
 e:SetInterveningIf(state_condition_value)
 e:SetOperation(game_ops_value)
 e:SetTarget(target_spec)
+e:SetModes(mode_choice, { mode, mode, ... })
 e:SetText(text)
 e:Register()
 ```
+
+`:Register()` needs exactly one of `:SetOperation` or `:SetModes`. `:SetTarget` beside `:SetModes` is an error, since each mode owns its targets. See [`Game.ModeChoice.*`](#gamemodechoice) for the mode table.
 
 ### `Game.CreateZonePermission`
 

@@ -577,7 +577,7 @@ pub enum AbilityEffect {
     /// does. An entry that owns none acts on its controller. The counts must
     /// sum to the declared word count, which `script::decode::check_chain_words`
     /// checks at registration or spell load.
-    // TODO: a word shared by two entries ("destroy target creature, then its controller gains 3 life"), and a chain inside `ForEachPlayer` or as a mode of a `Modal`
+    // TODO: a word shared by two entries ("destroy target creature, then its controller gains 3 life"), a chain inside `ForEachPlayer`, and a chain mode combined with other modes
     Chain {
         entries: Vec<AbilityEffect>,
         words: Option<Vec<usize>>,
@@ -632,7 +632,9 @@ pub enum AbilityEffect {
     /// `SacrificeRandom`, `DiscardRandom`, `Mill` or `LoseLife` tag (see
     /// `ForEachPlayerTag`). This field is `None` for the function shape, whose
     /// payload is `RegisteredAbility::operation` or `StackObject::operation`,
-    /// and `Some(inner)` for a bare tag.
+    /// and `Some(inner)` for a bare tag. A spell or mode has no `operation`, so
+    /// it carries the function shape packed as `Some(Script(handle))`, which
+    /// `commands::unpack_script_effect` splits back at push (see `packed`).
     ///
     /// Function shape: `engine::resolve::each_player::resolve_for_each_player_effect`
     /// invokes the function once per player in CR 101.4 APNAP order, rebasing
@@ -689,6 +691,21 @@ pub enum AbilityEffect {
     // TODO: "discard your hand" (an unbounded count); `count: u32` covers only a fixed number such as Mind Rot's two
     // TODO: several target words ("target player discards a card and target player discards a card"); single target only
     Discard { count: u32 },
+}
+
+impl AbilityEffect {
+    /// Folds a decoded operation (a `Game.Ops.*` effect or a function handle)
+    /// into the one effect a spell or mode can hold. A function becomes
+    /// `Script(handle)`, and a `ForEachPlayer` function `ForEachPlayer(Some(Script(handle)))`.
+    pub fn packed(primitive: Option<AbilityEffect>, handle: ScriptHandle) -> AbilityEffect {
+        match primitive {
+            Some(AbilityEffect::ForEachPlayer(None)) => {
+                AbilityEffect::ForEachPlayer(Some(Box::new(AbilityEffect::Script(handle))))
+            }
+            Some(effect) => effect,
+            None => AbilityEffect::Script(handle),
+        }
+    }
 }
 
 /// Where `AbilityEffect::Search`'s found cards go, limited to the two common
@@ -1403,7 +1420,6 @@ pub struct RegisteredAbility {
     pub modes: Vec<SpellMode>,
     /// Meaningless when `modes` is empty, but must be set since
     /// `RegisteredAbility` has no `Default`.
-    // TODO: CR 700.2e opponent-chosen modes for a triggered ability; `push_ordered_triggers` doesn't special-case `ExactlyChosenByOpponent` or `UpToChosenByOpponent`, so the controller would be asked instead of the other player
     pub mode_choice: ModeChoice,
     /// CR 405.4: the ability's text, set by a script's `:SetText`. Copied onto
     /// the `StackObject` at push so it outlives the ability.

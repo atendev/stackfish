@@ -615,6 +615,20 @@ impl Engine {
         self.script_runtime.build_operation(source)
     }
 
+    /// A modal spell's modes and mode choice (CR 700.2) from its script's `modes()`.
+    pub fn build_modes(
+        &self,
+        source: &str,
+    ) -> Result<
+        Option<(
+            Vec<crate::types::card::SpellMode>,
+            crate::types::card::ModeChoice,
+        )>,
+        ScriptError,
+    > {
+        self.script_runtime.build_modes(source)
+    }
+
     /// A card's alternative costs (CR 601.2b) from its script's `alternative_costs()`.
     pub fn build_alternative_costs(
         &self,

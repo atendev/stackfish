@@ -293,6 +293,7 @@ by which specific object ends up carrying it:
 |---|---|---|
 | `target_requirement()` | An Aura's "Enchant [quality]" line, or any other spell's own base targeting (CR 601.2c/702.5a) | [targeting-and-choices.md](targeting-and-choices.md#a-cards-own-base-targeting-enchant-etc) |
 | `operation()` | A plain spell's own resolution effect (CR 608.2m) — Armageddon's "Destroy all lands," Shock's "deals 2 damage to any target" | below |
+| `modes()` | A modal spell's "Choose one —" modes and how many to choose (CR 700.2) | below |
 | `alternative_costs()` | Flashback/escape-style alternative costs (CR 601.2b) | below |
 | `buyback_cost()` | Buyback's optional additional cost (CR 702.27a) | below |
 
@@ -335,16 +336,57 @@ end
 return s
 ```
 
-`Engine::new_game` reads `operation()`, `target_requirement()`, `alternative_costs()` and
+`Engine::new_game` reads `operation()`, `target_requirement()`, `modes()`, `alternative_costs()` and
 `buyback_cost()` once for each distinct script and copies the results onto every copy of the card's
-`CardDefinition`. A value already set in Rust (`effect`, `target_requirement`, a non-empty
-`alternative_costs`, a `buyback_cost`) wins over the script. The scenario crate loads only
-`operation()` and `target_requirement()` for its own fixtures. Before this, a host that built cards
+`CardDefinition`. A value already set in Rust (`effect`, `target_requirement`, non-empty `modes`, a
+non-empty `alternative_costs`, a `buyback_cost`) wins over the script. The scenario crate loads only
+`operation()`, `target_requirement()` and `modes()` for its own fixtures. Before this, a host that built cards
 through `new_game` cast a script-only spell with no target and resolved it doing nothing.
 
 A card with no `operation()` function at all keeps the pre-existing default: its effect can only
 be a Rust-native primitive supplied some other way (direct construction today; TOML has no field
 for this either — see [scenario_format.md](../scenario_format.md)).
+
+#### Writing `modes()`
+
+A modal spell ("Choose one —") returns its count and its modes. The player picks the modes as part
+of casting (CR 601.2b), before targets, and each mode declares its own targets:
+
+```lua
+-- Fork in the Road: Choose one — deals 2 damage to target creature; or you gain 3 life.
+local s = {}
+
+function s.modes()
+    return {
+        choice = Game.ModeChoice.Exactly(1),
+        modes = {
+            {
+                target = { type = "object", card_types = { "Creature" }, count = 1 },
+                operation = Game.Ops.Damage(2),
+            },
+            { operation = Game.Ops.GainLife(3) },
+        },
+    }
+end
+
+return s
+```
+
+A mode is `{ target = ..., operation = ..., cost = ..., pawprint = n }`, and only `operation` is
+required. `target` takes the same table or array as `target_requirement()`, or a scripted-legality
+function. `operation` takes a `Game.Ops.*` value or a custom function. `cost` is an additional cost
+paid only when that mode is chosen (CR 700.2h). It takes any `Game.Costs.*` value except `Mana`.
+`pawprint` is the mode's weight under `Game.ModeChoice.PawprintBudget(n)` (CR 700.2i). See
+[game-constants.md](game-constants.md#gamemodechoice) for every `choice` value.
+
+Chosen modes resolve in printed order (CR 700.2c). A mode with several effects uses one
+`Game.Ops.Chain` or `ChainEach`. A function operation, a chain and a `ForEachPlayer` are solo-only
+modes: each can be the one chosen mode, but a cast that picks it beside another mode is refused.
+
+`modes()` can't sit beside `operation()` or `target_requirement()`, since each mode owns its
+targets and operation. A script with both logs a script error and loads no modes. A modal
+triggered ability uses `:SetModes` instead (see
+[triggered-abilities.md](triggered-abilities.md#modal-triggered-abilities)).
 
 #### Writing `alternative_costs()`
 

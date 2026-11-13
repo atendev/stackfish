@@ -311,10 +311,15 @@ impl Engine {
                 .find(|a| a.id == trigger.ability)
         });
         let Some(ability) = ability else { return };
-        let operation = ability.operation;
-        let (target_requirement, effect) = match modal_override {
-            Some(pair) => pair,
-            None => (ability.target.clone(), ability.effect.clone()),
+        let (target_requirement, (operation, effect)) = match modal_override {
+            Some((target, effect)) => (
+                target,
+                commands::unpack_script_effect(effect, ability.operation),
+            ),
+            None => (
+                ability.target.clone(),
+                (ability.operation, ability.effect.clone()),
+            ),
         };
         let intervening_if = ability.intervening_if.clone();
         let ability_text = ability.text.clone();

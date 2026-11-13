@@ -437,7 +437,7 @@ ignore the ability's own target.
   or mid-cost.
 - `Game.SelectTargets`/`Game.MayChoose`/`Game.ChooseN` are for a choice made *during resolution*.
   Choosing a mode for a modal spell ("choose one —") happens before the spell even goes on the
-  stack, as part of casting it — a different mechanism entirely, and not something a card script
-  drives (see [not-available-yet.md](not-available-yet.md)).
+  stack, as part of casting it. A card script declares the modes with `s.modes()` (see
+  [card-script-basics.md](card-script-basics.md#writing-modes)), and the engine asks for them.
 - `Game.Ops.ForEachPlayer`'s bare-tag shape only accepts `SacrificeRandom`/`DiscardRandom`/`Mill`/`LoseLife` — no
   other `Game.Ops.*` primitive can be applied per-player without a wrapping function.

@@ -121,6 +121,9 @@ again in `register_abilities`.
 
 ## What's not covered
 
+- **Modes are not available.** `ManaAbilityBuilder` has no `:SetModes` (CR 605.3b), so a "choose
+  one" mana ability can't be written. For a choice of color use `AddManaChoice`.
+
 - **Triggered mana abilities** are not built, so their mana is never marked snow.
 
 - **Object-specific restrictions** ("only to cast the exiled card") aren't modeled — only a

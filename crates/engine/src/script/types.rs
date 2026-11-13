@@ -207,9 +207,10 @@ pub(crate) struct ScriptRegistry {
 }
 
 impl ScriptRegistry {
+    /// Handles start at 1, because `ScriptHandle(0)` is the "no function" placeholder
+    /// that a `Game.Ops.*` operation carries.
     pub(crate) fn next_script_handle(&mut self) -> ScriptHandle {
-        let handle = ScriptHandle(self.next_handle);
         self.next_handle += 1;
-        handle
+        ScriptHandle(self.next_handle)
     }
 }

@@ -112,6 +112,7 @@ mod legend_world_rule;
 mod loop_draw;
 mod lose_all_abilities;
 mod lua_api_doc_sync;
+mod lua_modes;
 mod lua_namespace_unification;
 mod madness;
 mod mana_ability_during_payment;

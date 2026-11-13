@@ -30,6 +30,7 @@ pub(crate) use attach::{
     legal_aura_entry_candidates, legal_entry_attach_candidates, next_active_player,
     non_eliminated_players, purge_granted_abilities, remap_abilities, retire_object,
 };
+pub(crate) use cast::unpack_script_effect;
 pub(crate) use combat::{
     attacker_entries, band_entries, blocker_entries, damage_split_entries,
     execute_assign_combat_damage, mark_effect_blocked, min_blockers, next_blocking_player,

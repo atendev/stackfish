@@ -792,9 +792,40 @@ pub(crate) fn register_script_target_requirement(
         .target_requirement = requirement;
 }
 
+/// Sets `object`'s `modes` and `mode_choice` from the script's optional `s.modes()`, when the
+/// fixture declared no modes of its own. Built through the engine's runtime so function modes run.
+pub(crate) fn register_script_modes(engine: &mut Engine, object: ObjectId, source: &str) {
+    let declared = engine
+        .state()
+        .objects
+        .get(&object)
+        .is_some_and(|o| !o.definition.modes.is_empty());
+    if declared {
+        return;
+    }
+    let Some((modes, choice)) = engine
+        .build_modes(source)
+        .unwrap_or_else(|e| panic!("script modes() failed to load: {e:?}"))
+    else {
+        return;
+    };
+    let definition = &mut engine
+        .state_mut()
+        .objects
+        .get_mut(&object)
+        .unwrap_or_else(|| panic!("script modes registration: object {object:?} not found"))
+        .definition;
+    assert!(
+        definition.effect.is_none() && definition.target_requirement.is_none(),
+        "script modes() for {object:?} can't be declared beside operation() or target_requirement()"
+    );
+    definition.modes = modes;
+    definition.mode_choice = choice;
+}
+
 /// Sets `object`'s `effect` from the script's optional `s.operation()`, leaving it unchanged
-/// if there is none. A `Game.Ops.*` tag becomes its `AbilityEffect` variant; a custom function
-/// becomes `AbilityEffect::Script` so the cast can carry the handle onto the stack object.
+/// if there is none. `AbilityEffect::packed` folds a custom function into the effect so the cast
+/// can carry the handle onto the stack object.
 pub(crate) fn register_script_operation(engine: &mut Engine, object: ObjectId, source: &str) {
     let Some((primitive, handle)) = engine
         .build_operation(source)
@@ -802,7 +833,7 @@ pub(crate) fn register_script_operation(engine: &mut Engine, object: ObjectId, s
     else {
         return;
     };
-    let effect = primitive.or(Some(AbilityEffect::Script(handle)));
+    let effect = Some(AbilityEffect::packed(primitive, handle));
     engine
         .state_mut()
         .objects

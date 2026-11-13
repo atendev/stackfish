@@ -560,17 +560,7 @@ pub(super) fn apply_cast_spell(
         modal_effect
     };
 
-    // A script custom-function operation (`s.operation()` returning a Lua function
-    // and not a `Game.Ops.*` tag) arrives packed as `AbilityEffect::Script(handle)`
-    // on `CardDefinition.effect` (see that variant for why). It is unpacked into
-    // StackObject's `operation`/`effect` pair so `ResolveStackTop` treats it like a
-    // triggered or activated ability's script fallback: `None` on `effect` makes it
-    // run `operation`. Every other shape keeps the `ScriptHandle(0)` placeholder,
-    // and only the Rust-native `effect` can resolve those.
-    let (operation, effect) = match effect {
-        Some(AbilityEffect::Script(handle)) => (handle, None),
-        other => (ScriptHandle(0), other),
-    };
+    let (operation, effect) = unpack_script_effect(effect, ScriptHandle(0));
 
     state.stack.push(StackObject::new(
         new_id,
@@ -632,4 +622,25 @@ pub(super) fn apply_cast_spell(
         }),
         battlefield_entries: Vec::new(),
     })
+}
+
+/// Splits an effect made by `AbilityEffect::packed` back into the
+/// `StackObject` `operation` and `effect` pair, so `None` on `effect` makes
+/// `ResolveStackTop` run the function. Every other effect keeps `operation`.
+pub(crate) fn unpack_script_effect(
+    effect: Option<AbilityEffect>,
+    operation: ScriptHandle,
+) -> (ScriptHandle, Option<AbilityEffect>) {
+    match effect {
+        Some(AbilityEffect::Script(handle)) => (handle, None),
+        Some(AbilityEffect::ForEachPlayer(Some(inner)))
+            if matches!(*inner, AbilityEffect::Script(_)) =>
+        {
+            let AbilityEffect::Script(handle) = *inner else {
+                unreachable!("matched above")
+            };
+            (handle, Some(AbilityEffect::ForEachPlayer(None)))
+        }
+        other => (operation, other),
+    }
 }

@@ -196,7 +196,6 @@ impl Engine {
                 // on since no path leads back to a `StepStatus` error.
                 // Skipped for `ScriptHandle(0)`, the placeholder `cast.rs` leaves on
                 // vanilla spells, which would log a false failure every time.
-                // TODO: `cast.rs` collapses a `ForEachPlayer`-wrapped handle to `ScriptHandle(0)`, so a plain custom function that is the runtime's first handle reads as the placeholder
                 let outcome = self.script_runtime.invoke_operation(
                     top.operation,
                     &mut self.state,

@@ -162,13 +162,30 @@
 ---@field exile_on_leaving_stack? boolean -- default false; CR 702.34a Flashback
 ---@field escape? boolean                 -- default false; true only for CR 702.138 Escape
 
--- The `s.register_abilities`/`s.target_requirement`/`s.operation`/`s.alternative_costs`/
+-- One mode of `s.modes()` or `:SetModes` (CR 700.2). Only `operation` is required. A function
+-- operation, a `Game.Ops.Chain`/`ChainEach` and a `ForEachPlayer` are solo-only modes: each can be
+-- the one chosen mode but can't join another. `cost` and `pawprint` are for `s.modes()` only, and
+-- `pawprint` (at least 1) is required on every mode under `Game.ModeChoice.PawprintBudget`.
+---@class Mode
+---@field target? TargetRequirementTable|TargetRequirementTable[]|ScriptedTargetFn  -- this mode's own targets (CR 700.2c)
+---@field operation GameOpsValue|OperationFn
+---@field cost? GameCostsValue                -- CR 700.2h, not Game.Costs.Mana
+---@field pawprint? integer                   -- CR 700.2i
+
+---@alias ModeChoice GameModeChoiceValue
+
+---@class ModesDeclaration
+---@field choice ModeChoice
+---@field modes Mode[]                        -- two or more (CR 700.2)
+
+-- The `s.register_abilities`/`s.target_requirement`/`s.operation`/`s.modes`/`s.alternative_costs`/
 -- `s.buyback_cost` shape every card script module returns. Not a real global — write your own
 -- `local s = {}` matching this shape. See docs/lua/card-script-basics.md.
 ---@class CardScript
 ---@field register_abilities? fun(c: ObjectId)
 ---@field target_requirement? fun(): TargetRequirementTable|TargetRequirementTable[]  -- an array declares one entry per "target" word, in card order (Prey Upon)
 ---@field operation? fun(): GameOpsValue|nil
+---@field modes? fun(): ModesDeclaration   -- a modal spell; not beside operation or target_requirement
 ---@field alternative_costs? fun(): AlternativeCostEntry[]
 ---@field buyback_cost? fun(): string    -- a mana-cost string, e.g. "{2}" — parsed via Game.Costs.Mana's grammar
 
@@ -179,6 +196,7 @@
 -------------------------------------------------------------------------------
 
 ---@class GameConditionsValue
+---@class GameModeChoiceValue
 ---@class GameCounterValue
 ---@alias CounterKind string|GameCounterValue
 ---@class GameAffectedValue
@@ -238,7 +256,14 @@ function TriggeredAbilityBuilder:SetOperation(value) end
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetTarget(value) end
 
---- Finalizes and registers the ability. Requires :SetOperation.
+--- CR 603.3c, 700.2: a modal trigger. Replaces :SetOperation and :SetTarget, since each mode owns
+--- its targets and operation. Modes take no `cost` or `pawprint`, and `choice` can't be PawprintBudget.
+---@param choice ModeChoice
+---@param modes Mode[]
+---@return TriggeredAbilityBuilder
+function TriggeredAbilityBuilder:SetModes(choice, modes) end
+
+--- Finalizes and registers the ability. Requires exactly one of :SetOperation or :SetModes.
 function TriggeredAbilityBuilder:Register() end
 
 ---@class StaticAbilityBuilder
@@ -318,6 +343,7 @@ function ActivatedAbilityBuilder:SetTarget(value) end
 --- Finalizes and registers the ability. Requires :SetOperation.
 function ActivatedAbilityBuilder:Register() end
 
+-- No :SetModes: a mana ability can't be modal here (CR 605.3b). Use AddManaChoice for a color choice.
 ---@class ManaAbilityBuilder
 local ManaAbilityBuilder = {}
 
@@ -1127,6 +1153,37 @@ function GameEffectsTable.AddColor(letter) end
 ---@field Permanent GameDurationsValue   -- default
 
 -------------------------------------------------------------------------------
+-- Game.ModeChoice.* — the `choice` of s.modes() and :SetModes. n is at least 1, and only the
+-- repeatable forms may exceed the mode count (CR 700.2a, 700.2d, 700.2e, 700.2i).
+-------------------------------------------------------------------------------
+
+---@class GameModeChoiceTable
+local GameModeChoiceTable = {}
+---@param n integer
+---@return GameModeChoiceValue
+function GameModeChoiceTable.Exactly(n) end
+---@param n integer
+---@return GameModeChoiceValue
+function GameModeChoiceTable.UpTo(n) end
+---@param n integer
+---@return GameModeChoiceValue
+function GameModeChoiceTable.ExactlyRepeatable(n) end
+---@param n integer
+---@return GameModeChoiceValue
+function GameModeChoiceTable.UpToRepeatable(n) end
+--- The one other player chooses (two players only). Every mode is targetless and costless.
+---@param n integer
+---@return GameModeChoiceValue
+function GameModeChoiceTable.ExactlyChosenByOpponent(n) end
+---@param n integer
+---@return GameModeChoiceValue
+function GameModeChoiceTable.UpToChosenByOpponent(n) end
+--- s.modes() only. Every mode needs `pawprint`; the chosen weights must fit `n`.
+---@param n integer
+---@return GameModeChoiceValue
+function GameModeChoiceTable.PawprintBudget(n) end
+
+-------------------------------------------------------------------------------
 -- Game.EventFilters.* — :SetFilter (replacement effects).
 -------------------------------------------------------------------------------
 
@@ -1236,6 +1293,7 @@ function GameTokensTable.CopyOf(objectId, exceptions) end
 ---@field Affected GameAffectedTable
 ---@field Ops GameOpsTable
 ---@field Costs GameCostsTable
+---@field ModeChoice GameModeChoiceTable
 ---@field Layers GameLayersTable
 ---@field Effects GameEffectsTable
 ---@field Durations GameDurationsTable

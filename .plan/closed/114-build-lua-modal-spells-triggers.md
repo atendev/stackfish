@@ -3,7 +3,7 @@ id: 114
 title: Build Lua modal spells and triggers
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: [90]
 claimed: false
 ---
@@ -28,4 +28,8 @@ Build the spell and trigger half of what 090 decided: the mode-table decoder, th
 
 ## Resolution
 
-<Filled in at close.>
+Built in auto mode, then merged. A spell declares `s.modes()` and a triggered ability `:SetModes(choice, modes)`, both read by `decode_modes`, with `Game.ModeChoice.*` tags for the seven `ModeChoice` variants and every load error from 090, including a count of 0 for every variant. Handles start at 1, which moved the replay pin, so `BEHAVIOUR_REV` is 10.
+
+A `ForEachPlayer(function)` is packed into the effect as `ForEachPlayer(Some(Script(handle)))` by `AbilityEffect::packed` and split by `commands::unpack_script_effect`. That fixed spell functions working only at handle 0 and allows a solo `ForEachPlayer` mode, so the `misc_effects.rs` handle TODO went. A per-mode cost takes only an additional `Game.Costs.*` value, and a mana cost is a load error with a TODO (CR 700.2h). A mode's `target` decodes like `s.target_requirement()`, or like `:SetTarget` for a function. No fight or bite shape check is called, since 148 is open.
+
+Tests are in `lua_modes.rs` (17) and `scenarios/scripting/script_modes.toml`. Fork in the Road and Crossroads Scout are the proof cards. The docs and stub are updated, and `docs/implementation/39-lua-modes.md` holds the notes. 115 builds the activated half.

@@ -215,7 +215,7 @@ fn script_only_definition(definition_id: u64, name: &str, source: &str) -> CardD
         .build_operation(source)
         .expect("script should load")
         .expect("script declares an operation");
-    let effect = effect.or(Some(AbilityEffect::Script(handle)));
+    let effect = Some(AbilityEffect::packed(effect, handle));
     let target_requirement = runtime
         .build_target_requirement(source)
         .expect("script should load");
@@ -370,7 +370,7 @@ fn casting_a_script_declared_custom_function_operation_spell_resolves_via_the_sc
         .build_operation(CUSTOM_GAIN_ONE_LIFE_SCRIPT)
         .expect("script should load")
         .expect("script declares an operation");
-    let effect = primitive.or(Some(AbilityEffect::Script(handle)));
+    let effect = Some(AbilityEffect::packed(primitive, handle));
     engine
         .state_mut()
         .objects
