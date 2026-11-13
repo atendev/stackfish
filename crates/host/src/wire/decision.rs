@@ -181,7 +181,8 @@ fn target_words(
             let divide_total = divide_totals.get(i).copied().flatten();
             WireTargetWord {
                 min,
-                // CR 601.2d: each target takes at least 1 of the total.
+                // CR 601.2d
+                // A word can't take more targets than the total it divides.
                 max: match (max, divide_total) {
                     (Some(max), Some(total)) => Some(max.min(total)),
                     (None, total) => total,

@@ -382,7 +382,7 @@ mod tests {
     }
 
     // CR 601.2d
-    // A Seat written before `division` existed omits it on every reply that can carry it.
+    // A Seat that omits `division` on any reply that can carry it still parses.
     #[test]
     fn a_division_is_read_where_sent_and_defaults_to_none() {
         let reply = |value: serde_json::Value| {

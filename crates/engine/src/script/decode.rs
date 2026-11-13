@@ -1461,7 +1461,7 @@ pub(crate) fn check_chain_words(
 
 /// CR 601.2d: a divided effect splits its total among the targets of one
 /// "target" word. A total of 0, a word that must take more targets than the
-/// total, or a player target for divided counters (`CounterAdded` names an
+/// total, or a non-object word for divided counters (`CounterAdded` names an
 /// object) is a load error.
 pub(crate) fn check_divided_shape(
     effect: Option<&AbilityEffect>,
@@ -1491,7 +1491,10 @@ pub(crate) fn check_divided_shape(
         ));
     }
     if matches!(effect, AbilityEffect::DividedCounters { .. })
-        && !matches!(requirement.filter, TargetFilter::Object { .. })
+        && !matches!(
+            requirement.filter,
+            TargetFilter::Object { .. } | TargetFilter::Script(_)
+        )
     {
         return refuse("of counters can only target objects");
     }
@@ -1842,6 +1845,19 @@ mod chain_word_tests {
             total: 2,
         };
         assert!(check_divided_shape(Some(&counters), Some(&exactly(1))).is_err());
+        let on = |filter| {
+            TargetSpec::Primitive(TargetRequirement {
+                filter,
+                count: 2,
+                up_to: true,
+                at_least: false,
+                exclude_source: false,
+            })
+        };
+        let scripted = on(TargetFilter::Script(crate::types::ids::ScriptHandle(0)));
+        assert!(check_divided_shape(Some(&counters), Some(&scripted)).is_ok());
+        let ability = on(TargetFilter::Ability);
+        assert!(check_divided_shape(Some(&counters), Some(&ability)).is_err());
         assert!(check_divided_shape(Some(&AbilityEffect::Damage(5)), Some(&exactly(9))).is_ok());
     }
 }

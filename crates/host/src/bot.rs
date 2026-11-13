@@ -135,7 +135,7 @@ type Announced = (Vec<u64>, Vec<Value>, Vec<u64>);
 
 // CR 601.2d
 // The engine wants an empty division unless some word splits among two or more targets.
-fn division(shares: Vec<u64>) -> Vec<u64> {
+fn flat_division(shares: Vec<u64>) -> Vec<u64> {
     if shares.iter().any(|&s| s > 0) {
         shares
     } else {
@@ -698,7 +698,7 @@ impl Bot {
                 Value::Array(self.sample(&candidates, count))
             })
             .collect();
-        json!({ "kind": "targets", "targets": lists, "division": division(shares) })
+        json!({ "kind": "targets", "targets": lists, "division": flat_division(shares) })
     }
 
     /// Targets for each slot in order, and the flat division across them.
@@ -715,7 +715,7 @@ impl Bot {
             shares.extend(self.split(&slot["divide_total"], count));
             chosen.extend(self.sample(&candidates, count));
         }
-        Some((chosen, division(shares)))
+        Some((chosen, flat_division(shares)))
     }
 
     fn word_count(&mut self, word: &Value, min: usize, len: usize) -> usize {
@@ -729,7 +729,7 @@ impl Bot {
 
     // CR 601.2d
     // One share per target, each at least 1. A word with no total or fewer than
-    // two targets gives 0s, which `division` drops when no word divides.
+    // two targets gives 0s, which `flat_division` drops when no word divides.
     fn split(&mut self, total: &Value, count: usize) -> Vec<u64> {
         let Some(total) = total.as_u64().filter(|_| count >= 2) else {
             return vec![0; count];

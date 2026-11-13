@@ -745,7 +745,7 @@
   chunk on its own. Chain and function effects never carry one.
 - Load errors (`check_divided_shape`, at spell declarations, both ability builders' `:Register()` and each mode in
   `decode_modes`): a total of 0, a spec that is not one `Primitive` word, a word minimum above the total, and
-  `DividedCounters` on a word that can target a player.
+  `DividedCounters` on a word that can target a player or an ability.
 - Entries: `TargetSlot.divide_total` and `ReplyShape::Targets.divide_totals` give the total per word, and `max` is
   capped at it. `legal_actions` lists no compositions.
 - Resolution: `divided_shares` pairs each legal target with its entry, or the whole total for a lone target.
@@ -762,5 +762,5 @@
 - Open (TODOs): an X total, untargeted division at resolution (CR 608.2d), divided amounts in Chain and function
   ops, a copy's new division (CR 707.10c), `Game.Ops.CastSpell` announces no division, `:SetTarget` and mode words
   take one target, and "one, two or three targets" has no minimum of one.
-- Verify: `tests/divided_effects.rs` (12), `validate_division` unit tests, `wire::reply` division defaults,
+- Verify: `tests/divided_effects.rs` (13), `validate_division` unit tests, `wire::reply` division defaults,
   `replay.rs` divided round trip, and the proof seed loop's divided cast.

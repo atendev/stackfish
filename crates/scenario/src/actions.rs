@@ -56,6 +56,7 @@ pub(crate) fn to_player_action(
                 alternative_cost: None,
                 // TODO: a TOML field for paying buyback
                 pay_buyback: false,
+                // TODO: a TOML field for the announced division (CR 601.2d)
                 division: Vec::new(),
             },
         ),

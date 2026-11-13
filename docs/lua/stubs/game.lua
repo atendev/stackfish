@@ -930,7 +930,7 @@ function GameOpsTable.Counters(counter, amount) end
 
 --- CR 601.2d, "distribute `total` `counter` counters among" the targets of the ability's one target word. `counter` is
 --- as for Ops.Counters. The split is announced with the targets, as for Ops.DividedDamage, with the same load errors,
---- and a player or any-target word is also a load error since the counters go on objects only.
+--- and a player, any-target or ability word is also a load error since the counters go on objects only.
 ---@param counter CounterKind
 ---@param total integer
 ---@return GameOpsValue

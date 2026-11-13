@@ -333,6 +333,46 @@ fn two_divided_modes_are_checked_and_resolved_separately() {
     );
 }
 
+/// 2 damage to one creature, then 3 damage divided among up to three creatures.
+fn undivided_then_divided_mode() -> CardDefinition {
+    CardDefinition {
+        modes: vec![
+            mode(creature_word(1, false), AbilityEffect::Damage(2)),
+            mode(creature_word(3, true), AbilityEffect::DividedDamage(3)),
+        ],
+        ..two_divided_modes()
+    }
+}
+
+// CR 601.2d, 700.2d
+#[test]
+fn a_share_outside_a_divided_word_of_two_or_more_targets_is_rejected() {
+    let bad: [(&[ObjectId], Vec<u32>); 4] = [
+        (&[A, B, C], vec![1, 2, 1]),
+        (&[A, B, C], vec![2, 1]),
+        (&[A, B], vec![0, 3]),
+        (&[A, B], vec![0, 0]),
+    ];
+    for (targets, division) in bad {
+        let mut engine = Engine::new(state_with(undivided_then_divided_mode()));
+        assert!(
+            cast(&mut engine, vec![0, 1], targets, division.clone()).is_err(),
+            "{targets:?} with {division:?} must be rejected"
+        );
+    }
+    let mut engine = Engine::new(state_with(undivided_then_divided_mode()));
+    cast(&mut engine, vec![0, 1], &[A, B, C], vec![0, 2, 1]).expect("a split on the divided word");
+    resolve(&mut engine);
+    assert_eq!(
+        (damage(&engine, A), damage(&engine, B), damage(&engine, C)),
+        (2, 2, 1)
+    );
+    let mut engine = Engine::new(state_with(undivided_then_divided_mode()));
+    cast(&mut engine, vec![0, 1], &[A, B], Vec::new()).expect("a lone divided target");
+    resolve(&mut engine);
+    assert_eq!((damage(&engine, A), damage(&engine, B)), (2, 3));
+}
+
 // CR 601.2d, 700.2d
 #[test]
 fn a_lone_target_in_a_divided_mode_takes_a_zero_entry_and_the_whole_total() {

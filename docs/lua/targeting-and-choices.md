@@ -227,7 +227,7 @@ a modal spell a divided mode owns one target word and its split covers that word
 
 The divided effect needs exactly one target word, and that word's minimum count can't be above the
 total. A total of 0, an array of words, a word with `count = 4` and no `up_to` for a total of 3,
-`DividedCounters` on a word that can target a player, and a divided op inside `Chain`, `ChainEach` or
+`DividedCounters` on a word that can target a player or an ability, and a divided op inside `Chain`, `ChainEach` or
 a custom function are all load errors.
 
 "One, two, or three targets" has no minimum of one, since a word has no lower bound beside `up_to`,

@@ -306,7 +306,6 @@ impl Engine {
             // pipeline so prevention and lifelink apply. Never combat damage (CR 903.10a).
             // CR 608.2b: individually illegal targets are skipped, and each legal target
             // takes the full amount.
-            // CR 608.2b: each legal target takes the full amount.
             Some(AbilityEffect::Damage(amount)) => {
                 self.resolve_damage_effect(top, legal_targets, *amount, events)
             }

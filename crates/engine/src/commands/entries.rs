@@ -451,7 +451,8 @@ fn target_slots(
                 } else {
                     requirement.count
                 },
-                // CR 601.2d: each target takes at least 1 of the total.
+                // CR 601.2d
+                // A word can't take more targets than the total it divides.
                 max: match (requirement.at_least, divide_total) {
                     (true, total) => total,
                     (false, Some(total)) => Some(requirement.count.min(total)),
