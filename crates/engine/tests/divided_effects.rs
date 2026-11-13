@@ -559,3 +559,267 @@ fn a_bad_divided_shape_is_a_load_error() {
         a:SetOperation(Game.Ops.DividedDamage(2)) a:Register() end }";
     assert!(load_error(two_words).contains("exactly one target word"));
 }
+
+const LUA_LAND: &str = "Lua Rod";
+
+fn lua_land_engine(body: &str) -> Engine {
+    let mut state = two_player_main_phase_state();
+    for (id, name) in [(A, "A"), (B, "B")] {
+        state.objects.insert(
+            id,
+            card_object(id, tough_creature(name), P1, ZoneKind::Battlefield),
+        );
+        state
+            .zone_mut(ZoneKind::Battlefield, None)
+            .unwrap()
+            .push_bottom(id);
+    }
+    let land = CardDefinition {
+        script_ref: ScriptReference::Inline(format!(
+            "return {{ register_abilities = function(c) {body} end }}"
+        )),
+        ..minimal_card_definition(
+            25,
+            LUA_LAND,
+            "lua_rod",
+            ManaCost {
+                symbols: Vec::new(),
+            },
+            CardTypeSet::LAND,
+        )
+    };
+    state
+        .objects
+        .insert(CARD, card_object(CARD, land, P0, ZoneKind::Hand));
+    state
+        .zone_mut(ZoneKind::Hand, Some(P0))
+        .unwrap()
+        .push_bottom(CARD);
+    Engine::new(state)
+}
+
+fn play_lua_land(engine: &mut Engine) -> StepStatus {
+    engine
+        .submit_action(PlayerAction {
+            player: P0,
+            kind: PlayerActionKind::PlayLand { card: CARD },
+        })
+        .expect("p0 holds priority and the land is in hand");
+    drain(engine)
+}
+
+fn lua_land_id(engine: &Engine) -> ObjectId {
+    *engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .iter()
+        .find(|&&id| engine.state().objects[&id].definition.name == LUA_LAND)
+        .expect("the land is on the battlefield")
+}
+
+fn lua_target(engine: &Engine) -> Option<TargetSpec> {
+    let source = lua_land_id(engine);
+    engine
+        .state()
+        .abilities
+        .iter()
+        .find(|ability| ability.source == source)
+        .expect("the land registered an ability")
+        .target
+        .clone()
+}
+
+fn lua_activate(
+    engine: &mut Engine,
+    modes: Vec<u32>,
+    division: Vec<u32>,
+) -> Result<(), ActionError> {
+    let source = lua_land_id(engine);
+    engine.submit_action(PlayerAction {
+        player: P0,
+        kind: PlayerActionKind::ActivateAbility {
+            source,
+            ability_index: 0,
+            modes,
+            targets: vec![Target::Object(A), Target::Object(B)],
+            division,
+            chosen_colors: Vec::new(),
+            x_value: None,
+        },
+    })
+}
+
+// CR 601.2d, 602.2b
+#[test]
+fn a_lua_activated_ability_divides_counters_among_its_counted_word() {
+    let mut engine = lua_land_engine(
+        "local a = Game.CreateActivatedAbility(c) \
+         a:SetTarget({ type = 'object', card_types = { 'Creature' }, count = 3, up_to = true }) \
+         a:SetOperation(Game.Ops.DividedCounters('PlusOnePlusOne', 3)) a:Register()",
+    );
+    play_lua_land(&mut engine);
+    assert!(lua_activate(&mut engine, Vec::new(), vec![2, 2]).is_err());
+    lua_activate(&mut engine, Vec::new(), vec![1, 2]).expect("a valid split");
+    resolve(&mut engine);
+    assert_eq!(
+        (plus_counters(&engine, A), plus_counters(&engine, B)),
+        (1, 2)
+    );
+}
+
+// CR 601.2d, 603.3d
+#[test]
+fn a_lua_trigger_divides_damage_among_its_counted_word() {
+    let mut engine = lua_land_engine(
+        "local e = Game.CreateTriggeredAbility(c) e:SetCondition(Game.Conditions.Enters) \
+         e:SetTarget({ type = 'any', count = 3, up_to = true }) \
+         e:SetOperation(Game.Ops.DividedDamage(3)) e:Register()",
+    );
+    let status = play_lua_land(&mut engine);
+    assert!(
+        matches!(status, StepStatus::AwaitingTriggerTargets { .. }),
+        "{status:?}"
+    );
+    let targets = vec![Target::Object(A), Target::Object(B)];
+    assert!(
+        engine
+            .submit_trigger_targets(targets.clone(), vec![3])
+            .is_err()
+    );
+    engine
+        .submit_trigger_targets(targets, vec![2, 1])
+        .expect("a valid split");
+    drain(&mut engine);
+    pass_both_and_drain(&mut engine, P0, P1);
+    assert_eq!((damage(&engine, A), damage(&engine, B)), (2, 1));
+}
+
+// CR 601.2d, 602.2b
+#[test]
+fn a_lua_mode_word_takes_its_count_and_a_division() {
+    let mut engine = lua_land_engine(
+        "local a = Game.CreateActivatedAbility(c) \
+         a:SetModes(Game.ModeChoice.Exactly(1), { \
+           { target = { type = 'object', card_types = { 'Creature' }, count = 2 }, \
+             operation = Game.Ops.DividedCounters('PlusOnePlusOne', 3) }, \
+           { operation = Game.Ops.DrawCards(1) } }) \
+         a:Register()",
+    );
+    play_lua_land(&mut engine);
+    lua_activate(&mut engine, vec![0], vec![2, 1]).expect("a valid split");
+    resolve(&mut engine);
+    assert_eq!(
+        (plus_counters(&engine, A), plus_counters(&engine, B)),
+        (2, 1)
+    );
+}
+
+fn word_of(spec: Option<TargetSpec>) -> TargetRequirement {
+    match spec {
+        Some(TargetSpec::Primitive(word)) => word,
+        other => panic!("expected one word, got {other:?}"),
+    }
+}
+
+fn counts(word: &TargetRequirement) -> (u32, bool, bool, bool) {
+    (word.count, word.up_to, word.at_least, word.exclude_source)
+}
+
+fn registered_target(body: &str) -> Option<TargetSpec> {
+    let mut engine = lua_land_engine(body);
+    play_lua_land(&mut engine);
+    lua_target(&engine)
+}
+
+fn activated_with_target(target: &str) -> String {
+    format!(
+        "local a = Game.CreateActivatedAbility(c) a:SetTarget({target}) \
+         a:SetOperation(Game.Ops.Tap) a:Register()"
+    )
+}
+
+// CR 601.2c, 115.4, 115.6
+#[test]
+fn set_target_reads_the_count_keys_and_defaults_count_to_one() {
+    let bare = word_of(registered_target(&activated_with_target(
+        "{ type = 'object' }",
+    )));
+    assert_eq!(counts(&bare), (1, false, false, false));
+    let keyed = word_of(registered_target(&activated_with_target(
+        "{ type = 'object', count = 2, up_to = true, exclude_source = true }",
+    )));
+    assert_eq!(counts(&keyed), (2, true, false, true));
+    let any_number = word_of(registered_target(&activated_with_target(
+        "{ type = 'object', count = 0, at_least = true }",
+    )));
+    assert_eq!(counts(&any_number), (0, false, true, false));
+    let scripted = word_of(registered_target(&activated_with_target(
+        "{ count = 2, filter = function() return true end }",
+    )));
+    assert!(matches!(scripted.filter, TargetFilter::Script(_)));
+    assert_eq!(scripted.count, 2);
+    let function = word_of(registered_target(&activated_with_target(
+        "function() return true end",
+    )));
+    assert_eq!(counts(&function), (1, false, false, false));
+    let Some(TargetSpec::Multiple(words)) = registered_target(&activated_with_target(
+        "{ { type = 'object', count = 2 }, { type = 'player' } }",
+    )) else {
+        panic!("expected two words");
+    };
+    assert_eq!(
+        words.iter().map(counts).collect::<Vec<_>>(),
+        vec![(2, false, false, false), (1, false, false, false)]
+    );
+}
+
+// CR 601.2c
+#[test]
+fn a_function_mode_word_stays_one_exact_target() {
+    let mut engine = lua_land_engine(
+        "local a = Game.CreateActivatedAbility(c) \
+         a:SetModes(Game.ModeChoice.Exactly(1), { \
+           { target = function() return true end, operation = Game.Ops.Tap }, \
+           { operation = Game.Ops.DrawCards(1) } }) \
+         a:Register()",
+    );
+    play_lua_land(&mut engine);
+    let source = lua_land_id(&engine);
+    let ability = engine
+        .state()
+        .abilities
+        .iter()
+        .find(|ability| ability.source == source)
+        .unwrap();
+    assert_eq!(
+        counts(&word_of(ability.modes[0].target_requirement.clone())),
+        (1, false, false, false)
+    );
+}
+
+// CR 601.2c, 115.6
+#[test]
+fn a_bad_set_target_count_is_a_load_error() {
+    let ability = |target: &str| {
+        format!(
+            "return {{ register_abilities = function(c) {} end }}",
+            activated_with_target(target)
+        )
+    };
+    assert!(load_error(&ability("{ type = 'triggering', count = 2 }")).contains("triggering"));
+    assert!(load_error(&ability("{ type = 'object', count = -1 }")).contains("whole number"));
+    assert!(
+        load_error(&ability(
+            "{ type = 'object', count = 2, up_to = true, at_least = true }"
+        ))
+        .contains("both up_to and at_least")
+    );
+    assert!(load_error(&ability("{ type = 'object', count = 0 }")).contains("at_least = true"));
+    let too_many = "return { register_abilities = function(c) \
+        local a = Game.CreateActivatedAbility(c) \
+        a:SetTarget({ type = 'any', count = 4 }) a:SetOperation(Game.Ops.DividedDamage(3)) \
+        a:Register() end }";
+    assert!(load_error(too_many).contains("at least 1 of 3"));
+}

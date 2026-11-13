@@ -764,3 +764,16 @@
   take one target, and "one, two or three targets" has no minimum of one.
 - Verify: `tests/divided_effects.rs` (13), `validate_division` unit tests, `wire::reply` division defaults,
   `replay.rs` divided round trip, and the proof seed loop's divided cast.
+
+## Slice: lua-target-word-counts (branch `phase5/lua-target-word-counts`)
+
+- Scope: a Lua `:SetTarget` table word takes `count`, `up_to`, `at_least` and `exclude_source`, with `count`
+  defaulting to 1, so a Lua activated or triggered ability can divide among several targets (CR 601.2c, 601.2d).
+- `script/decode.rs`: `decode_requirement_keys` reads the count keys once for `target_requirement()`, mode
+  tables (`count` required) and `:SetTarget` (`count` defaults to 1). A bare function word stays exactly one
+  target. Load errors: `up_to` with `at_least`, `count = 0` without `at_least`, and any count key on a
+  `"triggering"` word.
+- Mode `target` tables already took a count through `decode_target_spec_table`. Nothing below the decoder
+  changed: `TargetSlot`, `validate_targets`, the trigger target pause and the division checks already read any
+  `TargetRequirement`.
+- Verify: the Lua cases in `tests/divided_effects.rs`.

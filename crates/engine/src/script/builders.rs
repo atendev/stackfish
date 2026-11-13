@@ -240,12 +240,10 @@ fn validate_replacement_filter_payload_pairing(
 /// `AbilityKind::Triggered`), not a settable field. `:SetCost` is not bound,
 /// since triggered abilities have no activation cost.
 ///
-/// `:SetTarget(table | function)` mirrors `ActivatedAbilityBuilder::SetTarget`:
-/// the same `decode_target_filter_value` and a single exact count
-/// (`count: 1, up_to: false`, no multi-word form). It makes CR 603.3d's
-/// target-selection pause (`AwaitingTriggerTargets`,
-/// `Engine::submit_trigger_targets`) reachable from a card script. Omitting it
-/// means `target: None`.
+/// `:SetTarget(table | function)` mirrors `ActivatedAbilityBuilder::SetTarget`
+/// through `decode_target_spec_value`. It makes CR 603.3d's target-selection
+/// pause (`AwaitingTriggerTargets`, `Engine::submit_trigger_targets`)
+/// reachable from a card script. Omitting it means `target: None`.
 ///
 /// `:SetModes(choice, modes)` (CR 603.3c, 700.2) replaces `:SetOperation` and
 /// `:SetTarget`, since each mode owns its targets and operation. The ability
@@ -387,7 +385,6 @@ impl UserData for TriggeredAbilityBuilder {
                 this.target.is_some(),
                 "a triggered ability",
             )?;
-            // CR 603.3d: the same single-exact-count wrapping as `ActivatedAbilityBuilder::Register`'s `:SetTarget`; nothing consumes "up to N" or `TargetSpec::Multiple` from this builder.
             let target = this.target.clone();
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             check_divided_shape(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
@@ -432,13 +429,13 @@ impl UserData for TriggeredAbilityBuilder {
 ///
 /// `kind` is implied by the constructor, as for `TriggeredAbilityBuilder`.
 ///
-/// `:SetTarget(table | function)` goes through `decode_target_filter_value`. A
+/// `:SetTarget(table | function)` goes through `decode_target_spec_value`. A
 /// table decodes the flat option-bag `Game.SelectTargets` uses, such as
 /// `{type="object", card_types={"Creature"}, controller="you"}` (Equip,
-/// CR 702.6a). A bare function becomes `TargetFilter::Script`, such as
+/// CR 702.6a), plus `target_requirement()`'s count keys with `count`
+/// defaulting to 1. A bare function becomes `TargetFilter::Script`, such as
 /// `function(object, source, controller, state) return ... end` (CR 601.2c,
-/// 602.2b). Always a single exact-count target (`count: 1, up_to: false`),
-/// since nothing consumes more.
+/// 602.2b), with exactly one target.
 ///
 /// `:SetModes(choice, modes)` (CR 602.2b, 700.2a) replaces `:SetOperation` and
 /// `:SetTarget` as on the triggered builder. The activation announces the

@@ -411,7 +411,7 @@ A mode is a plain table. Only `operation` is required.
 
 ```lua
 {
-    target = target_spec,      -- this mode's own targets, same shape as s.target_requirement() or :SetTarget
+    target = target_spec,      -- this mode's own targets, same shape as s.target_requirement() (count required), or a function
     operation = op_or_function,
     cost = Game.Costs.Sacrifice(filter), -- s.modes() only; any Game.Costs.* value except Mana
     pawprint = 2,              -- s.modes() only; required and at least 1 under PawprintBudget
@@ -597,6 +597,8 @@ end
 ```
 
 Two target words return an array of requirement tables. A `filter` key may hold a function for scripted predicates.
+
+`:SetTarget(target_spec)` on an activated or triggered ability takes the same table or array, but `count` is optional and defaults to 1. It also takes a bare predicate function, which is exactly one target. A mode's `target` takes the `s.target_requirement()` shape, so `count` is required there. A word with both `up_to` and `at_least`, or with `count = 0` and no `at_least`, is a load error. A `"triggering"` word takes no count keys.
 
 ## Mid-resolution choices
 

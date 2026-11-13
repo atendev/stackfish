@@ -50,6 +50,12 @@ is the spell or ability that caused the trigger, filled in automatically with no
 player, and the trigger is dropped if that spell or ability has already left the stack (CR 603.3d).
 `Game.RegisterWard` uses it.
 
+A `:SetTarget` table also takes the count keys of `s.target_requirement()` (`count`, `up_to`,
+`at_least` and `exclude_source`, below). `count` defaults to 1 there, so `{ type = "player" }` is one
+target. `{ type = "object", count = 2, up_to = true }` is "up to two target permanents". A
+`"triggering"` word takes none of the count keys. Two shapes are load errors everywhere: a word with
+both `up_to` and `at_least`, and a word with `count = 0` but no `at_least`.
+
 ```lua
 -- "Target opponent" - no script needed for this common case.
 function s.target_requirement()
@@ -225,15 +231,21 @@ At resolution each legal target takes its own share. An illegal target's share i
 targets keep theirs (CR 608.2b). All shares are dealt in one batch before state-based actions run. In
 a modal spell a divided mode owns one target word and its split covers that word only.
 
+An activated or triggered ability divides the same way. Put the count keys on its `:SetTarget` table:
+
+```lua
+-- "{2}, {T}: This deals 3 damage divided as you choose among one, two, or three targets."
+a:SetTarget({ type = "any", count = 3, up_to = true })
+a:SetOperation(Game.Ops.DividedDamage(3))
+```
+
 The divided effect needs exactly one target word, and that word's minimum count can't be above the
 total. A total of 0, an array of words, a word with `count = 4` and no `up_to` for a total of 3,
 `DividedCounters` on a word that can target a player or an ability, and a divided op inside `Chain`, `ChainEach` or
 a custom function are all load errors.
 
 "One, two, or three targets" has no minimum of one, since a word has no lower bound beside `up_to`,
-so `up_to = true` also accepts no targets. A `:SetTarget` word and a mode's `target` word always take
-one target, so for now only a non-modal spell's `s.target_requirement()` gives a divided effect more
-than one target.
+so `up_to = true` also accepts no targets.
 
 ## Scripted targeting predicates
 
