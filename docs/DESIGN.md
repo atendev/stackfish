@@ -232,7 +232,8 @@ original plan:
 - Lua scripts get only the `table`, `string`, `utf8`, `math` and `coroutine` libraries, with
   `math.random`, `math.randomseed`, `dofile` and `loadfile` removed, so no script reads a clock, an
   unseeded random source or a file. Lua 5.4 still seeds string hashes per state, so `pairs` order over
-  string keys can differ between runs (TODO).
+  string keys can differ between runs (TODO). The engine's key checks sort the bad keys they name,
+  and a script must not let `pairs` order decide an outcome (`docs/lua/card-script-basics.md`).
 - CR 104.4b loop draws live in `crates/engine/src/engine/loop_watch.rs`. A priority pass is forced
   when the passer has nothing but `Pass` and mana abilities whose whole cost is `{T}`. Each forced
   pass with a non-empty stack fingerprints the state, and a fingerprint seen before ends the game as
@@ -245,7 +246,8 @@ original plan:
   walks a `HashMap` and produces events or ids must still sort first.
 - A keyed collection that is walked is a `BTreeMap` or `BTreeSet`, and a `HashMap` is only read by
   key. Clippy enforces this with `iter_over_hash_type` and `disallowed-methods` in the root
-  `clippy.toml`. `into_iter`, `extend` and `from_iter` are not caught. Details in
+  `clippy.toml`, which also refuses `HashSet` set algebra and `extract_if` on both hash types.
+  `into_iter`, `extend` and `from_iter` are not caught. Details in
   `docs/implementation/28-module-layout.md`.
 
 ## Open questions
