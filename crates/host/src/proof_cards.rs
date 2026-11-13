@@ -23,7 +23,8 @@ const RED_GREEN: Deck = &[
     ("ember_pinger", 1),
     ("mirror_sage", 1),
     ("ravenous_ooze", 2),
-    ("shock", 2),
+    ("shock", 1),
+    ("arc_lightning", 1),
     ("fork_in_the_road", 1),
     ("rampant_growth", 2),
     ("raise_militia", 2),
@@ -394,6 +395,18 @@ pub fn proof_cards() -> FixtureCardSource {
         Some(r#"{ type = "any", count = 1 }"#),
         "Game.Ops.Damage(2)",
     );
+    // TODO: "one, two or three targets" has no minimum of one, since a TargetRequirement has no lower bound beside up_to (CR 601.2c)
+    let arc_lightning = spell(
+        base(
+            38,
+            "Arc Lightning",
+            "{2}{R}",
+            sorcery,
+            "Arc Lightning deals 3 damage divided as you choose among one, two, or three targets.",
+        ),
+        Some(r#"{ type = "any", count = 3, up_to = true }"#),
+        "Game.Ops.DividedDamage(3)",
+    );
     let divination = spell(
         base(14, "Divination", "{2}{U}", sorcery, "Draw two cards."),
         None,
@@ -662,6 +675,7 @@ return s
         .with("ember_pinger", ember_pinger)
         .with("mirror_sage", mirror_sage)
         .with("shock", shock)
+        .with("arc_lightning", arc_lightning)
         .with("divination", divination)
         .with("counterspell", counterspell)
         .with("bounce", bounce)

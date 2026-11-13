@@ -146,6 +146,10 @@ pub(crate) struct WireStackEntry {
     pub owner: u32,
     pub controller: u32,
     pub targets: Vec<WireTarget>,
+    /// CR 601.2d: the announced shares, index for index with `targets`. Empty when
+    /// the effect is undivided or has one target, which takes the whole total.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub division: Vec<u32>,
     pub chosen_modes: Vec<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x_value: Option<u32>,

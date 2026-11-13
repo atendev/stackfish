@@ -380,4 +380,61 @@ mod tests {
         assert_eq!(action(serde_json::json!({ "modes": [1, 0] })), vec![1, 0]);
         assert!(action(serde_json::json!({})).is_empty());
     }
+
+    // CR 601.2d
+    // A Seat written before `division` existed omits it on every reply that can carry it.
+    #[test]
+    fn a_division_is_read_where_sent_and_defaults_to_none() {
+        let reply = |value: serde_json::Value| {
+            serde_json::from_value::<WireReply>(value)
+                .unwrap()
+                .into_reply(PlayerId(0))
+        };
+        let cast = |extra: serde_json::Value| {
+            let mut action = serde_json::json!({
+                "kind": "cast_spell",
+                "card": "7",
+                "targets": [{ "kind": "player", "id": 1 }, { "kind": "object", "id": "4" }],
+                "x_value": null,
+                "alternative_cost": null,
+            });
+            action
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let Reply::Action(action) =
+                reply(serde_json::json!({ "kind": "action", "action": action }))
+            else {
+                panic!("expected an Action reply");
+            };
+            let stackfish_engine::PlayerActionKind::CastSpell { division, .. } = action.kind else {
+                panic!("expected a cast");
+            };
+            division
+        };
+        assert_eq!(cast(serde_json::json!({ "division": [2, 1] })), vec![2, 1]);
+        assert!(cast(serde_json::json!({})).is_empty());
+
+        let targets = |extra: serde_json::Value| {
+            let mut value = serde_json::json!({ "kind": "targets", "targets": [[{ "kind": "player", "id": 1 }]] });
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let Reply::Targets { division, .. } = reply(value) else {
+                panic!("expected a Targets reply");
+            };
+            division
+        };
+        assert_eq!(targets(serde_json::json!({ "division": [3] })), vec![3]);
+        assert!(targets(serde_json::json!({})).is_empty());
+
+        let Reply::MayCast(Some(cast)) = reply(serde_json::json!({
+            "kind": "may_cast",
+            "cast": { "targets": [], "x_value": null },
+        })) else {
+            panic!("expected a cast");
+        };
+        assert!(cast.division.is_empty());
+    }
 }

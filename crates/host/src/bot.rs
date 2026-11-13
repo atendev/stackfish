@@ -115,6 +115,7 @@ pub struct Bot {
     mechanics_seen: BTreeMap<String, usize>,
     costs_paid: BTreeMap<String, usize>,
     modal_activations: usize,
+    divided_casts: usize,
     /// The mana cost of each card the bot has seen, by object id. A move event
     /// carries the identity of every card its Seat may see, including the
     /// Seat's own hand.
@@ -127,6 +128,19 @@ pub struct Bot {
 
 fn id_number(id: &Value) -> Option<u64> {
     id.as_str()?.parse().ok()
+}
+
+/// Chosen modes, flat targets and the flat division.
+type Announced = (Vec<u64>, Vec<Value>, Vec<u64>);
+
+// CR 601.2d
+// The engine wants an empty division unless some word splits among two or more targets.
+fn division(shares: Vec<u64>) -> Vec<u64> {
+    if shares.iter().any(|&s| s > 0) {
+        shares
+    } else {
+        Vec::new()
+    }
 }
 
 impl Bot {
@@ -148,6 +162,7 @@ impl Bot {
             mechanics_seen: BTreeMap::new(),
             costs_paid: BTreeMap::new(),
             modal_activations: 0,
+            divided_casts: 0,
             costs: HashMap::new(),
             seats: BTreeSet::new(),
             record: false,
@@ -194,6 +209,12 @@ impl Bot {
     /// it; the bot never branches on it.
     pub fn modal_activations(&self) -> usize {
         self.modal_activations
+    }
+
+    /// How many casts announcing a division the Session accepted. Tests read it;
+    /// the bot never branches on it.
+    pub fn divided_casts(&self) -> usize {
+        self.divided_casts
     }
 
     /// The events `seat` received, in order. Empty unless `recording` was set.
@@ -518,6 +539,11 @@ impl Bot {
         {
             self.modal_activations += 1;
         }
+        if action["kind"] == "cast_spell"
+            && action["division"].as_array().is_some_and(|d| !d.is_empty())
+        {
+            self.divided_casts += 1;
+        }
         if let Some(payments) = reply.value["plan"]["payments"].as_array() {
             for kind in payments.iter().filter_map(|p| p["kind"].as_str()) {
                 *self.costs_paid.entry(kind.to_string()).or_default() += 1;
@@ -661,32 +687,58 @@ impl Bot {
 
     fn targets(&mut self, decision: &Value) -> Value {
         let words = decision["words"].as_array().cloned().unwrap_or_default();
+        let mut shares = Vec::new();
         let lists: Vec<Value> = words
             .iter()
             .map(|word| {
                 let candidates = word["candidates"].as_array().cloned().unwrap_or_default();
                 let min = word["min"].as_u64().unwrap_or(0) as usize;
-                let max = word["max"].as_u64().map(|m| m as usize);
-                let count = self.count(min, max, candidates.len());
+                let count = self.word_count(word, min, candidates.len());
+                shares.extend(self.split(&word["divide_total"], count));
                 Value::Array(self.sample(&candidates, count))
             })
             .collect();
-        json!({ "kind": "targets", "targets": lists })
+        json!({ "kind": "targets", "targets": lists, "division": division(shares) })
     }
 
-    fn slot_targets(&mut self, slots: &[Value]) -> Option<Vec<Value>> {
+    /// Targets for each slot in order, and the flat division across them.
+    fn slot_targets(&mut self, slots: &[Value]) -> Option<(Vec<Value>, Vec<u64>)> {
         let mut chosen = Vec::new();
+        let mut shares = Vec::new();
         for slot in slots {
             let candidates = slot["candidates"].as_array().cloned().unwrap_or_default();
             let min = slot["min"].as_u64().unwrap_or(0) as usize;
             if candidates.len() < min {
                 return None;
             }
-            let max = slot["max"].as_u64().map(|m| m as usize);
-            let count = self.count(min, max, candidates.len());
+            let count = self.word_count(slot, min, candidates.len());
+            shares.extend(self.split(&slot["divide_total"], count));
             chosen.extend(self.sample(&candidates, count));
         }
-        Some(chosen)
+        Some((chosen, division(shares)))
+    }
+
+    fn word_count(&mut self, word: &Value, min: usize, len: usize) -> usize {
+        let max = word["max"].as_u64().map(|m| m as usize);
+        let max = match word["divide_total"].as_u64() {
+            Some(total) => Some(max.unwrap_or(len).min(total as usize)),
+            None => max,
+        };
+        self.count(min, max, len)
+    }
+
+    // CR 601.2d
+    // One share per target, each at least 1. A word with no total or fewer than
+    // two targets gives 0s, which `division` drops when no word divides.
+    fn split(&mut self, total: &Value, count: usize) -> Vec<u64> {
+        let Some(total) = total.as_u64().filter(|_| count >= 2) else {
+            return vec![0; count];
+        };
+        let mut shares = vec![1; count];
+        for _ in count as u64..total {
+            shares[self.rng.below(count)] += 1;
+        }
+        shares
     }
 
     fn x_value(&mut self, cost: Option<&str>, can_pay: &dyn Fn(&str, u32) -> bool) -> Value {
@@ -703,21 +755,22 @@ impl Bot {
         } else {
             entry["alternative_costs"].get(0)?.clone()
         };
-        let (modes, targets) = self.announce(entry)?;
+        let (modes, targets, division) = self.announce(entry)?;
         Some(json!({
             "kind": "cast_spell",
             "card": entry["card"],
             "modes": modes,
             "targets": targets,
+            "division": division,
             "x_value": x_value,
             "alternative_cost": alternative,
             "pay_buyback": false,
         }))
     }
 
-    /// Modes and targets for a cast entry or `may_cast` options: both carry
-    /// `modes` (absent when not modal) and `targets` in the same form.
-    fn announce(&mut self, entry: &Value) -> Option<(Vec<u64>, Vec<Value>)> {
+    /// Modes, targets and division for a cast entry or `may_cast` options: both
+    /// carry `modes` (absent when not modal) and `targets` in the same form.
+    fn announce(&mut self, entry: &Value) -> Option<Announced> {
         self.announce_from(
             entry,
             &entry["targets"]["slots"],
@@ -732,7 +785,7 @@ impl Bot {
         entry: &Value,
         fixed: &Value,
         per_mode: &Value,
-    ) -> Option<(Vec<u64>, Vec<Value>)> {
+    ) -> Option<Announced> {
         let (modes, slots): (Vec<u64>, Vec<Value>) = match entry["modes"].as_object() {
             None => (Vec::new(), fixed.as_array().cloned().unwrap_or_default()),
             Some(range) => {
@@ -756,8 +809,8 @@ impl Bot {
             }
         };
         // TODO: pick X and targets together; an `x_dependent` slot lists targets legal for some X, so the engine can reject the pair
-        let targets = self.slot_targets(&slots)?;
-        Some((modes, targets))
+        let (targets, division) = self.slot_targets(&slots)?;
+        Some((modes, targets, division))
     }
 
     // CR 702.35a, CR 702.85a
@@ -765,13 +818,18 @@ impl Bot {
     fn may_cast(&mut self, decision: &Value) -> Value {
         let options = &decision["options"];
         let cast = if options.is_object() && self.rng.chance(3, 4) {
-            self.announce(options).map(|(modes, targets)| {
+            self.announce(options).map(|(modes, targets, division)| {
                 let x_value = if options["x"] == true {
                     json!(0)
                 } else {
                     Value::Null
                 };
-                json!({ "modes": modes, "targets": targets, "x_value": x_value })
+                json!({
+                    "modes": modes,
+                    "targets": targets,
+                    "division": division,
+                    "x_value": x_value,
+                })
             })
         } else {
             None
@@ -782,7 +840,7 @@ impl Bot {
     // CR 602.2b, 700.2a
     // A modal ability lists its slots per mode under `mode_targets`.
     fn activate(&mut self, entry: &Value) -> Option<Value> {
-        let (modes, targets) =
+        let (modes, targets, division) =
             self.announce_from(entry, &entry["targets"], &entry["mode_targets"])?;
         let chosen_colors: Vec<Value> = match entry["color_choice"].as_object() {
             None => Vec::new(),
@@ -805,6 +863,7 @@ impl Bot {
             "ability_index": entry["ability_index"],
             "modes": modes,
             "targets": targets,
+            "division": division,
             "chosen_colors": chosen_colors,
             "x_value": x_value,
         }))
