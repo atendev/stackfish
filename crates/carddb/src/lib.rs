@@ -8,11 +8,36 @@ mod types_line;
 
 use rusqlite::Connection;
 use stackfish_engine::{
-    CardDefinition, KeywordSet, ManaCost, ModeChoice, PTValue, ScriptReference,
+    CardDefinition, CardTypeSet, ManaCost, ModeChoice, PTValue, ScriptReference, Subtype,
 };
 use std::path::Path;
 
 pub use types_line::TypeLineError;
+
+/// A card kind the engine does not model and the loader therefore refuses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NonGoalKind {
+    Planeswalker,
+    Battle,
+    Saga,
+    Class,
+    /// Has Manifest, Manifest dread or Cloak, which put a card onto the battlefield face down.
+    FaceDownProducer,
+}
+
+impl std::fmt::Display for NonGoalKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            NonGoalKind::Planeswalker => "planeswalker",
+            NonGoalKind::Battle => "battle",
+            NonGoalKind::Saga => "saga",
+            NonGoalKind::Class => "Class",
+            NonGoalKind::FaceDownProducer => {
+                "face-down producer (Manifest, Manifest dread or Cloak)"
+            }
+        })
+    }
+}
 
 /// Everything that can go wrong turning a DB row into a `CardDefinition`.
 /// Unrecognized input is always an error, never a guess.
@@ -23,6 +48,11 @@ pub enum CardLoadError {
     NotFound(String),
     /// `cards.has_multiple_faces = 1`; multi-face cards are a `DESIGN.md` non-goal.
     MultiFace(String),
+    /// The card is a planeswalker, battle, saga, Class or face-down producer; see `NonGoalKind`.
+    NonGoal {
+        name: String,
+        kind: NonGoalKind,
+    },
     /// `cards.mana_cost` failed `ManaCost::parse`.
     ManaCost(stackfish_engine::ManaCostParseError),
     /// `cards.type_line` held a type this engine does not model.
@@ -38,6 +68,12 @@ impl std::fmt::Display for CardLoadError {
                 write!(
                     f,
                     "{name:?} has multiple faces (DFC/split/flip/adventure) - not supported, see DESIGN.md non-goals"
+                )
+            }
+            CardLoadError::NonGoal { name, kind } => {
+                write!(
+                    f,
+                    "{name:?} is a {kind} - not supported, see DESIGN.md non-goals"
                 )
             }
             CardLoadError::ManaCost(e) => write!(f, "mana_cost parse error: {}", e.0),
@@ -75,9 +111,9 @@ impl CardDb {
     /// fails wherever `load_by_oracle_id` fails, with the same error.
     pub fn record_by_oracle_id(&self, oracle_id: &str) -> Result<CardRecord, CardLoadError> {
         let row = self.fetch_row("oracle_id", oracle_id)?;
-        self.build_definition(&row)?;
+        let (_, keywords) = self.build_with_keyword_names(&row)?;
         Ok(CardRecord {
-            keywords: self.keyword_names(&row.oracle_id)?,
+            keywords,
             script: self.active_script(&row.oracle_id)?,
             oracle_id: row.oracle_id,
             name: row.name,
@@ -136,6 +172,14 @@ impl CardDb {
     }
 
     fn build_definition(&self, row: &CardRow) -> Result<CardDefinition, CardLoadError> {
+        Ok(self.build_with_keyword_names(row)?.0)
+    }
+
+    // Returns the keyword names too, so `record_by_oracle_id` does not query them twice.
+    fn build_with_keyword_names(
+        &self,
+        row: &CardRow,
+    ) -> Result<(CardDefinition, Vec<String>), CardLoadError> {
         if row.has_multiple_faces {
             return Err(CardLoadError::MultiFace(row.name.clone()));
         }
@@ -153,10 +197,18 @@ impl CardDb {
             subtypes,
         } = types_line::parse(&row.type_line).map_err(CardLoadError::TypeLine)?;
 
-        let keywords = self.load_keywords(&row.oracle_id)?;
+        let keyword_names = self.keyword_names(&row.oracle_id)?;
+        if let Some(kind) = non_goal_kind(&card_types, &subtypes, &keyword_names) {
+            return Err(CardLoadError::NonGoal {
+                name: row.name.clone(),
+                kind,
+            });
+        }
+
+        let keywords = keywords::parse(&keyword_names);
         let script_ref = self.load_script_ref(&row.oracle_id)?;
 
-        Ok(CardDefinition {
+        let definition = CardDefinition {
             definition_id: hash_oracle_id(&row.oracle_id),
             oracle_id: Some(row.oracle_id.clone()),
             name: row.name.clone(),
@@ -180,11 +232,8 @@ impl CardDb {
             effect: None,
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
-        })
-    }
-
-    fn load_keywords(&self, oracle_id: &str) -> Result<KeywordSet, CardLoadError> {
-        Ok(keywords::parse(&self.keyword_names(oracle_id)?))
+        };
+        Ok((definition, keyword_names))
     }
 
     fn keyword_names(&self, oracle_id: &str) -> Result<Vec<String>, CardLoadError> {
@@ -303,6 +352,32 @@ struct CardRow {
     loyalty: Option<String>,
     defense: Option<String>,
     has_multiple_faces: bool,
+}
+
+// The first match wins. Saga and Class are subtypes, so only the card type bits of the
+// part left of the em dash reach `card_types`. `keywords::parse` drops the producer names.
+fn non_goal_kind(
+    card_types: &CardTypeSet,
+    subtypes: &[Subtype],
+    keyword_names: &[String],
+) -> Option<NonGoalKind> {
+    let has_subtype = |name: &str| subtypes.iter().any(|s| s.0 == name);
+    if card_types.contains(CardTypeSet::PLANESWALKER) {
+        Some(NonGoalKind::Planeswalker)
+    } else if card_types.contains(CardTypeSet::BATTLE) {
+        Some(NonGoalKind::Battle)
+    } else if has_subtype("Saga") {
+        Some(NonGoalKind::Saga)
+    } else if has_subtype("Class") {
+        Some(NonGoalKind::Class)
+    } else if keyword_names
+        .iter()
+        .any(|k| matches!(k.as_str(), "Manifest" | "Manifest dread" | "Cloak"))
+    {
+        Some(NonGoalKind::FaceDownProducer)
+    } else {
+        None
+    }
 }
 
 /// An integer is `Fixed`; anything else (`"*"`, `"*+1"`) is characteristic-defining.

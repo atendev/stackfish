@@ -38,7 +38,7 @@ pub(crate) fn parse(type_line: &str) -> Result<ParsedTypeLine, TypeLineError> {
             return Err(TypeLineError(format!(
                 "unrecognized/unsupported type {word:?} in type_line {type_line:?} - not in this \
                  engine's CardTypeSet/SupertypeSet (casual-format types like Plane/Phenomenon/\
-                 Scheme/Vanguard/Conspiracy/Dungeon/Class are an explicit DESIGN.md non-goal)"
+                 Scheme/Vanguard/Conspiracy/Dungeon are an explicit DESIGN.md non-goal)"
             )));
         }
     }

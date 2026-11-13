@@ -12,6 +12,10 @@ The rule used here, applied only to the kinds named as non-goals in `DESIGN.md` 
 
 Recommendation: reject at load, as a new `CardLoadError` variant checked in `build_definition` next to `MultiFace`, for planeswalkers, battles, sagas, Class cards and the 73 face-down producers. The 73 include Roalesk, Prime Specimen and Sleuth Instructor, which have both Disguise and Cloak. Allow the other 229 morph, megamorph and disguise cards to load, and record the missing face-down cast in the backlog. Cards that make face-down permanents without a keyword, such as Ixidron, break silently too but are not caught by the keyword check, so they load until open question 6 is answered. This departs from backlog item 12, which lists "face-down permanents" as cards to skip or reject. Item 12 needs amending if this rule is adopted, or the user can choose to reject all 302.
 
+## Outcome
+
+The loader now rejects planeswalkers, battles, sagas, Class cards and the Manifest, Manifest dread and Cloak producers with `CardLoadError::NonGoal`. The 229 Morph, Megamorph and Disguise cards, Ixidron-type cards and the unflagged layouts load. Against the real database 71 of the 73 producers reach this check; the other 2 stop at `MultiFace` or `TypeLine` first. Backlog item 12 holds the remaining gaps.
+
 ## Where the non-goals are written
 
 - `docs/DESIGN.md:15-20` ("Non-goals (v1)"): "No planeswalkers, Sagas, Battles, double-faced cards, split/flip/adventure cards, Class cards in the initial card-type implementation — but the data model and layer/effect systems must leave room for them (stubbed type slots, not a wall)."

@@ -1,7 +1,7 @@
 //! End-to-end tests against a fixture SQLite DB holding only the tables the loader reads.
 
 use rusqlite::Connection;
-use stackfish_carddb::CardDb;
+use stackfish_carddb::{CardDb, CardLoadError, NonGoalKind};
 use stackfish_engine::{CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
 use std::path::PathBuf;
 
@@ -69,6 +69,54 @@ fn fixture_db_path() -> PathBuf {
 
         INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, power, toughness, has_multiple_faces)
         VALUES ('tarmogoyf-1', 'Tarmogoyf', '{1}{G}', 'Creature — Lhurgoyf', '*/1+*', '*', '1+*', 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('pw-1', 'Jace, the Mind Sculptor', '{2}{U}{U}', 'Legendary Planeswalker — Jace', '', '3', 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('pw-art-1', 'The Aetherspark', '{4}', 'Legendary Artifact Planeswalker — Equipment', '', '4', 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('battle-1', 'Occupation of Kulrath', '{3}{R}', 'Battle — Control Point', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('saga-1', 'The Eldest Reborn', '{4}{B}', 'Enchantment — Saga', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('class-1', 'Artificer Class', '{1}{U}', 'Enchantment — Class', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('morph-1', 'Venomspout Brackus', '{3}{G}{G}', 'Creature — Beast', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('mega-1', 'Ire Shaman', '{1}{R}', 'Creature — Orc Shaman', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('disguise-1', 'Mistway Spy', '{2}{U}', 'Creature — Merfolk Detective', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('cloak-1', 'Veiled Ascension', '{2}{U}', 'Enchantment', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('dread-1', 'Manifest Dread', '{1}{G}', 'Sorcery', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('both-1', 'Roalesk, Prime Specimen', '{2}{G}{U}', 'Legendary Creature — Human Mutant', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('meld-1', 'Bruna, the Fading Light', '{5}{W}{W}', 'Legendary Creature — Angel Horror', '', NULL, 0);
+
+        INSERT INTO cards (oracle_id, name, mana_cost, type_line, oracle_text, loyalty, has_multiple_faces)
+        VALUES ('ixidron-1', 'Ixidron', '{3}{U}{U}', 'Creature — Illusion', '', NULL, 0);
+
+        INSERT INTO keywords (name) VALUES ('Morph'), ('Megamorph'), ('Disguise'), ('Cloak'), ('Manifest dread');
+        INSERT INTO card_keywords (oracle_id, keyword_id) VALUES ('morph-1', (SELECT id FROM keywords WHERE name = 'Morph'));
+        INSERT INTO card_keywords (oracle_id, keyword_id) VALUES ('mega-1', (SELECT id FROM keywords WHERE name = 'Megamorph'));
+        INSERT INTO card_keywords (oracle_id, keyword_id) VALUES ('disguise-1', (SELECT id FROM keywords WHERE name = 'Disguise'));
+        INSERT INTO card_keywords (oracle_id, keyword_id) VALUES ('both-1', (SELECT id FROM keywords WHERE name = 'Disguise'));
+        INSERT INTO card_keywords (oracle_id, keyword_id) VALUES ('cloak-1', (SELECT id FROM keywords WHERE name = 'Cloak'));
+        INSERT INTO card_keywords (oracle_id, keyword_id) VALUES ('both-1', (SELECT id FROM keywords WHERE name = 'Cloak'));
+        INSERT INTO card_keywords (oracle_id, keyword_id) VALUES ('dread-1', (SELECT id FROM keywords WHERE name = 'Manifest dread'));
         ",
     )
     .unwrap();
@@ -191,4 +239,62 @@ fn cda_power_and_toughness_have_no_script_yet() {
     // The fixture row has a NULL loyalty, which must not read as "*".
     assert!(def.loyalty.is_none());
     assert_eq!(def.supertypes, SupertypeSet::empty());
+}
+
+fn non_goal_kind(db: &CardDb, oracle_id: &str) -> NonGoalKind {
+    match db.load_by_oracle_id(oracle_id).unwrap_err() {
+        CardLoadError::NonGoal { kind, .. } => kind,
+        other => panic!("expected NonGoal, got {other:?}"),
+    }
+}
+
+#[test]
+fn non_goal_kinds_are_rejected_with_their_kind() {
+    let db = open_fixture();
+    for (oracle_id, kind) in [
+        ("pw-1", NonGoalKind::Planeswalker),
+        ("battle-1", NonGoalKind::Battle),
+        ("saga-1", NonGoalKind::Saga),
+        ("class-1", NonGoalKind::Class),
+        ("cloak-1", NonGoalKind::FaceDownProducer),
+        ("dread-1", NonGoalKind::FaceDownProducer),
+    ] {
+        assert_eq!(non_goal_kind(&db, oracle_id), kind, "{oracle_id}");
+    }
+}
+
+#[test]
+fn artifact_planeswalker_reports_planeswalker() {
+    let db = open_fixture();
+    assert_eq!(non_goal_kind(&db, "pw-art-1"), NonGoalKind::Planeswalker);
+}
+
+#[test]
+fn disguise_card_with_a_producer_keyword_reports_face_down_producer() {
+    let db = open_fixture();
+    assert_eq!(non_goal_kind(&db, "both-1"), NonGoalKind::FaceDownProducer);
+}
+
+#[test]
+fn non_goal_error_names_the_card_and_every_lookup_refuses_it() {
+    let db = open_fixture();
+    let err = db.load_by_name("The Eldest Reborn").unwrap_err();
+    assert!(err.to_string().contains("The Eldest Reborn"), "{err}");
+    assert!(err.to_string().contains("saga"), "{err}");
+    assert!(matches!(
+        db.record_by_oracle_id("saga-1").unwrap_err(),
+        CardLoadError::NonGoal { .. }
+    ));
+}
+
+#[test]
+fn face_down_cast_and_unflagged_cards_still_load() {
+    let db = open_fixture();
+    for oracle_id in ["morph-1", "mega-1", "disguise-1", "meld-1", "ixidron-1"] {
+        db.load_by_oracle_id(oracle_id)
+            .unwrap_or_else(|e| panic!("{oracle_id} should load: {e}"));
+    }
+    // Morph and Megamorph are not in `KeywordSet`, so only the record keeps them.
+    let record = db.record_by_oracle_id("morph-1").unwrap();
+    assert_eq!(record.keywords, vec!["Morph".to_string()]);
 }
