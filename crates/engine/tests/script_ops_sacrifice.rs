@@ -144,6 +144,7 @@ fn cast_sacrifice_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, t
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -285,6 +286,7 @@ fn sacrifice_activated_ability_also_works() {
                 modes: Vec::new(),
                 targets: vec![Target::Object(target)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

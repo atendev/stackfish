@@ -187,6 +187,7 @@ fn activate_pay_and_resolve(
                 modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

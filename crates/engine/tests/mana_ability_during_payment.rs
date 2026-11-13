@@ -140,6 +140,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId) -> Result<(
             modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     })
@@ -237,6 +238,7 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand, main phase, empty stack");
@@ -361,6 +363,7 @@ fn casting_a_second_spell_mid_payment_is_still_illegal() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap_err();
@@ -513,6 +516,7 @@ fn activate_reply(player: PlayerId, source: ObjectId) -> decision::Reply {
             modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     })

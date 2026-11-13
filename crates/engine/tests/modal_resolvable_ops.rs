@@ -166,6 +166,7 @@ fn try_cast(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) -> Step
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");
@@ -186,6 +187,7 @@ fn try_try_cast(
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     })?;
     Ok(drain(engine))

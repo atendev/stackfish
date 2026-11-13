@@ -296,6 +296,7 @@ fn cast(engine: &mut Engine, targets: Vec<Target>) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");
@@ -520,6 +521,7 @@ fn a_target_that_does_not_match_the_filter_is_rejected_at_cast() {
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     });
     let status = drain(&mut engine);

@@ -39,6 +39,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -931,6 +932,7 @@ fn a_reduction_ends_once_its_source_leaves_the_battlefield() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, the destroy spell is in hand");

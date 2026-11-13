@@ -217,6 +217,7 @@ fn cast_and_resolve(engine: &mut Engine) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");
@@ -256,6 +257,7 @@ fn activate_and_resolve(engine: &mut Engine, source: u64, payments: Vec<CostPaym
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

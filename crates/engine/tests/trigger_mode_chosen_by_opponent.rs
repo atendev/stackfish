@@ -230,7 +230,7 @@ fn choosing_two_modes_resolves_both_for_the_controller() {
         "got {status:?}"
     );
     engine
-        .submit_trigger_targets(Vec::new())
+        .submit_trigger_targets(Vec::new(), Vec::new())
         .expect("every combined mode is targetless");
     drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);

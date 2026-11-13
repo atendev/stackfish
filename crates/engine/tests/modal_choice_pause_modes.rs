@@ -169,6 +169,7 @@ fn cast(engine: &mut Engine) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");

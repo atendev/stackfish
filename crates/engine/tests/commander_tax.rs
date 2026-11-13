@@ -109,6 +109,7 @@ fn cast_and_pay(engine: &mut Engine, card: ObjectId, n: u32) -> u32 {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority");
@@ -188,6 +189,7 @@ fn x_cost_commander_first_cast_still_needs_an_explicit_empty_mana_entry() {
                 x_value: Some(0),
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("X=0 is a legal announced value, first cast, no tax yet");
@@ -435,6 +437,7 @@ fn tax_stacks_additively_onto_a_real_printed_cost() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority");

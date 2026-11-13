@@ -177,6 +177,7 @@ fn push_creature_spell_on_stack(state: &mut GameState, stack_id: ObjectId, owner
         ),
     );
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id,
@@ -216,6 +217,7 @@ fn push_spell_with_mana_value_on_stack(
         card_object(stack_id, definition, owner, ZoneKind::Stack),
     );
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id,
@@ -256,6 +258,7 @@ fn cast_spell_with_x(
                 x_value: Some(x_value),
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -277,6 +280,7 @@ fn try_cast_spell_with_x(
             x_value: Some(x_value),
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     })
 }
@@ -445,6 +449,7 @@ fn counter_noncreature_spell_rejects_a_creature_spell_target_at_cast_time() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap_err();

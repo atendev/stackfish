@@ -162,6 +162,7 @@ fn cast_spell(
         .submit_action(PlayerAction {
             player,
             kind: PlayerActionKind::CastSpell {
+                division: Vec::new(),
                 card,
                 modes: Vec::new(),
                 targets,
@@ -183,6 +184,7 @@ fn try_cast_spell(
     engine.submit_action(PlayerAction {
         player,
         kind: PlayerActionKind::CastSpell {
+            division: Vec::new(),
             card,
             modes: Vec::new(),
             targets,

@@ -413,7 +413,7 @@ fn casting_via_madness_bypasses_sorcery_speed_timing_and_resolves_to_the_graveya
 
     // Still the End step with no main phase, where an ordinary sorcery cast would be illegal.
     engine
-        .submit_madness_cast(Vec::new(), Vec::new(), None)
+        .submit_madness_cast(Vec::new(), Vec::new(), Vec::new(), None)
         .expect("madness cast bypasses sorcery-speed timing");
     let status = drain(&mut engine);
     assert!(
@@ -552,6 +552,7 @@ fn a_cost_payment_discard_also_triggers_madness() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

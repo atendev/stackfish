@@ -132,6 +132,7 @@ fn cast_action(player: PlayerId, card: ObjectId, alternative_cost: Option<usize>
             x_value: None,
             alternative_cost,
             pay_buyback: false,
+            division: Vec::new(),
         },
     }
 }

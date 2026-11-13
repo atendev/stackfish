@@ -197,11 +197,11 @@ impl Engine {
 
             (Route::Madness, Reply::MayCast(None)) => self.decline_madness_cast().map_err(invalid),
             (Route::Madness, Reply::MayCast(Some(cast))) => self
-                .submit_madness_cast(cast.modes, cast.targets, cast.x_value)
+                .submit_madness_cast(cast.modes, cast.targets, cast.division, cast.x_value)
                 .map_err(madness_error),
             (Route::Cascade, Reply::MayCast(None)) => self.decline_cascade_cast().map_err(invalid),
             (Route::Cascade, Reply::MayCast(Some(cast))) => self
-                .submit_cascade_cast(cast.modes, cast.targets, cast.x_value)
+                .submit_cascade_cast(cast.modes, cast.targets, cast.division, cast.x_value)
                 .map_err(cascade_error),
 
             (Route::CommanderReturn, Reply::YesNo(returned)) => self
@@ -229,7 +229,7 @@ impl Engine {
                 let order = order_from_indices(&group, &indices)?;
                 self.submit_trigger_order(order).map_err(invalid)
             }
-            (Route::TriggerTargets, Reply::Targets(per_word)) => {
+            (Route::TriggerTargets, Reply::Targets { per_word, division }) => {
                 let ReplyShape::Targets { candidates, .. } = &shape else {
                     unreachable!("route and shape come from the same pause");
                 };
@@ -243,7 +243,7 @@ impl Engine {
                         ),
                     ));
                 }
-                self.submit_trigger_targets(per_word.into_iter().flatten().collect())
+                self.submit_trigger_targets(per_word.into_iter().flatten().collect(), division)
                     .map_err(invalid)
             }
 
@@ -314,7 +314,7 @@ fn shape_matches(shape: &ReplyShape, reply: &Reply) -> bool {
             | (ReplyShape::Modes { .. }, Reply::Modes(_))
             | (ReplyShape::Partition { .. }, Reply::Partition { .. })
             | (ReplyShape::Payment { .. }, Reply::Payment(_))
-            | (ReplyShape::Targets { .. }, Reply::Targets(_))
+            | (ReplyShape::Targets { .. }, Reply::Targets { .. })
             | (ReplyShape::MayCast { .. }, Reply::MayCast(_))
             | (ReplyShape::Action { .. }, Reply::Action(_))
             | (ReplyShape::Payment { .. }, Reply::Action(_))

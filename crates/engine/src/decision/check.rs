@@ -36,6 +36,7 @@ pub(super) fn check_action(entries: &[Entry], kind: &PlayerActionKind) -> Result
             x_value,
             alternative_cost,
             pay_buyback,
+            division: _,
         } => {
             let entry = entries
                 .iter()
@@ -60,6 +61,7 @@ pub(super) fn check_action(entries: &[Entry], kind: &PlayerActionKind) -> Result
             targets,
             chosen_colors,
             x_value,
+            division: _,
         } => {
             let entry = entries
                 .iter()

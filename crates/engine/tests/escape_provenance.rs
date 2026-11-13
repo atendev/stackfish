@@ -155,6 +155,7 @@ fn cast_spell(
                 x_value: None,
                 alternative_cost,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player controls the card and holds priority");

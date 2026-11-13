@@ -86,6 +86,7 @@ fn x_spell_cast_with_announced_value_is_payable() {
                 x_value: Some(3),
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("X announced matches the cost's {X}");
@@ -153,6 +154,7 @@ fn x_spell_cast_without_announcing_x_is_rejected() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap_err();
@@ -199,6 +201,7 @@ fn announcing_x_for_a_non_x_spell_is_rejected() {
                 x_value: Some(1),
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap_err();
@@ -238,6 +241,7 @@ fn x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry() {
                 x_value: Some(0),
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("X=0 is a legal announced value");

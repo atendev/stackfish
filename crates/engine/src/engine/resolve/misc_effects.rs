@@ -307,6 +307,8 @@ impl Engine {
                 card,
                 modes,
                 targets,
+                // TODO: Game.Ops.CastSpell announces no division, so a divided spell cast this way takes at most one target (CR 601.2d)
+                division: Vec::new(),
                 x_value,
                 alternative_cost: None,
                 pay_buyback: false,

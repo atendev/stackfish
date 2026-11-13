@@ -254,6 +254,7 @@ fn the_static_is_gone_once_the_source_leaves_the_graveyard() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

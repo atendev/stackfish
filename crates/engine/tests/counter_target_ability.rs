@@ -186,6 +186,7 @@ fn stifle_counters_a_real_activated_ability_before_it_deals_its_damage() {
                 modes: Vec::new(),
                 targets: vec![Target::Player(p1)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

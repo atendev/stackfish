@@ -125,9 +125,12 @@ impl Engine {
         };
         // CR 700.2d: a Modal effect needs per-mode legal chunks, which the flattened
         // list loses. Computed here so the borrow of `self.state` ends before the
-        // mutating match below.
-        let modal_chunk_legals: Vec<Vec<Target>> = match &top.target_requirement {
-            Some(TargetSpec::Multiple(reqs)) => commands::split_targets_by_requirement(
+        // mutating match below. Each chunk's announced shares (CR 601.2d) are kept
+        // beside its legal targets, so an illegal target drops its own share.
+        let (modal_chunk_legals, modal_chunk_shares): (Vec<Vec<Target>>, Vec<Vec<u32>>) = match &top
+            .target_requirement
+        {
+            Some(TargetSpec::Multiple(reqs)) => commands::split_target_indices_by_requirement(
                 &self.state,
                 &self.script_runtime,
                 reqs,
@@ -140,12 +143,16 @@ impl Engine {
                 reqs.iter()
                     .zip(chunks)
                     .map(|(req, chunk)| {
-                        chunk.into_iter().filter(|t| is_legal_now(t, req)).collect()
+                        chunk
+                            .into_iter()
+                            .filter(|&i| is_legal_now(&top.targets[i], req))
+                            .map(|i| (top.targets[i], top.division.get(i).copied().unwrap_or(0)))
+                            .unzip()
                     })
-                    .collect()
+                    .unzip()
             })
             .unwrap_or_default(),
-            _ => Vec::new(),
+            _ => (Vec::new(), Vec::new()),
         };
         let fizzles = match &top.target_requirement {
             // Gated on targets actually chosen, not the requirement's `count`: an "up to
@@ -238,8 +245,13 @@ impl Engine {
                 StackEntryKind::TriggeredAbility | StackEntryKind::ActivatedAbility
             ) || is_instant_or_sorcery
             {
-                match self.resolve_ability_effect(&top, &legal_targets, &modal_chunk_legals, events)
-                {
+                match self.resolve_ability_effect(
+                    &top,
+                    &legal_targets,
+                    &modal_chunk_legals,
+                    &modal_chunk_shares,
+                    events,
+                ) {
                     ControlFlow::Break(status) => return status,
                     ControlFlow::Continue(resumed) => events = resumed,
                 }
@@ -256,11 +268,13 @@ impl Engine {
     }
 
     /// The `top.effect` dispatch: one line per variant, delegating to a sibling module.
+    /// `modal_chunk_shares` holds the announced shares beside `modal_chunk_legals`.
     fn resolve_ability_effect(
         &mut self,
         top: &StackObject,
         legal_targets: &[Target],
         modal_chunk_legals: &[Vec<Target>],
+        modal_chunk_shares: &[Vec<u32>],
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         match &top.effect {
@@ -268,9 +282,14 @@ impl Engine {
             // with one entry per mode. The flattened `legal_targets` loses chunk
             // boundaries, so per-mode chunks are re-derived and rechecked (CR 608.2b);
             // `modal.rs` runs each mode and holds the continuation for pausing modes.
-            Some(AbilityEffect::Modal { effects, words }) => {
-                self.resolve_modal_effect(top, effects, words, modal_chunk_legals, events)
-            }
+            Some(AbilityEffect::Modal { effects, words }) => self.resolve_modal_effect(
+                top,
+                effects,
+                words,
+                modal_chunk_legals,
+                modal_chunk_shares,
+                events,
+            ),
             // CR 608.2c: a modal loop with every entry chosen and one shared target set.
             Some(AbilityEffect::Chain { entries, words }) => self.resolve_chain_effect(
                 top,
@@ -285,10 +304,16 @@ impl Engine {
             }
             // CR 608.2m: damage emits a `DamageDealt` event through the replacement
             // pipeline so prevention and lifelink apply. Never combat damage (CR 903.10a).
-            // CR 608.2b: individually illegal targets are skipped.
-            // TODO: divide-as-you-choose damage; each legal target takes the full amount (CR 601.2d)
+            // CR 608.2b: individually illegal targets are skipped, and each legal target
+            // takes the full amount.
             Some(AbilityEffect::Damage(amount)) => {
                 self.resolve_damage_effect(top, legal_targets, *amount, events)
+            }
+            // CR 601.2d, 608.2b: each legal target takes its announced share, and an
+            // illegal target's share is lost. One event per share, all in this batch.
+            Some(AbilityEffect::DividedDamage(total)) => {
+                let shares = divided_shares(top, legal_targets, *total);
+                self.resolve_divided_damage_effect(top, &shares, events)
             }
             // CR 701.17: sacrifice each legal target independently. Never destruction
             // (CR 614.8) and indestructibility doesn't apply (CR 702.12b). An ordering
@@ -395,6 +420,11 @@ impl Engine {
             // object target gets the full amount (CR 601.2d); players are skipped.
             Some(AbilityEffect::Counters { kind, amount }) => {
                 self.resolve_counters_effect(legal_targets, kind, *amount, events)
+            }
+            // CR 601.2d, 122.1: shares as for `DividedDamage`.
+            Some(AbilityEffect::DividedCounters { kind, total }) => {
+                let shares = divided_shares(top, legal_targets, *total);
+                self.resolve_divided_counters_effect(&shares, kind, events)
             }
             // CR 611.2a: each legal object target gets its own continuous effect pushed
             // directly, pinned to the target with `self_only`.
@@ -511,4 +541,23 @@ impl Engine {
             | None => self.resolve_misc_or_script_effect(top, events),
         }
     }
+}
+
+/// CR 601.2d: each legal target with its share. A target takes the entry at its
+/// position in `top.division`, or the whole `total` when it was the lone target,
+/// whose entry is missing or 0.
+fn divided_shares(top: &StackObject, legal_targets: &[Target], total: u32) -> Vec<(Target, u32)> {
+    legal_targets
+        .iter()
+        .map(|&target| {
+            let share = top
+                .targets
+                .iter()
+                .position(|t| *t == target)
+                .and_then(|i| top.division.get(i).copied())
+                .filter(|&share| share > 0)
+                .unwrap_or(total);
+            (target, share)
+        })
+        .collect()
 }

@@ -235,6 +235,7 @@ fn cast(engine: &mut Engine, targets: Vec<Target>) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority and the targets are legal");
@@ -638,6 +639,7 @@ fn an_activated_ability_runs_its_chain() {
                 modes: Vec::new(),
                 targets: vec![Target::Object(BEAR)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -708,6 +710,7 @@ fn an_etb_trigger_resolves_its_chain_after_the_creature_enters() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");

@@ -287,6 +287,7 @@ fn cast(engine: &mut Engine, targets: Vec<Target>) -> Result<(), String> {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .map_err(|e| format!("{e:?}"))?;
@@ -327,6 +328,7 @@ fn activate_and_resolve(
                 modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

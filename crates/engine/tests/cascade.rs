@@ -151,6 +151,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -397,7 +398,7 @@ fn casting_the_candidate_pays_no_mana_cost_and_bottoms_only_the_leftovers() {
     };
 
     engine
-        .submit_cascade_cast(Vec::new(), Vec::new(), None)
+        .submit_cascade_cast(Vec::new(), Vec::new(), Vec::new(), None)
         .expect("casting the candidate via cascade");
     let status = drain(&mut engine);
     assert!(
@@ -518,7 +519,7 @@ fn no_qualifying_candidate_only_allows_decline() {
         "got {status:?}"
     );
 
-    let result = engine.submit_cascade_cast(Vec::new(), Vec::new(), None);
+    let result = engine.submit_cascade_cast(Vec::new(), Vec::new(), Vec::new(), None);
     assert!(
         matches!(result, Err(CascadeChoiceError::NoCandidate)),
         "got {result:?}"
@@ -655,7 +656,7 @@ fn a_cascade_decision_asks_for_x_and_only_zero_is_legal() {
 
     let before = engine.snapshot();
     let err = engine
-        .submit_cascade_cast(Vec::new(), Vec::new(), Some(2))
+        .submit_cascade_cast(Vec::new(), Vec::new(), Vec::new(), Some(2))
         .unwrap_err();
     assert!(
         matches!(err, CascadeChoiceError::IllegalCast(_)),
@@ -664,7 +665,7 @@ fn a_cascade_decision_asks_for_x_and_only_zero_is_legal() {
     stackfish_testutil::assert_unchanged(&before, &engine, "a nonzero X on a free cast");
 
     engine
-        .submit_cascade_cast(Vec::new(), Vec::new(), Some(0))
+        .submit_cascade_cast(Vec::new(), Vec::new(), Vec::new(), Some(0))
         .expect("X = 0 is the legal announcement");
 }
 
