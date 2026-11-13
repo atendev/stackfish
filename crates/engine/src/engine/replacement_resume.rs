@@ -872,7 +872,7 @@ impl Engine {
             // CR 701.17a: library to graveyard, or wherever a replacement sent it.
             // `commit_zone_move` derives the owner from the zone kind, so a redirect to
             // exile lands correctly.
-            ScriptedZoneMoveKind::Mill => {
+            ScriptedZoneMoveKind::Mill { .. } => {
                 let (event, departed) = commands::commit_zone_move(&mut self.state, final_event);
                 self.departed_triggered_abilities.extend(departed);
                 self.state.ledger.push(event);
@@ -1196,6 +1196,10 @@ impl Engine {
                 }
             }
         }
+        if let ScriptedZoneMoveKind::Mill { since_ledger } = kind {
+            let milled = self.cards_milled_events(since_ledger);
+            self.log_events(milled);
+        }
         match then {
             ScriptedZoneMoveThen::StackResolution { stack_id } => {
                 let mut final_events: VecDeque<GameEventKind> = trailing.into();
@@ -1233,6 +1237,39 @@ impl Engine {
                 ProcessState::SbaLoop
             }
         }
+    }
+
+    /// CR 701.17a, 701.17c: one `CardsMilled` per player whose library lost a card
+    /// since `since_ledger`, in first-move order, which is APNAP for a
+    /// `ForEachPlayer` mill. A card that moved to a hidden zone still makes the
+    /// player have milled but is left out of `cards`.
+    fn cards_milled_events(&self, since_ledger: usize) -> Vec<GameEventKind> {
+        let mut milled: Vec<(PlayerId, Vec<ObjectId>)> = Vec::new();
+        for event in self.state.ledger.iter().skip(since_ledger) {
+            let GameEventKind::ZoneChange {
+                object,
+                from: ZoneKind::Library,
+                to,
+                last_known_info: Some(lki),
+            } = &event.kind
+            else {
+                continue;
+            };
+            let index = match milled.iter().position(|(p, _)| *p == lki.owner) {
+                Some(index) => index,
+                None => {
+                    milled.push((lki.owner, Vec::new()));
+                    milled.len() - 1
+                }
+            };
+            if !matches!(to, ZoneKind::Library | ZoneKind::Hand) {
+                milled[index].1.push(*object);
+            }
+        }
+        milled
+            .into_iter()
+            .map(|(player, cards)| GameEventKind::CardsMilled { player, cards })
+            .collect()
     }
 
     /// Runs the 0-2 zone-move batches of a script operation's sacrifice and discard

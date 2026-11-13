@@ -1028,7 +1028,31 @@ pub enum ConditionPrimitive {
     /// filter-scoped sibling of `LeavesBattlefield`, same relationship
     /// `DiesMatching` has to `Dies`.
     LeavesBattlefieldMatching(FilterSpec),
+    /// CR 603.2e: "whenever this becomes tapped", a `Tapped` naming `source`.
+    /// `Tapped` is written only on a real flip, never for a permanent entering
+    /// tapped.
+    BecomesTapped,
+    /// CR 603.2e: "whenever this becomes untapped", the `Untapped` twin of
+    /// `BecomesTapped`.
+    BecomesUntapped,
+    /// CR 119.9: "whenever you gain life", a `LifeChanged` for the controller
+    /// with a positive `delta`. A 0 change is never written.
+    GainsLife,
+    /// CR 119.3: "whenever you lose life", a `LifeChanged` for the controller
+    /// with a negative `delta`.
+    LosesLife,
+    /// CR 508.3a: "whenever this attacks", an `AttackerDeclared` naming
+    /// `source`. A creature put onto the battlefield attacking writes none.
+    Attacks,
+    /// CR 509.3a: "whenever this blocks", a `BlockerDeclared` naming `source`.
+    // TODO: one event per blocker-attacker pair, so a creature blocking several attackers would trigger more than once (CR 509.3a)
+    Blocks,
+    /// CR 701.17a: "whenever you mill", a `CardsMilled` for the controller,
+    /// even when `cards` is empty.
+    Mills,
 }
+
+// TODO: Each* siblings of BecomesTapped, BecomesUntapped, GainsLife, LosesLife, Attacks, Blocks and Mills
 
 // TODO: `submit_discard`'s CR 514.1 hand-size discard and `draw_step`'s library-side retirement still discard their departed abilities outright; wiring them is inert today, since neither produces a Battlefield-departure LKI (CR 603.10)
 // TODO: untap-step events can't trigger anything (CR 502.4 grants no priority), and Cleanup's `CleanupSbaCheck` flow doesn't run `collect_triggers`
@@ -1178,6 +1202,34 @@ impl ConditionPrimitive {
                 event,
                 GameEventKind::ZoneChange { from: ZoneKind::Battlefield, last_known_info: Some(lki), .. }
                     if filter.matches(lki, lki.controller, controller)
+            ),
+            ConditionPrimitive::BecomesTapped => matches!(
+                event,
+                GameEventKind::Tapped { object } if *object == source
+            ),
+            ConditionPrimitive::BecomesUntapped => matches!(
+                event,
+                GameEventKind::Untapped { object } if *object == source
+            ),
+            ConditionPrimitive::GainsLife => matches!(
+                event,
+                GameEventKind::LifeChanged { player, delta } if *player == controller && *delta > 0
+            ),
+            ConditionPrimitive::LosesLife => matches!(
+                event,
+                GameEventKind::LifeChanged { player, delta } if *player == controller && *delta < 0
+            ),
+            ConditionPrimitive::Attacks => matches!(
+                event,
+                GameEventKind::AttackerDeclared { attacker, .. } if *attacker == source
+            ),
+            ConditionPrimitive::Blocks => matches!(
+                event,
+                GameEventKind::BlockerDeclared { blocker, .. } if *blocker == source
+            ),
+            ConditionPrimitive::Mills => matches!(
+                event,
+                GameEventKind::CardsMilled { player, .. } if *player == controller
             ),
         }
     }

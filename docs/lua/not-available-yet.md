@@ -38,14 +38,14 @@ name.
   format itself still has no `[cards.alternative_costs]`/`buyback_cost` field, so a scenario
   fixture can't drive either without a script. Hybrid, Phyrexian, `{C}`, `{X}` and snow mana
   payment all work in the engine now (see [mana-abilities.md](mana-abilities.md#snow-mana)).
-- **Only zone changes are visible to a condition.** A condition wanting to check a damage event,
-  life change, or tap/untap event will always see `nil` for `event` — see
-  [card-script-basics.md](card-script-basics.md#writing-a-condition).
-- **No "becomes tapped" / "becomes untapped" condition.** `Game.Ops.Tap`/`Untap` and the self/all
-  forms emit real `Tapped`/`Untapped` events (only on a real flip, CR 603.2e), but no
-  `Game.Conditions.*` entry listens for them yet, so a card like Frozen Shade-style "whenever this
-  becomes tapped" can't be scripted. There is also no replacement hook for "would become tapped/untapped"
+- **No tap or untap replacements.** There is no replacement hook for "would become tapped/untapped"
   and no stun counters (CR 122.1d), so an untap always succeeds.
+- **No `Each*` versions of the newer event tags.** `BecomesTapped`, `BecomesUntapped`, `GainsLife`,
+  `LosesLife`, `Attacks`, `Blocks` and `Mills` are about this permanent or you only. "Whenever a
+  player loses life" or "whenever a creature attacks" needs a custom condition function reading
+  the event table (see [card-script-basics.md](card-script-basics.md#writing-a-condition)), and
+  there is no `DealsCombatDamage` tag. "Whenever this blocks" triggers once per blocked attacker,
+  which only matters once a creature can block more than one.
 - **Reanimation options are limited.** `Game.Ops.ReturnToBattlefield`/`ReturnAllToBattlefield` take
   only `control` (`"you"` or `"owner"`) and `tapped`. Not available: entering with an extra counter
   ("with a +1/+1 counter"), entering attacking or blocking (CR 508.4), "under target opponent's
@@ -94,8 +94,8 @@ name.
   value 3 or less" or "mana value X," *and* "counter target activated or triggered ability"
   (Stifle, Trickbind, via `{type = "ability"}` on `:SetTarget`/`target_requirement()`) are all real
   now too.)
-- **Mill and life loss have no trigger or replacement hooks.** `Game.Ops.Mill` and `Game.Ops.LoseLife`
-  work (see [game-constants.md](game-constants.md#gameops)), but no `Game.Conditions.*` entry listens
-  for "whenever a card is milled" or "whenever you lose life", and there is no "would lose life"
-  replacement or "can't lose life" restriction (CR 119.8). There is no way to act on "the milled
-  card" (CR 701.17c/d), no mill as a cost, no dredge and no rad counters.
+- **Mill and life loss have no replacement hooks.** `Game.Conditions.Mills` and `LosesLife` trigger
+  on them, but there is no "would lose life" replacement or "can't lose life" restriction
+  (CR 119.8). An operation can't act on "the milled card" (CR 701.17c/d); only a condition sees
+  the milled ids, and a card a replacement sent to a hand or library is left out of them. There is
+  no mill as a cost, no dredge and no rad counters.

@@ -79,6 +79,13 @@ Two kinds of values live here. Event tags go to `:SetCondition` on a triggered a
 | `EachScries` | Whenever a player scries. | 701.22d |
 | `Surveils` | Whenever you surveil. | 701.25d |
 | `EachSurveils` | Whenever a player surveils. | 701.25d |
+| `BecomesTapped` | Whenever this becomes tapped. | 603.2e |
+| `BecomesUntapped` | Whenever this becomes untapped. | 603.2e |
+| `GainsLife` | Whenever you gain life. | 119.9 |
+| `LosesLife` | Whenever you lose life. | 119.3 |
+| `Attacks` | Whenever this attacks. | 508.3a |
+| `Blocks` | Whenever this blocks. | 509.3a |
+| `Mills` | Whenever you mill one or more cards. | 701.17a |
 | `BeginningOfCombat` | At the beginning of combat on your turn. | 507 |
 | `EachBeginningOfCombat` | At the beginning of each combat. | 507 |
 | `EndStep` | At the beginning of your end step. | 512/513 |

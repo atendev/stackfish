@@ -408,6 +408,11 @@ pub(crate) enum WireEventKind {
         kept_on_top: Vec<U64>,
         put_graveyard: Vec<U64>,
     },
+    /// CR 701.17a: `cards` can be shorter than the number milled, or empty.
+    CardsMilled {
+        player: u32,
+        cards: Vec<U64>,
+    },
     BecameCopy {
         object: U64,
         copied: U64,
@@ -623,6 +628,10 @@ impl WireEventKind {
                 player: player(*p),
                 kept_on_top: ids(kept_on_top),
                 put_graveyard: ids(put_graveyard),
+            },
+            GameEventKind::CardsMilled { player: p, cards } => W::CardsMilled {
+                player: player(*p),
+                cards: ids(cards),
             },
             GameEventKind::BecameCopy { object, copied } => W::BecameCopy {
                 object: (*object).into(),

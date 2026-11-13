@@ -1106,3 +1106,119 @@ fn lua_rejects_negative_lose_life_and_unsupported_for_each_player_tags() {
     assert!(runtime.build_operation(LUA_LOSE_LIFE_NEGATIVE).is_err());
     assert!(runtime.build_operation(LUA_EACH_PLAYER_DAMAGE).is_err());
 }
+
+fn cards_milled(engine: &Engine) -> Vec<(PlayerId, Vec<ObjectId>)> {
+    engine
+        .state()
+        .ledger
+        .iter()
+        .filter_map(|e| match &e.kind {
+            GameEventKind::CardsMilled { player, cards } => Some((*player, cards.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Ids in a zone in zone order, excluding the test spell.
+fn ids_in(engine: &Engine, zone: ZoneKind, owner: Option<PlayerId>) -> Vec<ObjectId> {
+    engine
+        .state()
+        .zone(zone, owner)
+        .unwrap()
+        .contents
+        .iter()
+        .copied()
+        .filter(|id| engine.state().object(*id).unwrap().definition.name != "Test Spell")
+        .collect()
+}
+
+// CR 701.17a
+#[test]
+fn a_mill_writes_one_cards_milled_with_the_new_graveyard_ids() {
+    let mut engine = engine_with(five_cards(P0, 1), Some(spell(AbilityEffect::Mill(2), None)));
+    cast_and_resolve(&mut engine, Vec::new());
+
+    let graveyard = ids_in(&engine, ZoneKind::Graveyard, Some(P0));
+    assert_eq!(graveyard.len(), 2);
+    assert_eq!(cards_milled(&engine), vec![(P0, graveyard)]);
+}
+
+// CR 701.17c
+#[test]
+fn a_milled_card_exiled_instead_is_listed_by_its_exile_id() {
+    let mut cards = five_cards(P0, 1);
+    cards.push(placed(
+        900,
+        "Leyline",
+        CardTypeSet::ENCHANTMENT,
+        P0,
+        ZoneKind::Battlefield,
+    ));
+    let mut engine = engine_with(cards, Some(spell(AbilityEffect::Mill(2), None)));
+    engine
+        .state_mut()
+        .replacement_effects
+        .push(library_redirect(900, ZoneKind::Exile));
+    cast_and_resolve(&mut engine, Vec::new());
+
+    let exiled = ids_in(&engine, ZoneKind::Exile, None);
+    assert_eq!(exiled.len(), 2);
+    assert_eq!(cards_milled(&engine), vec![(P0, exiled)]);
+}
+
+// CR 701.17a, 701.17c: the player still milled, but a hand is hidden, so no id is listed.
+#[test]
+fn milled_cards_sent_to_a_hidden_zone_still_write_cards_milled_with_no_ids() {
+    let mut cards = five_cards(P0, 1);
+    cards.push(placed(
+        900,
+        "Hand Sender",
+        CardTypeSet::ENCHANTMENT,
+        P0,
+        ZoneKind::Battlefield,
+    ));
+    let mut engine = engine_with(cards, Some(spell(AbilityEffect::Mill(2), None)));
+    engine
+        .state_mut()
+        .replacement_effects
+        .push(library_redirect(900, ZoneKind::Hand));
+    cast_and_resolve(&mut engine, Vec::new());
+
+    assert_eq!(ids_in(&engine, ZoneKind::Hand, Some(P0)).len(), 2);
+    assert_eq!(cards_milled(&engine), vec![(P0, Vec::new())]);
+}
+
+// CR 701.17b
+#[test]
+fn milling_an_empty_library_or_zero_cards_writes_no_cards_milled() {
+    let mut engine = engine_with(Vec::new(), Some(spell(AbilityEffect::Mill(3), None)));
+    cast_and_resolve(&mut engine, Vec::new());
+    assert!(cards_milled(&engine).is_empty());
+
+    let mut engine = engine_with(five_cards(P0, 1), Some(spell(AbilityEffect::Mill(0), None)));
+    cast_and_resolve(&mut engine, Vec::new());
+    assert!(cards_milled(&engine).is_empty());
+}
+
+// CR 101.4, 701.17a
+#[test]
+fn for_each_player_mill_writes_one_cards_milled_per_player_in_apnap_order() {
+    let mut cards = five_cards(P0, 1);
+    cards.extend(
+        ["X", "Y", "Z"]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| library_card(11 + i as u64, n, P1)),
+    );
+    let effect = AbilityEffect::ForEachPlayer(Some(Box::new(AbilityEffect::Mill(2))));
+    let mut engine = engine_with(cards, Some(spell(effect, None)));
+    cast_and_resolve(&mut engine, Vec::new());
+
+    assert_eq!(
+        cards_milled(&engine),
+        vec![
+            (P0, ids_in(&engine, ZoneKind::Graveyard, Some(P0))),
+            (P1, ids_in(&engine, ZoneKind::Graveyard, Some(P1))),
+        ]
+    );
+}

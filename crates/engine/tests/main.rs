@@ -43,6 +43,7 @@ mod combat_predicates;
 mod commander;
 mod commander_damage;
 mod commander_tax;
+mod condition_events;
 mod conditional_continuous_effects;
 mod continuous_effects_script;
 mod control_change_consumers;

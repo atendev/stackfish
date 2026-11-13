@@ -66,7 +66,9 @@ impl Engine {
         };
         let ids = self.top_of_library_ids(player, amount);
         self.process_state = self.continue_scripted_zone_move(
-            ScriptedZoneMoveKind::Mill,
+            ScriptedZoneMoveKind::Mill {
+                since_ledger: self.state.ledger.len(),
+            },
             ids,
             ScriptedZoneMoveThen::StackResolution {
                 stack_id: top.stack_id,

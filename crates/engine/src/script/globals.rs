@@ -106,6 +106,19 @@ pub(crate) fn bind_game_globals(
     )?;
     // CR 601.2i: "when you cast this spell" (self-referential). No Lua producer self-registers it, because that needs the card's script to run again on the stack (CR 601.2a), which double-registers ETB triggers; see `ConditionPrimitive::Cast`. Direct `RegisteredAbility` construction only.
     conditions.set("Cast", ConditionTag(ConditionPrimitive::Cast))?;
+    conditions.set(
+        "BecomesTapped",
+        ConditionTag(ConditionPrimitive::BecomesTapped),
+    )?;
+    conditions.set(
+        "BecomesUntapped",
+        ConditionTag(ConditionPrimitive::BecomesUntapped),
+    )?;
+    conditions.set("GainsLife", ConditionTag(ConditionPrimitive::GainsLife))?;
+    conditions.set("LosesLife", ConditionTag(ConditionPrimitive::LosesLife))?;
+    conditions.set("Attacks", ConditionTag(ConditionPrimitive::Attacks))?;
+    conditions.set("Blocks", ConditionTag(ConditionPrimitive::Blocks))?;
+    conditions.set("Mills", ConditionTag(ConditionPrimitive::Mills))?;
     // CR 702.21a: Ward's trigger event, "this permanent becomes the target of a spell or ability an opponent controls".
     conditions.set(
         "BecomesTargetOfOpponent",

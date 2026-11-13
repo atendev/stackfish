@@ -527,3 +527,16 @@ fn remap_abilities_keeps_a_timed_permission_under_its_old_source() {
     assert_eq!(state.zone_permissions.len(), 1);
     assert_eq!(state.zone_permissions[0].source, ObjectId(1));
 }
+
+// CR 119.3
+#[test]
+fn a_paid_life_cost_of_zero_writes_no_life_changed() {
+    let mut state = minimal_state();
+    let events = super::zone_ops::commit_payment(
+        &mut state,
+        PlayerId(0),
+        &[crate::types::cost::CostPayment::Life(0)],
+    );
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(state.players[0].life, 20);
+}

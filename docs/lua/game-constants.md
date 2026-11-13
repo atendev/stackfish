@@ -51,6 +51,13 @@ Both slots also accept a Lua function.
 | `EachScries` | "Whenever a player scries," any player. |
 | `Surveils` | CR 701.25d, "whenever you surveil." |
 | `EachSurveils` | "Whenever a player surveils," any player. |
+| `BecomesTapped` | CR 603.2e, "whenever this becomes tapped." Fires on the flip only, so a permanent that enters tapped doesn't trigger it, and a vigilance attacker doesn't either. |
+| `BecomesUntapped` | CR 603.2e, "whenever this becomes untapped," from the untap step or any untap effect. |
+| `GainsLife` | CR 119.9, "whenever you gain life." Once per life change; a gain of 0 is no event. |
+| `LosesLife` | CR 119.3, "whenever you lose life," from damage, a life payment or a lose-life effect. Not an opponent's loss. |
+| `Attacks` | CR 508.3a, "whenever this attacks." Fires when it is declared as an attacker, not when it is put onto the battlefield attacking. |
+| `Blocks` | CR 509.3a, "whenever this blocks." Fires when it is declared as a blocker. |
+| `Mills` | CR 701.17a, "whenever you mill one or more cards." Once per mill action, even when a replacement sent every card somewhere else. |
 | `BeginningOfCombat` | CR 507, "at the beginning of combat on your turn." |
 | `EachBeginningOfCombat` | "At the beginning of combat," any player's turn. |
 | `EndStep` | CR 512/513, "at the beginning of your end step." |

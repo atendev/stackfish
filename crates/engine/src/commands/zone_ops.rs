@@ -200,6 +200,8 @@ pub(crate) fn commit_payment(
             CostPayment::Sacrifice(_) | CostPayment::Discard(_) | CostPayment::Exile(_) => {
                 // Handled by Engine::continue_cost_zone_moves instead.
             }
+            // CR 119.3: paying 0 life changes nothing, so no event.
+            CostPayment::Life(0) => {}
             CostPayment::Life(amount) => {
                 if let Some(player) = state.player_mut(payer) {
                     player.lose_life(*amount as i32);
