@@ -44,4 +44,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [38-zone-permission-riders](38-zone-permission-riders.md) — `LeaveStackRider`, `StackObject.leave_stack_rider` and `leave_destination` at resolve, fizzle and counter, `ZonePermission.rider`, `cast_zone_source`, `ZonePermissionBuilder:SetRider`, the Kess scenario
 - [39-lua-modes](39-lua-modes.md) — `s.modes()`, `:SetModes` on triggers and activated abilities, modes in `ActivateAbility`, `Game.ModeChoice.*`, `decode_modes`, handles from 1, `AbilityEffect::packed` and `unpack_script_effect`, solo-only function and chain modes, `BEHAVIOUR_REV` 10
 - [40-stun-counters](40-stun-counters.md) — `CounterKind::Stun`, `Engine::attempt_untap` as the one untap seam for the untap step and `flip_tapped`, pending stun deltas, phased-out permanents skipped
+- [41-battlefield-setup-scripts](41-battlefield-setup-scripts.md) — `Engine::run_battlefield_card_scripts`, the scenario harness call after the `Pending*` registrations, the script-and-shortcut panic in `build_initial_state`, Kess starting on the battlefield
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

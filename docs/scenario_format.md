@@ -230,7 +230,9 @@ fields. When set, every other characteristic field above (`name`, `generic_cost`
 `keywords`) is ignored — not rejected if also present, just unused. `script`/`mana_ability`/
 `trigger_condition`+`trigger_operation` are unaffected either way: those register separate
 abilities keyed off the object's id, not fields on the card's own definition, so a scenario can
-still attach a synthetic ability to a real DB-backed card to test an interaction.
+still attach a synthetic ability to a real DB-backed card to test an interaction. The exception is
+a battlefield setup card whose row has a script, which can't also set a shortcut (see `script`
+below).
 
 **`mana_ability` (CR 605):** if non-empty, every instance of this card gets one
 `RegisteredAbility { kind: Activated, effect: AddMana(...) }` set up automatically — activate it via
@@ -325,7 +327,13 @@ by the harness rather than the card's own script. See `script` below for real se
 module convention, calling `Game.CreateTriggeredAbility(c)` itself — instead of the harness
 building a `RegisteredAbility` by hand. Sets `CardDefinition::script_ref` directly; no
 post-construction `Engine` step needed, since the real engine pipeline (`PlayLand`/
-`ResolveStackTop`) runs it automatically once the card actually reaches the battlefield. **See
+`ResolveStackTop`) runs it automatically once the card actually reaches the battlefield. A
+`[[setup]]` card placed straight on the battlefield runs its `register_abilities` once before the
+first step (`Engine::run_battlefield_card_scripts`, CR 604.1), so its static and activated
+abilities work from the start. That covers a `db_script_id` card whose row has a script. Setup is
+the starting state, not an entry: "when this enters" triggers register but never fire, "enters
+with" replacements don't apply, and no event is written (CR 603.6a). A setup script that fails to
+load or raises panics with the card key. **See
 [docs/lua/index.md](lua/index.md) for the full authoring reference.** Example (same ETB "gain 1 life" ability
 as above, self-registered instead of harness-wired):
 
@@ -347,9 +355,12 @@ return s
 `crates/engine/tests/scenarios/scripting/static_ability_self_registration.toml` for a worked example
 (an anthem land whose own script buffs "creatures you control" the moment it's played).
 `Game.CreateActivatedAbility(c)`/`Game.CreateReplacementEffect(c)`/`Game.CreateCostModifier(c)` are
-real too — see [docs/lua/index.md](lua/index.md) for the full set. Nothing stops a card from
-setting both `script` and `trigger_condition`/`trigger_operation` at once, but that's not a
-supported combination — pick one per card.
+real too — see [docs/lua/index.md](lua/index.md) for the full set. A script and a harness shortcut
+(`trigger_operation`, a non-empty `mana_ability` or `continuous_effect`) on the same card is not a
+supported combination — pick one per card. For a battlefield setup card with a script (its own
+`script` or a `db_script_id` row's), `build_initial_state` panics on the pair, because the setup
+run registers the card's abilities and the shortcut would add another. Off the battlefield the
+pair isn't checked.
 
 Two more optional functions in the same script, each called once when the `CardDefinition` itself
 is built rather than per battlefield entry: `s.target_requirement()` fills in

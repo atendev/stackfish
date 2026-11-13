@@ -551,6 +551,25 @@ pub fn build_initial_state(file: &ScenarioFile) -> InitialState {
 
         let owner = PlayerId(entry.player);
         let zone_kind = parse_zone_kind(&entry.zone);
+        // The setup script registers the card's own abilities, so a harness shortcut beside it
+        // would register a second copy.
+        if zone_kind == ZoneKind::Battlefield && resolved_script.is_some() {
+            let shortcut = if spec.trigger_operation.is_some() {
+                Some("trigger_operation")
+            } else if !spec.mana_ability.is_empty() {
+                Some("mana_ability")
+            } else if spec.continuous_effect.is_some() {
+                Some("continuous_effect")
+            } else {
+                None
+            };
+            if let Some(field) = shortcut {
+                panic!(
+                    "battlefield setup card '{}' has a script and sets {field}; pick one",
+                    entry.card
+                );
+            }
+        }
         // Library and hand are hidden and every other zone is public; `visible_to` is unused.
         let public = !matches!(zone_kind, ZoneKind::Library | ZoneKind::Hand);
 

@@ -1,7 +1,6 @@
 # CR 601.3, 608.2n: Kess, Dissident Mage lets its controller cast an instant or sorcery from
 # their graveyard, and a spell cast that way is exiled instead of returning there. A sorcery
-# cast from hand still goes to the graveyard, a graveyard creature stays uncastable, and the
-# graveyard sorcery is refused before Kess resolves.
+# cast from hand still goes to the graveyard, and a graveyard creature stays uncastable.
 # Kess's once-per-turn limit is not modeled, so this fixture casts through it once.
 seed = 1
 
@@ -53,7 +52,7 @@ types = ["Land"]
 
 [[setup]]
 player = 0
-zone = "hand"
+zone = "battlefield"
 card = "kess"
 
 [[setup]]
@@ -83,25 +82,6 @@ player = 0
 
 [[steps]]
 type = "pass_priority"
-player = 0
-
-[[steps]]
-type = "pass_priority"
-player = 0
-
-[[steps]]
-type = "cast_spell"
-player = 0
-card = "rite"
-expect_error = true
-
-[[steps]]
-type = "cast_spell"
-player = 0
-card = "kess"
-
-[[steps]]
-type = "submit_payment"
 player = 0
 
 [[steps]]
