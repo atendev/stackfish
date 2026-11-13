@@ -59,13 +59,13 @@ one of `:SetOperation` or `:SetModes`.
 **`:SetTarget(value)`** — CR 603.3d: "target [something]" in the ability's own text. `value` is
 either a flat option-bag table (the same shape [`Game.SelectTargets`](targeting-and-choices.md)
 accepts, e.g. `{type="object", card_types={"Creature"}, controller="opponent"}`) or a custom
-scripted-legality function `function(object, source, controller, state) -> bool`. Every word is an
-exact-count target (`count: 1, up_to: false`), with no "up to N". An array of those values is
+scripted-legality function `function(object, source, controller, state) -> bool`. A table takes
+`s.target_requirement()`'s count keys (`count`, `up_to`, `at_least`, `exclude_source`), with `count`
+defaulting to 1. A bare function is exactly one target. An array of those values is
 CR 601.2c's multi-word form ("target creature and target land"), one word per entry in order, and a
 one-entry array is the same single word as a bare table. Pair a multi-word `:SetTarget` with
 [`Game.Ops.ChainEach`](game-constants.md#gameops) so each operation reads its own word. A table that
-mixes array entries with other keys is a load error. For "up to N" words, construct a
-`RegisteredAbility` directly in Rust. Omitting `:SetTarget` means no target requirement at all (`target: None`).
+mixes array entries with other keys is a load error. Omitting `:SetTarget` means no target requirement at all (`target: None`).
 When set, the real engine pause this implies (`ProcessState`/`StepStatus::AwaitingTriggerTargets`,
 `Engine::submit_trigger_targets`) happens automatically the moment the ability would go on the
 stack — nothing else needs to be written to make that happen.
@@ -91,7 +91,8 @@ e:Register()
 ```
 
 `choice` is a [`Game.ModeChoice.*`](game-constants.md#gamemodechoice) value, and each mode is a
-`{ target = ..., operation = ... }` table. `target` takes the same values as `:SetTarget`. The
+`{ target = ..., operation = ... }` table. `target` takes the same table or array as
+`s.target_requirement()`, where `count` is required on every table, or a scripted-legality function. The
 controller chooses the modes as the trigger goes on the stack, then its targets (CR 603.3c). With
 `ExactlyChosenByOpponent` or `UpToChosenByOpponent` the other player chooses, and no mode may have
 a target. `:SetTarget` beside `:SetModes` is an error, since each mode owns its targets. A mode
