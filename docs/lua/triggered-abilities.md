@@ -53,8 +53,8 @@ script stays dormant there. Statics, replacement effects and modifiers accept it
 
 **`:SetOperation(value)`** — what the ability does. `value` is a
 [`Game.Ops.*`](game-constants.md#gameops) tag or a custom function — see
-[card-script-basics.md](card-script-basics.md#writing-an-operation). Required — `:Register()`
-without an operation set is an error.
+[card-script-basics.md](card-script-basics.md#writing-an-operation). `:Register()` needs exactly
+one of `:SetOperation` or `:SetModes`.
 
 **`:SetTarget(value)`** — CR 603.3d: "target [something]" in the ability's own text. `value` is
 either a flat option-bag table (the same shape [`Game.SelectTargets`](targeting-and-choices.md)
@@ -70,19 +70,40 @@ When set, the real engine pause this implies (`ProcessState`/`StepStatus::Awaiti
 `Engine::submit_trigger_targets`) happens automatically the moment the ability would go on the
 stack — nothing else needs to be written to make that happen.
 
-**`:Register()`** — finalizes and queues the ability. Requires `:SetOperation` to have been
-called.
+**`:SetModes(choice, modes)`** — CR 603.3c, a modal trigger. See
+[modal triggered abilities](#modal-triggered-abilities) below.
+
+**`:Register()`** — finalizes and queues the ability. Requires exactly one of `:SetOperation` or
+`:SetModes`.
+
+## Modal triggered abilities
+
+"When this enters, choose one —" uses `:SetModes` in place of `:SetOperation`:
+
+```lua
+local e = Game.CreateTriggeredAbility(c)
+e:SetCondition(Game.Conditions.Enters)
+e:SetModes(Game.ModeChoice.Exactly(1), {
+    { operation = Game.Ops.GainLife(2) },
+    { operation = Game.Ops.DrawCards(1) },
+})
+e:Register()
+```
+
+`choice` is a [`Game.ModeChoice.*`](game-constants.md#gamemodechoice) value, and each mode is a
+`{ target = ..., operation = ... }` table. `target` takes the same values as `:SetTarget`. The
+controller chooses the modes as the trigger goes on the stack, then its targets (CR 603.3c). With
+`ExactlyChosenByOpponent` or `UpToChosenByOpponent` the other player chooses, and no mode may have
+a target. `:SetTarget` beside `:SetModes` is an error, since each mode owns its targets. A mode
+can't have a `cost` or `pawprint`, and `PawprintBudget` is refused: those belong to a spell's
+`s.modes()` (see [card-script-basics.md](card-script-basics.md#writing-modes)). A function
+operation, a chain and a `ForEachPlayer` are solo-only modes, as on a spell.
 
 ## What's not available on this builder
 
 - **No `:SetCost`.** Triggered abilities don't have activation costs (some do have their own
   additional cost the controller can choose to pay — that's a card-specific, not-yet-modeled
   shape).
-- **No mode declaration.** CR 603.3c's modal triggered-ability mode choice
-  (`RegisteredAbility.modes`/`.mode_choice`, `Engine::submit_trigger_mode_choice`) is real in the
-  engine, but this builder has no way to declare a trigger's own modes from a card script yet — modal
-  *spells* don't have a script-facing way to declare modes either, so this isn't a trigger-specific
-  gap so much as "modes in general aren't part of this scripting API yet."
 
 ## Registering more than one triggered ability on a card
 

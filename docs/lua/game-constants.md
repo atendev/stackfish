@@ -419,6 +419,26 @@ to `Game.Ops.Pump`/`Game.Ops.GainControl`/`Game.Ops.GrantTimingPermission`/`Game
 | `UntilEndOfCombat` | Cleans up at the end of the current combat. |
 | `Permanent` | Never expires on its own (the default if `:SetDuration` is never called). |
 
+## `Game.ModeChoice.*`
+
+The `choice` of a spell's [`s.modes()`](card-script-basics.md#writing-modes) or a trigger's
+[`:SetModes`](triggered-abilities.md#modal-triggered-abilities). Every one takes a count `n` of at
+least 1.
+
+| Name | Meaning |
+|---|---|
+| `Exactly(n)` | CR 700.2a, choose exactly `n` different modes. `n` can't exceed the mode count. |
+| `UpTo(n)` | Choose from one to `n` different modes. `n` can't exceed the mode count. |
+| `ExactlyRepeatable(n)` | CR 700.2d, choose `n` modes, the same one more than once if you like. |
+| `UpToRepeatable(n)` | Choose from one to `n` modes, repeats allowed. |
+| `ExactlyChosenByOpponent(n)` | CR 700.2e, the other player chooses exactly `n`. Two players only. No mode may have a target or cost. |
+| `UpToChosenByOpponent(n)` | The other player chooses from one to `n`. Same limits. |
+| `PawprintBudget(n)` | CR 700.2i, choose modes whose `pawprint` weights total at most `n`. Spells only. Every mode needs `pawprint` of at least 1. |
+
+A mode table takes `target`, `operation`, `cost` and `pawprint`, and only `operation` is required.
+`cost` and `pawprint` are for a spell's `s.modes()` only. `cost` is any `Game.Costs.*` value except
+`Mana`. Load errors are listed in [LUA_API.md](../LUA_API.md#gamemodechoice).
+
 ## `Game.EventFilters.*`
 
 Used with `:SetFilter` on a [replacement effect](replacement-effects.md) — which event shape this

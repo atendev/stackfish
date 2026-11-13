@@ -182,6 +182,13 @@ original plan:
   Target legality is one such responsibility: protection, hexproof and shroud are enforced in
   `commands::target_is_legal`, so a script can grant or remove the keyword but never decides
   whether a target is legal.
+- Mode declarations come from three places. A card definition built in Rust or a TOML fixture fills
+  `CardDefinition::modes`. A spell's script fills it through `s.modes()`, read once per script by
+  `load_script_declarations` and only when the definition has no modes. A triggered ability's
+  script declares them with `:SetModes`, which fills `RegisteredAbility::modes`. One decoder
+  (`script::decode::decode_modes`) serves both script forms. A function mode packs its handle into
+  the mode's effect (`AbilityEffect::packed`), and `commands::unpack_script_effect` splits it back
+  when the spell or trigger goes on the stack.
 
 ## Multiplayer / Commander
 
@@ -246,9 +253,9 @@ original plan:
       coroutines (`Lua::create_thread`/`Thread::resume`, yield/resume spanning `Engine::step()`
       calls) — see `docs/implementation/05-script-bridge.md`'s script-coroutines slice and
       `docs/lua/targeting-and-choices.md`'s "Asking the player for a target mid-resolution". CR
-      700.2's modal-spell cluster (a-i) is closed — see `99-backlog.md`'s Targeting entry. Still
-      open: a modal *triggered* ability's own mode declaration (CR 603.3c) has no Lua builder yet
-      — see `docs/lua/not-available-yet.md`.
+      700.2's modal-spell cluster (a-i) is closed — see `99-backlog.md`'s Targeting entry. A
+      spell's `s.modes()` and a trigger's `:SetModes` declare modes from Lua. Still open: modal
+      activated abilities from Lua — see `docs/lua/not-available-yet.md`.
 - [ ] Snapshot/checkpoint strategy for the event ledger — replaying from event 0 every time you
       want state at event N works for v1, may need periodic snapshots later for performance. Not
       a v1 concern.

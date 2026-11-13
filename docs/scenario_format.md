@@ -508,7 +508,12 @@ count = 1
 No TOML field for a mode's own effect yet (same pre-existing gap as `CardSpec` itself having no
 field for a Rust-native `AbilityEffect` — only reachable via direct `CardDefinition`/`SpellMode`
 struct literals in a Rust integration test, e.g.
-`crates/engine/tests/script_modal_spells.rs`). See
+`crates/engine/tests/script_modal_spells.rs`). A scripted fixture can declare its modes with
+`s.modes()` instead, effects, costs, pawprints and opponent choice included, when the card has no
+`[[cards.modes]]` of its own (see
+[docs/lua/card-script-basics.md](lua/card-script-basics.md#writing-modes) and
+`crates/engine/tests/scenarios/scripting/script_modes.toml`). `s.modes()` beside a script's
+`s.operation()` or `s.target_requirement()` fails the fixture build. See
 `crates/engine/tests/scenarios/modal/modal_spell_toml.toml` for a worked example proving the
 TOML → `CardDefinition.modes` → `CastSpell` mode-selection pipeline, one cast per mode.
 

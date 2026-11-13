@@ -25,8 +25,10 @@
 - Open:
   - Separate targets per entry. `modal-multi-word-modes` already splits target words per mode for spells, so a chain with
     a `Multiple` spec could assign words to entries.
-  - A chain inside `ForEachPlayer`, a custom function as an entry (it would need the entry's own `ScriptHandle` on the
-    view), and a chain as a mode of a modal spell.
+  - A chain inside `ForEachPlayer`, and a custom function as an entry (it would need the entry's own `ScriptHandle` on
+    the view).
+  - A chain as a mode is solo only. `s.modes()` and `:SetModes` accept one, and `check_chain_words` runs per mode, but
+    `is_modal_resolvable` refuses it beside another mode. TODO: combine a chain mode with other modes.
   - Scenario TOML has no field for a chain.
 
 ## Slice: chain-per-entry-targets (branch `phase5/chain-per-entry-targets`)
@@ -61,4 +63,4 @@
   - The spell-load word check (`pregame`) has no integration test. Only the function itself is unit tested.
   - `up_to` and `at_least` words in a `ChainEach` are not retested, and `:SetTarget` arrays can't declare them.
   - A two-word `Fight` on an ability is untested.
-  - Same exclusions as `Chain`: `ForEachPlayer`, custom functions as entries, a chain as a modal mode, scenario TOML.
+  - Same exclusions as `Chain`: `ForEachPlayer`, custom functions as entries, scenario TOML. A chain mode is solo only.
