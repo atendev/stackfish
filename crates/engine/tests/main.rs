@@ -21,6 +21,7 @@ mod banding;
 mod bands_with_other;
 mod bands_with_other_effect_blocked;
 mod bands_with_other_keyword_loss;
+mod battlefield_card_scripts;
 mod beginning_phase;
 mod bloodthirst;
 mod buyback;
