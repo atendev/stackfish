@@ -1041,7 +1041,6 @@ mod tests {
         );
     }
 
-    // CR 702.22c
     // CR 602.2b, 700.2a
     #[test]
     fn a_modal_activation_announces_one_mode_and_only_its_targets() {
@@ -1079,6 +1078,7 @@ mod tests {
         assert_eq!(seen, [true, true]);
     }
 
+    // CR 702.22c
     #[test]
     fn a_band_answer_is_no_bands_or_one_pair_of_listed_attackers() {
         let decision = json!({ "shape": "declare_bands", "attackers": ["1", "2", "3"] });

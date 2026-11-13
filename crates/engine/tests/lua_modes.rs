@@ -715,7 +715,7 @@ fn activated_engine(script: &str, with_creatures: bool) -> Engine {
     engine
 }
 
-/// The played land, which is a new object on the battlefield (CR 400.7).
+/// The land in play: a played land is a different object from the hand card, so look it up by name (CR 400.7).
 fn land_id(engine: &Engine) -> ObjectId {
     let battlefield = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
     *battlefield
