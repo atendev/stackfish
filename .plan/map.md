@@ -95,6 +95,10 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 150 Build non-goal card rejection in the loader. `CardLoadError::NonGoal { name, kind }` rejects planeswalkers, battles, sagas, Class cards and the Manifest, Manifest dread and Cloak producers, checked in that order in `build_definition`. Morph, Megamorph, Disguise, meld and Ixidron-type cards still load. Built by a wayfinder child. [closed/150-build-non-goal-card-rejection.md](closed/150-build-non-goal-card-rejection.md)
 - 147 Build stun counters. `Engine::attempt_untap` serves every untap attempt. A stunned permanent loses one stun counter, writes no `Untapped` (CR 122.1d, 614.5), and a phased-out permanent makes no attempt. `CounterKind::Stun` has Lua, scenario and additive wire names. `BEHAVIOUR_REV` stays 10. Built by a wayfinder child. [closed/147-build-stun-counters.md](closed/147-build-stun-counters.md)
 - 115 Build Lua modal activated abilities. The activation announces its modes (CR 602.2b, 700.2a), and cast and activation share `announced_modes_in_order`. The activated `:SetModes` refuses opponent-chosen modes, per-mode costs, pawprints and mana modes. The wire adds `modes` and `mode_targets` with `PROTOCOL_VERSION` still 1. Forked Totem joins the proof deck, and `BEHAVIOUR_REV` stays 10. Built by a wayfinder child. [closed/115-build-lua-modal-activated.md](closed/115-build-lua-modal-activated.md)
+- 174 Modal mana abilities. The load error on mana modes stays, since no printed card has a modal mana ability. The recorded design announces modes on `ActivateAbility.modes` and judges each activation by its chosen modes (CR 700.2c). It found that an `AddMana` on a resolving stack object adds nothing, which is 175. Decided in auto mode. [closed/174-modal-mana-abilities.md](closed/174-modal-mana-abilities.md)
+- 149 Lua key-error order and hash set algebra lint. The three Lua key checks name every bad key in byte-sorted order, `clippy.toml` refuses hash set algebra and `extract_if`, and the Lua docs forbid letting `pairs` order decide an outcome. Built by a wayfinder child. [closed/149-fix-lua-key-error-order.md](closed/149-fix-lua-key-error-order.md)
+- 118 Build battlefield setup card scripts. A scripted battlefield setup card registers its abilities once before the first step, with no enter event. The harness panics on a script failure and on a harness shortcut beside a script. Kess starts on the battlefield. Built by a wayfinder child. [closed/118-build-battlefield-setup-scripts.md](closed/118-build-battlefield-setup-scripts.md)
+- 116 Build divided damage and counters. `division` rides on `CastSpell` (madness and cascade included), `ActivateAbility` and the trigger-target answer, checked before any change. Each legal target gets its share and an illegal target's share is lost (CR 608.2b). Lua gets `Game.Ops.DividedDamage` and `DividedCounters`, but `:SetTarget` gives a Lua divided ability one target and `Game.Ops.CastSpell` passes no division, both TODOs. Arc Lightning joins the proof deck, and `BEHAVIOUR_REV` stays 10. Built by a wayfinder child. [closed/116-build-divided-damage-and-counters.md](closed/116-build-divided-damage-and-counters.md)
 
 ## Not yet specified
 
@@ -168,13 +172,11 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 174 Modal mana abilities
+- 176 Triggered mana abilities
 
 Builds and audits:
 
-- 116 Build divided damage and counters
 - 117 Build effect-owned exile links and a library-top `ExileLinked`
-- 118 Build battlefield setup card scripts
 - 119 Build library top views and the shown-top event
 - 120 Build scenario assertions and fixture fields
 - 122 Delete `invoke_cost` and the unpayable `Other` cost
@@ -186,10 +188,12 @@ Builds and audits:
 - 142 Build hexproof from
 - 143 Build static redirect recipients
 - 148 Build fight and bite target shapes
-- 149 Fix Lua key-error order and lint hash set algebra (AFK)
 - 151 Build spell additional costs
 - 152 One object pays one moving cost
 - 163 Build flash costs
 - 164 Build delayed end-step triggers
 - 172 Fix the CR 702.16 citation in a hexproof test assertion (AFK)
 - 173 Narrow the stale becomes-tapped and becomes-untapped TODOs (AFK)
+- 175 Resolve mana added by spells and stack abilities
+- 177 Let Lua target words take a count
+- 178 Add a minimum target count beside `up_to`
