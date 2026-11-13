@@ -30,11 +30,11 @@ m:Register()
 
 ### Enforcement
 
-`player_blocked_by_hexproof_or_shroud(state, script_runtime, player, caster) -> bool`, next to `target_blocked_by_hexproof_or_shroud` in `commands/legality.rs`:
+`player_blocked_by_hexproof_or_shroud(state, script_runtime, player, caster) -> bool`, next to `target_blocked_by_hexproof_or_shroud` in `commands/legality.rs`. `caster` keeps the name `target_is_legal` already uses. It is the controller of the spell or ability that targets: the caster of a spell, the activator of an activated ability, and for a triggered ability its controller when it is put on the stack (CR 603.3d).
 
 - Shroud on the player blocks every caster, the player included (CR 702.18a).
 - Hexproof blocks only when `caster != player` (CR 702.11c).
-- `You` and `Opponent` resolve against the source's live controller (`layers::effective_controller`), not the drain-time stamp, so Leyline of Sanctity follows a control change (CR 108.4). `EnchantedPlayer` reads the source's `attached_to_player` (CR 303.4m).
+- `You` and `Opponent` resolve against the source's live controller (`layers::effective_controller`), not the drain-time stamp, so Leyline of Sanctity follows a control change (CR 109.5). `EnchantedPlayer` reads the source's `attached_to_player` (CR 303.4m).
 
 Call sites in `target_is_legal_impl`, each gated on `enforce_targetability`:
 
@@ -44,7 +44,7 @@ Call sites in `target_is_legal_impl`, each gated on `enforce_targetability`:
 
 `attachment_target_is_legal` passes `enforce_targetability = false`, so the CR 704.5m recheck of an Aura attached to a player and the CR 303.4f entry scan ignore player hexproof and shroud (CR 115.1b). An Aura spell cast at a player is targeted and is blocked.
 
-The player TODO above `target_blocked_by_hexproof_or_shroud` is removed. The `hexproof_shroud.rs` header TODO for players is removed too.
+The player TODO above `target_blocked_by_hexproof_or_shroud` (`crates/engine/src/commands/legality.rs`) is removed. The header line `// TODO: hexproof and shroud on players (CR 702.11c)` in `crates/engine/tests/hexproof_shroud.rs` is removed too.
 
 ## Comp rules
 
@@ -55,14 +55,16 @@ The player TODO above `target_blocked_by_hexproof_or_shroud` is removed. The `he
 - CR 601.2c, 602.2b, 603.3d: targets are chosen at cast, activation and when a trigger is put on the stack.
 - CR 608.2b, 608.3b: a resolving spell rechecks its target. An Aura spell whose only target became illegal does not resolve and goes to the graveyard.
 - CR 303.4m: "enchanted player".
-- CR 108.4: "you" is the source's controller.
-- CR 113.6: `:SetFunctionsFrom` for a modifier that works from another zone.
+- CR 109.5: "you" is the source's controller.
+- CR 113.6b: `:SetFunctionsFrom` for a modifier that works from another zone.
+- CR 704.5m: the SBA that removes an Aura attached to an illegal player.
+- CR 702.16b: player protection, not modeled here.
 
 ## TODOs kept or added
 
 - `// TODO: no team model, so "opponent" means any other player` stays above `target_blocked_by_hexproof_or_shroud` and is repeated above the player function.
 - "hexproof from" and "as though it didn't have hexproof" TODOs stay. They belong to "Build hexproof from".
-- `// TODO: player protection (CR 702.16)` at the `PlayerScript` arm, where the comment already says player protection is not modeled.
+- At the `PlayerScript` arm, the plain comment saying player protection is not modeled becomes `// TODO: protection on players (CR 702.16b)`. The `Player` and `AnyTarget` player branches get the same TODO.
 - No new TODO for hexproof on a player through `AddKeyword`: players have no characteristics, so this builder is the one path.
 
 ## Tests
@@ -73,13 +75,16 @@ New file `crates/engine/tests/player_hexproof_shroud.rs`:
 2. Load errors: an unknown keyword, an object tag in `:SetAffected`, and `:Register()` missing either setter.
 3. Hexproof on a player (`You`): an opponent's spell cannot target the player (`target_is_legal` false), and the player's own spell can.
 4. Shroud on a player: neither the opponent nor the player can target the player.
-5. `Opponent` and `Any` affect the right players.
+5. `Opponent` and `Any` affect the right players. Under `Any` hexproof, each player can still target themselves (CR 702.11c).
 6. `EnchantedPlayer`: only the player the source Aura is attached to has it.
 7. `AnyTarget`: the player branch is blocked by hexproof for an opponent.
 8. `PlayerScript`: blocked, and the script predicate is not consulted.
 9. Aura spell at a player: casting an enchant-player Aura at an opponent with hexproof is rejected. The CR 608.2b recheck: the Aura spell targets a player, the player then gains hexproof (modifier pushed onto the state) before resolution, and the Aura goes to the graveyard without attaching.
-10. Attached Aura stays: an Aura attached to a player who gains shroud is not removed by SBA (CR 115.1b).
+10. Attached Aura stays: an Aura attached to a player who gains shroud is not removed by the CR 704.5m SBA, because the Aura permanent does not target (CR 115.1b).
 11. Source leaves the battlefield: the modifier is purged and targeting works again.
-12. Control change: Leyline of Sanctity under another player's control protects the new controller.
+12. Control change: Leyline of Sanctity under another player's control protects the new controller (CR 109.5).
+13. Activated ability: an opponent's Lua activated ability with a player target cannot target a hexproof player, and the activation is rejected (CR 602.2b).
+14. Triggered ability: an opponent's trigger with a player target skips the hexproof player in its candidate scan, so it picks the other legal player or is removed when there is none (CR 603.3d).
+15. Redundancy: two sources give the same player hexproof. Removing one leaves the player protected (CR 702.11h, 702.18b).
 
-Docs: `docs/lua/stubs/game.lua` (builder class and `Game.CreatePlayerKeywordModifier`), `docs/lua/player-modifiers.md` (new section and the `EnchantedPlayer` row), `docs/lua/game-constants.md` (constructor list), `docs/lua/not-available-yet.md` (drop the player half of the hexproof bullet).
+Docs: `docs/DESIGN.md` (where it lists player modifiers), `docs/lua/stubs/game.lua` (builder class and `Game.CreatePlayerKeywordModifier`), `docs/lua/player-modifiers.md` (new section and the `EnchantedPlayer` row), `docs/lua/game-constants.md` (constructor list), `docs/lua/not-available-yet.md` (drop the player half of the hexproof bullet).
