@@ -25,7 +25,7 @@
   - `Damage`/`Sacrifice`/`Destroy`/`Exile`/`Counters` arms iterate all `legal_targets`.
   - Partial fizzle falls out for free: illegal targets absent from `legal_targets`.
 - Unresolved:
-  - Damage division/distribution among targets.
+  - Damage division/distribution among targets (built in divided-damage-counters below).
 
 ## Slice: targeting-up-to-n (merged)
 
@@ -728,3 +728,39 @@
 - Not changed: `:SetTarget` on triggered and activated abilities still builds one `Primitive` with count 1, and the
   scenario TOML `[cards.target_requirement]` is still one table. Both are open.
 - Verify: the Lua decode cases in `phase5_fight_bite.rs`.
+
+## Slice: divided-damage-counters (branch `phase5/divided-damage-counters`)
+
+- Scope: CR 601.2d "divided as you choose" for damage and counters, from ticket 091's decision. The split is
+  announced with the targets on a cast, an activation or a trigger's target answer, never chosen by the script.
+- Types: `PlayerActionKind::CastSpell`/`ActivateAbility`, `CastAnnouncement` (madness, cascade) and
+  `Reply::Targets { per_word, division }` carry `division: Vec<u32>`. `StackObject.division` keeps it, index for
+  index with `targets`; empty for an undivided effect or one target, 0 at a position outside a divided word of two
+  or more targets. `AbilityEffect::DividedDamage(total)` and `DividedCounters { kind, total }`, with
+  `divided_total()`.
+- Validation: `validate_division(total, n, division)` is pure. Zero or one target needs an empty division; two or
+  more need one share each, every share at least 1, summing to the total. `validate_effect_division` runs it per
+  entry point: an undivided effect refuses any division, a `Primitive` word checks the whole list, and a modal
+  spell cuts the flat list into word chunks with `split_target_indices_by_requirement` and checks each divided
+  chunk on its own. Chain and function effects never carry one.
+- Load errors (`check_divided_shape`, at spell declarations, both ability builders' `:Register()` and each mode in
+  `decode_modes`): a total of 0, a spec that is not one `Primitive` word, a word minimum above the total, and
+  `DividedCounters` on a word that can target a player.
+- Entries: `TargetSlot.divide_total` and `ReplyShape::Targets.divide_totals` give the total per word, and `max` is
+  capped at it. `legal_actions` lists no compositions.
+- Resolution: `divided_shares` pairs each legal target with its entry, or the whole total for a lone target.
+  `DividedDamage` pushes one `DamageDealt` per share and `DividedCounters` one `CounterAdded`, all in one batch
+  before `ReplacementCheck`, so every share lands before state-based actions. Fizzle is unchanged.
+- Host: `division` on `cast_spell`, `activate_ability`, `may_cast` and the `targets` reply, each defaulting to
+  empty, so an old Seat still works. `divide_total` on slots and target words, and `division` on snapshot stack
+  entries, where a hidden target's share is dropped with it. `PROTOCOL_VERSION` stays 1. The bot splits at random,
+  and Arc Lightning (`DividedDamage(3)` over up to three any-targets) is in the red-green proof deck.
+- Replay: the division is part of the recorded Answer, so no format change. The pin did not move and
+  `BEHAVIOUR_REV` stays 10.
+- Constraint for a future redirect effect (ticket 103): changing a divided spell's targets must keep the announced
+  division, share for share.
+- Open (TODOs): an X total, untargeted division at resolution (CR 608.2d), divided amounts in Chain and function
+  ops, a copy's new division (CR 707.10c), `Game.Ops.CastSpell` announces no division, `:SetTarget` and mode words
+  take one target, and "one, two or three targets" has no minimum of one.
+- Verify: `tests/divided_effects.rs` (12), `validate_division` unit tests, `wire::reply` division defaults,
+  `replay.rs` divided round trip, and the proof seed loop's divided cast.

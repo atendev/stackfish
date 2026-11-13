@@ -203,6 +203,38 @@ creature you don't control" (an activated one). `:SetTarget` also takes an array
 target word each (see [triggered-abilities.md](triggered-abilities.md)). A two-word `Fight` on an ability
 is not tested yet.
 
+### Divided damage and counters
+
+"Deals 3 damage divided as you choose among one, two, or three targets" is
+`Game.Ops.DividedDamage(3)` over one target word. "Distribute two +1/+1 counters among one or two
+target creatures" is `Game.Ops.DividedCounters("PlusOnePlusOne", 2)`. The script names only the
+total. The player announces the split with the targets, as CR 601.2d requires: one share per target,
+each at least 1, adding up to the total. A single target takes the whole total and announces no split.
+
+```lua
+-- Arc Lightning: "Arc Lightning deals 3 damage divided as you choose among one, two, or three targets."
+function s.target_requirement()
+    return { type = "any", count = 3, up_to = true }
+end
+function s.operation()
+    return Game.Ops.DividedDamage(3)
+end
+```
+
+At resolution each legal target takes its own share. An illegal target's share is lost, and the other
+targets keep theirs (CR 608.2b). All shares are dealt in one batch before state-based actions run. In
+a modal spell a divided mode owns one target word and its split covers that word only.
+
+The divided effect needs exactly one target word, and that word's minimum count can't be above the
+total. A total of 0, an array of words, a word with `count = 4` and no `up_to` for a total of 3,
+`DividedCounters` on a word that can target a player, and a divided op inside `Chain`, `ChainEach` or
+a custom function are all load errors.
+
+"One, two, or three targets" has no minimum of one, since a word has no lower bound beside `up_to`,
+so `up_to = true` also accepts no targets. A `:SetTarget` word and a mode's `target` word always take
+one target, so for now only a non-modal spell's `s.target_requirement()` gives a divided effect more
+than one target.
+
 ## Scripted targeting predicates
 
 For a legality check the plain filter table can't express (e.g. "target creature with power 4 or
@@ -344,8 +376,9 @@ end)
 shape `Game.SelectTargets`/`Game.ChooseN` return, so a picked target passes straight through. It
 becomes a real `DamageDealt` event, going through the normal replacement/prevention pipeline
 (CR 615/616) and applying Deathtouch/Wither/Infect/Lifelink exactly like combat damage or
-`Game.Ops.Damage`. CR 601.2d "divide as you choose" still isn't modeled — each `DealDamageTo` deals its
-full `amount` independently.
+`Game.Ops.Damage`. Each `DealDamageTo` deals its full `amount` on its own and nothing divides. For
+"divided as you choose" use `Game.Ops.DividedDamage` (see
+[Divided damage and counters](#divided-damage-and-counters)).
 
 ```lua
 e:SetOperation(function(source, controller)

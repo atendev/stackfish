@@ -70,17 +70,18 @@ pub enum AbilityEffect {
     /// it can target a player. Both push a `LifeChanged` event.
     /// TODO: no condition matches a life gain and no replacement listens for one CR 119.9, 119.10
     GainLife(i32),
-    /// `Game.Ops.Damage(n)`: deals `n` damage to the resolving object's first
-    /// chosen target (CR 608.2m). It emits a real `DamageDealt` event through
+    /// `Game.Ops.Damage(n)`: deals `n` damage to each legal target (CR 608.2b,
+    /// 608.2m). It emits a real `DamageDealt` event through
     /// `ReplacementCheck` and `CommitEvents`, as combat damage does, so
     /// prevention and replacement (CR 614-616) and Lifelink, Wither, Infect
-    /// and Deathtouch (`commands::apply_damage_event`) apply. A single fixed
-    /// target only, with no "each opponent" shape. `DividedDamage` divides.
+    /// and Deathtouch (`commands::apply_damage_event`) apply. There is no "each
+    /// opponent" shape. `DividedDamage` divides.
     Damage(u32),
     /// `Game.Ops.DividedDamage(total)`: `total` damage divided among the
     /// targets as announced (CR 601.2d). Each legal target takes its share,
     /// and an illegal target's share is lost (CR 608.2b).
     // TODO: an X-dependent total ("X damage divided") (CR 601.2d, 107.3)
+    // TODO: untargeted division chosen at resolution (CR 608.2d)
     DividedDamage(u32),
     /// `Game.Ops.Destroy()`: destroys the first chosen target (CR 701.8). It
     /// can't push an unapplied event as `Damage` does, because every

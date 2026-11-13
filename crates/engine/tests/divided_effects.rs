@@ -154,6 +154,35 @@ fn each_target_takes_its_announced_share() {
 }
 
 // CR 601.2d
+// A word wider than the total can't give every target at least 1, so the slot caps it.
+#[test]
+fn a_cast_entry_shows_the_divided_total_and_caps_the_target_count() {
+    let wide = CardDefinition {
+        target_requirement: Some(TargetSpec::Primitive(any_word(5))),
+        ..arc_lightning()
+    };
+    let engine = Engine::new(state_with(wide));
+    let slots = engine
+        .legal_actions()
+        .into_iter()
+        .find_map(|entry| match entry {
+            decision::Entry::Cast(entry) if entry.card == CARD => Some(entry.targets),
+            _ => None,
+        })
+        .expect("the spell is castable");
+    let decision::EntryTargets::Fixed(slots) = slots else {
+        panic!("a non-modal spell has fixed slots");
+    };
+    assert_eq!(
+        slots
+            .iter()
+            .map(|s| (s.divide_total, s.min, s.max))
+            .collect::<Vec<_>>(),
+        vec![(Some(3), 0, Some(3))]
+    );
+}
+
+// CR 601.2d
 #[test]
 fn a_lone_target_takes_the_whole_total_with_no_division() {
     let mut engine = Engine::new(state_with(arc_lightning()));

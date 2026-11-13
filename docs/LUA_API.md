@@ -180,6 +180,7 @@ Game.Ops.LoseLife(amount)
 
 ```lua
 Game.Ops.Damage(amount)
+Game.Ops.DividedDamage(total)
 Game.Ops.Destroy
 Game.Ops.DestroyAll(filter)
 Game.Ops.BecomeBlocked
@@ -220,12 +221,15 @@ Game.Ops.UntapAll(filter)
 
 ```lua
 Game.Ops.Counters(counter, amount)
+Game.Ops.DividedCounters(counter, total)
 Game.Ops.ReturnSelfWithCounter(counter)
 Game.Ops.Pump(power, toughness, duration)
 Game.Ops.GainControl(duration)
 ```
 
 `duration` is a `Game.Durations.*` value.
+
+`DividedDamage` and `DividedCounters` split `total` among the targets of the ability's one target word. The player announces the split with the targets (CR 601.2d), so the script never names a share.
 
 ### Timed grants
 

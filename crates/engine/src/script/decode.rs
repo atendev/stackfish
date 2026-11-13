@@ -1379,6 +1379,7 @@ pub(crate) fn decode_target_spec_value(
     registry: &mut ScriptRegistry,
     value: Value,
 ) -> Result<TargetSpec, ScriptError> {
+    // TODO: a :SetTarget or mode target word takes exactly one target, so a Lua divided ability or mode has one target (CR 601.2d)
     let single = |filter| TargetRequirement {
         filter,
         count: 1,

@@ -799,10 +799,19 @@ function GameOpsTable.LoseLife(amount) end
 ---@return GameOpsValue
 function GameOpsTable.Mill(n) end
 
---- CR 608.2m. Unsigned, single fixed target; goes through the normal damage pipeline.
+--- CR 608.2m. Unsigned; every legal target takes the full amount through the normal damage pipeline.
+--- For "divided as you choose" use Ops.DividedDamage.
 ---@param amount integer
 ---@return GameOpsValue
 function GameOpsTable.Damage(amount) end
+
+--- CR 601.2d, "deals `total` damage divided as you choose among" the targets of the ability's one target word.
+--- The player announces the split with the targets; the script never sees it. Each legal target takes its share and an
+--- illegal target's share is lost (CR 608.2b). A total of 0, a target spec that is not one word, or a word whose
+--- minimum count is above `total` is a load error. Not allowed inside Chain, ChainEach or a custom function.
+---@param total integer
+---@return GameOpsValue
+function GameOpsTable.DividedDamage(total) end
 
 --- CR 701.8/601.2c. No targets. Takes a raw flat table with the same keys Game.Filter matches on
 --- (controller, card_types, subtypes, excluded_subtypes, supertypes, excluded_supertypes); other keys are ignored.
@@ -919,6 +928,14 @@ function GameOpsTable.ChainEach(...) end
 ---@return GameOpsValue
 function GameOpsTable.Counters(counter, amount) end
 
+--- CR 601.2d, "distribute `total` `counter` counters among" the targets of the ability's one target word. `counter` is
+--- as for Ops.Counters. The split is announced with the targets, as for Ops.DividedDamage, with the same load errors,
+--- and a player or any-target word is also a load error since the counters go on objects only.
+---@param counter CounterKind
+---@param total integer
+---@return GameOpsValue
+function GameOpsTable.DividedCounters(counter, total) end
+
 --- CR 702.79a, 702.93a: Persist/Undying's "return this to the battlefield under its owner's control". `counter` is the counter kind checked by `Game.Conditions.HadNoCounters(counter)`.
 ---@param counter CounterKind
 ---@return GameOpsValue
@@ -958,14 +975,15 @@ function GameOpsTable.DrawCards(amount) end
 
 --- CR 120.3, "deals `amount` damage to `pick`". `pick` is one entry from Game.SelectTargets / Game.ChooseN. Goes through the
 --- same replacement/prevention/lifelink path as Ops.Damage. Only valid as a custom operation function's return value
---- (or inside Chain there); at most one pending kind per Chain.
+--- (or inside Chain there); at most one pending kind per Chain. Each call deals its own amount; nothing divides.
 ---@param pick TargetResult
 ---@param amount integer
 ---@return GameOpsValue
 function GameOpsTable.DealDamageTo(pick, amount) end
 
 --- CR 122.1, puts `amount` counters of `counter` on `pick` (an object pick from Game.SelectTargets / Game.ChooseN).
---- Only valid as a custom operation function's return value (or inside Chain there).
+--- Only valid as a custom operation function's return value (or inside Chain there). Each call adds its own amount;
+--- nothing divides.
 ---@param pick TargetResult
 ---@param counter CounterKind
 ---@param amount integer

@@ -1,5 +1,4 @@
 //! CR 608.2b, 601.2c: every `AbilityEffect` arm (`Damage`, `Sacrifice`, `Destroy`, `Exile`, `Counters`) applies to every legal target and not only `targets.first()`, and a spell with some targets illegal still resolves, skipping those (partial fizzle).
-// TODO: CR 601.2d "divide as you choose", since each legal target gets the full stated amount
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
