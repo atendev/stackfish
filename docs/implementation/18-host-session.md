@@ -88,6 +88,7 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   that has since left a hand (the Observer remembers the old hidden ids).
 - `revealed` (new engine event `GameEventKind::Revealed { player, zone, cards }`): every Seat gets each card's
   `identity`. `object` appears only where the Seat could see the card. Nothing in the engine produces it yet.
+- `cards_milled` is public, since its `cards` lists only ids that landed in a public zone.
 - `cards_scried` and `cards_surveiled` go to the controller and omniscient Seats. `rng_drawn` goes to omniscient Seats
   only. `library_shuffled` is public.
 - Decisions: the chooser and omniscient Seats get the full Decision plus `identities` (`[{object, identity}]`) for

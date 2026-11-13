@@ -5,19 +5,24 @@
 use mlua::{Lua, Value};
 
 use crate::types::card::CardTypeSet;
+use crate::types::counter::CounterKind;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::PlayerId;
+use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::object::GameObject;
 use crate::types::zone::ZoneKind;
 
 use super::types::ScriptError;
 
-/// Bridges `GameEventKind::ZoneChange` into a Lua table with `kind`, `object`,
-/// `from` and `to` (lowercase zone names). Every other `GameEventKind` becomes
-/// `Value::Nil`.
-///
-/// TODO: more event shapes (damage dealt, life changed, tapped) as conditions need them
+fn runtime_err(e: mlua::Error) -> ScriptError {
+    ScriptError::RuntimeError(e.to_string())
+}
+
+/// Bridges the events a trigger condition reads into flat Lua tables: `kind` is
+/// the snake_case variant name and the other fields keep their Rust names, ids
+/// as plain integers. Every other kind is `Value::Nil`. Only ids, zone and
+/// counter names, players, numbers and flags are written, never card
+/// characteristics, so a table leaks nothing about a hidden card.
 pub(crate) fn event_to_lua<'lua>(
     lua: &'lua Lua,
     event: Option<&GameEvent>,
@@ -25,22 +30,174 @@ pub(crate) fn event_to_lua<'lua>(
     let Some(event) = event else {
         return Ok(Value::Nil);
     };
+    let table = lua.create_table().map_err(runtime_err)?;
     match &event.kind {
         GameEventKind::ZoneChange {
             object, from, to, ..
         } => {
-            let table = lua
-                .create_table()
-                .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            table.set("kind", "zone_change").map_err(runtime_err)?;
+            table.set("object", object.0).map_err(runtime_err)?;
             table
-                .set("kind", "zone_change")
-                .and_then(|_| table.set("object", object.0))
-                .and_then(|_| table.set("from", zone_kind_name(*from)))
-                .and_then(|_| table.set("to", zone_kind_name(*to)))
-                .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            Ok(Value::Table(table))
+                .set("from", zone_kind_name(*from))
+                .map_err(runtime_err)?;
+            table.set("to", zone_kind_name(*to)).map_err(runtime_err)?;
         }
-        _ => Ok(Value::Nil),
+        GameEventKind::DamageDealt {
+            source,
+            target,
+            amount,
+            is_combat_damage,
+        } => {
+            table.set("kind", "damage_dealt").map_err(runtime_err)?;
+            table.set("source", source.0).map_err(runtime_err)?;
+            table
+                .set("target", target_to_lua(lua, *target)?)
+                .map_err(runtime_err)?;
+            table.set("amount", *amount).map_err(runtime_err)?;
+            table
+                .set("is_combat_damage", *is_combat_damage)
+                .map_err(runtime_err)?;
+        }
+        GameEventKind::LifeChanged { player, delta } => {
+            table.set("kind", "life_changed").map_err(runtime_err)?;
+            table.set("player", player.0).map_err(runtime_err)?;
+            table.set("delta", *delta).map_err(runtime_err)?;
+        }
+        GameEventKind::Tapped { object } => {
+            table.set("kind", "tapped").map_err(runtime_err)?;
+            table.set("object", object.0).map_err(runtime_err)?;
+        }
+        GameEventKind::Untapped { object } => {
+            table.set("kind", "untapped").map_err(runtime_err)?;
+            table.set("object", object.0).map_err(runtime_err)?;
+        }
+        GameEventKind::CounterAdded {
+            object,
+            kind,
+            amount,
+        } => {
+            table.set("kind", "counter_added").map_err(runtime_err)?;
+            table.set("object", object.0).map_err(runtime_err)?;
+            table
+                .set("counter", counter_kind_name(kind))
+                .map_err(runtime_err)?;
+            table.set("amount", *amount).map_err(runtime_err)?;
+        }
+        GameEventKind::PlayerCounterAdded {
+            player,
+            kind,
+            amount,
+        } => {
+            table
+                .set("kind", "player_counter_added")
+                .map_err(runtime_err)?;
+            table.set("player", player.0).map_err(runtime_err)?;
+            table
+                .set("counter", counter_kind_name(kind))
+                .map_err(runtime_err)?;
+            table.set("amount", *amount).map_err(runtime_err)?;
+        }
+        GameEventKind::AttackerDeclared { attacker, target } => {
+            table
+                .set("kind", "attacker_declared")
+                .map_err(runtime_err)?;
+            table.set("attacker", attacker.0).map_err(runtime_err)?;
+            table
+                .set("target", target_to_lua(lua, *target)?)
+                .map_err(runtime_err)?;
+        }
+        GameEventKind::BlockerDeclared { blocker, attacker } => {
+            table.set("kind", "blocker_declared").map_err(runtime_err)?;
+            table.set("blocker", blocker.0).map_err(runtime_err)?;
+            table.set("attacker", attacker.0).map_err(runtime_err)?;
+        }
+        GameEventKind::CardsMilled { player, cards } => {
+            table.set("kind", "cards_milled").map_err(runtime_err)?;
+            table.set("player", player.0).map_err(runtime_err)?;
+            table
+                .set("cards", id_array_to_lua(lua, cards)?)
+                .map_err(runtime_err)?;
+        }
+        // `kept_on_top` would show library order to a condition any player controls.
+        GameEventKind::CardsScried { .. } | GameEventKind::CardsSurveiled { .. } => {
+            return Ok(Value::Nil);
+        }
+        // No card reads these, so they stay unbridged. Listed by name so a new
+        // variant fails to compile until someone decides whether to bridge it.
+        GameEventKind::ManaAdded { .. }
+        | GameEventKind::CostPaid { .. }
+        | GameEventKind::PrioritySet { .. }
+        | GameEventKind::PriorityPassed { .. }
+        | GameEventKind::StackObjectPushed { .. }
+        | GameEventKind::StackObjectResolved { .. }
+        | GameEventKind::Fizzled { .. }
+        | GameEventKind::Countered { .. }
+        | GameEventKind::CastingUnwound { .. }
+        | GameEventKind::TriggerQueued { .. }
+        | GameEventKind::ReplacementApplied { .. }
+        | GameEventKind::StateBasedActionApplied { .. }
+        | GameEventKind::ScriptError { .. }
+        | GameEventKind::TurnStarted { .. }
+        | GameEventKind::PhaseStarted { .. }
+        | GameEventKind::StepStarted { .. }
+        | GameEventKind::PlayerEliminated { .. }
+        | GameEventKind::LeftGame { .. }
+        | GameEventKind::RngDrawn { .. }
+        | GameEventKind::LibraryShuffled { .. }
+        | GameEventKind::BecameCopy { .. }
+        | GameEventKind::TextBoxesExchanged { .. }
+        | GameEventKind::Regenerated { .. }
+        | GameEventKind::TokenCeased { .. }
+        | GameEventKind::Attached { .. }
+        | GameEventKind::AttachedToPlayer { .. }
+        | GameEventKind::Unattached { .. }
+        | GameEventKind::UmbraArmorConsumed { .. }
+        | GameEventKind::Cycled { .. }
+        | GameEventKind::MadnessExiled { .. }
+        | GameEventKind::SpellCast { .. }
+        | GameEventKind::BecameTarget { .. }
+        | GameEventKind::Revealed { .. } => return Ok(Value::Nil),
+    }
+    Ok(Value::Table(table))
+}
+
+/// A `Target` as the target-result table `{kind = "object"|"player"|"ability", id = n}`
+/// that `Game.SelectTargets` answers and bridged events share.
+pub(crate) fn target_to_lua<'lua>(
+    lua: &'lua Lua,
+    target: Target,
+) -> Result<Value<'lua>, ScriptError> {
+    let table = lua.create_table().map_err(runtime_err)?;
+    let (kind, id) = match target {
+        Target::Object(id) => ("object", id.0),
+        Target::Player(id) => ("player", u64::from(id.0)),
+        Target::Ability(id) => ("ability", id.0),
+    };
+    table.set("kind", kind).map_err(runtime_err)?;
+    table.set("id", id).map_err(runtime_err)?;
+    Ok(Value::Table(table))
+}
+
+fn id_array_to_lua<'lua>(lua: &'lua Lua, ids: &[ObjectId]) -> Result<Value<'lua>, ScriptError> {
+    let table = lua.create_table().map_err(runtime_err)?;
+    for (i, id) in ids.iter().enumerate() {
+        table.set((i + 1) as i64, id.0).map_err(runtime_err)?;
+    }
+    Ok(Value::Table(table))
+}
+
+/// The inverse of `decode::parse_counter_kind_name`. A `Custom` kind gives its own
+/// name, which reads back through `Game.Counter.Custom(name)`, not the name parser.
+pub(crate) fn counter_kind_name(kind: &CounterKind) -> String {
+    match kind {
+        CounterKind::PlusOnePlusOne => "PlusOnePlusOne".to_string(),
+        CounterKind::MinusOneMinusOne => "MinusOneMinusOne".to_string(),
+        CounterKind::Loyalty => "Loyalty".to_string(),
+        CounterKind::Poison => "Poison".to_string(),
+        CounterKind::Energy => "Energy".to_string(),
+        CounterKind::Experience => "Experience".to_string(),
+        CounterKind::Charge => "Charge".to_string(),
+        CounterKind::Custom(name) => name.clone(),
     }
 }
 
@@ -293,5 +450,45 @@ fn zone_kind_name(kind: ZoneKind) -> &'static str {
         ZoneKind::Stack => "stack",
         ZoneKind::Exile => "exile",
         ZoneKind::Command => "command",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::script::decode::parse_counter_kind_name;
+
+    // CR 120.1, 508.1b: no damage or attack event names an ability, but encoding one must not panic.
+    #[test]
+    fn an_ability_target_encodes_as_kind_ability() {
+        let lua = Lua::new();
+        let Value::Table(table) = target_to_lua(&lua, Target::Ability(ObjectId(7))).unwrap() else {
+            panic!("a target encodes as a table");
+        };
+        assert_eq!(table.get::<_, String>("kind").unwrap(), "ability");
+        assert_eq!(table.get::<_, u64>("id").unwrap(), 7);
+    }
+
+    // CR 122.1
+    #[test]
+    fn counter_names_round_trip_through_the_name_parser() {
+        for kind in [
+            CounterKind::PlusOnePlusOne,
+            CounterKind::MinusOneMinusOne,
+            CounterKind::Loyalty,
+            CounterKind::Poison,
+            CounterKind::Energy,
+            CounterKind::Experience,
+            CounterKind::Charge,
+        ] {
+            assert_eq!(
+                parse_counter_kind_name(&counter_kind_name(&kind)).unwrap(),
+                kind
+            );
+        }
+        assert_eq!(
+            counter_kind_name(&CounterKind::Custom("Fade".to_string())),
+            "Fade"
+        );
     }
 }

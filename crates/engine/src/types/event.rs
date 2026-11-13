@@ -182,6 +182,16 @@ pub enum GameEventKind {
         kept_on_top: Vec<ObjectId>,
         put_graveyard: Vec<ObjectId>,
     },
+    /// CR 701.17a: `player` milled at least one card. Written once per player per
+    /// mill action, after its last card moved. `cards` holds the new ids of the
+    /// cards that ended in a public zone (CR 701.17c), so it can be shorter than
+    /// the number milled, or empty. Surveil never writes one.
+    // TODO: a milled card replaced into a hidden zone is left out of `cards`
+    // TODO: mill as a cost
+    CardsMilled {
+        player: PlayerId,
+        cards: Vec<ObjectId>,
+    },
     /// CR 707.2, 613.1a: `object` became a copy of `copied`'s current copiable
     /// values (`AbilityEffect::BecomeCopy`). No trigger condition matches it.
     BecameCopy {

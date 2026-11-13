@@ -41,7 +41,9 @@ impl Engine {
                     ScriptedZoneMoveKind::Sacrifice
                 }
                 AbilityEffect::DiscardRandom { .. } => ScriptedZoneMoveKind::Discard,
-                AbilityEffect::Mill(_) => ScriptedZoneMoveKind::Mill,
+                AbilityEffect::Mill(_) => ScriptedZoneMoveKind::Mill {
+                    since_ledger: self.state.ledger.len(),
+                },
                 _ => unreachable!(
                     "Game.Ops.ForEachPlayer's Lua binding only ever accepts SacrificeRandom/DiscardRandom/Mill/LoseLife as a bare tag"
                 ),

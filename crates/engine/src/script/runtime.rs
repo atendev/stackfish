@@ -27,7 +27,7 @@ use super::decode::{
     decode_alternative_cost_table, decode_condition_value, decode_operation_value,
     decode_script_choice_request, decode_target_spec_table,
 };
-use super::encode::{event_to_lua, state_to_lua};
+use super::encode::{event_to_lua, state_to_lua, target_to_lua};
 use super::globals::bind_game_globals;
 use super::tags::{EffectPrimitiveTag, ResultItem, result_items};
 use super::types::{
@@ -586,8 +586,8 @@ impl ScriptRuntime {
     }
 
     /// Builds a minimal Lua argument set from `ctx` and calls the loaded
-    /// function, expecting a bool. Only `GameEventKind::ZoneChange` is bridged
-    /// (`event_to_lua`); every other event reaches the script as `nil`.
+    /// function, expecting a bool. `event_to_lua` decides which events reach the
+    /// script as a table; the rest arrive as `nil`.
     pub(crate) fn invoke_condition(
         &self,
         handle: ScriptHandle,
@@ -831,36 +831,7 @@ impl ScriptRuntime {
         answer: Target,
     ) -> Result<OperationOutcome, ScriptError> {
         let thread = self.thread(thread_handle)?;
-        let answer_table = self
-            .lua
-            .create_table()
-            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        match answer {
-            Target::Object(id) => {
-                answer_table
-                    .set("kind", "object")
-                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                answer_table
-                    .set("id", id.0)
-                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            }
-            Target::Player(id) => {
-                answer_table
-                    .set("kind", "player")
-                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                answer_table
-                    .set("id", id.0)
-                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            }
-            Target::Ability(id) => {
-                answer_table
-                    .set("kind", "ability")
-                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-                answer_table
-                    .set("id", id.0)
-                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            }
-        }
+        let answer_table = target_to_lua(&self.lua, answer)?;
         let result: Value = thread
             .resume(answer_table)
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;

@@ -652,6 +652,14 @@ fn surveil_two_to_graveyard_is_a_real_zone_change_with_new_ids() {
         put_graveyard, &zone_changes,
         "the summary event's put_graveyard carries the new ids, not the old ones"
     );
+    assert!(
+        !engine
+            .state()
+            .ledger
+            .iter()
+            .any(|e| matches!(e.kind, GameEventKind::CardsMilled { .. })),
+        "CR 701.25a: surveil is not a mill"
+    );
 }
 
 #[test]

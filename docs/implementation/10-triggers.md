@@ -529,3 +529,12 @@
 
 - Trigger ordering: `group_apnap` groups by controller in APNAP order; intra-group ordering pauses via `AwaitTriggerOrderChoice`.
 - Departed-abilities stash is per-pipeline-run, cleared in `end_pipeline_run`.
+
+## Condition events (`phase5/condition-events`)
+
+- `script::encode::event_to_lua` bridges ten kinds as flat tables (`zone_change`, `damage_dealt`, `life_changed`, `tapped`, `untapped`, `counter_added`, `player_counter_added`, `attacker_declared`, `blocker_declared`, `cards_milled`) and lists every other `GameEventKind` by name, so a new variant fails to compile until someone decides. `CardsScried`/`CardsSurveiled` stay `nil` because `kept_on_top` shows library order. The field table is in `docs/lua/card-script-basics.md`.
+- `target_to_lua` is shared with `resume_operation`. `counter_kind_name` inverts `parse_counter_kind_name`; a `Custom` kind gives its own name.
+- `GameEventKind::CardsMilled { player, cards }`. `ScriptedZoneMoveKind::Mill { since_ledger }` remembers where its batch started; when the queue drains, `cards_milled_events` scans the ledger for library departures, one event per owner in first-move order (APNAP for `ForEachPlayer`). Cards that went to a hand or library count as milled but are left out of `cards`.
+- `CostPayment::Life(0)` writes no `LifeChanged`, so `delta` is never 0.
+- New `ConditionPrimitive`s: `BecomesTapped`, `BecomesUntapped`, `GainsLife`, `LosesLife`, `Attacks`, `Blocks`, `Mills`. `Blocks` fires once per blocker-attacker pair (TODO for CR 509.3a once multi-block exists).
+- Verify: `tests/condition_events.rs`, the CardsMilled tests in `mill_lose_life_sacrifice_self.rs`, `script::encode` and `commands::tests` unit tests.

@@ -110,6 +110,7 @@ pub fn collect_triggers(
                 )
             }
             Some(ConditionSpec::Script(handle)) => {
+                // TODO: skip the Lua call for event kinds a condition never reads
                 let ctx = ScriptContext {
                     state,
                     source: ability.source,

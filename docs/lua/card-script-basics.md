@@ -125,20 +125,48 @@ return function(source, controller, event)
 end
 ```
 
-Called with `(source, controller, event)`:
+Called with `(source, controller, event, state)`. A function that declares only the first three
+still works, because Lua drops the extra argument.
 - `source` — this ability's source object id (a plain integer).
 - `controller` — the source's controller (a plain integer).
-- `event` — the event being checked, as a table, or `nil`. **Only zone changes are currently
-  bridged** — every other event kind (damage dealt, life changed, tapped, ...) arrives as `nil`. A
-  zone-change table has:
-  - `event.kind` — always the string `"zone_change"`.
-  - `event.object` — the object id that moved (an integer).
-  - `event.from` / `event.to` — the zone it moved out of/into, as a lowercase string
-    (`"library"`, `"hand"`, `"battlefield"`, `"graveyard"`, `"stack"`, `"exile"`, `"command"`).
+- `event` — the event being checked, as a flat table, or `nil` for an event kind that isn't
+  bridged. `event.kind` names the event, and the other fields are plain integers, strings and
+  booleans:
 
-Must return a plain boolean, and must not attempt to read broader game state — a condition
-function only ever sees `source`/`controller`/`event` (see
-[Hidden information](#hidden-information) below).
+  | `event.kind` | other fields |
+  |---|---|
+  | `"zone_change"` | `object` (the id after the move), `from`, `to` (lowercase zone names: `"library"`, `"hand"`, `"battlefield"`, `"graveyard"`, `"stack"`, `"exile"`, `"command"`) |
+  | `"damage_dealt"` | `source`, `target`, `amount`, `is_combat_damage` |
+  | `"life_changed"` | `player`, `delta` (negative for a loss, never 0) |
+  | `"tapped"`, `"untapped"` | `object` |
+  | `"counter_added"` | `object`, `counter`, `amount` |
+  | `"player_counter_added"` | `player`, `counter`, `amount` |
+  | `"attacker_declared"` | `attacker`, `target` |
+  | `"blocker_declared"` | `blocker`, `attacker` |
+  | `"cards_milled"` | `player`, `cards` (an array of ids) |
+
+  `target` is `{ kind = "object" | "player", id = n }`, the same shape `Game.SelectTargets`
+  answers with. `counter` is a counter name such as `"PlusOnePlusOne"` or `"Poison"`, or a custom
+  counter's own name. `cards` lists the milled cards that ended up in a public zone, by their new
+  ids, so it can be shorter than the number milled, or empty when a replacement sent them to a
+  hand or library. Scry, surveil, priority, mana and the other bookkeeping events arrive as `nil`.
+- `state` — the public board snapshot (see [Hidden information](#hidden-information)).
+
+One action can write several events: an attack taps the attacker and then declares it, and damage
+to a player is a `damage_dealt` followed by a `life_changed`. Each event is checked on its own,
+and no order between them is promised (CR 603.2). To trigger only on combat damage, test
+`event.is_combat_damage` in a custom function.
+
+```lua
+return function(source, controller, event)
+    return event ~= nil
+       and event.kind == "life_changed"
+       and event.player ~= controller
+       and event.delta < 0                -- "whenever an opponent loses life"
+end
+```
+
+Must return a plain boolean.
 
 ### Writing an operation
 
@@ -385,9 +413,11 @@ buyback cost, same as the overwhelming majority of real cards.
 
 ## Hidden information
 
-A condition function only ever receives `source`/`controller`/`event` as plain values — there's no
-way for a condition to read an opponent's hand or library contents, even by accident, since
-nothing beyond those three arguments is ever passed to it.
+A condition function receives `source`/`controller`/`event` as plain values and the public
+`state` snapshot. An event table carries only ids, zone and counter names, players, numbers and
+flags, never a card's characteristics, and a moved card's id is the one it got on arriving, which
+says nothing about where it sat in a library. There's no way for a condition to read an opponent's
+hand or library contents, even by accident.
 
 Static-ability affects-predicates and effect-shape custom functions *do* receive a snapshot of
 real, public board state as a trailing argument (see [static-abilities.md](static-abilities.md)) —

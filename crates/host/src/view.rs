@@ -449,6 +449,8 @@ impl Observer {
             | K::ManaAdded { .. }
             | K::AttackerDeclared { .. }
             | K::BlockerDeclared { .. }
+            // CR 701.17c: `cards` lists only ids that landed in a public zone.
+            | K::CardsMilled { .. }
             | K::CostPaid { .. }
             | K::PrioritySet { .. }
             | K::PriorityPassed { .. }

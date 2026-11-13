@@ -576,6 +576,7 @@
   unchanged.
 - Rule-number fix: the `Sacrifice` doc comment, the `Game.Ops.Sacrifice` row and the stub now cite CR 701.21a (701.17
   is Mill in the current comp rules). Other stale citations were left alone.
+- A drained mill batch writes one `CardsMilled` per player (see `10-triggers.md`, "Condition events").
 - Verify: `phase5_mill_lose_life_sacrifice_self.rs` (32).
 - Open: see the `phase5/mill-lose-life-sacrifice-self` entry in [99-backlog](99-backlog.md).
 

@@ -25,20 +25,76 @@
 ---@field attachments ObjectId[]
 
 ---@class StateSnapshot
+---@field life table<PlayerId, integer>
 ---@field battlefield CardSummary[]
 ---@field exile CardSummary[]
+---@field graveyard table<PlayerId, CardSummary[]>
+---@field command table<PlayerId, CardSummary[]>
 ---@field hand_count table<PlayerId, integer>     -- hidden zone, count-only
 ---@field library_count table<PlayerId, integer>  -- hidden zone, count-only
 
+-- "ability" is a spell or ability on the stack. A damage or attack event never names one.
 ---@class TargetResult
----@field kind "object"|"player"
+---@field kind "object"|"player"|"ability"
 ---@field id integer
+
+-- The event tables a trigger condition receives. Every other event kind arrives as nil.
+-- One action can write several events, checked one at a time in no promised order (CR 603.2).
 
 ---@class ZoneChangeEvent
 ---@field kind "zone_change"
----@field object ObjectId
+---@field object ObjectId  -- the id after the move (CR 400.7)
 ---@field from string  -- "library"|"hand"|"battlefield"|"graveyard"|"stack"|"exile"|"command"
 ---@field to string
+
+---@class DamageDealtEvent
+---@field kind "damage_dealt"
+---@field source ObjectId
+---@field target TargetResult
+---@field amount integer
+---@field is_combat_damage boolean
+
+---@class LifeChangedEvent
+---@field kind "life_changed"
+---@field player PlayerId
+---@field delta integer  -- negative for a loss, never 0
+
+---@class TappedEvent
+---@field kind "tapped"
+---@field object ObjectId
+
+---@class UntappedEvent
+---@field kind "untapped"
+---@field object ObjectId
+
+---@class CounterAddedEvent
+---@field kind "counter_added"
+---@field object ObjectId
+---@field counter string  -- "PlusOnePlusOne", "Poison", ... or a custom counter's name
+---@field amount integer
+
+---@class PlayerCounterAddedEvent
+---@field kind "player_counter_added"
+---@field player PlayerId
+---@field counter string
+---@field amount integer
+
+---@class AttackerDeclaredEvent
+---@field kind "attacker_declared"
+---@field attacker ObjectId
+---@field target TargetResult
+
+---@class BlockerDeclaredEvent
+---@field kind "blocker_declared"
+---@field blocker ObjectId
+---@field attacker ObjectId
+
+---@class CardsMilledEvent
+---@field kind "cards_milled"
+---@field player PlayerId
+---@field cards ObjectId[]  -- milled cards now in a public zone; can be shorter than the number milled, or empty
+
+---@alias Event ZoneChangeEvent|DamageDealtEvent|LifeChangedEvent|TappedEvent|UntappedEvent|CounterAddedEvent|PlayerCounterAddedEvent|AttackerDeclaredEvent|BlockerDeclaredEvent|CardsMilledEvent
 
 -- The shared filter-table shape used across :SetTarget/costs/Game.Ops.Search/Game.Filter etc.
 -- See docs/lua/targeting-and-choices.md#filter-table-shape.
@@ -71,7 +127,7 @@
 
 ---@alias ScriptedTargetFn fun(object: ObjectId, source: ObjectId, controller: PlayerId, state: StateSnapshot): boolean
 ---@alias PlayerPredicateFn fun(player: PlayerId, source: ObjectId, controller: PlayerId, state: StateSnapshot): boolean
----@alias ConditionFn fun(source: ObjectId, controller: PlayerId, event: ZoneChangeEvent|nil): boolean
+---@alias ConditionFn fun(source: ObjectId, controller: PlayerId, event: Event|nil, state: StateSnapshot): boolean
 ---@alias InterveningIfFn fun(source: ObjectId, controller: PlayerId): boolean
 ---@alias AffectsPredicateFn fun(object: ObjectId, source: ObjectId, controller: PlayerId, state: StateSnapshot, enchanted: ObjectId|nil): boolean
 ---@alias EffectShapeFn fun(source: ObjectId, controller: PlayerId, state: StateSnapshot, enchanted: ObjectId|nil): GameEffectsValue|nil
@@ -602,6 +658,13 @@ local GameAffectedTable = {}
 ---@field EachBeginningOfCombat GameConditionsValue         -- any player's turn
 ---@field EndStep GameConditionsValue                       -- CR 512/513, your end step
 ---@field EachEndStep GameConditionsValue                   -- any player's end step
+---@field BecomesTapped GameConditionsValue                 -- CR 603.2e, "whenever this becomes tapped"
+---@field BecomesUntapped GameConditionsValue               -- CR 603.2e, "whenever this becomes untapped"
+---@field GainsLife GameConditionsValue                     -- CR 119.9, "whenever you gain life"
+---@field LosesLife GameConditionsValue                     -- CR 119.3, "whenever you lose life"
+---@field Attacks GameConditionsValue                       -- CR 508.3a, "whenever this attacks"
+---@field Blocks GameConditionsValue                        -- CR 509.3a, "whenever this blocks"
+---@field Mills GameConditionsValue                         -- CR 701.17a, "whenever you mill one or more cards"
 local GameConditionsTable = {}
 
 --- CR 700.4/603.10, filtered death (e.g. "whenever a creature you control dies").

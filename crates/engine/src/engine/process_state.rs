@@ -242,7 +242,11 @@ pub(crate) enum ScriptedZoneMoveKind {
     Bounce,
     /// CR 701.17a: library to graveyard (`AbilityEffect::Mill`). Committed through
     /// `commit_zone_move` so a redirect to exile lands in the right zone.
-    Mill,
+    /// `since_ledger` is the ledger length when the batch was built, so the drain
+    /// can find its moves and write one `CardsMilled` per player.
+    Mill {
+        since_ledger: usize,
+    },
     /// CR 110.2a, 400.7: graveyard or exile to battlefield. `controller` is who it
     /// enters under (`None` is the owner); `tapped` enters it tapped.
     Reanimate {
@@ -288,7 +292,7 @@ impl ScriptedZoneMoveKind {
     pub(in crate::engine) fn source_zone(self) -> ZoneKind {
         match self {
             ScriptedZoneMoveKind::Discard => ZoneKind::Hand,
-            ScriptedZoneMoveKind::Mill => ZoneKind::Library,
+            ScriptedZoneMoveKind::Mill { .. } => ZoneKind::Library,
             ScriptedZoneMoveKind::Reanimate { .. } => ZoneKind::Graveyard,
             ScriptedZoneMoveKind::Destroy
             | ScriptedZoneMoveKind::Sacrifice
