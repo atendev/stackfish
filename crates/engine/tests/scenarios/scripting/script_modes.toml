@@ -1,0 +1,76 @@
+# CR 700.2, 601.2b: a card's own `s.modes()` fills in CardDefinition.modes through the
+# scenario crate's register_script_modes, and the chosen function mode runs through the
+# engine's own runtime.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "choose_one"
+name = "Test Choose One"
+types = ["Sorcery"]
+script = """
+local s = {}
+function s.modes()
+    return {
+        choice = Game.ModeChoice.Exactly(1),
+        modes = {
+            { operation = Game.Ops.GainLife(3) },
+            { operation = function(c, controller) return Game.Ops.GainLife(5) end },
+        },
+    }
+end
+return s
+"""
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "choose_one"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "choose_one"
+targets = []
+modes = [1]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "choose_one"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_life"
+player = 0
+equals = 25

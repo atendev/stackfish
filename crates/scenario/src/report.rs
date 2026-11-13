@@ -7,7 +7,7 @@ use crate::actions::{build_payment_plan, resolve_card, resolve_target, to_player
 use crate::assertions::{AssertionOutcome, check_assertion};
 use crate::auto_pay::chain_auto_pay;
 use crate::build::{
-    build_initial_state, parse_phase, parse_step, register_script_operation,
+    build_initial_state, parse_phase, parse_step, register_script_modes, register_script_operation,
     register_script_target_requirement, register_target_script, register_trigger_ability,
 };
 use crate::build_new_game::build_new_game_engine;
@@ -206,6 +206,7 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
         }
         for pending in script_operations {
             register_script_operation(&mut engine, pending.object, &pending.source);
+            register_script_modes(&mut engine, pending.object, &pending.source);
         }
         (engine, card_ids)
     };

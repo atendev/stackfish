@@ -1,5 +1,4 @@
 //! CR 603.3d: `Game.CreateTriggeredAbility(c)` has a `:SetTarget(table | function)` method, decoded as in `Game.CreateActivatedAbility` (`decode_target_filter_value`, `count: 1`, `up_to: false`), so a card script can declare a targeted trigger.
-// TODO: mode declaration for triggered abilities from Lua (CR 603.3c), since there is no Lua modal vocabulary to mirror
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;

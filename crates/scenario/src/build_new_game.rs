@@ -6,8 +6,8 @@ use stackfish_engine::*;
 
 use crate::build::{
     build_continuous_effect, card_definition_from_spec, open_card_db, parse_mana_unit,
-    register_script_operation, register_script_target_requirement, register_target_script,
-    register_trigger_ability,
+    register_script_modes, register_script_operation, register_script_target_requirement,
+    register_target_script, register_trigger_ability,
 };
 use crate::report::remap_moved_card_ids;
 use crate::run::drain;
@@ -180,6 +180,7 @@ pub(crate) fn build_new_game_engine(
             }
             if let Some(source) = &resolved_script {
                 register_script_operation(&mut engine, card_ids[key], source);
+                register_script_modes(&mut engine, card_ids[key], source);
             }
         }
     }
