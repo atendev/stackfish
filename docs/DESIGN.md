@@ -18,7 +18,8 @@ Supports normal games of Magic, including Commander, for N players (not hardcode
   Stickers, Attractions, Dungeons.
 - No planeswalkers, Sagas, Battles, double-faced cards, split/flip/adventure cards, Class cards
   in the initial card-type implementation — but the data model and layer/effect systems must
-  leave room for them (stubbed type slots, not a wall).
+  leave room for them (stubbed type slots, not a wall). The card loader refuses planeswalkers,
+  Battles, Sagas, Class cards and Manifest, Manifest dread and Cloak cards with `CardLoadError::NonGoal`.
 - No netcode/matchmaking — that's host-application concern.
 - No card database tooling — card data (oracle text, costs, types, P/T, and a reference to or
   literal of the Lua script implementing the card) comes from an external, separately-maintained
