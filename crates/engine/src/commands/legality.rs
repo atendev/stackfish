@@ -1514,6 +1514,20 @@ pub(crate) fn combine_chosen_modes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // CR 601.2d
+    #[test]
+    fn validate_division_needs_one_share_of_at_least_one_per_target() {
+        assert!(validate_division(3, 0, &[]).is_ok());
+        assert!(validate_division(3, 1, &[]).is_ok());
+        assert!(validate_division(3, 1, &[3]).is_err());
+        assert!(validate_division(3, 0, &[3]).is_err());
+        assert!(validate_division(3, 2, &[2, 1]).is_ok());
+        assert!(validate_division(3, 2, &[]).is_err());
+        assert!(validate_division(3, 2, &[2, 2]).is_err());
+        assert!(validate_division(3, 2, &[3, 0]).is_err());
+        assert!(validate_division(3, 4, &[1, 1, 1, 0]).is_err());
+    }
     use crate::types::ability::AbilityEffect;
     use crate::types::card::{
         CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SpellMode,

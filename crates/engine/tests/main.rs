@@ -66,6 +66,7 @@ mod dies_triggers;
 mod discard_target_player;
 mod discard_triggers;
 mod discarded_trigger;
+mod divided_effects;
 mod draw_combat_end_triggers;
 mod draw_limit_modifier;
 mod effect_duration_expiration;
