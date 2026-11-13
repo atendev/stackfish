@@ -1728,8 +1728,8 @@ fn sequence_len(table: &Table) -> Option<usize> {
 
 /// One target word's filter decoder for `:SetTarget`, `target_requirement()`
 /// and modes, taking a `Value` and not `decode_target_filter_table`'s bare
-/// `Table`. A bare function is
-/// registered and returned as `TargetFilter::Script` (invoked later through
+/// `Table`. A bare function is registered and returned as
+/// `TargetFilter::Script` (invoked later through
 /// `ScriptRuntime::invoke_target_legal`), for a legality shape the flat table
 /// can't express ("power 4 or greater"). A table's `filter` key takes a
 /// function the same way (`TargetFilter::PlayerScript` with `type = "player"`),

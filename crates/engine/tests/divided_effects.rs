@@ -562,8 +562,6 @@ fn a_bad_divided_shape_is_a_load_error() {
 
 const LUA_LAND: &str = "Lua Rod";
 
-/// Two tough P1 creatures in play and a P0 land in hand whose script runs `body` in
-/// `register_abilities(c)`.
 fn lua_land_engine(body: &str) -> Engine {
     let mut state = two_player_main_phase_state();
     for (id, name) in [(A, "A"), (B, "B")] {
