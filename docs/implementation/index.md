@@ -43,4 +43,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [37-expiring-permissions](37-expiring-permissions.md) — `duration` on both permission structs, `source_bound` purges, `expire_permissions` in the three turn drains, `AbilityEffect::GrantTimingPermission`/`GrantZonePermission`, `Game.Ops.Grant*Permission`
 - [38-zone-permission-riders](38-zone-permission-riders.md) — `LeaveStackRider`, `StackObject.leave_stack_rider` and `leave_destination` at resolve, fizzle and counter, `ZonePermission.rider`, `cast_zone_source`, `ZonePermissionBuilder:SetRider`, the Kess scenario
 - [39-lua-modes](39-lua-modes.md) — `s.modes()`, `:SetModes` on triggers, `Game.ModeChoice.*`, `decode_modes`, handles from 1, `AbilityEffect::packed` and `unpack_script_effect`, solo-only function and chain modes, `BEHAVIOUR_REV` 10
+- [40-stun-counters](40-stun-counters.md) — `CounterKind::Stun`, `Engine::attempt_untap` as the one untap seam for the untap step and `flip_tapped`, pending stun deltas, phased-out permanents skipped
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

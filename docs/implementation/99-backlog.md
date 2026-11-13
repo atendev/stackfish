@@ -17,7 +17,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 7. Modal builders in Lua. Merged from `phase5/lua-modal-spells-triggers`: `s.modes()` for spells and `:SetModes` for triggered abilities (ticket 114). See `39-lua-modes.md`. Still open: modal activated abilities in `commands/activate.rs` and `:SetModes` on the activated builder.
 8. CR 601.2d division of damage or counters among targets, then subtype and exclusion keys on `DestroyAll` filters.
 9. Merged from `phase5/revealed-face-down-producers`: ticket 027, `Revealed` from a revealing search and from amplify, the free-text event rule in `DESIGN.md`, and the `ScriptError` redaction. `face_down` has no producer, since face-down mechanics are a design non-goal (item 12).
-10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target, stun counters and Condescend's X. CR 104.4b loop detection is merged (ticket 029, `30-loop-detection.md`), and so is Echo's control check (ticket 111).
+10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target and Condescend's X. CR 104.4b loop detection is merged (ticket 029, `30-loop-detection.md`), and so is Echo's control check (ticket 111).
 11. Housekeeping, alongside the above: the live `todo!()` body in `ScriptRuntime::invoke_cost` (ticket 122 deletes it; the one in `commands/mod.rs` went away in ticket 035). Ticket 017 (stale notes and the `.plan/` commit policy) and the stale-prose pass over `docs/lua/` (ticket 110) are closed.
 12. Design non-goals (planeswalkers, battles, double-faced, split and flip cards, sagas, face-down permanents, team rules). If the card database holds any of these, the loader should skip or reject them explicitly before then.
 
@@ -384,8 +384,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   `object.controller`; only `untap_step` resolves the layered controller. A stale source id does nothing (CR
   400.7). Tapping never touches `CombatState` (CR 506.4b). Tests: `phase5_tap_untap_effects.rs` (22). Left open:
   no Lua `becomes tapped`/`becomes untapped` condition (events exist, `ConditionPrimitive` has none, CR
-  603.2e); no "would become tapped/untapped" replacement event and no stun counters (CR 122.1d, 614), so an
-  untap always succeeds; no "can't be tapped"/"doesn't untap" query (CR 614.17); `phased_out` not modeled; not
+  603.2e); stun counters (CR 122.1d) are the only untap replacement, applied in `Engine::attempt_untap`,
+  with no "would become tapped" event and no other "would become untapped" replacement (CR 614, 616.1); no "can't be tapped"/"doesn't untap" query (CR 614.17); `phased_out` not modeled; not
   usable as a mode of a multi-mode spell (`is_modal_resolvable` left unchanged). Test-harness note: this slice's
   "all effects don't target" test uses protection from everything because hexproof didn't exist yet; hexproof
   and shroud are real now (`phase5/hexproof-shroud`), and `phase5_hexproof_shroud.rs` has the `TapAll` cases.

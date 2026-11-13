@@ -71,7 +71,7 @@
 ---@field kind "counter_added"
 ---@field object ObjectId
 ---@field counter string  -- "PlusOnePlusOne", "Poison", ... or a custom counter's name
----@field amount integer
+---@field amount integer  -- negative for a removal, such as a stun counter replacing an untap
 
 ---@class PlayerCounterAddedEvent
 ---@field kind "player_counter_added"
@@ -637,6 +637,7 @@ function ZonePermissionBuilder:Register() end
 ---@field Energy GameCounterValue
 ---@field Experience GameCounterValue
 ---@field Charge GameCounterValue
+---@field Stun GameCounterValue  -- CR 122.1d; an untap attempt removes one instead
 ---@field Custom fun(name: string): GameCounterValue
 local GameCounterTable = {}
 
@@ -904,7 +905,7 @@ function GameOpsTable.Chain(...) end
 ---@return GameOpsValue
 function GameOpsTable.ChainEach(...) end
 
---- CR 122.1a. `counter` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
+--- CR 122.1a. `counter` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge"/"Stun") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
 ---@param counter CounterKind
 ---@param amount integer
 ---@return GameOpsValue

@@ -506,6 +506,7 @@ pub(crate) fn parse_counter_kind_name(name: &str) -> Result<CounterKind, ScriptE
         "Energy" => CounterKind::Energy,
         "Experience" => CounterKind::Experience,
         "Charge" => CounterKind::Charge,
+        "Stun" => CounterKind::Stun,
         other => {
             return Err(ScriptError::LoadError(format!(
                 "unknown counter kind '{other}' - use Game.Counter.Custom(...) for flavor counters"
