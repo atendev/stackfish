@@ -617,13 +617,14 @@ Game.RegisterWard(source, cost)
 
 ## Strict validation rules
 
-- Unknown keys in any engine-decoded table raise a load error.
+- Unknown keys in any engine-decoded table raise a load error. The error names every unknown key, sorted.
 - Wrong-typed values raise a load error.
 - Unknown counter kind strings raise a load error. Use `Game.Counter.Custom(name)` for flavor counters.
 - A bare `Game.Ops.*` factory passed uncalled is detected and rejected.
 - A raw table in `:SetAffected` is rejected. Wrap it in `Game.Filter(...)`.
 - Operations must return a `Game.Ops.*` or `Game.Effects.*` value, or `nil` to mean "do nothing." Raw-key tables are rejected.
 - Multi-op results in callbacks must use `Game.Ops.Chain` or `Game.Ops.ChainEach`.
+- `pairs` order over string keys can change between games. A script that needs order uses `ipairs` or sorts its keys. See [card-script-basics.md](lua/card-script-basics.md#iteration-order).
 
 ## Migration from the old API
 

@@ -295,25 +295,66 @@ fn lua_load_err(error: mlua::Error) -> ScriptError {
     ScriptError::LoadError(error.to_string())
 }
 
-/// Rejects a Lua table key that is not in `allowed` or `extra_allowed`.
-/// Every load-time table decoder uses this so typos fail at script load time.
-/// Game-time callback readers pass `extra_allowed` when a table mixes several
-/// concerns (target requirement keys beside filter keys).
+/// Rejects a Lua table with any key not in `allowed` or `extra_allowed`, naming
+/// every bad key in sorted order so the message does not depend on Lua's
+/// per-state string hash seed. Every load-time table decoder uses this so typos
+/// fail at script load time. Game-time callback readers pass `extra_allowed`
+/// when a table mixes several concerns (target requirement keys beside filter keys).
 pub(crate) fn reject_unknown_keys(
     table: &Table,
     allowed: &[&str],
     extra_allowed: &[&str],
     context: &str,
 ) -> Result<(), ScriptError> {
-    for pair in table.clone().pairs::<String, Value>() {
+    let mut unknown = Vec::new();
+    for pair in table.clone().pairs::<Value, Value>() {
         let (key, _) = pair.map_err(lua_load_err)?;
-        if !allowed.contains(&key.as_str()) && !extra_allowed.contains(&key.as_str()) {
-            return Err(ScriptError::LoadError(format!(
-                "{context} has unknown key '{key}'"
-            )));
+        let known = match &key {
+            Value::String(name) => name
+                .to_str()
+                .is_ok_and(|name| allowed.contains(&name) || extra_allowed.contains(&name)),
+            _ => false,
+        };
+        if !known {
+            unknown.push(lua_key_name(&key));
         }
     }
-    Ok(())
+    match unknown_keys_list(unknown) {
+        None => Ok(()),
+        Some((1, names)) => Err(ScriptError::LoadError(format!(
+            "{context} has unknown key {names}"
+        ))),
+        Some((_, names)) => Err(ScriptError::LoadError(format!(
+            "{context} has unknown keys {names}"
+        ))),
+    }
+}
+
+/// Names a Lua table key for an error message: a string by its text, an integer
+/// in decimal, and anything else by type, since a float or a reference has no
+/// text that is stable across runs. The `Game.ChooseN` opts check in the Lua
+/// prelude follows the same rule.
+pub(crate) fn lua_key_name(key: &Value) -> String {
+    match key {
+        Value::String(name) => name.to_string_lossy().into_owned(),
+        Value::Integer(n) => n.to_string(),
+        other => format!("<{}>", other.type_name()),
+    }
+}
+
+/// Sorts bad key names and joins them as `'a', 'b'`, with the count so the
+/// caller can pick singular or plural text. `None` when there are none.
+pub(crate) fn unknown_keys_list(mut names: Vec<String>) -> Option<(usize, String)> {
+    if names.is_empty() {
+        return None;
+    }
+    names.sort();
+    let joined = names
+        .iter()
+        .map(|name| format!("'{name}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some((names.len(), joined))
 }
 
 fn read_names(table: &Table, key: &str) -> Result<Option<Vec<String>>, ScriptError> {
