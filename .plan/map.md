@@ -90,13 +90,14 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 110 Sweep stale notes and plan prose. The Lua gaps page drops attachment protection, enchanting a player and the missing `LifeChanged` claim, all of which work. Protection against attachments cites CR 702.16c and 702.16d, the backlog marks merged work as merged, and the older maps show no open tickets. Ticket 171 fixes the matching Rust citations. [closed/110-stale-note-sweep.md](closed/110-stale-note-sweep.md)
 - 111 Echo sacrifice checks control. An unpaid Echo trigger makes the same CR 701.21a control check as `Game.Ops.SacrificeSelf`, through one shared helper. The unless-paid pause keeps the ability's controller. No Lua builder was added. Built in auto mode, then merged. [closed/111-echo-sacrifice-checks-control.md](closed/111-echo-sacrifice-checks-control.md)
 - 113 Bridge condition events into Lua. Conditions see ten event kinds as flat tables, mill writes `CardsMilled` per player, paying 0 life writes no event, and seven new `Game.Conditions` tags ship. `BEHAVIOUR_REV` stays 9. Built in auto mode, then merged. [closed/113-build-condition-events.md](closed/113-build-condition-events.md)
+- 114 Build Lua modal spells and triggers. `s.modes()` and `:SetModes` on triggers ship through one decoder with `Game.ModeChoice.*`. Handles start at 1, and a `ForEachPlayer` function packs into the effect, which fixed spell functions working only at handle 0. Function, chain and `ForEachPlayer` modes are solo only, and a per-mode mana cost is a load error. `BEHAVIOUR_REV` is 10. Built in auto mode, then merged. [closed/114-build-lua-modal-spells-triggers.md](closed/114-build-lua-modal-spells-triggers.md)
 
 ## Not yet specified
 
 - Carddb-backed CardSource: a thin wrapper over `CardDb::load_by_oracle_id` for `../stackfish-db/stackfish.db`. Its shape is settled in 006. The Godot adapter's `create` needs it to serve real cards.
 - Wrong-thread behavior in the Godot adapter: tell hosts to expect `null`, or compile gdext's check out of release builds (found by 015).
 - Engine atomicity on a failed command. Decided in ticket 024 (see `map-fixes.md`): validate before mutate, so a rejected input changes nothing. The build work is tracked there as 025, 035, 026 and 036.
-- Chain operation leftovers. A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode are not built (`25-chain-operations.md`). A chain mode is solo only (090), and combining it with other modes is not built.
+- Chain operation leftovers. A word shared by two entries, a chain inside `ForEachPlayer`, and a custom function as an entry are not built (`25-chain-operations.md`). A chain mode is solo only (090, 114), and combining it with other modes is not built.
 - Opponent-chosen modes with three or more players, where the controller picks the chooser (CR 700.2e), and repeatable pawprint-budget modes (CR 700.2i).
 - Condescend's `{X}`. "Counter unless that player pays {X}" supports only a fixed printed amount, and an X announced on the countering spell has no representation yet.
 - Devour and Amplify quality restrictions, and a creature with several independent Amplify instances.
@@ -167,7 +168,7 @@ Decisions (HITL):
 
 Builds and audits:
 
-- 114 Build Lua modal spells and triggers
+- 115 Build Lua modal activated abilities
 - 116 Build divided damage and counters
 - 117 Build effect-owned exile links and a library-top `ExileLinked`
 - 118 Build battlefield setup card scripts
