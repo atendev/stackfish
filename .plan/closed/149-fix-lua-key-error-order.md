@@ -3,9 +3,9 @@ id: 149
 title: Fix Lua key-error order and lint hash set algebra
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question

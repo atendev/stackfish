@@ -3,9 +3,9 @@ id: 118
 title: Build battlefield setup card scripts
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: [93]
-claimed: true
+claimed: false
 ---
 
 ## Question
