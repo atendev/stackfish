@@ -107,6 +107,25 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
+    /// CR 601.2d: one `DamageDealt` per share, in target order, so prevention and
+    /// replacement apply to each target on its own.
+    pub(super) fn resolve_divided_damage_effect(
+        &mut self,
+        top: &StackObject,
+        shares: &[(Target, u32)],
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        for &(target, amount) in shares {
+            events.push(GameEventKind::DamageDealt {
+                source: top.source,
+                target,
+                amount,
+                is_combat_damage: false,
+            });
+        }
+        ControlFlow::Continue(events)
+    }
+
     /// CR 701.14: fight (`mutual`) and bite. A two-word spec reads the per-word legal
     /// chunks, so an illegal word voids the effect (CR 701.14b); one word uses the
     /// flattened list. Amounts are read through the layer engine before any event is
@@ -207,6 +226,25 @@ impl Engine {
                 object: *id,
                 kind: kind.clone(),
                 amount,
+            });
+        }
+        ControlFlow::Continue(events)
+    }
+
+    /// CR 601.2d, 122.1: one `CounterAdded` per share. Players are skipped, since
+    /// the loader refuses a player target for this effect.
+    pub(super) fn resolve_divided_counters_effect(
+        &mut self,
+        shares: &[(Target, u32)],
+        kind: &CounterKind,
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        for &(target, amount) in shares {
+            let Target::Object(id) = target else { continue };
+            events.push(GameEventKind::CounterAdded {
+                object: id,
+                kind: kind.clone(),
+                amount: i32::try_from(amount).unwrap_or(i32::MAX),
             });
         }
         ControlFlow::Continue(events)

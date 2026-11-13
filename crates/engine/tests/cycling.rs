@@ -141,6 +141,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId) {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -160,6 +161,7 @@ fn try_activate(
             modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     })

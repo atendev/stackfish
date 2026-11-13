@@ -240,6 +240,16 @@ pub(crate) fn bind_game_globals(
     let damage =
         lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::Damage(amount))))?;
     ops.set("Damage", damage)?;
+    // CR 601.2d: the split is announced with the targets, never by the script.
+    let divided_damage = lua.create_function(|_, total: u32| {
+        if total == 0 {
+            return Err(mlua::Error::RuntimeError(
+                "Game.Ops.DividedDamage needs a total of at least 1 (CR 601.2d)".to_string(),
+            ));
+        }
+        Ok(OperationTag(AbilityEffect::DividedDamage(total)))
+    })?;
+    ops.set("DividedDamage", divided_damage)?;
     ops.set("Destroy", OperationTag(AbilityEffect::Destroy))?;
     ops.set("BecomeBlocked", OperationTag(AbilityEffect::BecomeBlocked))?;
     let destroy_all = lua.create_function(|_, table: Table| {
@@ -505,6 +515,16 @@ pub(crate) fn bind_game_globals(
         Ok(OperationTag(AbilityEffect::Counters { kind, amount }))
     })?;
     ops.set("Counters", counters)?;
+    let divided_counters = lua.create_function(|_, (counter, total): (Value, u32)| {
+        let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
+        if total == 0 {
+            return Err(mlua::Error::RuntimeError(
+                "Game.Ops.DividedCounters needs a total of at least 1 (CR 601.2d)".to_string(),
+            ));
+        }
+        Ok(OperationTag(AbilityEffect::DividedCounters { kind, total }))
+    })?;
+    ops.set("DividedCounters", divided_counters)?;
     // CR 702.79a, 702.93a: `Game.Ops.ReturnSelfWithCounter(counter)`, Persist and Undying's resolution effect, paired with `Game.Conditions.Dies` and `Game.Conditions.HadNoCounters(counter)` (see `AbilityEffect::ReturnSelfWithCounter`).
     let return_self_with_counter = lua.create_function(|_, counter: Value| {
         let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
@@ -1734,6 +1754,12 @@ fn chain_entry(lua: &Lua, ctor: &str, position: usize, arg: Value) -> mlua::Resu
     match arg {
         Value::UserData(ud) if ud.is::<OperationTag>() => {
             let effect = ud.borrow::<OperationTag>()?.0.clone();
+            // TODO: divided amounts in function and chain operations (CR 601.2d)
+            if effect.divided_total().is_some() {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Game.Ops.{ctor} argument {position} is a divided effect, which can't be chained yet"
+                )));
+            }
             if !crate::commands::is_modal_resolvable(&effect) {
                 return Err(mlua::Error::RuntimeError(format!(
                     "Game.Ops.{ctor} argument {position} can't be chained (a nested chain and some \

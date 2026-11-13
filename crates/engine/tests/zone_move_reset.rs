@@ -110,6 +110,7 @@ fn cast(engine: &mut Engine) -> Result<(), ()> {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .map_err(|_| ())?;
@@ -242,6 +243,7 @@ fn a_battlefield_filter_cannot_hit_a_graveyard_card() {
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     });
     let status = drain(&mut engine);

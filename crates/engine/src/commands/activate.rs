@@ -19,7 +19,7 @@ use super::attach::find_ability;
 use super::cast::unpack_script_effect;
 use super::legality::{
     announced_modes_in_order, combine_chosen_modes, has_summoning_sickness, is_sorcery_speed,
-    validate_targets,
+    validate_effect_division, validate_targets,
 };
 use super::{
     CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
@@ -50,6 +50,7 @@ pub(crate) enum ActivatePlan {
         source: ObjectId,
         source_owner: PlayerId,
         targets: Vec<Target>,
+        division: Vec<u32>,
         target_requirement: Option<TargetSpec>,
         x_value: Option<u32>,
         operation: ScriptHandle,
@@ -70,6 +71,7 @@ pub(super) fn validate_activate_ability(
     ability_index: u32,
     modes: Vec<u32>,
     targets: Vec<Target>,
+    division: Vec<u32>,
     chosen_colors: Vec<Color>,
     x_value: Option<u32>,
 ) -> Result<Validated, Rejected> {
@@ -214,7 +216,7 @@ pub(super) fn validate_activate_ability(
     match effect {
         Some(effect @ (AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. })) => {
             // CR 605.1a
-            if !targets.is_empty() {
+            if !targets.is_empty() || !division.is_empty() {
                 return Err(Rejected::IllegalAction(
                     "a mana ability cannot have targets".to_string(),
                 ));
@@ -316,6 +318,8 @@ pub(super) fn validate_activate_ability(
         non_mana_effect @ (None
         | Some(AbilityEffect::GainLife(_))
         | Some(AbilityEffect::Damage(_))
+        | Some(AbilityEffect::DividedDamage(_))
+        | Some(AbilityEffect::DividedCounters { .. })
         | Some(AbilityEffect::Destroy)
         | Some(AbilityEffect::BecomeBlocked)
         // CR 701.8/601.2c
@@ -415,6 +419,18 @@ pub(super) fn validate_activate_ability(
                 // resolves against, as in CastSpell.
                 x_value,
             )?;
+            // CR 601.2d/602.2b
+            validate_effect_division(
+                state,
+                script_runtime,
+                target_requirement.as_ref(),
+                non_mana_effect.as_ref(),
+                &targets,
+                &division,
+                actor,
+                source,
+                x_value,
+            )?;
 
             // `None` means no cost: the same empty CostSpec RegisteredAbility::cost
             // describes.
@@ -457,6 +473,7 @@ pub(super) fn validate_activate_ability(
                 source,
                 source_owner,
                 targets,
+                division,
                 target_requirement,
                 x_value,
                 operation,
@@ -541,6 +558,7 @@ pub(super) fn apply_activate_ability(
             source,
             source_owner,
             targets,
+            division,
             target_requirement,
             x_value,
             operation,
@@ -582,6 +600,7 @@ pub(super) fn apply_activate_ability(
             );
             entry.ability_index = Some(ability_index);
             entry.ability_text = ability_text;
+            entry.division = division;
             state.stack.push(entry);
 
             Ok(CommandOutcome {

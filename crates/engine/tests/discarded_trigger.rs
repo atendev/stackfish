@@ -186,6 +186,7 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

@@ -100,6 +100,7 @@ fn cast(card: ObjectId) -> PlayerActionKind {
         x_value: None,
         alternative_cost: None,
         pay_buyback: false,
+        division: Vec::new(),
     }
 }
 
@@ -110,6 +111,7 @@ fn activate(source: ObjectId) -> PlayerActionKind {
         modes: Vec::new(),
         targets: Vec::new(),
         chosen_colors: Vec::new(),
+        division: Vec::new(),
         x_value: None,
     }
 }
@@ -543,6 +545,7 @@ fn activate_an_ability_index_that_does_not_exist_is_rejected() {
             modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     );
@@ -577,6 +580,7 @@ fn activate_with_the_wrong_arguments_is_rejected() {
         modes: Vec::new(),
         targets: vec![Target::Player(P1)],
         chosen_colors: Vec::new(),
+        division: Vec::new(),
         x_value: None,
     };
     assert_action_rejected(
@@ -590,6 +594,7 @@ fn activate_with_the_wrong_arguments_is_rejected() {
         modes: Vec::new(),
         targets: Vec::new(),
         chosen_colors: vec![Color::Red],
+        division: Vec::new(),
         x_value: None,
     };
     assert_action_rejected(&mut engine, "colors with no choice", act(P0, with_colors));
@@ -599,6 +604,7 @@ fn activate_with_the_wrong_arguments_is_rejected() {
         modes: Vec::new(),
         targets: Vec::new(),
         chosen_colors: Vec::new(),
+        division: Vec::new(),
         x_value: Some(1),
     };
     assert_action_rejected(&mut engine, "X with no X cost", act(P0, with_x));
@@ -620,6 +626,7 @@ fn activate_a_color_choice_with_the_wrong_colors_is_rejected() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: colors.clone(),
+                division: Vec::new(),
                 x_value: None,
             },
         );
@@ -684,6 +691,7 @@ fn activate_a_targeted_ability_with_a_bad_target_is_rejected() {
         modes: Vec::new(),
         targets: vec![Target::Object(ObjectId(555))],
         chosen_colors: Vec::new(),
+        division: Vec::new(),
         x_value: None,
     };
     assert_action_rejected(&mut engine, "missing target", act(P0, bad));
@@ -807,6 +815,7 @@ fn another_action_during_a_payment_is_rejected_without_touching_it() {
         modes: Vec::new(),
         targets: Vec::new(),
         chosen_colors: Vec::new(),
+        division: Vec::new(),
         x_value: None,
     };
     let rejected =

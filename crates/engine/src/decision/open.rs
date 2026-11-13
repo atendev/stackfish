@@ -6,6 +6,7 @@ use crate::commands;
 use crate::engine::{Engine, ProcessState};
 use crate::script::ScriptChoiceRequest;
 use crate::triggers::PendingTrigger;
+use crate::types::ability::AbilityEffect;
 use crate::types::cost::CostSpec;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::target::TargetSpec;
@@ -383,13 +384,17 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
             trigger,
             spec,
             candidates,
+            modal_effect,
             ..
-        } => (
-            trigger.controller,
-            "Trigger targets",
-            targets_shape(spec, candidates),
-            Route::TriggerTargets,
-        ),
+        } => {
+            let effect = engine.pending_trigger_effect(trigger, modal_effect.as_ref());
+            (
+                trigger.controller,
+                "Trigger targets",
+                targets_shape(spec, candidates, effect.as_ref()),
+                Route::TriggerTargets,
+            )
+        }
         ProcessState::AwaitingTriggerModeChoice {
             modes,
             mode_choice,
@@ -475,10 +480,15 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
     })
 }
 
-fn targets_shape(spec: &TargetSpec, candidates: &[Vec<Target>]) -> ReplyShape {
+fn targets_shape(
+    spec: &TargetSpec,
+    candidates: &[Vec<Target>],
+    effect: Option<&AbilityEffect>,
+) -> ReplyShape {
     ReplyShape::Targets {
         spec: spec.clone(),
         candidates: candidates.to_vec(),
+        divide_totals: commands::divided_word_totals(Some(spec), effect),
     }
 }
 

@@ -69,6 +69,7 @@ fn activate(
         .submit_action(PlayerAction {
             player,
             kind: PlayerActionKind::ActivateAbility {
+                division: Vec::new(),
                 source,
                 ability_index: 0,
                 modes: Vec::new(),
@@ -90,6 +91,7 @@ fn try_activate(
     engine.submit_action(PlayerAction {
         player,
         kind: PlayerActionKind::ActivateAbility {
+            division: Vec::new(),
             source,
             ability_index: 0,
             modes: Vec::new(),

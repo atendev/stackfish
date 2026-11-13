@@ -62,6 +62,7 @@ fn cast_with_x(engine: &mut Engine, player: PlayerId, card: ObjectId, x_value: u
                 x_value: Some(x_value),
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand, main phase, empty stack");

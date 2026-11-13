@@ -344,6 +344,7 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
@@ -451,6 +452,7 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");
@@ -480,6 +482,7 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");

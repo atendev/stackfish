@@ -94,6 +94,7 @@ fn cast_spell_moves_card_hand_to_stack() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, spell is in hand");
@@ -144,6 +145,7 @@ fn cast_spell_keeps_priority_with_caster() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap();
@@ -189,6 +191,7 @@ fn cast_spell_breaks_pass_chain() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap();
@@ -225,6 +228,7 @@ fn cast_spell_rejects_land() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap_err();
@@ -266,6 +270,7 @@ fn cast_spell_rejects_card_not_in_hand() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap_err();
@@ -302,6 +307,7 @@ fn cast_sorcery_rejects_outside_main_phase() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap_err();
@@ -328,6 +334,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
         card_object(already_on_stack, sorcery_definition(), p0, ZoneKind::Stack),
     );
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id: already_on_stack,
@@ -370,6 +377,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority - instant can be cast despite combat phase + nonempty stack");
@@ -406,6 +414,7 @@ fn cast_instant_resolves_to_owners_graveyard() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap();
@@ -479,6 +488,7 @@ fn cast_creature_resolves_to_battlefield() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap();

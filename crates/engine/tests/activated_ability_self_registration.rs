@@ -386,6 +386,7 @@ fn play_land_self_registered_activated_ability_can_be_activated_paid_and_resolve
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -472,6 +473,7 @@ fn play_land_self_registered_activated_ability_with_mana_cost_can_be_activated_p
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

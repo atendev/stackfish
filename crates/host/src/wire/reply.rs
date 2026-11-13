@@ -83,6 +83,9 @@ pub struct WireCast {
     pub modes: Vec<u32>,
     #[serde(default)]
     pub targets: Vec<WireTarget>,
+    /// CR 601.2d: as `cast_spell`'s `division`.
+    #[serde(default)]
+    pub division: Vec<u32>,
     pub x_value: Option<u32>,
 }
 
@@ -91,6 +94,7 @@ impl From<WireCast> for CastAnnouncement {
         CastAnnouncement {
             modes: cast.modes,
             targets: cast.targets.into_iter().map(Into::into).collect(),
+            division: cast.division,
             x_value: cast.x_value,
         }
     }
@@ -107,6 +111,10 @@ pub(crate) enum WireAction {
         modes: Vec<u32>,
         #[serde(default)]
         targets: Vec<WireTarget>,
+        /// CR 601.2d: one share per target for a divided effect with two or
+        /// more targets. Omitted otherwise.
+        #[serde(default)]
+        division: Vec<u32>,
         x_value: Option<u32>,
         alternative_cost: Option<usize>,
         #[serde(default)]
@@ -119,6 +127,9 @@ pub(crate) enum WireAction {
         modes: Vec<u32>,
         #[serde(default)]
         targets: Vec<WireTarget>,
+        /// CR 601.2d, 602.2b: as `cast_spell`'s `division`.
+        #[serde(default)]
+        division: Vec<u32>,
         #[serde(default)]
         chosen_colors: Vec<WireColor>,
         x_value: Option<u32>,
@@ -137,6 +148,7 @@ impl WireAction {
                 card,
                 modes,
                 targets,
+                division,
                 x_value,
                 alternative_cost,
                 pay_buyback,
@@ -144,6 +156,7 @@ impl WireAction {
                 card: card.into(),
                 modes,
                 targets: targets.into_iter().map(Into::into).collect(),
+                division,
                 x_value,
                 alternative_cost,
                 pay_buyback,
@@ -153,6 +166,7 @@ impl WireAction {
                 ability_index,
                 modes,
                 targets,
+                division,
                 chosen_colors,
                 x_value,
             } => Kind::ActivateAbility {
@@ -160,6 +174,7 @@ impl WireAction {
                 ability_index,
                 modes,
                 targets: targets.into_iter().map(Into::into).collect(),
+                division,
                 chosen_colors: chosen_colors.into_iter().map(Into::into).collect(),
                 x_value,
             },
@@ -223,8 +238,11 @@ pub(crate) enum WireReply {
     Payment {
         plan: Option<WirePlan>,
     },
+    /// `division` is the flat split, as on `cast_spell` (CR 601.2d, 603.3d).
     Targets {
         targets: Vec<Vec<WireTarget>>,
+        #[serde(default)]
+        division: Vec<u32>,
     },
     /// A missing or null `cast` declines.
     MayCast {
@@ -266,12 +284,13 @@ impl WireReply {
                 rest: objects(rest),
             },
             WireReply::Payment { plan } => Reply::Payment(plan.map(Into::into)),
-            WireReply::Targets { targets } => Reply::Targets(
-                targets
+            WireReply::Targets { targets, division } => Reply::Targets {
+                per_word: targets
                     .into_iter()
                     .map(|word| word.into_iter().map(Into::into).collect())
                     .collect(),
-            ),
+                division,
+            },
             WireReply::MayCast { cast } => Reply::MayCast(cast.map(Into::into)),
             WireReply::Action { action } => Reply::Action(action.into_action(player)),
             WireReply::DeclareAttackers { attackers } => Reply::DeclareAttackers(

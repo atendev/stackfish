@@ -177,6 +177,7 @@ fn push_creature_spell_on_stack(state: &mut GameState, stack_id: ObjectId, owner
         ),
     );
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id,
@@ -208,6 +209,7 @@ fn push_echo_trigger_on_stack(
     cost: &str,
 ) {
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id,

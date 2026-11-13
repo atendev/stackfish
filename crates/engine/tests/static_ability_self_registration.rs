@@ -490,6 +490,7 @@ fn cast_self_buffing_creature_resolves_with_effective_pt_boosted() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");

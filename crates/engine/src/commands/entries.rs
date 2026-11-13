@@ -18,8 +18,9 @@ use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::legality::{
-    can_cast_from_zone, can_cast_now, can_play_land_from_zone, has_summoning_sickness,
-    is_sorcery_speed, legal_target_candidates_for_x, requirement_depends_on_x, solo_only_modes,
+    can_cast_from_zone, can_cast_now, can_play_land_from_zone, divided_word_totals,
+    has_summoning_sickness, is_sorcery_speed, legal_target_candidates_for_x,
+    requirement_depends_on_x, solo_only_modes,
 };
 
 /// Every entry the priority player may take, with `Pass` last.
@@ -157,6 +158,7 @@ fn cast_modes_and_targets(
             state,
             script_runtime,
             definition.target_requirement.as_ref(),
+            definition.effect.as_ref(),
             player,
             card,
         );
@@ -189,6 +191,7 @@ fn modal_modes_and_targets(
                 state,
                 script_runtime,
                 mode.target_requirement.as_ref(),
+                mode.effect.as_ref(),
                 player,
                 source,
             )
@@ -350,6 +353,7 @@ fn activate_entries(
                 state,
                 script_runtime,
                 ability.target.as_ref(),
+                ability.effect.as_ref(),
                 player,
                 ability.source,
             );
@@ -411,11 +415,13 @@ fn activate_entries(
 }
 
 /// One slot per target word of `spec`, with each word's legal candidates in a
-/// stable order.
+/// stable order. `effect` is the one those words feed, which marks a divided
+/// word (CR 601.2d).
 fn target_slots(
     state: &GameState,
     script_runtime: &ScriptRuntime,
     spec: Option<&TargetSpec>,
+    effect: Option<&AbilityEffect>,
     player: PlayerId,
     source: ObjectId,
 ) -> Vec<TargetSlot> {
@@ -424,9 +430,11 @@ fn target_slots(
         Some(TargetSpec::Primitive(requirement)) => vec![requirement],
         Some(TargetSpec::Multiple(requirements)) => requirements.iter().collect(),
     };
+    let totals = divided_word_totals(spec, effect);
     requirements
         .into_iter()
-        .map(|requirement| {
+        .zip(totals)
+        .map(|(requirement, divide_total)| {
             let mut candidates = legal_target_candidates_for_x(
                 state,
                 script_runtime,
@@ -443,12 +451,14 @@ fn target_slots(
                 } else {
                     requirement.count
                 },
-                max: if requirement.at_least {
-                    None
-                } else {
-                    Some(requirement.count)
+                // CR 601.2d: each target takes at least 1 of the total.
+                max: match (requirement.at_least, divide_total) {
+                    (true, total) => total,
+                    (false, Some(total)) => Some(requirement.count.min(total)),
+                    (false, None) => Some(requirement.count),
                 },
                 x_dependent: requirement_depends_on_x(requirement),
+                divide_total,
             }
         })
         .collect()

@@ -182,7 +182,7 @@ fn fire_and_resolve(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>)
         matches!(status, StepStatus::AwaitingTriggerTargets { .. }),
         "2+ modes combine into a target pause: {status:?}"
     );
-    engine.submit_trigger_targets(targets).unwrap();
+    engine.submit_trigger_targets(targets, Vec::new()).unwrap();
     drain(engine);
     assert_eq!(engine.state().stack.len(), 1, "the ability is on the stack");
     pass_both(engine);
@@ -483,7 +483,9 @@ fn fire_chosen_by_opponent(engine: &mut Engine, chosen: Vec<u32>) -> StepStatus 
         matches!(status, StepStatus::AwaitingTriggerTargets { .. }),
         "{status:?}"
     );
-    engine.submit_trigger_targets(Vec::new()).unwrap();
+    engine
+        .submit_trigger_targets(Vec::new(), Vec::new())
+        .unwrap();
     drain(engine);
     pass_both(engine)
 }

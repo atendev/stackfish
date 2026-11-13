@@ -191,6 +191,7 @@ pub(crate) fn resolve_auto_pay(
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         };

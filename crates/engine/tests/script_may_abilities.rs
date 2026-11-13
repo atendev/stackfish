@@ -111,6 +111,7 @@ fn play_activate_and_drain(
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

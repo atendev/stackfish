@@ -321,6 +321,7 @@ fn cast_self_registering_creature_gains_life_on_etb_end_to_end() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
@@ -430,6 +431,7 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
                     x_value: None,
                     alternative_cost: None,
                     pay_buyback: false,
+                    division: Vec::new(),
                 },
             })
             .expect("p0 holds priority");

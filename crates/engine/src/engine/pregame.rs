@@ -257,6 +257,12 @@ impl Engine {
                     let words_check = match (&operation, &requirement) {
                         (Ok(Some((Some(effect), _))), Ok(requirement)) => {
                             crate::script::check_chain_words(Some(effect), requirement.as_ref())
+                                .and_then(|()| {
+                                    crate::script::check_divided_shape(
+                                        Some(effect),
+                                        requirement.as_ref(),
+                                    )
+                                })
                         }
                         _ => Ok(()),
                     };

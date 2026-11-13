@@ -22,6 +22,9 @@ pub struct TargetSlot {
     pub max: Option<u32>,
     /// The candidates depend on the announced X, so they are a superset.
     pub x_dependent: bool,
+    /// CR 601.2d: the word's effect divides this total among its targets, and
+    /// `max` is capped at it. The Answer's `division` carries the split.
+    pub divide_total: Option<u32>,
 }
 
 /// The target slots of a spell or ability. A modal one lists them per mode,

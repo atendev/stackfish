@@ -70,6 +70,7 @@ pub fn try_cast_spell(
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     })
 }
@@ -87,6 +88,7 @@ pub fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");

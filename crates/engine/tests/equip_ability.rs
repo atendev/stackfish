@@ -151,6 +151,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
                 modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -171,6 +172,7 @@ fn try_activate(
             modes: Vec::new(),
             targets,
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     })
@@ -304,6 +306,7 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
         ),
     );
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id: already_on_stack,

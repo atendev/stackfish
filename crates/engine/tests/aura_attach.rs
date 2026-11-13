@@ -479,6 +479,7 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -504,6 +505,7 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

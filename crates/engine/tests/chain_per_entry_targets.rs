@@ -318,6 +318,7 @@ fn cast(engine: &mut Engine, targets: Vec<Target>) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority and the targets are legal");
@@ -475,6 +476,7 @@ fn target_opponent_rejects_the_controller_as_the_target() {
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     });
     let rejected = result.is_err() || matches!(drain(&mut engine), StepStatus::Error(_));
@@ -697,6 +699,7 @@ fn an_activated_ability_with_two_words_runs_each_entry_on_its_own_word() {
                 modes: Vec::new(),
                 targets: vec![Target::Object(BEAR), Target::Player(P1)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -745,6 +748,7 @@ fn an_etb_trigger_with_two_words_asks_for_both_and_runs_each_entry_on_its_word()
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");
@@ -767,7 +771,7 @@ fn an_etb_trigger_with_two_words_asks_for_both_and_runs_each_entry_on_its_word()
     );
     let hand = hand_size(&engine, P0);
     engine
-        .submit_trigger_targets(vec![Target::Object(BEAR), Target::Player(P1)])
+        .submit_trigger_targets(vec![Target::Object(BEAR), Target::Player(P1)], Vec::new())
         .expect("both words satisfied");
     drain(&mut engine);
     pass_both(&mut engine);

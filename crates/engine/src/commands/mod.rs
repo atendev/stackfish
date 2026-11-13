@@ -37,10 +37,11 @@ pub(crate) use combat::{
 };
 pub(crate) use entries::{cast_options, mana_ability_entries, priority_entries};
 pub(crate) use legality::{
-    attachment_target_is_legal, combine_chosen_modes, effective_keywords, effective_power,
-    is_ability_stack_entry, is_modal_placeholder_requirement, is_modal_resolvable,
+    attachment_target_is_legal, combine_chosen_modes, divided_word_totals, effective_keywords,
+    effective_power, is_ability_stack_entry, is_modal_placeholder_requirement, is_modal_resolvable,
     legal_target_candidates_for_spec, mode_can_join_others, solo_only_modes,
-    split_targets_by_requirement, target_is_legal, target_spec_minimums, validate_targets,
+    split_target_indices_by_requirement, split_targets_by_requirement, target_is_legal,
+    target_spec_minimums, validate_effect_division, validate_targets,
 };
 pub(crate) use zone_ops::{
     apply_damage_event, collect_cost_zone_moves, commit_payment, commit_zone_move, propose_draw,
@@ -208,6 +209,7 @@ pub(crate) fn validate_command(
             card,
             modes,
             targets,
+            division,
             x_value,
             alternative_cost,
             pay_buyback,
@@ -218,6 +220,7 @@ pub(crate) fn validate_command(
             card,
             modes,
             targets,
+            division,
             x_value,
             alternative_cost,
             pay_buyback,
@@ -227,6 +230,7 @@ pub(crate) fn validate_command(
             ability_index,
             modes,
             targets,
+            division,
             chosen_colors,
             x_value,
         } => activate::validate_activate_ability(
@@ -237,6 +241,7 @@ pub(crate) fn validate_command(
             ability_index,
             modes,
             targets,
+            division,
             chosen_colors,
             x_value,
         ),

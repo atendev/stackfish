@@ -149,6 +149,7 @@ fn etb_trigger_casts_an_exiled_card_for_free_via_game_ops_cast_spell() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, caster is in hand, main phase, empty stack");
@@ -279,6 +280,7 @@ fn casting_a_nonexistent_object_does_not_panic_and_the_triggering_ability_still_
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, caster is in hand, main phase, empty stack");

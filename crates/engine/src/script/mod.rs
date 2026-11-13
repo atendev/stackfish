@@ -11,7 +11,7 @@ mod tags;
 mod types;
 
 // Re-exports keep `crate::script::X` paths resolving for the rest of the crate and the integration tests.
-pub(crate) use decode::check_chain_words;
+pub(crate) use decode::{check_chain_words, check_divided_shape};
 pub use runtime::ScriptRuntime;
 pub use types::{
     OperationOutcome, ScriptChoiceRequest, ScriptContext, ScriptError, ScriptZoneMoveKind,
