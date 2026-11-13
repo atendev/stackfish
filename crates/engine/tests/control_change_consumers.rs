@@ -270,6 +270,7 @@ fn the_new_controller_can_activate_a_gain_controlled_sources_ability() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -294,6 +295,7 @@ fn the_original_owner_can_no_longer_activate_a_gain_controlled_sources_ability()
             modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     });
@@ -367,6 +369,7 @@ fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

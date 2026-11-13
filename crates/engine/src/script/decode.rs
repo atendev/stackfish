@@ -295,25 +295,66 @@ fn lua_load_err(error: mlua::Error) -> ScriptError {
     ScriptError::LoadError(error.to_string())
 }
 
-/// Rejects a Lua table key that is not in `allowed` or `extra_allowed`.
-/// Every load-time table decoder uses this so typos fail at script load time.
-/// Game-time callback readers pass `extra_allowed` when a table mixes several
-/// concerns (target requirement keys beside filter keys).
+/// Rejects a Lua table with any key not in `allowed` or `extra_allowed`, naming
+/// every bad key in sorted order so the message does not depend on Lua's
+/// per-state string hash seed. Every load-time table decoder uses this so typos
+/// fail at script load time. Game-time callback readers pass `extra_allowed`
+/// when a table mixes several concerns (target requirement keys beside filter keys).
 pub(crate) fn reject_unknown_keys(
     table: &Table,
     allowed: &[&str],
     extra_allowed: &[&str],
     context: &str,
 ) -> Result<(), ScriptError> {
-    for pair in table.clone().pairs::<String, Value>() {
+    let mut unknown = Vec::new();
+    for pair in table.clone().pairs::<Value, Value>() {
         let (key, _) = pair.map_err(lua_load_err)?;
-        if !allowed.contains(&key.as_str()) && !extra_allowed.contains(&key.as_str()) {
-            return Err(ScriptError::LoadError(format!(
-                "{context} has unknown key '{key}'"
-            )));
+        let known = match &key {
+            Value::String(name) => name
+                .to_str()
+                .is_ok_and(|name| allowed.contains(&name) || extra_allowed.contains(&name)),
+            _ => false,
+        };
+        if !known {
+            unknown.push(lua_key_name(&key));
         }
     }
-    Ok(())
+    match unknown_keys_list(unknown) {
+        None => Ok(()),
+        Some((1, names)) => Err(ScriptError::LoadError(format!(
+            "{context} has unknown key {names}"
+        ))),
+        Some((_, names)) => Err(ScriptError::LoadError(format!(
+            "{context} has unknown keys {names}"
+        ))),
+    }
+}
+
+/// Names a Lua table key for an error message: a string by its text, an integer
+/// in decimal, and anything else by type, since a float or a reference has no
+/// text that is stable across runs. The `Game.ChooseN` opts check in the Lua
+/// prelude follows the same rule.
+pub(crate) fn lua_key_name(key: &Value) -> String {
+    match key {
+        Value::String(name) => name.to_string_lossy().into_owned(),
+        Value::Integer(n) => n.to_string(),
+        other => format!("<{}>", other.type_name()),
+    }
+}
+
+/// Sorts bad key names and joins them as `'a', 'b'`, with the count so the
+/// caller can pick singular or plural text. `None` when there are none.
+pub(crate) fn unknown_keys_list(mut names: Vec<String>) -> Option<(usize, String)> {
+    if names.is_empty() {
+        return None;
+    }
+    names.sort();
+    let joined = names
+        .iter()
+        .map(|name| format!("'{name}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some((names.len(), joined))
 }
 
 fn read_names(table: &Table, key: &str) -> Result<Option<Vec<String>>, ScriptError> {
@@ -1338,6 +1379,7 @@ pub(crate) fn decode_target_spec_value(
     registry: &mut ScriptRegistry,
     value: Value,
 ) -> Result<TargetSpec, ScriptError> {
+    // TODO: a :SetTarget or mode target word takes exactly one target, so a Lua divided ability or mode has one target (CR 601.2d)
     let single = |filter| TargetRequirement {
         filter,
         count: 1,
@@ -1415,6 +1457,48 @@ pub(crate) fn check_chain_words(
             "Game.Ops.ChainEach entries own {owned} target word(s) but the ability declares {declared}"
         )))
     }
+}
+
+/// CR 601.2d: a divided effect splits its total among the targets of one
+/// "target" word. A total of 0, a word that must take more targets than the
+/// total, or a non-object word for divided counters (`CounterAdded` names an
+/// object) is a load error.
+pub(crate) fn check_divided_shape(
+    effect: Option<&AbilityEffect>,
+    target: Option<&TargetSpec>,
+) -> Result<(), ScriptError> {
+    let Some(effect) = effect else {
+        return Ok(());
+    };
+    let Some(total) = effect.divided_total() else {
+        return Ok(());
+    };
+    let refuse = |why: &str| Err(ScriptError::LoadError(format!("a divided effect {why}")));
+    if total == 0 {
+        return refuse("needs a total of at least 1");
+    }
+    let Some(TargetSpec::Primitive(requirement)) = target else {
+        return refuse("needs exactly one target word");
+    };
+    let minimum = if requirement.up_to {
+        0
+    } else {
+        requirement.count
+    };
+    if minimum > total {
+        return refuse(&format!(
+            "can't give each of {minimum} targets at least 1 of {total}"
+        ));
+    }
+    if matches!(effect, AbilityEffect::DividedCounters { .. })
+        && !matches!(
+            requirement.filter,
+            TargetFilter::Object { .. } | TargetFilter::Script(_)
+        )
+    {
+        return refuse("of counters can only target objects");
+    }
+    Ok(())
 }
 
 /// Which declaration a mode list comes from. Per-mode costs and pawprints
@@ -1534,11 +1618,13 @@ pub(crate) fn decode_modes(
             )));
         }
         let effect = AbilityEffect::packed(primitive, handle);
-        check_chain_words(Some(&effect), target.as_ref()).map_err(|e| match e {
-            ScriptError::LoadError(m) | ScriptError::RuntimeError(m) => {
-                ScriptError::LoadError(format!("{at}: {m}"))
-            }
-        })?;
+        check_chain_words(Some(&effect), target.as_ref())
+            .and_then(|()| check_divided_shape(Some(&effect), target.as_ref()))
+            .map_err(|e| match e {
+                ScriptError::LoadError(m) | ScriptError::RuntimeError(m) => {
+                    ScriptError::LoadError(format!("{at}: {m}"))
+                }
+            })?;
         let cost = match entry.get::<_, Value>("cost").map_err(lua_load_err)? {
             Value::Nil => None,
             _ if owner != ModeOwner::Spell => {
@@ -1732,5 +1818,46 @@ mod chain_word_tests {
         );
         assert!(check_chain_words(Some(&AbilityEffect::Destroy), None).is_ok());
         assert!(check_chain_words(None, None).is_ok());
+    }
+
+    fn exactly(count: u32) -> TargetSpec {
+        TargetSpec::Primitive(TargetRequirement {
+            filter: TargetFilter::AnyTarget,
+            count,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        })
+    }
+
+    // CR 601.2d
+    #[test]
+    fn a_divided_word_must_fit_its_total() {
+        let divided = AbilityEffect::DividedDamage(2);
+        assert!(check_divided_shape(Some(&divided), Some(&exactly(2))).is_ok());
+        assert!(check_divided_shape(Some(&divided), Some(&exactly(3))).is_err());
+        assert!(
+            check_divided_shape(Some(&AbilityEffect::DividedDamage(0)), Some(&exactly(1))).is_err()
+        );
+        assert!(check_divided_shape(Some(&divided), None).is_err());
+        let counters = AbilityEffect::DividedCounters {
+            kind: crate::types::counter::CounterKind::PlusOnePlusOne,
+            total: 2,
+        };
+        assert!(check_divided_shape(Some(&counters), Some(&exactly(1))).is_err());
+        let on = |filter| {
+            TargetSpec::Primitive(TargetRequirement {
+                filter,
+                count: 2,
+                up_to: true,
+                at_least: false,
+                exclude_source: false,
+            })
+        };
+        let scripted = on(TargetFilter::Script(crate::types::ids::ScriptHandle(0)));
+        assert!(check_divided_shape(Some(&counters), Some(&scripted)).is_ok());
+        let ability = on(TargetFilter::Ability);
+        assert!(check_divided_shape(Some(&counters), Some(&ability)).is_err());
+        assert!(check_divided_shape(Some(&AbilityEffect::Damage(5)), Some(&exactly(9))).is_ok());
     }
 }

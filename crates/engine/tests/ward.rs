@@ -154,6 +154,7 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Targ
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -627,6 +628,7 @@ fn an_activated_ability_targeting_a_ward_permanent_triggers_ward_and_can_be_coun
                 modes: Vec::new(),
                 targets: vec![Target::Object(bear)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -752,7 +754,7 @@ fn a_triggered_ability_targeting_a_ward_permanent_triggers_ward() {
         "got {status:?}"
     );
     engine
-        .submit_trigger_targets(vec![Target::Object(bear)])
+        .submit_trigger_targets(vec![Target::Object(bear)], Vec::new())
         .expect("the bear is an offered candidate");
     let status = drain(&mut engine);
 
@@ -869,6 +871,7 @@ fn a_selecttargets_answer_checks_protection_against_the_abilitys_source_not_its_
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

@@ -254,7 +254,7 @@ impl Engine {
                     })
                 });
                 if let Some(target) = target {
-                    self.push_trigger_stack_object(&trigger, vec![target], None);
+                    self.push_trigger_stack_object(&trigger, vec![target], Vec::new(), None);
                 }
                 continue;
             }
@@ -286,7 +286,7 @@ impl Engine {
                 };
                 return StepStatus::Progressed;
             }
-            self.push_trigger_stack_object(&trigger, Vec::new(), None);
+            self.push_trigger_stack_object(&trigger, Vec::new(), Vec::new(), None);
         }
         self.process_state = match self.recollect_triggers_since.take() {
             Some(since) => ProcessState::CollectTriggers { since },
@@ -303,6 +303,7 @@ impl Engine {
         &mut self,
         trigger: &PendingTrigger,
         targets: Vec<Target>,
+        division: Vec<u32>,
         modal_override: Option<(Option<TargetSpec>, Option<AbilityEffect>)>,
     ) {
         let ability = commands::find_ability_by_id(&self.state, trigger.ability).or_else(|| {
@@ -368,6 +369,7 @@ impl Engine {
         );
         entry.ability_index = ability_index;
         entry.ability_text = ability_text;
+        entry.division = division;
         self.state.stack.push(entry);
         let event_id = self.state.allocate_event_id();
         let sequence_no = self.state.allocate_sequence_no();
@@ -388,18 +390,46 @@ impl Engine {
         }
     }
 
+    /// The effect a trigger target pause feeds: the chosen modes' combined
+    /// effect (CR 603.3c), or the ability's own.
+    pub(crate) fn pending_trigger_effect(
+        &self,
+        trigger: &PendingTrigger,
+        modal_effect: Option<&Option<AbilityEffect>>,
+    ) -> Option<AbilityEffect> {
+        if let Some(effect) = modal_effect {
+            return effect.clone();
+        }
+        commands::find_ability_by_id(&self.state, trigger.ability)
+            .or_else(|| {
+                self.departed_triggered_abilities
+                    .iter()
+                    .find(|a| a.id == trigger.ability)
+            })
+            .and_then(|ability| ability.effect.clone())
+    }
+
     /// Answers a trigger target pause (CR 603.3d). `chosen` is validated as a whole
-    /// against the spec, like `CastSpell`. A separate entry point from
-    /// `submit_action` because it answers a sub-decision.
+    /// against the spec, like `CastSpell`, and `division` as `CastSpell::division`
+    /// is (CR 601.2d). A separate entry point from `submit_action` because it
+    /// answers a sub-decision.
     pub fn submit_trigger_targets(
         &mut self,
         chosen: Vec<Target>,
+        division: Vec<u32>,
     ) -> Result<(), TriggerTargetsError> {
-        let ProcessState::AwaitingTriggerTargets { trigger, spec, .. } = &self.process_state else {
+        let ProcessState::AwaitingTriggerTargets {
+            trigger,
+            spec,
+            modal_effect,
+            ..
+        } = &self.process_state
+        else {
             return Err(TriggerTargetsError::NotAwaitingChoice);
         };
+        let effect = self.pending_trigger_effect(trigger, modal_effect.as_ref());
         // CR 202.3: a triggered ability has no announced X, so an X bound is 0.
-        if commands::validate_targets(
+        let checked = commands::validate_targets(
             &self.state,
             &self.script_runtime,
             Some(spec),
@@ -408,8 +438,20 @@ impl Engine {
             trigger.source,
             None,
         )
-        .is_err()
-        {
+        .and_then(|()| {
+            commands::validate_effect_division(
+                &self.state,
+                &self.script_runtime,
+                Some(spec),
+                effect.as_ref(),
+                &chosen,
+                &division,
+                trigger.controller,
+                trigger.source,
+                None,
+            )
+        });
+        if checked.is_err() {
             return Err(TriggerTargetsError::InvalidTargets);
         }
         let ProcessState::AwaitingTriggerTargets {
@@ -425,7 +467,7 @@ impl Engine {
         // CR 603.3c: `modal_effect` is set only when the pause came from a modal
         // trigger's mode choice.
         let modal_override = modal_effect.map(|effect| (Some(spec), effect));
-        self.push_trigger_stack_object(&trigger, chosen, modal_override);
+        self.push_trigger_stack_object(&trigger, chosen, division, modal_override);
         // Defers `remaining` to the next `step()` through the empty-groups branch of
         // `PutTriggersApnap` instead of a third copy of the push loop.
         self.process_state = ProcessState::PutTriggersApnap {
@@ -529,7 +571,7 @@ impl Engine {
         }
 
         // Every chosen mode is targetless, so push immediately.
-        self.push_trigger_stack_object(&trigger, Vec::new(), Some((None, effect)));
+        self.push_trigger_stack_object(&trigger, Vec::new(), Vec::new(), Some((None, effect)));
         self.process_state = ProcessState::PutTriggersApnap {
             ordered: remaining.into(),
             pending_groups: VecDeque::new(),

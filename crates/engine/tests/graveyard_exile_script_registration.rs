@@ -147,6 +147,7 @@ fn activate(engine: &mut Engine, source: ObjectId) {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -302,6 +303,7 @@ fn leaving_the_graveyard_drops_the_ability() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

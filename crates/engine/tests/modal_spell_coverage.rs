@@ -177,6 +177,7 @@ fn cast_card(engine: &mut Engine, card: ObjectId, chosen: Vec<u32>, targets: Vec
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");

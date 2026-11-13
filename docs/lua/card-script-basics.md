@@ -474,3 +474,26 @@ only, hidden-zones-as-counts-only boundary as everywhere else this snapshot appe
 `state.hand_count`/`state.library_count` are per-player counts only, never contents. This is what lets
 an operation compute something like Balance's own "the fewest lands any player controls" before
 making a choice — see [targeting-and-choices.md](targeting-and-choices.md#applying-an-effect-to-each-player).
+
+## Iteration order
+
+A script that needs order walks an array with `ipairs`, or collects a table's keys and sorts them
+before walking. It never lets `pairs` order over string keys decide an outcome: which object is
+picked, which player goes first, or what an error says. Lua 5.4 seeds string hashes per state, so
+`pairs` can visit the same string keys in a different order in each game, including a replay of the
+same game. Integer keys, such as a table keyed by player id, are hashed without a seed, but `ipairs`
+or a sort still states the intent. Using `pairs` is fine when the result does not depend on order,
+such as a count or a minimum.
+
+```lua
+local names = {}
+for name in pairs(by_name) do
+    table.insert(names, name)
+end
+table.sort(names)
+for _, name in ipairs(names) do
+    -- act on by_name[name] in a fixed order
+end
+```
+
+The engine's own key checks follow the same rule: an unknown-key error names every bad key, sorted.

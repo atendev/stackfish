@@ -154,6 +154,7 @@ fn cast_and_resolve(engine: &mut Engine, p0: PlayerId, p1: PlayerId, card: Objec
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");

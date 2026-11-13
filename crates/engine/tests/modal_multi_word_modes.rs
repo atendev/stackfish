@@ -175,6 +175,7 @@ fn try_cast(
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     })?;
     Ok(drain(engine))
@@ -462,7 +463,9 @@ fn a_multi_word_mode_works_on_a_modal_triggered_ability() {
         matches!(status, StepStatus::AwaitingTriggerTargets { .. }),
         "{status:?}"
     );
-    engine.submit_trigger_targets(vec![obj(1), obj(2)]).unwrap();
+    engine
+        .submit_trigger_targets(vec![obj(1), obj(2)], Vec::new())
+        .unwrap();
     drain(&mut engine);
     pass_both(&mut engine);
 

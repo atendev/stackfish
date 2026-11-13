@@ -10,6 +10,7 @@ pub enum StackEntryKind {
     Spell,
     ActivatedAbility,
     TriggeredAbility,
+    // TODO: a copy that chooses new targets re-announces its division (CR 707.10c)
     Copy { of: Box<StackEntryKind> },
 }
 
@@ -30,6 +31,10 @@ pub struct StackObject {
     pub controller: PlayerId,
     pub chosen_modes: Vec<u32>,
     pub targets: Vec<Target>,
+    /// CR 601.2d: the announced shares, index for index with `targets`. Empty
+    /// for an undivided effect or a single target, which takes the whole total.
+    /// A 0 marks a position outside a divided word of two or more targets.
+    pub division: Vec<u32>,
     /// Set at push from `CardDefinition::target_requirement` or
     /// `RegisteredAbility::target`. `ResolveStackTop` rechecks `targets`
     /// against it (CR 608.2b). The target count is fixed at cast (CR 601.2c).
@@ -124,6 +129,7 @@ impl StackObject {
             controller,
             chosen_modes,
             targets,
+            division: Vec::new(),
             target_requirement,
             x_value,
             leave_stack_rider,

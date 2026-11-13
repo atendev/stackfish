@@ -288,6 +288,7 @@ fn cast(engine: &mut Engine, targets: Vec<Target>) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");
@@ -319,6 +320,7 @@ fn activate(engine: &mut Engine, source: u64, targets: Vec<Target>, payments: Ve
                 modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

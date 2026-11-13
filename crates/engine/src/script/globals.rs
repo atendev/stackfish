@@ -31,9 +31,10 @@ use super::builders::{
 use super::decode::{
     decode_copy_exceptions, decode_counter_arg, decode_creature_token_opts,
     decode_effect_filter_table, decode_filter_table, decode_landwalk_quality, decode_name_list,
-    decode_object_filter_keys, decode_target_pick, parse_card_type_name, parse_color_letter,
-    parse_color_string, parse_filter_controller_name, parse_keyword_name, parse_mana_unit_letter,
-    parse_supertype_name, parse_zone_kind_name, reject_unknown_keys,
+    decode_object_filter_keys, decode_target_pick, lua_key_name, parse_card_type_name,
+    parse_color_letter, parse_color_string, parse_filter_controller_name, parse_keyword_name,
+    parse_mana_unit_letter, parse_supertype_name, parse_zone_kind_name, reject_unknown_keys,
+    unknown_keys_list,
 };
 use super::tags::{
     AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, CounterTag,
@@ -239,6 +240,16 @@ pub(crate) fn bind_game_globals(
     let damage =
         lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::Damage(amount))))?;
     ops.set("Damage", damage)?;
+    // CR 601.2d: the split is announced with the targets, never by the script.
+    let divided_damage = lua.create_function(|_, total: u32| {
+        if total == 0 {
+            return Err(mlua::Error::RuntimeError(
+                "Game.Ops.DividedDamage needs a total of at least 1 (CR 601.2d)".to_string(),
+            ));
+        }
+        Ok(OperationTag(AbilityEffect::DividedDamage(total)))
+    })?;
+    ops.set("DividedDamage", divided_damage)?;
     ops.set("Destroy", OperationTag(AbilityEffect::Destroy))?;
     ops.set("BecomeBlocked", OperationTag(AbilityEffect::BecomeBlocked))?;
     let destroy_all = lua.create_function(|_, table: Table| {
@@ -504,6 +515,16 @@ pub(crate) fn bind_game_globals(
         Ok(OperationTag(AbilityEffect::Counters { kind, amount }))
     })?;
     ops.set("Counters", counters)?;
+    let divided_counters = lua.create_function(|_, (counter, total): (Value, u32)| {
+        let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
+        if total == 0 {
+            return Err(mlua::Error::RuntimeError(
+                "Game.Ops.DividedCounters needs a total of at least 1 (CR 601.2d)".to_string(),
+            ));
+        }
+        Ok(OperationTag(AbilityEffect::DividedCounters { kind, total }))
+    })?;
+    ops.set("DividedCounters", divided_counters)?;
     // CR 702.79a, 702.93a: `Game.Ops.ReturnSelfWithCounter(counter)`, Persist and Undying's resolution effect, paired with `Game.Conditions.Dies` and `Game.Conditions.HadNoCounters(counter)` (see `AbilityEffect::ReturnSelfWithCounter`).
     let return_self_with_counter = lua.create_function(|_, counter: Value| {
         let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
@@ -1410,15 +1431,29 @@ pub(crate) fn bind_game_globals(
     // - neither: exactly `n`, with no yes/no ask.
     // - `up_to`: 0 to `n`, asking "one more?" before every pick (the first included) and stopping on `false`.
     // - `at_least`: `n` or more with no upper bound beyond the legal candidates. The first `n` picks are mandatory, and "one more?" is asked before each later pick until declined.
+    //
+    // The opts check names its bad keys sorted, by the `lua_key_name` rule, so the error does not depend on Lua's per-state string hash seed.
     let choose_n: Function = lua
         .load(
             r#"
             function(filter, n, opts)
                 opts = opts or {}
+                local unknown = {}
                 for k, _ in pairs(opts) do
                     if k ~= "up_to" and k ~= "at_least" then
-                        error("Game.ChooseN opts has unknown key '" .. k .. "'")
+                        local name
+                        if type(k) == "string" or math.type(k) == "integer" then
+                            name = tostring(k)
+                        else
+                            name = "<" .. type(k) .. ">"
+                        end
+                        table.insert(unknown, name)
                     end
+                end
+                if #unknown > 0 then
+                    table.sort(unknown)
+                    local noun = #unknown == 1 and "key '" or "keys '"
+                    error("Game.ChooseN opts has unknown " .. noun .. table.concat(unknown, "', '") .. "'")
                 end
                 local results = {}
                 local ids = {}
@@ -1660,34 +1695,53 @@ fn timed_grant_duration(duration: &AnyUserData, op_name: &str) -> mlua::Result<E
 /// Decodes the `{ control = "you" | "owner", tapped = bool }` options table
 /// of the reanimation ops. Defaults are CR 110.2a's "under your control" and
 /// untapped; an unknown key or value is a script error so typos don't pass.
+/// Every bad key is named in sorted order, before any bad `control` value, so
+/// the message does not depend on Lua's per-state string hash seed.
 fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(EntryControl, bool)> {
-    let mut control = EntryControl::You;
+    let mut control = None;
     let mut tapped = false;
     let Some(opts) = opts else {
-        return Ok((control, tapped));
+        return Ok((EntryControl::You, tapped));
     };
-    for pair in opts.pairs::<String, mlua::Value>() {
+    let mut bad_keys = Vec::new();
+    for pair in opts.pairs::<mlua::Value, mlua::Value>() {
         let (key, value) = pair?;
-        match (key.as_str(), value) {
-            ("control", mlua::Value::String(name)) => {
-                control = match name.to_str()? {
-                    "you" => EntryControl::You,
-                    "owner" => EntryControl::Owner,
-                    other => {
-                        return Err(mlua::Error::RuntimeError(format!(
-                            "{op_name} control must be \"you\" or \"owner\", got {other:?}"
-                        )));
-                    }
-                };
-            }
-            ("tapped", mlua::Value::Boolean(flag)) => tapped = flag,
-            (other, _) => {
-                return Err(mlua::Error::RuntimeError(format!(
-                    "{op_name} option {other:?} is unknown or has the wrong type (expected control = \"you\"|\"owner\", tapped = boolean)"
-                )));
-            }
+        let name = match &key {
+            mlua::Value::String(name) => name.to_str().ok(),
+            _ => None,
+        };
+        match (name, value) {
+            (Some("control"), mlua::Value::String(value)) => control = Some(value),
+            (Some("tapped"), mlua::Value::Boolean(flag)) => tapped = flag,
+            _ => bad_keys.push(lua_key_name(&key)),
         }
     }
+    const EXPECTED: &str = "(expected control = \"you\"|\"owner\", tapped = boolean)";
+    match unknown_keys_list(bad_keys) {
+        None => {}
+        Some((1, names)) => {
+            return Err(mlua::Error::RuntimeError(format!(
+                "{op_name} option {names} is unknown or has the wrong type {EXPECTED}"
+            )));
+        }
+        Some((_, names)) => {
+            return Err(mlua::Error::RuntimeError(format!(
+                "{op_name} options {names} are unknown or have the wrong type {EXPECTED}"
+            )));
+        }
+    }
+    let control = match control {
+        None => EntryControl::You,
+        Some(name) => match name.to_str()? {
+            "you" => EntryControl::You,
+            "owner" => EntryControl::Owner,
+            other => {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "{op_name} control must be \"you\" or \"owner\", got {other:?}"
+                )));
+            }
+        },
+    };
     Ok((control, tapped))
 }
 
@@ -1700,6 +1754,12 @@ fn chain_entry(lua: &Lua, ctor: &str, position: usize, arg: Value) -> mlua::Resu
     match arg {
         Value::UserData(ud) if ud.is::<OperationTag>() => {
             let effect = ud.borrow::<OperationTag>()?.0.clone();
+            // TODO: divided amounts in function and chain operations (CR 601.2d)
+            if effect.divided_total().is_some() {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Game.Ops.{ctor} argument {position} is a divided effect, which can't be chained yet"
+                )));
+            }
             if !crate::commands::is_modal_resolvable(&effect) {
                 return Err(mlua::Error::RuntimeError(format!(
                     "Game.Ops.{ctor} argument {position} can't be chained (a nested chain and some \

@@ -217,7 +217,7 @@ fn triggered_ability_pauses_for_a_real_target_choice_and_resolves_against_it() {
     );
 
     engine
-        .submit_trigger_targets(vec![Target::Object(bear)])
+        .submit_trigger_targets(vec![Target::Object(bear)], Vec::new())
         .expect("Bear was an offered candidate");
     let status = drain(&mut engine);
     assert!(
@@ -288,7 +288,9 @@ fn triggered_ability_with_zero_legal_targets_is_removed_from_the_stack_without_p
 #[test]
 fn submit_trigger_targets_rejects_when_not_awaiting() {
     let mut engine = Engine::new(two_player_state());
-    let err = engine.submit_trigger_targets(Vec::new()).unwrap_err();
+    let err = engine
+        .submit_trigger_targets(Vec::new(), Vec::new())
+        .unwrap_err();
     assert!(matches!(err, TriggerTargetsError::NotAwaitingChoice));
 }
 
@@ -330,7 +332,7 @@ fn submit_trigger_targets_rejects_a_candidate_not_offered() {
 
     let not_a_candidate = ObjectId(999);
     let err = engine
-        .submit_trigger_targets(vec![Target::Object(not_a_candidate)])
+        .submit_trigger_targets(vec![Target::Object(not_a_candidate)], Vec::new())
         .unwrap_err();
     assert!(matches!(err, TriggerTargetsError::InvalidTargets));
     // Still paused - a rejected answer doesn't consume the choice.
@@ -418,7 +420,7 @@ fn vesuvans_granted_upkeep_ability_now_really_fires_and_becomes_a_copy() {
     assert!(candidates[0].contains(&Target::Object(salamander)));
 
     engine
-        .submit_trigger_targets(vec![Target::Object(salamander)])
+        .submit_trigger_targets(vec![Target::Object(salamander)], Vec::new())
         .expect("Salamander was offered");
     drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);
@@ -505,7 +507,10 @@ fn triggered_ability_with_multiple_target_words_pauses_once_and_resolves_both() 
     assert_eq!(candidates[1], vec![Target::Object(swamp)], "land word");
 
     engine
-        .submit_trigger_targets(vec![Target::Object(bear), Target::Object(swamp)])
+        .submit_trigger_targets(
+            vec![Target::Object(bear), Target::Object(swamp)],
+            Vec::new(),
+        )
         .expect("both words satisfied");
     drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);

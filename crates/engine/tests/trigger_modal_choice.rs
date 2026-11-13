@@ -210,7 +210,7 @@ fn two_modes_chosen_combine_and_resolve_both_against_their_own_targets() {
     );
 
     engine
-        .submit_trigger_targets(vec![Target::Player(p1)])
+        .submit_trigger_targets(vec![Target::Player(p1)], Vec::new())
         .expect("mode 1's own target");
     drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);
@@ -288,7 +288,7 @@ fn a_single_chosen_mode_with_its_own_target_chains_into_real_target_selection() 
     assert_eq!(sorted, vec![Target::Object(reaper), Target::Object(bear)]);
 
     engine
-        .submit_trigger_targets(vec![Target::Object(bear)])
+        .submit_trigger_targets(vec![Target::Object(bear)], Vec::new())
         .expect("Bear was offered");
     drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);

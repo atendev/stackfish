@@ -2,7 +2,7 @@
 
 The canonical reference has moved to [docs/LUA_API.md](../LUA_API.md). This folder keeps topic-specific companions: card-script basics, per-ability-kind guides, targeting and mid-resolution choices, tokens, and the not-available-yet list.
 
-- **[Card script basics](card-script-basics.md)** — how a card's Lua runs: `register_abilities(c)`, conditions, operations, primitives vs. custom functions, and registration timing.
+- **[Card script basics](card-script-basics.md)** — how a card's Lua runs: `register_abilities(c)`, conditions, operations, primitives vs. custom functions, registration timing, and iteration order.
 - **[Game constants reference (legacy)](game-constants.md)** — older multi-page reference, superseded by [docs/LUA_API.md](../LUA_API.md).
 - **[Triggered abilities](triggered-abilities.md)** — `Game.CreateTriggeredAbility` and `:SetCondition`/`:SetOperation`.
 - **[Static abilities](static-abilities.md)** — `Game.CreateStaticAbility`, layers, effects, and `:SetAffected`.

@@ -334,6 +334,7 @@ fn cast(engine: &mut Engine, targets: Vec<Target>) -> Result<(), String> {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .map_err(|e| format!("{e:?}"))?;
@@ -373,6 +374,7 @@ fn activate_and_resolve(engine: &mut Engine, source: u64, targets: Vec<Target>) 
                 modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -959,6 +961,7 @@ fn a_self_source_fight_does_nothing_when_the_source_stops_being_a_creature() {
                 modes: Vec::new(),
                 targets: vec![obj(2)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -1002,6 +1005,7 @@ fn a_self_source_fight_does_nothing_when_the_source_has_left() {
                 modes: Vec::new(),
                 targets: vec![obj(2)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -1344,6 +1348,7 @@ fn a_two_word_fight_can_be_one_mode_of_a_multi_mode_spell() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap();

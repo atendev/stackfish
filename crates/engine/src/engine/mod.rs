@@ -494,6 +494,35 @@ impl Engine {
         &mut self.state
     }
 
+    /// CR 604.1, 113.6: runs the script of every battlefield object in `ObjectId` order and
+    /// returns the failures, for a host that builds a state with permanents already in play.
+    /// Call it once on a freshly built state: a second call registers every ability twice.
+    /// Placement is not an entry, so no enters trigger or replacement applies and no event is
+    /// written. `ByKey` and empty `Inline` sources are skipped.
+    pub fn run_battlefield_card_scripts(&mut self) -> Vec<(ObjectId, ScriptError)> {
+        let scripted: Vec<(ObjectId, crate::types::card::CardDefinition)> = self
+            .state
+            .objects
+            .values()
+            .filter(|o| o.zone == ZoneKind::Battlefield)
+            .filter(
+                |o| matches!(&o.definition.script_ref, ScriptReference::Inline(s) if !s.is_empty()),
+            )
+            .map(|o| (o.object_id, o.definition.clone()))
+            .collect();
+        let mut failures = Vec::new();
+        // `objects` is a `BTreeMap`, so this runs in `ObjectId` order and ability ids stay stable.
+        for (object_id, definition) in scripted {
+            if let Err(e) =
+                self.script_runtime
+                    .run_card_script(&mut self.state, &definition, object_id)
+            {
+                failures.push((object_id, e));
+            }
+        }
+        failures
+    }
+
     /// CR 702.29b: runs the script of a card that just entered the hand so a hand-only
     /// ability (cycling) registers. Covers every library-to-hand producer. Leaving
     /// hand purges the abilities as for any zone change.

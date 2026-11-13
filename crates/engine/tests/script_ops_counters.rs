@@ -357,6 +357,7 @@ fn counters_ability_works_the_same_as_a_counters_spell() {
                 modes: Vec::new(),
                 targets: vec![Target::Object(target)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

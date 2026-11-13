@@ -380,6 +380,7 @@ fn destroy_ability_works_the_same_as_a_destroy_spell() {
                 modes: Vec::new(),
                 targets: vec![Target::Object(target)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

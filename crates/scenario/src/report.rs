@@ -208,6 +208,14 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
             register_script_operation(&mut engine, pending.object, &pending.source);
             register_script_modes(&mut engine, pending.object, &pending.source);
         }
+        // Runs after the `Pending*` registrations so their ability ids don't move.
+        if let Some((object, error)) = engine.run_battlefield_card_scripts().into_iter().next() {
+            let key = card_ids
+                .iter()
+                .find(|(_, id)| **id == object)
+                .map_or("<unknown>", |(key, _)| key.as_str());
+            panic!("battlefield setup card '{key}' script failed: {error:?}");
+        }
         (engine, card_ids)
     };
     let mut entries = Vec::new();

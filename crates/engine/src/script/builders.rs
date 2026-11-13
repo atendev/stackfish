@@ -30,10 +30,10 @@ use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::decode::{
-    ModeOwner, check_chain_words, decode_affected_value, decode_condition_value,
-    decode_cost_component_value, decode_effect_value, decode_layer_value, decode_mode_choice_value,
-    decode_modes, decode_operation_value, decode_replacement_affected, decode_target_spec_value,
-    parse_single_color_letter,
+    ModeOwner, check_chain_words, check_divided_shape, decode_affected_value,
+    decode_condition_value, decode_cost_component_value, decode_effect_value, decode_layer_value,
+    decode_mode_choice_value, decode_modes, decode_operation_value, decode_replacement_affected,
+    decode_target_spec_value, parse_single_color_letter,
 };
 use super::tags::{
     AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind,
@@ -390,6 +390,7 @@ impl UserData for TriggeredAbilityBuilder {
             // CR 603.3d: the same single-exact-count wrapping as `ActivatedAbilityBuilder::Register`'s `:SetTarget`; nothing consumes "up to N" or `TargetSpec::Multiple` from this builder.
             let target = this.target.clone();
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
+            check_divided_shape(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
                 text: this.text.clone(),
                 modes,
@@ -529,6 +530,7 @@ impl UserData for ActivatedAbilityBuilder {
             };
             let target = this.target.clone();
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
+            check_divided_shape(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
                 text: this.text.clone(),
                 modes,

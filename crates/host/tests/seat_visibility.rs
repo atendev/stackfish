@@ -881,10 +881,8 @@ fn a_snapshot_shows_each_seat_only_the_ids_it_may_see() {
             .map(|o| o["object"].as_str().unwrap().to_string())
             .collect()
     };
-    let libraries: HashSet<String> = ids_of("library", 0)
-        .union(&ids_of("library", 1))
-        .cloned()
-        .collect();
+    let mut libraries = ids_of("library", 0);
+    libraries.extend(ids_of("library", 1));
     let hands = [ids_of("hand", 0), ids_of("hand", 1)];
     assert!(!libraries.is_empty() && !hands[0].is_empty() && !hands[1].is_empty());
 

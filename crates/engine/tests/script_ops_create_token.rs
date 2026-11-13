@@ -124,6 +124,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority");
@@ -384,6 +385,7 @@ fn treasure_ability_adds_chosen_color_mana_when_activated() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: vec![Color::Blue],
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -769,6 +771,7 @@ fn clue_ability_draws_a_card_when_activated() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -872,6 +875,7 @@ fn food_ability_gains_life_when_activated() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -988,6 +992,7 @@ fn clue_ability_cannot_be_paid_by_sacrificing_a_different_artifact() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

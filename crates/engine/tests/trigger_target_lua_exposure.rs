@@ -228,7 +228,7 @@ fn play_land_self_registering_targeted_ability_fires_pauses_and_resolves_end_to_
     );
 
     engine
-        .submit_trigger_targets(vec![Target::Object(bear)])
+        .submit_trigger_targets(vec![Target::Object(bear)], Vec::new())
         .expect("Bear was the offered candidate");
     drain(&mut engine);
     pass(&mut engine, p0);

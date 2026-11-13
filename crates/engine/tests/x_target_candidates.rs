@@ -109,6 +109,7 @@ fn push_spell(state: &mut GameState, id: u64, mana_value: u32) {
         ),
     );
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id: id,
@@ -187,6 +188,7 @@ fn cast_answer(
         x_value: Some(x_value),
         alternative_cost: None,
         pay_buyback: false,
+        division: Vec::new(),
     };
     engine.answer(
         P0,
@@ -343,6 +345,7 @@ fn an_activated_ability_with_an_x_cost_lists_the_superset_and_rechecks() {
             modes: Vec::new(),
             targets: vec![Target::Object(ObjectId(3))],
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: Some(x_value),
         };
         engine.answer(

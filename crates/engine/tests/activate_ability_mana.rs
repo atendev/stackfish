@@ -74,6 +74,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
                 modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -105,6 +106,7 @@ fn try_activate(
             modes: Vec::new(),
             targets,
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     })
@@ -261,6 +263,7 @@ fn reject_when_actor_does_not_hold_priority() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -284,6 +287,7 @@ fn reject_nonexistent_ability_index() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -386,6 +390,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

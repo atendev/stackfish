@@ -90,6 +90,7 @@ fn cast(engine: &mut Engine, modes: Vec<u32>, targets: Vec<Target>) -> Result<()
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .map_err(|e| format!("{e:?}"))
@@ -474,7 +475,7 @@ fn a_modal_enters_trigger_asks_for_a_mode_then_its_targets() {
         "{status:?}"
     );
     engine
-        .submit_trigger_targets(vec![Target::Player(P1)])
+        .submit_trigger_targets(vec![Target::Player(P1)], Vec::new())
         .expect("a legal target");
     drain(&mut engine);
     pass_both_and_drain(&mut engine, P0, P1);
@@ -736,6 +737,7 @@ fn activate(engine: &mut Engine, modes: Vec<u32>, targets: Vec<Target>) -> Resul
                 modes,
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -1000,6 +1002,7 @@ fn a_priority_answer_checks_an_activations_modes_against_the_entry() {
                         modes,
                         targets,
                         chosen_colors: Vec::new(),
+                        division: Vec::new(),
                         x_value: None,
                     },
                 }),

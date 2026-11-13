@@ -3,7 +3,7 @@ id: 174
 title: Modal mana abilities
 type: grilling
 mode: HITL
-status: open
+status: closed
 blocked_by: []
 claimed: false
 ---

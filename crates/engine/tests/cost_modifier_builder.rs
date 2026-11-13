@@ -205,6 +205,7 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) -> StepStatus {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("caster holds priority, card is in hand");
@@ -353,6 +354,7 @@ fn play_land_self_registered_cost_modifier_reduces_a_matching_spells_cost_end_to
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, bear is in hand");
@@ -445,6 +447,7 @@ fn play_land_self_registered_colored_cost_modifier_reduces_a_matching_spells_cos
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, bear is in hand");

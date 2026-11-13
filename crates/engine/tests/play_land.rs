@@ -274,6 +274,7 @@ fn play_land_rejects_nonempty_stack() {
     let p0 = PlayerId(0);
     let card = ObjectId(0);
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id: ObjectId(99),

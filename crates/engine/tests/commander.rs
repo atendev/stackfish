@@ -103,6 +103,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) -> StepStat
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority");
@@ -132,6 +133,7 @@ fn try_cast_spell(
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     })
 }

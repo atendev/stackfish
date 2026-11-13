@@ -25,13 +25,12 @@ A zone permission can send the spells cast through it to exile when they leave t
 - `zone_permissions.rs`: a rider cast resolving, countered and fizzling into exile, a rider-less cast into the graveyard, a permanent spell onto the battlefield and exiled when countered, flashback beside a rider-less permission, a rider outliving its bounced source, the rider-less permission winning, and buyback returning the spell to hand.
 - `script_zone_permission.rs`: both rider names reach the row, and an unknown name or a `PlayLand` permission is refused.
 - `types/stack.rs`: `leave_destination` for each rider and default.
-- `scenarios/permissions/kess_rider_cast.toml`: Kess is cast, a graveyard sorcery is exiled after it resolves, a hand-cast sorcery still reaches the graveyard, and a graveyard creature is refused.
+- `scenarios/permissions/kess_rider_cast.toml`: Kess starts on the battlefield, a graveyard sorcery is exiled after it resolves, a hand-cast sorcery still reaches the graveyard, and a graveyard creature is refused.
 
 ## Open
 
 - No "if it would die or leave exile this way" rider, no battlefield-side exile such as unearth, and no rider on a permanent spell's battlefield entry.
 - No player choice between matching permissions (CR 601.2), and no once-per-turn limit, so Kess can be used every time.
-- A scenario's battlefield setup does not register a card's static script, so the Kess fixture casts Kess first.
 
 ## Proof game
 

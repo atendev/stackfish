@@ -66,6 +66,7 @@ fn cast(engine: &mut Engine, x_value: Option<u32>) {
                 x_value,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("the spell is castable");
@@ -287,6 +288,7 @@ fn tap_for_mana(engine: &mut Engine, source: ObjectId) {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

@@ -17,7 +17,7 @@ use crate::types::zone::ZoneKind;
 use super::attach::{non_eliminated_players, remap_abilities};
 use super::legality::{
     ZoneCastSource, announced_modes_in_order, can_cast_now, cast_zone_source, combine_chosen_modes,
-    has_own_flash, validate_targets,
+    has_own_flash, validate_effect_division, validate_targets,
 };
 use super::{
     CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
@@ -31,6 +31,7 @@ pub(crate) struct CastPlan {
     card: ObjectId,
     modes: Vec<u32>,
     targets: Vec<Target>,
+    division: Vec<u32>,
     x_value: Option<u32>,
     pay_buyback: bool,
     from_zone: ZoneKind,
@@ -52,6 +53,7 @@ pub(super) fn validate_cast_spell(
     card: ObjectId,
     modes: Vec<u32>,
     targets: Vec<Target>,
+    division: Vec<u32>,
     x_value: Option<u32>,
     alternative_cost: Option<usize>,
     pay_buyback: bool,
@@ -315,7 +317,6 @@ pub(super) fn validate_cast_spell(
 
     // CR 601.2c/601.2e
     // Validated below, so an illegal cast is rejected before anything mutates.
-    // TODO: no division of an effect among targets (CR 601.2d)
     // TODO: no splice, since PlayerAction and StackObject cannot carry which cards are being spliced (CR 601.2b/702.47)
     validate_targets(
         state,
@@ -327,6 +328,23 @@ pub(super) fn validate_cast_spell(
         // CR 202.3/107.3a
         // This cast's announced X, which a `mana_value` target filter's X bound
         // resolves against.
+        x_value,
+    )?;
+    // CR 601.2d
+    let divided_effect = if object.definition.modes.is_empty() {
+        object.definition.effect.as_ref()
+    } else {
+        modal_effect.as_ref()
+    };
+    validate_effect_division(
+        state,
+        script_runtime,
+        target_requirement.as_ref(),
+        divided_effect,
+        &targets,
+        &division,
+        actor,
+        card,
         x_value,
     )?;
 
@@ -452,6 +470,7 @@ pub(super) fn validate_cast_spell(
         card,
         modes,
         targets,
+        division,
         x_value,
         pay_buyback,
         from_zone,
@@ -475,6 +494,7 @@ pub(super) fn apply_cast_spell(
         card,
         modes,
         targets,
+        division,
         x_value,
         pay_buyback,
         from_zone,
@@ -542,7 +562,7 @@ pub(super) fn apply_cast_spell(
 
     let (operation, effect) = unpack_script_effect(effect, ScriptHandle(0));
 
-    state.stack.push(StackObject::new(
+    let mut entry = StackObject::new(
         new_id,
         StackEntryKind::Spell,
         new_id,
@@ -571,7 +591,9 @@ pub(super) fn apply_cast_spell(
         // A spell never carries a departed-source LKI; only a triggered ability pushed
         // off a Dies-style departed source does.
         None,
-    ));
+    );
+    entry.division = division;
+    state.stack.push(entry);
 
     Ok(CommandOutcome {
         events: vec![

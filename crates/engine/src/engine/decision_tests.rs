@@ -745,7 +745,13 @@ fn a_trigger_targets_reply_needs_one_list_per_word() {
     reject(
         engine.answer(
             P0,
-            answer(id, Reply::Targets(vec![vec![Target::Object(ObjectId(5))]])),
+            answer(
+                id,
+                Reply::Targets {
+                    per_word: vec![vec![Target::Object(ObjectId(5))]],
+                    division: Vec::new(),
+                },
+            ),
         ),
         RejectionCode::InvalidChoice,
     );
@@ -1027,6 +1033,7 @@ fn an_unless_paid_payment_lists_no_mana_abilities_and_refuses_an_action() {
             modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     ));

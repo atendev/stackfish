@@ -62,6 +62,12 @@ request). Replace the YGO rules kernel entirely with an MTG-native one per the a
   `apply_enters_battlefield_modifiers`, Aura host). CR 110.2a picks the controller (`EntryControl::You` default).
   The graveyard object's `controller` is written temporarily so entry filters see the entering player and reset to
   the owner on every path that does not enter. Persist and Undying keep their narrower `ReturnSelfWithCounter` path
+- `Game.Ops.DividedDamage`/`DividedCounters` (`phase5/divided-damage-counters`): CR 601.2d splits are announced, not
+  scripted. `CastSpell`, `ActivateAbility`, the madness and cascade casts and the trigger target answer carry a flat
+  `division` index for index with `targets`, checked by `validate_effect_division` before anything changes, and kept
+  on `StackObject.division` (a copy keeps it). Resolution gives each legal target its share in one event batch and
+  drops an illegal target's share (CR 608.2b). `TargetSlot.divide_total` tells a Seat the total and caps `max`, and
+  the replay file needs no change because the split rides in the recorded Answer
 - Structured cost/payment system
 
 ### Step-able core (replay requirement)
@@ -232,7 +238,8 @@ original plan:
 - Lua scripts get only the `table`, `string`, `utf8`, `math` and `coroutine` libraries, with
   `math.random`, `math.randomseed`, `dofile` and `loadfile` removed, so no script reads a clock, an
   unseeded random source or a file. Lua 5.4 still seeds string hashes per state, so `pairs` order over
-  string keys can differ between runs (TODO).
+  string keys can differ between runs (TODO). The engine's key checks sort the bad keys they name,
+  and a script must not let `pairs` order decide an outcome (`docs/lua/card-script-basics.md`).
 - CR 104.4b loop draws live in `crates/engine/src/engine/loop_watch.rs`. A priority pass is forced
   when the passer has nothing but `Pass` and mana abilities whose whole cost is `{T}`. Each forced
   pass with a non-empty stack fingerprints the state, and a fingerprint seen before ends the game as
@@ -245,7 +252,8 @@ original plan:
   walks a `HashMap` and produces events or ids must still sort first.
 - A keyed collection that is walked is a `BTreeMap` or `BTreeSet`, and a `HashMap` is only read by
   key. Clippy enforces this with `iter_over_hash_type` and `disallowed-methods` in the root
-  `clippy.toml`. `into_iter`, `extend` and `from_iter` are not caught. Details in
+  `clippy.toml`, which also refuses `HashSet` set algebra and `extract_if` on both hash types.
+  `into_iter`, `extend` and `from_iter` are not caught. Details in
   `docs/implementation/28-module-layout.md`.
 
 ## Open questions
@@ -275,7 +283,9 @@ REPL yet), and `crates/engine/tests/` (real `cargo test` integration tests over 
 `tests/scenarios/`). Scenarios build `GameState` via direct struct literals rather than the
 engine's own constructors, so setup/assertion-only scenarios already run for real regardless of
 implementation progress; actions that hit unimplemented engine code report as such rather than
-failing the run. See `docs/implementation/00-overview.md` for the Phase 4 section and
+failing the run. A built state's battlefield permanents never entered, so the harness calls
+`Engine::run_battlefield_card_scripts` once after `Engine::new` to register their scripted
+abilities without an entry event. See `docs/implementation/00-overview.md` for the Phase 4 section and
 `docs/implementation/index.md` for the rest of the decision log.
 
 ## Status
