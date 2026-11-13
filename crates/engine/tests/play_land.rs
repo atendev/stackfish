@@ -277,6 +277,7 @@ fn play_land_rejects_nonempty_stack() {
         division: Vec::new(),
         ability_index: None,
         ability_text: None,
+        delayed_refers: Vec::new(),
         stack_id: ObjectId(99),
         kind: StackEntryKind::Spell,
         source: ObjectId(99),

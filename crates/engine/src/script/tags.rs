@@ -52,6 +52,13 @@ impl UserData for OncePerTurnTag {}
 pub(crate) struct OperationTag(pub(crate) AbilityEffect);
 impl UserData for OperationTag {}
 
+/// `Game.Ops.AtNextEndStep`'s return value, holding an
+/// `AbilityEffect::AtNextEndStep`. Its own type so only a `Game.Ops.Chain`
+/// entry accepts it (CR 603.7).
+#[derive(Clone)]
+pub(crate) struct DelayedTag(pub(crate) AbilityEffect);
+impl UserData for DelayedTag {}
+
 /// One step of a `:SetOperation` callback's return value, built by the
 /// `Game.Ops.*` constructors that act on picks the script gathered itself.
 /// `handle_operation_result` turns the steps into an `OperationOutcome`.

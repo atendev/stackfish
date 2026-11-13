@@ -170,6 +170,54 @@ pub struct GameState {
     /// `AlternativeCost::Replacement` because a library card has no Cascade
     /// cost of its own. Madness waives only timing, since its cost is real.
     pub pending_free_cast: Option<ObjectId>,
+    /// CR 603.7: one-shot delayed triggered abilities made by resolving
+    /// effects. Apart from `abilities` because the source is usually a spell
+    /// that has left the stack (CR 603.7d), so `retire_object` never touches them.
+    pub delayed_triggers: Vec<DelayedTrigger>,
+}
+
+/// CR 603.7: a delayed triggered ability, made by `AbilityEffect::AtNextEndStep`
+/// and removed when it goes on the stack.
+#[derive(Clone, PartialEq, Debug)]
+pub struct DelayedTrigger {
+    /// The `PendingTrigger::ability` that finds this row after a pause.
+    pub id: AbilityId,
+    /// CR 603.7d, 603.7e: the resolving spell's or ability's source.
+    pub source: ObjectId,
+    pub source_lki: Option<GameObject>,
+    /// CR 603.7d, 603.7e: who controlled the resolving spell or ability.
+    pub controller: PlayerId,
+    pub when: DelayedWhen,
+    /// One of the ops `script::globals` accepts for `AtNextEndStep`.
+    pub effect: crate::types::ability::AbilityEffect,
+    /// CR 603.7c: each object with the zone it was in when the row was made.
+    /// Resolution skips an object no longer in that zone.
+    pub refers: Vec<(ObjectId, ZoneKind)>,
+    /// CR 603.7a: `next_event_id` when the row was made. Only an event with
+    /// this id or a later one can trigger it.
+    pub created_after: EventId,
+    /// CR 603.7b: set when a collection pass matches the row, so a re-collect
+    /// before the push cannot match it again.
+    pub triggered: bool,
+}
+
+/// When a `DelayedTrigger` triggers.
+// TODO: other delayed timings: your next upkeep, your next end step, end of combat, when that creature dies or leaves this turn
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DelayedWhen {
+    /// "At the beginning of the next end step" (CR 513.1).
+    NextEndStep,
+}
+
+impl DelayedWhen {
+    pub(crate) fn matches(self, kind: &crate::types::event::GameEventKind) -> bool {
+        match self {
+            DelayedWhen::NextEndStep => matches!(
+                kind,
+                crate::types::event::GameEventKind::StepStarted { step: Step::End }
+            ),
+        }
+    }
 }
 
 impl GameState {
@@ -329,6 +377,7 @@ mod tests {
             exiled_with: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
+            delayed_triggers: Vec::new(),
         };
 
         let card = ObjectId(0);

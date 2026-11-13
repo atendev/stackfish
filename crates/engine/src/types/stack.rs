@@ -73,6 +73,10 @@ pub struct StackObject {
     /// CR 405.4, 113.7a: the ability's text, captured at push because the
     /// ability exists apart from its source. `None` for a spell.
     pub ability_text: Option<String>,
+    /// CR 603.7c: set only for a delayed triggered ability, from
+    /// `DelayedTrigger::refers`. `targets` holds the same ids, and resolution
+    /// keeps only those still in the zone recorded beside them.
+    pub delayed_refers: Vec<(ObjectId, ZoneKind)>,
 }
 
 /// CR 702.34a, 608.2n: where a spell goes in place of its usual zone when it
@@ -140,6 +144,7 @@ impl StackObject {
             effect,
             intervening_if,
             pending_mode_choice,
+            delayed_refers: Vec::new(),
         }
     }
 

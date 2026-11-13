@@ -60,6 +60,7 @@ fn trigger_on_stack(stack_id: u64, source: u64) -> StackObject {
         division: Vec::new(),
         ability_index: None,
         ability_text: None,
+        delayed_refers: Vec::new(),
         stack_id: ObjectId(stack_id),
         kind: StackEntryKind::TriggeredAbility,
         source: ObjectId(source),
