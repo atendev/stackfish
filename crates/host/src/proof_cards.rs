@@ -3,9 +3,8 @@
 
 use serde_json::{Value, json};
 use stackfish_engine::{
-    AbilityEffect, AtomicManaSymbol, CardDefinition, CardTypeSet, Color, KeywordSet, ManaCost,
-    ManaSymbol, ModeChoice, PTValue, ScriptReference, SpellMode, Subtype, SupertypeSet,
-    TargetFilter, TargetRequirement, TargetSpec,
+    AtomicManaSymbol, CardDefinition, CardTypeSet, Color, KeywordSet, ManaCost, ManaSymbol,
+    ModeChoice, PTValue, ScriptReference, Subtype, SupertypeSet,
 };
 
 use crate::card_source::FixtureCardSource;
@@ -41,7 +40,8 @@ const BLUE_BLACK: Deck = &[
     ("night_stalker", 2),
     ("vedalken_orrery", 1),
     ("scholar_imp", 2),
-    ("grave_rat", 3),
+    ("grave_rat", 2),
+    ("crossroads_scout", 1),
     ("rat_herald", 2),
     ("mimic_pool", 2),
     ("counterspell", 1),
@@ -212,51 +212,32 @@ return s
     )
 }
 
-fn creature_filter() -> TargetFilter {
-    TargetFilter::Object {
-        mana_value: None,
-        card_types: Some(CardTypeSet::CREATURE),
-        excluded_card_types: None,
-        subtypes: None,
-        excluded_subtypes: None,
-        supertypes: None,
-        excluded_supertypes: None,
-        controller: None,
-        zone: None,
-    }
-}
-
-// Declared in Rust because a card script cannot declare modes.
 fn fork_in_the_road() -> CardDefinition {
-    let damage = SpellMode {
-        target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: creature_filter(),
-            count: 1,
-            up_to: false,
-            at_least: false,
-            exclude_source: false,
-        })),
-        effect: Some(AbilityEffect::Damage(2)),
-        additional_cost: None,
-        pawprint_weight: 0,
-    };
-    let life = SpellMode {
-        target_requirement: None,
-        effect: Some(AbilityEffect::GainLife(3)),
-        additional_cost: None,
-        pawprint_weight: 0,
-    };
-    CardDefinition {
-        modes: vec![damage, life],
-        mode_choice: ModeChoice::Exactly(1),
-        ..base(
+    scripted(
+        base(
             17,
             "Fork in the Road",
             "{1}{R}",
             CardTypeSet::INSTANT,
             "Choose one: Fork in the Road deals 2 damage to target creature; or you gain 3 life.",
-        )
+        ),
+        r#"
+local s = {}
+function s.modes()
+    return {
+        choice = Game.ModeChoice.Exactly(1),
+        modes = {
+            {
+                target = { type = "object", card_types = { "Creature" }, count = 1 },
+                operation = Game.Ops.Damage(2),
+            },
+            { operation = Game.Ops.GainLife(3) },
+        },
     }
+end
+return s
+"#,
+    )
 }
 
 /// Every card in the proof set, keyed by a readable slug rather than an `oracle_id`.
@@ -576,6 +557,24 @@ return s
     p:Register()"#,
     );
 
+    let crossroads_scout = with_ability(
+        creature(
+            36,
+            "Crossroads Scout",
+            "{1}{U}",
+            1,
+            2,
+            "When Crossroads Scout enters the battlefield, choose one: you gain 2 life; or draw a card.",
+        ),
+        r#"    local e = Game.CreateTriggeredAbility(c)
+    e:SetCondition(Game.Conditions.Enters)
+    e:SetModes(Game.ModeChoice.Exactly(1), {
+        { operation = Game.Ops.GainLife(2) },
+        { operation = Game.Ops.DrawCards(1) },
+    })
+    e:Register()"#,
+    );
+
     let bone_altar = with_ability(
         base(
             35,
@@ -660,6 +659,7 @@ return s
         .with("vedalken_orrery", vedalken_orrery)
         .with("crucible_of_worlds", crucible_of_worlds)
         .with("bone_altar", bone_altar)
+        .with("crossroads_scout", crossroads_scout)
         .with("future_sight", future_sight)
 }
 
