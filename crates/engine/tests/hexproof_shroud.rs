@@ -1,6 +1,6 @@
 //! CR 702.11 Hexproof and CR 702.18 Shroud: `KeywordSet` bits read through `effective_characteristics` and enforced in `commands::target_is_legal`, at cast, activation, the CR 603.3d trigger scan and the CR 608.2b recheck.
 //! Hexproof stops only an opponent's spell or ability (CR 702.11b), shroud stops everyone (CR 702.18a), and untargeted effects never ask (CR 601.2c).
-//! Attached Auras and Equipment are not targeting, so SBA rechecks and the CR 303.4f entry scan use `attachment_target_is_legal`, which skips both keywords but keeps protection (CR 702.16d).
+//! Attached Auras and Equipment are not targeting, so SBA rechecks and the CR 303.4f entry scan use `attachment_target_is_legal`, which skips both keywords but keeps protection (CR 702.16c, 702.16d).
 // TODO: hexproof and shroud on players (CR 702.11c)
 // TODO: "hexproof from [quality]" (CR 702.11d-g)
 // TODO: "can be the target as though it didn't have hexproof" (CR 702.11e)

@@ -3,9 +3,9 @@ id: 171
 title: Fix the CR 702.16 citations in Rust comments
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question
@@ -22,4 +22,4 @@ Which Rust comments cite the wrong CR 702.16 subrule, and what should each one c
 
 ## Resolution
 
-<Filled in at close.>
+Comment-only fixes across 11 files, checked against the rule text. Targeting now cites 702.16b, blocking 702.16f, damage 702.16e, and Aura/Equipment comments cite 702.16c and 702.16d. The sweep also found damage comments citing 702.16a, so those were fixed too. `comment_diff.py` exits 0 and CI passed on f10398e. Left alone: the assertion message at `hexproof_shroud.rs:872` cites 702.16d where 702.16c fits, because it is a string. Report: `.plan/assets/171-fix-protection-rule-citations-report.md`.

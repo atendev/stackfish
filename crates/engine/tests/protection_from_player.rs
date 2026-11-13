@@ -237,7 +237,7 @@ fn game_effects_add_protection_player_rejects_any() {
     );
 }
 
-// CR 702.16a
+// CR 702.16e
 #[test]
 fn combat_damage_from_an_opponent_controlled_source_is_prevented_by_protection() {
     let p0 = PlayerId(0);
@@ -335,7 +335,7 @@ fn combat_damage_from_a_source_the_protected_controller_owns_still_lands() {
     );
 }
 
-// CR 702.16c
+// CR 702.16b
 #[test]
 fn casting_a_spell_an_opponent_controls_at_a_protected_target_is_rejected() {
     let mut state = two_player_main_phase_state();
@@ -438,7 +438,7 @@ fn spell_fizzles_when_target_gains_protection_from_an_opponent_before_resolution
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 702.16c: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
+    // CR 702.16b: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
     engine
         .state_mut()
         .continuous_effects
@@ -461,7 +461,7 @@ fn spell_fizzles_when_target_gains_protection_from_an_opponent_before_resolution
     );
 }
 
-// CR 702.16d
+// CR 702.16f
 #[test]
 fn an_attacker_with_protection_from_an_opponent_cannot_be_blocked_by_an_opponent_controlled_creature()
  {
