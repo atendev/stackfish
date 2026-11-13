@@ -1263,7 +1263,7 @@ fn decode_mana_value_bound(value: Value) -> Result<ManaValueBound, ScriptError> 
 /// `ScriptRuntime::build_target_requirement`'s return-table decoder, adding
 /// `count`, `up_to`, `at_least` and `exclude_source` to a bare `TargetFilter`,
 /// with the field names and defaults of the scenario crate's
-/// `TargetRequirementSpec`.
+/// `TargetRequirementSpec`. `count` is required here.
 ///
 /// The same table goes to `decode_target_filter_value`, so the filter keys sit
 /// flat beside the count keys and a `filter` function gives a scripted
@@ -1274,29 +1274,67 @@ pub(crate) fn decode_target_requirement_table(
     registry: &mut ScriptRegistry,
     table: Table,
 ) -> Result<TargetRequirement, ScriptError> {
-    let count: u32 = table.get("count").map_err(|e| {
+    decode_requirement_keys(lua, registry, table, None)
+}
+
+/// The count keys of one target word, then its filter. `default_count` is
+/// `None` where `count` is required and `Some(1)` for `:SetTarget`.
+/// `up_to` with `at_least`, and a zero `count` without `at_least`, are load
+/// errors (CR 601.2c, 115.6).
+fn decode_requirement_keys(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    table: Table,
+    default_count: Option<u32>,
+) -> Result<TargetRequirement, ScriptError> {
+    let count: Option<u32> = table.get("count").map_err(|e| {
         ScriptError::LoadError(format!(
-            "target_requirement() table missing required 'count': {e}"
+            "a target word's 'count' must be a whole number: {e}"
         ))
     })?;
-    let up_to: bool = table
-        .get::<_, Option<bool>>("up_to")
-        .map_err(|e| ScriptError::LoadError(e.to_string()))?
-        .unwrap_or(false);
-    let at_least: bool = table
-        .get::<_, Option<bool>>("at_least")
-        .map_err(|e| ScriptError::LoadError(e.to_string()))?
-        .unwrap_or(false);
-    let exclude_source: bool = table
-        .get::<_, Option<bool>>("exclude_source")
-        .map_err(|e| ScriptError::LoadError(e.to_string()))?
-        .unwrap_or(false);
+    let count = match (count, default_count) {
+        (Some(count), _) | (None, Some(count)) => count,
+        (None, None) => {
+            return Err(ScriptError::LoadError(
+                "target_requirement() table missing required 'count'".to_string(),
+            ));
+        }
+    };
+    let flag = |key: &str| -> Result<bool, ScriptError> {
+        Ok(table
+            .get::<_, Option<bool>>(key)
+            .map_err(|e| ScriptError::LoadError(e.to_string()))?
+            .unwrap_or(false))
+    };
+    let up_to = flag("up_to")?;
+    let at_least = flag("at_least")?;
+    let exclude_source = flag("exclude_source")?;
+    if up_to && at_least {
+        return Err(ScriptError::LoadError(
+            "a target word can't be both up_to and at_least".to_string(),
+        ));
+    }
+    if count == 0 && !at_least {
+        return Err(ScriptError::LoadError(
+            "a target word with count = 0 needs at_least = true (\"any number of targets\")"
+                .to_string(),
+        ));
+    }
     let filter = decode_target_filter_value(
         lua,
         registry,
         Value::Table(table),
         &["type", "count", "up_to", "at_least", "exclude_source"],
     )?;
+    if filter == TargetFilter::TriggeringStackObject
+        && (count != 1 || up_to || at_least || exclude_source)
+    {
+        return Err(ScriptError::LoadError(
+            "a { type = \"triggering\" } target is always exactly the triggering spell or ability, \
+             so it takes no count, up_to, at_least or exclude_source"
+                .to_string(),
+        ));
+    }
     Ok(TargetRequirement {
         filter,
         count,
@@ -1368,25 +1406,16 @@ pub(crate) fn decode_target_spec_table(
     }
 }
 
-/// `:SetTarget`'s argument for activated and triggered abilities. A plain
-/// filter table or function is one target word (count 1). An array of them is
-/// one word per entry in order (CR 601.2c, "target creature and target
-/// player"), a one-entry array being the same single word. Each entry decodes
-/// like a bare `:SetTarget` argument, so a function or a player-script table
-/// works in an array too.
+/// `:SetTarget`'s argument for activated and triggered abilities. A table is
+/// one target word whose `count` keys work as in `target_requirement()`, with
+/// `count` defaulting to 1. A bare function is one word of exactly one target.
+/// An array of them is one word per entry in order (CR 601.2c, "target
+/// creature and target player"), a one-entry array being the same single word.
 pub(crate) fn decode_target_spec_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
     value: Value,
 ) -> Result<TargetSpec, ScriptError> {
-    // TODO: a :SetTarget or mode target word takes exactly one target, so a Lua divided ability or mode has one target (CR 601.2d)
-    let single = |filter| TargetRequirement {
-        filter,
-        count: 1,
-        up_to: false,
-        at_least: false,
-        exclude_source: false,
-    };
     if let Value::Table(ref table) = value {
         let array_len = table.raw_len();
         if array_len > 0 {
@@ -1407,12 +1436,7 @@ pub(crate) fn decode_target_spec_value(
                 let entry: Value = table
                     .get(index)
                     .map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                requirements.push(single(decode_target_filter_value(
-                    lua,
-                    registry,
-                    entry,
-                    &["type"],
-                )?));
+                requirements.push(decode_set_target_word(lua, registry, entry)?);
             }
             return Ok(if requirements.len() == 1 {
                 TargetSpec::Primitive(requirements.remove(0))
@@ -1421,12 +1445,26 @@ pub(crate) fn decode_target_spec_value(
             });
         }
     }
-    Ok(TargetSpec::Primitive(single(decode_target_filter_value(
-        lua,
-        registry,
-        value,
-        &["type"],
-    )?)))
+    Ok(TargetSpec::Primitive(decode_set_target_word(
+        lua, registry, value,
+    )?))
+}
+
+fn decode_set_target_word(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    value: Value,
+) -> Result<TargetRequirement, ScriptError> {
+    match value {
+        Value::Table(table) => decode_requirement_keys(lua, registry, table, Some(1)),
+        other => Ok(TargetRequirement {
+            filter: decode_target_filter_value(lua, registry, other, &["type"])?,
+            count: 1,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        }),
+    }
 }
 
 /// A `Game.Ops.ChainEach` whose per-entry word counts don't add up to the
@@ -1688,8 +1726,9 @@ fn sequence_len(table: &Table) -> Option<usize> {
     (keys == table.raw_len()).then_some(keys)
 }
 
-/// `ActivatedAbilityBuilder::SetTarget`'s argument decoder, taking a `Value`
-/// and not `decode_target_filter_table`'s bare `Table`. A bare function is
+/// One target word's filter decoder for `:SetTarget`, `target_requirement()`
+/// and modes, taking a `Value` and not `decode_target_filter_table`'s bare
+/// `Table`. A bare function is
 /// registered and returned as `TargetFilter::Script` (invoked later through
 /// `ScriptRuntime::invoke_target_legal`), for a legality shape the flat table
 /// can't express ("power 4 or greater"). A table's `filter` key takes a
