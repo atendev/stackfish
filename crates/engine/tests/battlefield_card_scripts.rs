@@ -119,6 +119,15 @@ fn skips_by_key_empty_and_off_battlefield_sources() {
     place(&mut state, 2, inline(""), ZoneKind::Battlefield);
     place(&mut state, 3, inline(ETB_GAIN_LIFE), ZoneKind::Hand);
     place(&mut state, 4, inline(ETB_GAIN_LIFE), ZoneKind::Graveyard);
+    state.objects.insert(
+        ObjectId(6),
+        card_object(
+            ObjectId(6),
+            card(6, inline(ETB_GAIN_LIFE)),
+            P0,
+            ZoneKind::Stack,
+        ),
+    );
     let mut engine = Engine::new(state);
 
     assert!(engine.run_battlefield_card_scripts().is_empty());
