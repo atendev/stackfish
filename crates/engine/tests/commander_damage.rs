@@ -316,6 +316,7 @@ fn a_commanders_non_combat_damage_does_not_count() {
                 modes: Vec::new(),
                 targets: vec![Target::Player(p1)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -525,6 +526,7 @@ fn commander_damage_survives_a_death_return_and_recast() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, commander is castable from the command zone");

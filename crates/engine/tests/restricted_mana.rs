@@ -64,6 +64,7 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand, main phase, empty stack");
@@ -356,6 +357,7 @@ fn restricted_mana_cannot_fund_an_activated_ability_cost() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

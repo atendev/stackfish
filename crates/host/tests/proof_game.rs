@@ -219,11 +219,13 @@ fn the_games_reach_attacks_sacrifice_and_off_turn_casts() {
     let mut attacked = HashSet::new();
     let mut sacrificed = 0;
     let mut modal_activations = 0;
+    let mut divided_casts = 0;
     let mut off_turn = false;
     for seed in 0..30 {
         let (_, bot) = play_recorded(2, seed);
         sacrificed += bot.costs_paid().get("sacrifice").copied().unwrap_or(0);
         modal_activations += bot.modal_activations();
+        divided_casts += bot.divided_casts();
         for seat in 0..2 {
             let events = bot.events(seat);
             off_turn |= cast_off_turn_under_orrery(events);
@@ -251,6 +253,11 @@ fn the_games_reach_attacks_sacrifice_and_off_turn_casts() {
     assert!(
         modal_activations > 0,
         "no game activated Forked Totem with a mode"
+    );
+    // CR 601.2d
+    assert!(
+        divided_casts > 0,
+        "no game cast Arc Lightning with a division"
     );
     assert!(
         off_turn,

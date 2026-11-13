@@ -298,6 +298,7 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
@@ -419,6 +420,7 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");

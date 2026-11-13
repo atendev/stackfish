@@ -821,8 +821,8 @@ pub(crate) fn target_spec_minimums(spec: &TargetSpec) -> Vec<u32> {
 ///
 /// `pub(crate)` because `engine::triggers_pipeline`'s pause
 /// (`Engine::submit_trigger_targets`) validates a triggered ability's chosen
-/// targets here at answer time, from outside the `commands` tree.
-/// TODO: no division of an effect among several targets (CR 601.2d)
+/// targets here at answer time, from outside the `commands` tree. The split of
+/// a divided effect is checked afterwards by `validate_effect_division`.
 pub(crate) fn validate_targets(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -885,6 +885,144 @@ pub(crate) fn validate_targets(
             }
             Ok(())
         }
+    }
+}
+
+/// CR 601.2d: one divided word's split of `total` among `n_targets`. No target
+/// or one target sends an empty `division`, and the lone target takes the
+/// whole total. Two or more send one share each, every share at least 1,
+/// summing to `total`, so a word never takes more targets than `total`.
+pub(crate) fn validate_division(
+    total: u32,
+    n_targets: usize,
+    division: &[u32],
+) -> Result<(), Rejected> {
+    let reject = |why: String| Err(Rejected::IllegalAction(why));
+    if n_targets <= 1 {
+        return if division.is_empty() {
+            Ok(())
+        } else {
+            reject(format!(
+                "a divided effect with {n_targets} target(s) takes no division"
+            ))
+        };
+    }
+    if division.len() != n_targets {
+        return reject(format!(
+            "the division has {} share(s) for {n_targets} targets",
+            division.len()
+        ));
+    }
+    if division.contains(&0) {
+        return reject("each target of a divided effect must get at least 1".to_string());
+    }
+    let sum: u64 = division.iter().map(|&share| u64::from(share)).sum();
+    if sum != u64::from(total) {
+        return reject(format!("the division adds up to {sum}, not {total}"));
+    }
+    Ok(())
+}
+
+/// The divided total of each target word of `spec` under `effect`, in word
+/// order. A modal stack (CR 700.2d) gives each chosen mode's words its own
+/// entry, and only a divided mode with exactly one word is divided.
+// TODO: divided amounts in function and chain operations (CR 601.2d)
+pub(crate) fn divided_word_totals(
+    spec: Option<&TargetSpec>,
+    effect: Option<&AbilityEffect>,
+) -> Vec<Option<u32>> {
+    match spec {
+        None => Vec::new(),
+        Some(TargetSpec::Primitive(_)) => vec![effect.and_then(AbilityEffect::divided_total)],
+        Some(TargetSpec::Multiple(reqs)) => {
+            let mut totals = Vec::with_capacity(reqs.len());
+            if let Some(AbilityEffect::Modal { effects, words }) = effect {
+                for (mode_effect, &word_count) in effects.iter().zip(words) {
+                    let total = mode_effect
+                        .as_ref()
+                        .and_then(AbilityEffect::divided_total)
+                        .filter(|_| word_count == 1);
+                    totals.extend(std::iter::repeat_n(total, word_count));
+                }
+            }
+            totals.resize(reqs.len(), None);
+            totals
+        }
+    }
+}
+
+/// CR 601.2d, 602.2b, 603.3d: checks the announced `division` against the
+/// divided words of `spec` and `effect`, after `validate_targets` accepted
+/// `targets`. With several words the flat list is split as the targets are,
+/// and a position outside a divided word of two or more targets must be 0.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn validate_effect_division(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    spec: Option<&TargetSpec>,
+    effect: Option<&AbilityEffect>,
+    targets: &[Target],
+    division: &[u32],
+    caster: PlayerId,
+    source: ObjectId,
+    caster_x_value: Option<u32>,
+) -> Result<(), Rejected> {
+    let totals = divided_word_totals(spec, effect);
+    let undivided = || {
+        if division.is_empty() {
+            Ok(())
+        } else {
+            Err(Rejected::IllegalAction(
+                "a division was announced for an effect that is not divided".to_string(),
+            ))
+        }
+    };
+    match (spec, totals.as_slice()) {
+        (Some(TargetSpec::Primitive(_)), [Some(total)]) => {
+            validate_division(*total, targets.len(), division)
+        }
+        (Some(TargetSpec::Multiple(reqs)), _) if totals.iter().any(Option::is_some) => {
+            let chunks = split_target_indices_by_requirement(
+                state,
+                script_runtime,
+                reqs,
+                targets,
+                caster,
+                source,
+                caster_x_value,
+            )
+            .ok_or(Rejected::InvalidTarget)?;
+            let needs_shares = chunks
+                .iter()
+                .zip(&totals)
+                .any(|(chunk, total)| total.is_some() && chunk.len() >= 2);
+            if !needs_shares {
+                return undivided();
+            }
+            if division.len() != targets.len() {
+                return Err(Rejected::IllegalAction(format!(
+                    "the division has {} entries for {} targets",
+                    division.len(),
+                    targets.len()
+                )));
+            }
+            for (chunk, total) in chunks.iter().zip(&totals) {
+                let shares: Vec<u32> = chunk.iter().map(|&i| division[i]).collect();
+                match total {
+                    Some(total) if chunk.len() >= 2 => {
+                        validate_division(*total, chunk.len(), &shares)?;
+                    }
+                    _ if shares.iter().any(|&share| share != 0) => {
+                        return Err(Rejected::IllegalAction(
+                            "a share was announced for a target outside a divided word".to_string(),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            Ok(())
+        }
+        _ => undivided(),
     }
 }
 
@@ -962,6 +1100,34 @@ pub(crate) fn split_targets_by_requirement(
     source: ObjectId,
     caster_x_value: Option<u32>,
 ) -> Option<Vec<Vec<Target>>> {
+    split_target_indices_by_requirement(
+        state,
+        script_runtime,
+        reqs,
+        targets,
+        caster,
+        source,
+        caster_x_value,
+    )
+    .map(|chunks| {
+        chunks
+            .into_iter()
+            .map(|chunk| chunk.into_iter().map(|i| targets[i]).collect())
+            .collect()
+    })
+}
+
+/// `split_targets_by_requirement` as positions into `targets`, so a list
+/// parallel to `targets` (a CR 601.2d division) splits the same way.
+pub(crate) fn split_target_indices_by_requirement(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    reqs: &[TargetRequirement],
+    targets: &[Target],
+    caster: PlayerId,
+    source: ObjectId,
+    caster_x_value: Option<u32>,
+) -> Option<Vec<Vec<usize>>> {
     let variable_index = {
         let mut found = None;
         for (i, req) in reqs.iter().enumerate() {
@@ -1004,7 +1170,7 @@ pub(crate) fn split_targets_by_requirement(
         }
     }
 
-    let mut rest = targets;
+    let mut next = 0;
     let mut chunks = Vec::with_capacity(reqs.len());
     for (i, req) in reqs.iter().enumerate() {
         let n = if Some(i) == variable_index {
@@ -1012,14 +1178,17 @@ pub(crate) fn split_targets_by_requirement(
         } else {
             req.count as usize
         };
-        if rest.len() < n {
+        if targets.len() - next < n {
             return None;
         }
-        let (chunk, remaining) = rest.split_at(n);
-        chunks.push(chunk.to_vec());
-        rest = remaining;
+        chunks.push((next..next + n).collect());
+        next += n;
     }
-    if rest.is_empty() { Some(chunks) } else { None }
+    if next == targets.len() {
+        Some(chunks)
+    } else {
+        None
+    }
 }
 
 /// CR 601.2c, for 2 or more variable-count words: assigns each submitted target
@@ -1044,7 +1213,7 @@ fn assign_targets_by_filter(
     caster: PlayerId,
     source: ObjectId,
     caster_x_value: Option<u32>,
-) -> Option<Vec<Vec<Target>>> {
+) -> Option<Vec<Vec<usize>>> {
     // Precompute which words each submitted target is legal for; the search below
     // branches only over these.
     let legal_words: Vec<Vec<usize>> = targets
@@ -1074,7 +1243,7 @@ fn assign_targets_by_filter(
         targets: &[Target],
         reqs: &[TargetRequirement],
         legal_words: &[Vec<usize>],
-        buckets: &mut [Vec<Target>],
+        buckets: &mut [Vec<usize>],
     ) -> bool {
         if idx == targets.len() {
             return reqs.iter().enumerate().all(|(w, req)| {
@@ -1098,7 +1267,7 @@ fn assign_targets_by_filter(
             if buckets[w].len() >= max {
                 continue;
             }
-            buckets[w].push(targets[idx]);
+            buckets[w].push(idx);
             if backtrack(idx + 1, targets, reqs, legal_words, buckets) {
                 return true;
             }
@@ -1107,7 +1276,7 @@ fn assign_targets_by_filter(
         false
     }
 
-    let mut buckets: Vec<Vec<Target>> = vec![Vec::new(); reqs.len()];
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); reqs.len()];
     if backtrack(0, targets, reqs, &legal_words, &mut buckets) {
         Some(buckets)
     } else {
@@ -1138,7 +1307,9 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
         // Synchronous.
         AbilityEffect::GainLife(_)
             | AbilityEffect::Damage(_)
+            | AbilityEffect::DividedDamage(_)
             | AbilityEffect::Counters { .. }
+            | AbilityEffect::DividedCounters { .. }
             | AbilityEffect::Pump { .. }
             | AbilityEffect::GainControl(_)
             | AbilityEffect::GrantTimingPermission(_)
@@ -1364,6 +1535,20 @@ mod tests {
     use crate::types::turn::{Phase, Step};
     use crate::types::zone::ZoneKind;
     use std::collections::HashMap;
+
+    // CR 601.2d
+    #[test]
+    fn validate_division_needs_one_share_of_at_least_one_per_target() {
+        assert!(validate_division(3, 0, &[]).is_ok());
+        assert!(validate_division(3, 1, &[]).is_ok());
+        assert!(validate_division(3, 1, &[3]).is_err());
+        assert!(validate_division(3, 0, &[3]).is_err());
+        assert!(validate_division(3, 2, &[2, 1]).is_ok());
+        assert!(validate_division(3, 2, &[]).is_err());
+        assert!(validate_division(3, 2, &[2, 2]).is_err());
+        assert!(validate_division(3, 2, &[3, 0]).is_err());
+        assert!(validate_division(3, 4, &[1, 1, 1, 0]).is_err());
+    }
 
     fn player(id: PlayerId) -> PlayerState {
         PlayerState {

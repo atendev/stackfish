@@ -94,6 +94,7 @@ fn cast_action(modes: &[u32]) -> PlayerAction {
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     }
 }

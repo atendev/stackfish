@@ -276,6 +276,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
                 modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })
@@ -324,6 +325,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority");
@@ -486,6 +488,7 @@ fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_
                 modes: Vec::new(),
                 targets: vec![Target::Object(target_b)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

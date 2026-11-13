@@ -146,6 +146,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -671,6 +672,7 @@ fn a_draw_limit_modifier_is_purged_once_its_source_leaves_the_battlefield() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, spell is in hand");

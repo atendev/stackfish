@@ -149,6 +149,9 @@ pub(crate) struct WireTargetWord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<u32>,
     pub candidates: Vec<WireTarget>,
+    /// CR 601.2d: the total this word's targets divide, absent when undivided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub divide_total: Option<u32>,
 }
 
 fn word_bounds(requirement: &TargetRequirement) -> (u32, Option<u32>) {
@@ -164,6 +167,7 @@ fn word_bounds(requirement: &TargetRequirement) -> (u32, Option<u32>) {
 fn target_words(
     spec: &TargetSpec,
     candidates: &[Vec<stackfish_engine::Target>],
+    divide_totals: &[Option<u32>],
 ) -> Vec<WireTargetWord> {
     let requirements: Vec<&TargetRequirement> = match spec {
         TargetSpec::Primitive(requirement) => vec![requirement],
@@ -174,10 +178,18 @@ fn target_words(
         .enumerate()
         .map(|(i, word)| {
             let (min, max) = requirements.get(i).map_or((0, None), |r| word_bounds(r));
+            let divide_total = divide_totals.get(i).copied().flatten();
             WireTargetWord {
                 min,
-                max,
+                // CR 601.2d
+                // A word can't take more targets than the total it divides.
+                max: match (max, divide_total) {
+                    (Some(max), Some(total)) => Some(max.min(total)),
+                    (None, total) => total,
+                    (max, None) => max,
+                },
                 candidates: word.iter().map(|t| (*t).into()).collect(),
+                divide_total,
             }
         })
         .collect()
@@ -193,6 +205,9 @@ pub(crate) struct WireSlot {
     /// The candidates are every target legal for some announced X.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub x_dependent: bool,
+    /// CR 601.2d: the total this word's targets divide, absent when undivided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub divide_total: Option<u32>,
 }
 
 impl From<&TargetSlot> for WireSlot {
@@ -202,6 +217,7 @@ impl From<&TargetSlot> for WireSlot {
             min: slot.min,
             max: slot.max,
             x_dependent: slot.x_dependent,
+            divide_total: slot.divide_total,
         }
     }
 }
@@ -532,8 +548,12 @@ impl From<&ReplyShape> for WireShape {
                     .map(|entry| WireEntry::from(&Entry::Activate(entry.clone())))
                     .collect(),
             },
-            ReplyShape::Targets { spec, candidates } => WireShape::Targets {
-                words: target_words(spec, candidates),
+            ReplyShape::Targets {
+                spec,
+                candidates,
+                divide_totals,
+            } => WireShape::Targets {
+                words: target_words(spec, candidates, divide_totals),
             },
             ReplyShape::MayCast { card, options } => WireShape::MayCast {
                 card: card.map(U64::from),
@@ -756,6 +776,7 @@ mod tests {
             min: 1,
             max: Some(1),
             x_dependent: false,
+            divide_total: None,
         };
         let entry = |modes, targets| {
             Entry::Activate(ActivateEntry {
@@ -880,6 +901,7 @@ mod tests {
                     min: 1,
                     max: Some(1),
                     x_dependent: false,
+                    divide_total: None,
                 }]),
                 x: true,
             }),

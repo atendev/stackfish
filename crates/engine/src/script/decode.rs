@@ -1379,6 +1379,7 @@ pub(crate) fn decode_target_spec_value(
     registry: &mut ScriptRegistry,
     value: Value,
 ) -> Result<TargetSpec, ScriptError> {
+    // TODO: a :SetTarget or mode target word takes exactly one target, so a Lua divided ability or mode has one target (CR 601.2d)
     let single = |filter| TargetRequirement {
         filter,
         count: 1,
@@ -1456,6 +1457,48 @@ pub(crate) fn check_chain_words(
             "Game.Ops.ChainEach entries own {owned} target word(s) but the ability declares {declared}"
         )))
     }
+}
+
+/// CR 601.2d: a divided effect splits its total among the targets of one
+/// "target" word. A total of 0, a word that must take more targets than the
+/// total, or a non-object word for divided counters (`CounterAdded` names an
+/// object) is a load error.
+pub(crate) fn check_divided_shape(
+    effect: Option<&AbilityEffect>,
+    target: Option<&TargetSpec>,
+) -> Result<(), ScriptError> {
+    let Some(effect) = effect else {
+        return Ok(());
+    };
+    let Some(total) = effect.divided_total() else {
+        return Ok(());
+    };
+    let refuse = |why: &str| Err(ScriptError::LoadError(format!("a divided effect {why}")));
+    if total == 0 {
+        return refuse("needs a total of at least 1");
+    }
+    let Some(TargetSpec::Primitive(requirement)) = target else {
+        return refuse("needs exactly one target word");
+    };
+    let minimum = if requirement.up_to {
+        0
+    } else {
+        requirement.count
+    };
+    if minimum > total {
+        return refuse(&format!(
+            "can't give each of {minimum} targets at least 1 of {total}"
+        ));
+    }
+    if matches!(effect, AbilityEffect::DividedCounters { .. })
+        && !matches!(
+            requirement.filter,
+            TargetFilter::Object { .. } | TargetFilter::Script(_)
+        )
+    {
+        return refuse("of counters can only target objects");
+    }
+    Ok(())
 }
 
 /// Which declaration a mode list comes from. Per-mode costs and pawprints
@@ -1575,11 +1618,13 @@ pub(crate) fn decode_modes(
             )));
         }
         let effect = AbilityEffect::packed(primitive, handle);
-        check_chain_words(Some(&effect), target.as_ref()).map_err(|e| match e {
-            ScriptError::LoadError(m) | ScriptError::RuntimeError(m) => {
-                ScriptError::LoadError(format!("{at}: {m}"))
-            }
-        })?;
+        check_chain_words(Some(&effect), target.as_ref())
+            .and_then(|()| check_divided_shape(Some(&effect), target.as_ref()))
+            .map_err(|e| match e {
+                ScriptError::LoadError(m) | ScriptError::RuntimeError(m) => {
+                    ScriptError::LoadError(format!("{at}: {m}"))
+                }
+            })?;
         let cost = match entry.get::<_, Value>("cost").map_err(lua_load_err)? {
             Value::Nil => None,
             _ if owner != ModeOwner::Spell => {
@@ -1773,5 +1818,46 @@ mod chain_word_tests {
         );
         assert!(check_chain_words(Some(&AbilityEffect::Destroy), None).is_ok());
         assert!(check_chain_words(None, None).is_ok());
+    }
+
+    fn exactly(count: u32) -> TargetSpec {
+        TargetSpec::Primitive(TargetRequirement {
+            filter: TargetFilter::AnyTarget,
+            count,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        })
+    }
+
+    // CR 601.2d
+    #[test]
+    fn a_divided_word_must_fit_its_total() {
+        let divided = AbilityEffect::DividedDamage(2);
+        assert!(check_divided_shape(Some(&divided), Some(&exactly(2))).is_ok());
+        assert!(check_divided_shape(Some(&divided), Some(&exactly(3))).is_err());
+        assert!(
+            check_divided_shape(Some(&AbilityEffect::DividedDamage(0)), Some(&exactly(1))).is_err()
+        );
+        assert!(check_divided_shape(Some(&divided), None).is_err());
+        let counters = AbilityEffect::DividedCounters {
+            kind: crate::types::counter::CounterKind::PlusOnePlusOne,
+            total: 2,
+        };
+        assert!(check_divided_shape(Some(&counters), Some(&exactly(1))).is_err());
+        let on = |filter| {
+            TargetSpec::Primitive(TargetRequirement {
+                filter,
+                count: 2,
+                up_to: true,
+                at_least: false,
+                exclude_source: false,
+            })
+        };
+        let scripted = on(TargetFilter::Script(crate::types::ids::ScriptHandle(0)));
+        assert!(check_divided_shape(Some(&counters), Some(&scripted)).is_ok());
+        let ability = on(TargetFilter::Ability);
+        assert!(check_divided_shape(Some(&counters), Some(&ability)).is_err());
+        assert!(check_divided_shape(Some(&AbilityEffect::Damage(5)), Some(&exactly(9))).is_ok());
     }
 }

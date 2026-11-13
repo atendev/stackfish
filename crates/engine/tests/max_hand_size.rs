@@ -312,6 +312,7 @@ fn a_filter_scoped_hand_size_modifier_is_purged_once_its_source_leaves_the_battl
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority, spell is in hand");

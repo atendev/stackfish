@@ -163,6 +163,7 @@ fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: Obj
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

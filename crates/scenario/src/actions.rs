@@ -56,6 +56,8 @@ pub(crate) fn to_player_action(
                 alternative_cost: None,
                 // TODO: a TOML field for paying buyback
                 pay_buyback: false,
+                // TODO: a TOML field for the announced division (CR 601.2d)
+                division: Vec::new(),
             },
         ),
         ActionSpec::ActivateAbility {
@@ -77,6 +79,7 @@ pub(crate) fn to_player_action(
                     .iter()
                     .map(|t| resolve_target(t, card_ids))
                     .collect(),
+                division: Vec::new(),
                 chosen_colors: chosen_colors
                     .iter()
                     .map(|s| {
@@ -95,6 +98,7 @@ pub(crate) fn to_player_action(
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         ),

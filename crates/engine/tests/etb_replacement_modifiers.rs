@@ -663,6 +663,7 @@ fn cast_creature_resolution_self_registered_enters_with_counters() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap();

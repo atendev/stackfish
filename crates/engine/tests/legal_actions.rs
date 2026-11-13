@@ -413,6 +413,7 @@ fn a_priority_answer_that_no_entry_offers_is_rejected_and_changes_nothing() {
                 x_value,
                 alternative_cost: None,
                 pay_buyback: buyback,
+                division: Vec::new(),
             },
         })
     };
@@ -508,6 +509,7 @@ fn every_listed_entry_is_accepted_by_the_engine() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
             Entry::Activate(activate) => PlayerActionKind::ActivateAbility {
                 source: activate.source,
@@ -515,6 +517,7 @@ fn every_listed_entry_is_accepted_by_the_engine() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         };

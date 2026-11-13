@@ -94,9 +94,12 @@ pub enum ReplyShape {
     },
     /// Choose targets for a trigger: one candidate list per target word of
     /// `spec`, in order. The reply is one list per word.
+    /// `divide_totals` has one entry per word: the total a divided word splits
+    /// among its targets (CR 601.2d, 603.3d), or `None`.
     Targets {
         spec: TargetSpec,
         candidates: Vec<Vec<Target>>,
+        divide_totals: Vec<Option<u32>>,
     },
     /// Cast `card` as the resolving ability allows (Madness CR 702.35a,
     /// Cascade CR 702.85a), or decline with `None`. Cascade with no
@@ -141,6 +144,8 @@ pub struct Decision {
 pub struct CastAnnouncement {
     pub modes: Vec<u32>,
     pub targets: Vec<Target>,
+    /// CR 601.2d: as `PlayerActionKind::CastSpell::division`.
+    pub division: Vec<u32>,
     pub x_value: Option<u32>,
 }
 
@@ -156,7 +161,12 @@ pub enum Reply {
         rest: Vec<ObjectId>,
     },
     Payment(Option<PaymentPlan>),
-    Targets(Vec<Vec<Target>>),
+    /// One list per word, and the flat split of the targets as on
+    /// `PlayerActionKind::CastSpell::division`.
+    Targets {
+        per_word: Vec<Vec<Target>>,
+        division: Vec<u32>,
+    },
     MayCast(Option<CastAnnouncement>),
     Action(PlayerAction),
     DeclareAttackers(Vec<(ObjectId, Target)>),

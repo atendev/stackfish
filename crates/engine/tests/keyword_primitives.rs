@@ -770,6 +770,7 @@ fn flash_creature_castable_outside_main_phase() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .map(|_| drain(&mut engine));
@@ -794,6 +795,7 @@ fn non_flash_creature_rejected_outside_main_phase() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap_err();

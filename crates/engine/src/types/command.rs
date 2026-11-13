@@ -15,6 +15,9 @@ pub enum PlayerActionKind {
         card: ObjectId,
         modes: Vec<u32>,
         targets: Vec<Target>,
+        /// CR 601.2d: one share per target, parallel to `targets`, for a
+        /// divided effect with two or more targets. Empty otherwise.
+        division: Vec<u32>,
         x_value: Option<u32>,
         /// CR 601.2b: index into `CardDefinition::alternative_costs`, announced
         /// with `x_value`. `None` pays the printed cost. The card must be in
@@ -31,6 +34,8 @@ pub enum PlayerActionKind {
         /// with its targets. Empty for a non-modal ability.
         modes: Vec<u32>,
         targets: Vec<Target>,
+        /// CR 601.2d, 602.2b: the split of a divided effect, as on `CastSpell`.
+        division: Vec<u32>,
         /// CR 602.2b: colors for an `AddManaChoice` mana ability, chosen at
         /// activation because a mana ability never uses the stack (CR 605.3b).
         /// Empty for other abilities, and the length must match `count`.

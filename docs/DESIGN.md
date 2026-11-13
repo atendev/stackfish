@@ -62,6 +62,12 @@ request). Replace the YGO rules kernel entirely with an MTG-native one per the a
   `apply_enters_battlefield_modifiers`, Aura host). CR 110.2a picks the controller (`EntryControl::You` default).
   The graveyard object's `controller` is written temporarily so entry filters see the entering player and reset to
   the owner on every path that does not enter. Persist and Undying keep their narrower `ReturnSelfWithCounter` path
+- `Game.Ops.DividedDamage`/`DividedCounters` (`phase5/divided-damage-counters`): CR 601.2d splits are announced, not
+  scripted. `CastSpell`, `ActivateAbility`, the madness and cascade casts and the trigger target answer carry a flat
+  `division` index for index with `targets`, checked by `validate_effect_division` before anything changes, and kept
+  on `StackObject.division` (a copy keeps it). Resolution gives each legal target its share in one event batch and
+  drops an illegal target's share (CR 608.2b). `TargetSlot.divide_total` tells a Seat the total and caps `max`, and
+  the replay file needs no change because the split rides in the recorded Answer
 - Structured cost/payment system
 
 ### Step-able core (replay requirement)

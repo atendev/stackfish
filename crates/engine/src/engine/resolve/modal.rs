@@ -24,6 +24,7 @@ pub(in crate::engine) struct ModalContinuation {
     words: Vec<usize>,
     /// One legal-target chunk per target word, flat across all modes.
     chunks: Vec<Vec<Target>>,
+    shares: Vec<Vec<u32>>,
     /// `Some` for an `AbilityEffect::Chain`: the legal targets every entry sees.
     shared_legal: Option<Vec<Target>>,
     /// Index of the next mode to run.
@@ -45,7 +46,9 @@ fn is_synchronous(effect: &AbilityEffect) -> bool {
         effect,
         AbilityEffect::GainLife(_)
             | AbilityEffect::Damage(_)
+            | AbilityEffect::DividedDamage(_)
             | AbilityEffect::Counters { .. }
+            | AbilityEffect::DividedCounters { .. }
             | AbilityEffect::Pump { .. }
             | AbilityEffect::GainControl(_)
             | AbilityEffect::GrantTimingPermission(_)
@@ -81,6 +84,7 @@ fn mode_view(
     effect: &AbilityEffect,
     range: Range<usize>,
     legal: &[Target],
+    shares: Vec<u32>,
 ) -> StackObject {
     let mut view = top.clone();
     view.effect = Some(effect.clone());
@@ -99,6 +103,7 @@ fn mode_view(
         _ => None,
     };
     view.targets = legal.to_vec();
+    view.division = shares;
     view
 }
 
@@ -111,9 +116,19 @@ impl Engine {
         effects: &[Option<AbilityEffect>],
         words: &[usize],
         modal_chunk_legals: &[Vec<Target>],
+        modal_chunk_shares: &[Vec<u32>],
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        self.resolve_modal_from(top, effects, words, modal_chunk_legals, None, 0, events)
+        self.resolve_modal_from(
+            top,
+            effects,
+            words,
+            modal_chunk_legals,
+            modal_chunk_shares,
+            None,
+            0,
+            events,
+        )
     }
 
     /// CR 608.2c — `AbilityEffect::Chain`: every entry runs in order.
@@ -136,6 +151,7 @@ impl Engine {
                 &effects,
                 &[],
                 modal_chunk_legals,
+                &[],
                 Some(legal_targets),
                 0,
                 events,
@@ -152,7 +168,7 @@ impl Engine {
                     }
                     _ => modal_chunk_legals,
                 };
-                self.resolve_modal_from(top, &effects, words, chunks, None, 0, events)
+                self.resolve_modal_from(top, &effects, words, chunks, &[], None, 0, events)
             }
         }
     }
@@ -164,6 +180,7 @@ impl Engine {
         effects: &[Option<AbilityEffect>],
         words: &[usize],
         chunks: &[Vec<Target>],
+        shares: &[Vec<u32>],
         shared_legal: Option<&[Target]>,
         start: usize,
         mut events: Vec<GameEventKind>,
@@ -187,6 +204,7 @@ impl Engine {
                 effects: effects.to_vec(),
                 words: words.to_vec(),
                 chunks: chunks.to_vec(),
+                shares: shares.to_vec(),
                 shared_legal: shared_legal.map(<[Target]>::to_vec),
                 next,
             };
@@ -216,9 +234,15 @@ impl Engine {
                     view.targets = legal.clone();
                     view
                 }
-                None => mode_view(top, effect, range, &legal),
+                None => {
+                    let mode_shares = shares
+                        .get(range.clone())
+                        .map(|chunk| chunk.iter().flatten().copied().collect())
+                        .unwrap_or_default();
+                    mode_view(top, effect, range, &legal, mode_shares)
+                }
             };
-            match self.resolve_ability_effect(&view, &legal, mode_chunks, events) {
+            match self.resolve_ability_effect(&view, &legal, mode_chunks, &[], events) {
                 ControlFlow::Break(status) => return ControlFlow::Break(status),
                 ControlFlow::Continue(resumed) => events = resumed,
             }
@@ -240,6 +264,7 @@ impl Engine {
             effects,
             words,
             chunks,
+            shares,
             shared_legal,
             next,
         } = continuation;
@@ -248,6 +273,7 @@ impl Engine {
             &effects,
             &words,
             &chunks,
+            &shares,
             shared_legal.as_deref(),
             next,
             Vec::new(),

@@ -123,6 +123,7 @@ fn cast(engine: &mut Engine, card: ObjectId) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("P0 holds priority in its main phase with an empty stack");

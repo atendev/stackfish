@@ -70,13 +70,19 @@ pub enum AbilityEffect {
     /// it can target a player. Both push a `LifeChanged` event.
     /// TODO: no condition matches a life gain and no replacement listens for one CR 119.9, 119.10
     GainLife(i32),
-    /// `Game.Ops.Damage(n)`: deals `n` damage to the resolving object's first
-    /// chosen target (CR 608.2m). It emits a real `DamageDealt` event through
+    /// `Game.Ops.Damage(n)`: deals `n` damage to each legal target (CR 608.2b,
+    /// 608.2m). It emits a real `DamageDealt` event through
     /// `ReplacementCheck` and `CommitEvents`, as combat damage does, so
     /// prevention and replacement (CR 614-616) and Lifelink, Wither, Infect
-    /// and Deathtouch (`commands::apply_damage_event`) apply. A single fixed
-    /// target only, with no "divide among" or "each opponent" shapes.
+    /// and Deathtouch (`commands::apply_damage_event`) apply. There is no "each
+    /// opponent" shape. `DividedDamage` divides.
     Damage(u32),
+    /// `Game.Ops.DividedDamage(total)`: `total` damage divided among the
+    /// targets as announced (CR 601.2d). Each legal target takes its share,
+    /// and an illegal target's share is lost (CR 608.2b).
+    // TODO: an X-dependent total ("X damage divided") (CR 601.2d, 107.3)
+    // TODO: untargeted division chosen at resolution (CR 608.2d)
+    DividedDamage(u32),
     /// `Game.Ops.Destroy()`: destroys the first chosen target (CR 701.8). It
     /// can't push an unapplied event as `Damage` does, because every
     /// `ZoneChange` describes a move already made. `ResolveStackTop` instead
@@ -107,6 +113,11 @@ pub enum AbilityEffect {
     /// Experience are out.
     // TODO: no `EventFilter::CounterAdded`, so counter placement can't be replaced or prevented
     Counters { kind: CounterKind, amount: i32 },
+    /// `Game.Ops.DividedCounters(kind, total)`: `total` counters distributed
+    /// among object targets as announced (CR 601.2d, 122.1). Shares work as
+    /// for `DividedDamage`.
+    // TODO: an X-dependent total ("distribute X counters") (CR 601.2d, 107.3)
+    DividedCounters { kind: CounterKind, total: u32 },
     /// `Game.Ops.Pump(power, toughness, duration)`: "target creature gets
     /// +X/+Y until <duration>". Each legal target gets its own layer 7c
     /// `ModifyPT` `ContinuousEffect` pushed straight into
@@ -704,6 +715,17 @@ impl AbilityEffect {
             }
             Some(effect) => effect,
             None => AbilityEffect::Script(handle),
+        }
+    }
+
+    /// CR 601.2d: the amount a divided effect splits among its targets, or
+    /// `None` for an undivided one.
+    pub fn divided_total(&self) -> Option<u32> {
+        match self {
+            AbilityEffect::DividedDamage(total) | AbilityEffect::DividedCounters { total, .. } => {
+                Some(*total)
+            }
+            _ => None,
         }
     }
 }

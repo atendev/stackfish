@@ -437,6 +437,7 @@ impl Engine {
         &mut self,
         modes: Vec<u32>,
         targets: Vec<Target>,
+        division: Vec<u32>,
         x_value: Option<u32>,
     ) -> Result<(), MadnessChoiceError> {
         let ProcessState::AwaitingMadnessChoice { player, card, .. } = &self.process_state else {
@@ -469,6 +470,7 @@ impl Engine {
                 card,
                 modes,
                 targets,
+                division,
                 x_value,
                 alternative_cost: Some(alt_idx),
                 pay_buyback: false,
@@ -553,6 +555,7 @@ impl Engine {
         &mut self,
         modes: Vec<u32>,
         targets: Vec<Target>,
+        division: Vec<u32>,
         x_value: Option<u32>,
     ) -> Result<(), CascadeChoiceError> {
         let ProcessState::AwaitingCascadeChoice {
@@ -577,6 +580,7 @@ impl Engine {
                 card: candidate,
                 modes,
                 targets,
+                division,
                 x_value,
                 alternative_cost: None,
                 pay_buyback: false,

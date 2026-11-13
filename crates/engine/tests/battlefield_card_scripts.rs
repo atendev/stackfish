@@ -196,6 +196,7 @@ fn bounced_setup_card_registers_once_in_hand() {
                 ability_index: 0,
                 modes: Vec::new(),
                 targets: Vec::new(),
+                division: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
             },

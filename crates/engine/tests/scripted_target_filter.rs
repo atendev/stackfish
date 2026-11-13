@@ -198,6 +198,7 @@ fn try_play_land_and_activate(
             modes: Vec::new(),
             targets: vec![Target::Object(target)],
             chosen_colors: Vec::new(),
+            division: Vec::new(),
             x_value: None,
         },
     });
@@ -288,6 +289,7 @@ fn a_player_target_is_rejected_outright_by_a_script_filter() {
                 modes: Vec::new(),
                 targets: vec![Target::Player(p1)],
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

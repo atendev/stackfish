@@ -71,6 +71,7 @@ fn cast_spell(
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");
@@ -92,6 +93,7 @@ fn try_cast_spell(
             x_value: None,
             alternative_cost: None,
             pay_buyback: false,
+            division: Vec::new(),
         },
     })
 }
@@ -363,7 +365,7 @@ fn a_pawprint_budgeted_trigger_accepts_a_combination_within_budget() {
         "got {status:?}"
     );
     engine
-        .submit_trigger_targets(vec![])
+        .submit_trigger_targets(vec![], Vec::new())
         .expect("both requirements are zero-count");
     let status = drain(&mut engine);
     assert!(

@@ -585,22 +585,33 @@ pub(crate) fn snapshot_for(viewer: Viewer, state: &GameState, observer: &Observe
     let stack = state
         .stack
         .iter()
-        .map(|entry| WireStackEntry {
+        .map(|entry| {
+            // A share leaves with its hidden target, so `division` stays index for
+            // index with the shown `targets`.
+            let shown: Vec<usize> = (0..entry.targets.len())
+                .filter(|&i| match entry.targets[i] {
+                    Target::Object(id) => visible(id),
+                    _ => true,
+                })
+                .collect();
+            (entry, shown)
+        })
+        .map(|(entry, shown)| WireStackEntry {
             stack_id: entry.stack_id.into(),
             kind: (&entry.kind).into(),
             copy_of: copy_of(&entry.kind),
             source: visible(entry.source).then_some(U64::from(entry.source)),
             owner: entry.owner.0,
             controller: entry.controller.0,
-            targets: entry
-                .targets
-                .iter()
-                .filter(|t| match t {
-                    Target::Object(id) => visible(*id),
-                    _ => true,
-                })
-                .map(|t| (*t).into())
-                .collect(),
+            targets: shown.iter().map(|&i| entry.targets[i].into()).collect(),
+            division: if entry.division.is_empty() {
+                Vec::new()
+            } else {
+                shown
+                    .iter()
+                    .filter_map(|&i| entry.division.get(i).copied())
+                    .collect()
+            },
             chosen_modes: entry.chosen_modes.clone(),
             x_value: entry.x_value,
             card: state

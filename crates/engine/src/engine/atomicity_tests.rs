@@ -418,7 +418,7 @@ fn cases() -> Vec<Case> {
         case!(
             "trigger targets: a target no word offers",
             trigger_targets(),
-            |e| e.submit_trigger_targets(vec![Target::Object(ObjectId(777))])
+            |e| e.submit_trigger_targets(vec![Target::Object(ObjectId(777))], Vec::new())
         ),
         case!(
             "trigger modes: none chosen",

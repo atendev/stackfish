@@ -411,6 +411,7 @@ fn an_attacker_already_blocked_is_left_untouched() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("player holds priority, spell is in hand");

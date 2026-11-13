@@ -130,6 +130,66 @@ fn a_replayed_game_gives_the_same_omniscient_events_and_the_same_end() {
     }
 }
 
+// CR 601.2d, 608.2b
+// The division travels in the recorded cast Answer, so a loaded game puts the same shares
+// on the stack and deals them the same way.
+#[test]
+fn a_divided_cast_keeps_its_division_and_damage_through_a_replay() {
+    let (mut original, replay, at) = (0..30)
+        .find_map(|seed| {
+            let mut session = played(seed);
+            let replay = export(&mut session);
+            let at = replay["answers"].as_array()?.iter().position(|a| {
+                a["reply"]["action"]["kind"] == "cast_spell"
+                    && a["reply"]["action"]["division"]
+                        .as_array()
+                        .is_some_and(|d| !d.is_empty())
+            })?;
+            Some((session, replay, at))
+        })
+        .expect("no seed cast Arc Lightning with a division");
+    let division = replay["answers"][at]["reply"]["action"]["division"].clone();
+    let answers = replay["answers"].as_array().unwrap();
+
+    // The spell may wait on its payment Answer before the stack shows it.
+    let entry = (at..answers.len())
+        .find_map(|k| {
+            let mut cut = replay.clone();
+            cut["answers"] = json!(answers[..=k]);
+            let mut loaded = load(&cut, &proof_cards()).unwrap_or_else(|e| panic!("{e}"));
+            let body = send(
+                &mut loaded,
+                json!({ "v": 1, "kind": "snapshot", "seat": WATCHER, "body": {} }),
+            );
+            body["snapshot"]["stack"]
+                .as_array()?
+                .iter()
+                .find(|e| e.get("division").is_some())
+                .cloned()
+        })
+        .expect("the loaded game never showed the divided spell on the stack");
+    assert_eq!(entry["division"], division);
+
+    let mut loaded = load(&replay, &proof_cards()).unwrap_or_else(|e| panic!("{e}"));
+    let after = poll(&mut loaded, WATCHER);
+    assert_eq!(poll(&mut original, WATCHER), after);
+    let dealt: Vec<Value> = after["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "damage_dealt" && e["source"] == entry["stack_id"])
+        .map(|e| e["amount"].clone())
+        .collect();
+    assert!(!dealt.is_empty(), "the divided spell dealt no damage");
+    // An illegal target's share is lost, so the amounts are the shares in order, some
+    // possibly missing.
+    let mut shares = division.as_array().unwrap().iter();
+    assert!(
+        dealt.iter().all(|amount| shares.any(|s| s == amount)),
+        "dealt {dealt:?} against the division {division}"
+    );
+}
+
 #[test]
 fn a_replay_taken_with_a_decision_open_loads_with_the_same_decision_open() {
     let seed = 3;

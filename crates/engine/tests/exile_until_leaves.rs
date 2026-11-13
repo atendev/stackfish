@@ -279,6 +279,7 @@ fn activate(
                 modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
+                division: Vec::new(),
                 x_value: None,
             },
         })

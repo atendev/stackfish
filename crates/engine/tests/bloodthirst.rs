@@ -420,6 +420,7 @@ fn cast_creature_resolution_gets_bloodthirst_counters_after_real_combat_damage()
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .unwrap();

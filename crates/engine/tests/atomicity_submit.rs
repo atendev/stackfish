@@ -123,7 +123,7 @@ fn rows() -> Vec<Row> {
         row!("submit_trigger_order", |e| e
             .submit_trigger_order(Vec::new())),
         row!("submit_trigger_targets", |e| e
-            .submit_trigger_targets(vec![Target::Player(P1)])),
+            .submit_trigger_targets(vec![Target::Player(P1)], Vec::new())),
         row!("submit_trigger_mode_choice", |e| e
             .submit_trigger_mode_choice(vec![0])),
         row!("submit_discard", |e| e.submit_discard(vec![card])),
@@ -142,10 +142,12 @@ fn rows() -> Vec<Row> {
         row!("submit_madness_cast", |e| e.submit_madness_cast(
             Vec::new(),
             Vec::new(),
+            Vec::new(),
             None
         )),
         row!("decline_cascade_cast", |e| e.decline_cascade_cast()),
         row!("submit_cascade_cast", |e| e.submit_cascade_cast(
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             None
@@ -222,6 +224,7 @@ fn the_same_methods_reject_while_the_engine_waits_on_a_different_pause() {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         ))
         .unwrap();
@@ -276,6 +279,7 @@ fn paying_engine() -> Engine {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         ))
         .unwrap();
@@ -504,16 +508,16 @@ fn an_illegal_madness_cast_keeps_the_pause_and_the_command_id() {
         vec![("modes on a plain card", vec![0], None)];
     for (name, modes, x) in bad_casts {
         let result = assert_unchanged_after(&mut engine, name, |e| {
-            e.submit_madness_cast(modes, Vec::new(), x)
+            e.submit_madness_cast(modes, Vec::new(), Vec::new(), x)
         });
         assert!(result.is_err(), "{name} was accepted");
     }
     let result = assert_unchanged_after(&mut engine, "a target the card cannot take", |e| {
-        e.submit_madness_cast(Vec::new(), vec![Target::Player(P1)], None)
+        e.submit_madness_cast(Vec::new(), vec![Target::Player(P1)], Vec::new(), None)
     });
     assert!(result.is_err());
     engine
-        .submit_madness_cast(Vec::new(), Vec::new(), None)
+        .submit_madness_cast(Vec::new(), Vec::new(), Vec::new(), None)
         .expect("the legal cast still works");
 }
 
@@ -587,6 +591,7 @@ fn cascade_engine() -> Engine {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         ))
         .unwrap();
@@ -622,14 +627,14 @@ fn cascade_engine() -> Engine {
 fn an_illegal_cascade_cast_keeps_the_pause_and_the_command_id() {
     let mut engine = cascade_engine();
     let result = assert_unchanged_after(&mut engine, "modes on a plain card", |e| {
-        e.submit_cascade_cast(vec![0], Vec::new(), None)
+        e.submit_cascade_cast(vec![0], Vec::new(), Vec::new(), None)
     });
     assert!(result.is_err());
     let result = assert_unchanged_after(&mut engine, "a target the card cannot take", |e| {
-        e.submit_cascade_cast(Vec::new(), vec![Target::Player(P1)], None)
+        e.submit_cascade_cast(Vec::new(), vec![Target::Player(P1)], Vec::new(), None)
     });
     assert!(result.is_err());
     engine
-        .submit_cascade_cast(Vec::new(), Vec::new(), None)
+        .submit_cascade_cast(Vec::new(), Vec::new(), Vec::new(), None)
         .expect("the legal cast still works");
 }

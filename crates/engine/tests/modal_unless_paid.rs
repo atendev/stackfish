@@ -138,6 +138,7 @@ fn push_victim_spell(state: &mut GameState) {
         ),
     );
     state.stack.push(StackObject {
+        division: Vec::new(),
         ability_index: None,
         ability_text: None,
         stack_id: VICTIM,
@@ -198,6 +199,7 @@ fn cast(engine: &mut Engine, targets: Vec<Target>) {
                 x_value: None,
                 alternative_cost: None,
                 pay_buyback: false,
+                division: Vec::new(),
             },
         })
         .expect("p0 holds priority");
@@ -526,7 +528,9 @@ fn reach_the_unless_paid_pause(engine: &mut Engine, p0_mana: u32) -> StepStatus 
         matches!(status, StepStatus::AwaitingTriggerTargets { .. }),
         "{status:?}"
     );
-    engine.submit_trigger_targets(Vec::new()).unwrap();
+    engine
+        .submit_trigger_targets(Vec::new(), Vec::new())
+        .unwrap();
     drain(engine);
     engine.state_mut().players[0].mana_pool.colorless = p0_mana;
     pass_both(engine)
