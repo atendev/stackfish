@@ -161,7 +161,9 @@ original plan:
 - Zone *order* lives in exactly one place (the zone container), never duplicated onto the object
   itself.
 - Standing player-level grants live in their own lists on `GameState` and not in the layers:
-  `land_play_modifiers` and the other player modifiers, `timing_permissions` (when a player may
+  `land_play_modifiers` and the other player modifiers (`player_keyword_modifiers` gives a player
+  hexproof or shroud, read by `target_is_legal`, since a player has no characteristics for layer 6
+  to change), `timing_permissions` (when a player may
   cast) and `zone_permissions` (which zone a player may play or cast from, including the top of a
   library and cards exiled with a source). Each is purged by source in `retire_object` and
   `remap_abilities`, except a Timed permission from a resolving effect, which carries a

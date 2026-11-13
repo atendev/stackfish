@@ -80,10 +80,10 @@ name.
   instances aren't modeled — see [game-constants.md](game-constants.md#gamereplacementpayloads).
 - **Damage redirection only supports "to this permanent."** Redirecting to some other chosen
   target isn't available — see [replacement-effects.md](replacement-effects.md).
-- **Hexproof and Shroud work only on permanents, in their plain forms.** `"Hexproof"` and
-  `"Shroud"` are real keywords (see [game-constants.md](game-constants.md#supported-keyword-names-addkeywordremovekeywordignorekeyword)).
-  Not available: hexproof/shroud on a player ("You have hexproof"), "hexproof from [quality]",
-  and "can be the target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is
+- **Hexproof and Shroud have only their plain forms.** `"Hexproof"` and `"Shroud"` are real
+  keywords on permanents (see [game-constants.md](game-constants.md#supported-keyword-names-addkeywordremovekeywordignorekeyword)),
+  and a player gets them through [`Game.CreatePlayerKeywordModifier`](player-modifiers.md#gamecreateplayerkeywordmodifierc--cr-70211c-70218a).
+  Not available: "hexproof from [quality]", protection on a player, and "can be the target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is
   accepted but nothing reads it). "Opponent" means any other player; there is no team model.
 - **Ward is `Game.RegisterWard(source, cost)`, not a keyword name.** It takes a cost, so it can't go
   through `AddKeyword`. Only a mana cost works: no "Ward—Pay N life", discard or sacrifice cost, and no

@@ -25,8 +25,8 @@ use crate::types::zone::ZoneKind;
 use super::builders::{
     ActivatedAbilityBuilder, CostModifierBuilder, DrawLimitModifierBuilder,
     HandRevealModifierBuilder, HandSizeModifierBuilder, LandPlayModifierBuilder,
-    ManaAbilityBuilder, ReplacementEffectBuilder, StaticAbilityBuilder, TimingPermissionBuilder,
-    TriggeredAbilityBuilder, ZonePermissionBuilder,
+    ManaAbilityBuilder, PlayerKeywordModifierBuilder, ReplacementEffectBuilder,
+    StaticAbilityBuilder, TimingPermissionBuilder, TriggeredAbilityBuilder, ZonePermissionBuilder,
 };
 use super::decode::{
     decode_copy_exceptions, decode_counter_arg, decode_creature_token_opts,
@@ -1315,6 +1315,19 @@ pub(crate) fn bind_game_globals(
         })?
     };
 
+    let create_player_keyword_modifier = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(PlayerKeywordModifierBuilder {
+                source: ObjectId(source),
+                affected: None,
+                keyword: None,
+                function_zone: None,
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
     let create_draw_limit_modifier = {
         let registry = Rc::clone(&registry);
         lua.create_function(move |_, source: u64| {
@@ -1668,6 +1681,10 @@ pub(crate) fn bind_game_globals(
     game.set("CreateHandSizeModifier", create_hand_size_modifier)?;
     game.set("HandSizeEffects", hand_size_effects)?;
     game.set("CreateHandRevealModifier", create_hand_reveal_modifier)?;
+    game.set(
+        "CreatePlayerKeywordModifier",
+        create_player_keyword_modifier,
+    )?;
     game.set("CreateDrawLimitModifier", create_draw_limit_modifier)?;
     game.set("CreateLandPlayModifier", create_land_play_modifier)?;
     game.set("CreateTimingPermission", create_timing_permission)?;

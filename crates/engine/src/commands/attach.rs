@@ -81,6 +81,9 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     state.cost_modifiers.retain(|m| m.source != old_id);
     state.hand_size_modifiers.retain(|m| m.source != old_id);
     state.hand_reveal_modifiers.retain(|m| m.source != old_id);
+    state
+        .player_keyword_modifiers
+        .retain(|m| m.source != old_id);
     state.draw_limit_modifiers.retain(|m| m.source != old_id);
     state.land_play_modifiers.retain(|m| m.source != old_id);
 }
@@ -456,6 +459,9 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     state.cost_modifiers.retain(|m| m.source != old_id);
     state.hand_size_modifiers.retain(|m| m.source != old_id);
     state.hand_reveal_modifiers.retain(|m| m.source != old_id);
+    state
+        .player_keyword_modifiers
+        .retain(|m| m.source != old_id);
     state.draw_limit_modifiers.retain(|m| m.source != old_id);
     state.land_play_modifiers.retain(|m| m.source != old_id);
     state

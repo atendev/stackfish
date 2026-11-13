@@ -137,7 +137,7 @@ something to it, and anything else is a load error.
 | `EnchantedPlayer` | player | CR 303.4m, the player this Aura is attached to. |
 
 Player tags go to the [player modifiers](player-modifiers.md): `Game.CreateHandSizeModifier`,
-`CreateHandRevealModifier`, `CreateDrawLimitModifier`, `CreateLandPlayModifier`, `CreateTimingPermission`
+`CreateHandRevealModifier`, `CreatePlayerKeywordModifier`, `CreateDrawLimitModifier`, `CreateLandPlayModifier`, `CreateTimingPermission`
 and `CreateZonePermission`. The draw limit and land play modifiers and the timing and zone permissions
 reject `EnchantedPlayer` at `:SetAffected`, and the zone permission rejects it at `:SetOwner` too. A zone
 permission's `:SetRider` takes the name `"ExileInstead"` or `"ExileInsteadOfGraveyard"` (CR 608.2n). An object tag given to a player
