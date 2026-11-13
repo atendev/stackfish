@@ -370,6 +370,7 @@ fn activate_and_resolve(engine: &mut Engine, source: u64, targets: Vec<Target>) 
             kind: PlayerActionKind::ActivateAbility {
                 source: ObjectId(source),
                 ability_index: 0,
+                modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -955,6 +956,7 @@ fn a_self_source_fight_does_nothing_when_the_source_stops_being_a_creature() {
             kind: PlayerActionKind::ActivateAbility {
                 source: ObjectId(1),
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![obj(2)],
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -997,6 +999,7 @@ fn a_self_source_fight_does_nothing_when_the_source_has_left() {
             kind: PlayerActionKind::ActivateAbility {
                 source: ObjectId(1),
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![obj(2)],
                 chosen_colors: Vec::new(),
                 x_value: None,

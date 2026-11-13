@@ -279,10 +279,16 @@ pub(crate) enum WireEntry {
         alternative_costs: Vec<usize>,
         buyback: bool,
     },
+    /// A modal ability has `modes` and its slots per mode in `mode_targets`,
+    /// with `targets` empty. Both are absent for any other ability.
     Activate {
         source: U64,
         ability_index: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        modes: Option<WireModeRange>,
         targets: Vec<WireSlot>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        mode_targets: Vec<Vec<WireSlot>>,
         x: bool,
         mana_ability: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -317,6 +323,7 @@ impl From<&Entry> for WireEntry {
             Entry::Activate(ActivateEntry {
                 source,
                 ability_index,
+                modes,
                 targets,
                 x,
                 mana_ability,
@@ -324,7 +331,15 @@ impl From<&Entry> for WireEntry {
             }) => WireEntry::Activate {
                 source: (*source).into(),
                 ability_index: *ability_index,
-                targets: slots(targets),
+                modes: modes.as_ref().map(WireModeRange::from),
+                targets: match targets {
+                    EntryTargets::Fixed(list) => slots(list),
+                    EntryTargets::PerMode(_) => Vec::new(),
+                },
+                mode_targets: match targets {
+                    EntryTargets::Fixed(_) => Vec::new(),
+                    EntryTargets::PerMode(modes) => modes.iter().map(|m| slots(m)).collect(),
+                },
                 x: *x,
                 mana_ability: *mana_ability,
                 color_choice: color_choice.as_ref().map(|choice| WireColorChoice {
@@ -720,7 +735,8 @@ mod tests {
         let entry = ActivateEntry {
             source: ObjectId(4),
             ability_index: 0,
-            targets: Vec::new(),
+            modes: None,
+            targets: EntryTargets::Fixed(Vec::new()),
             x: false,
             mana_ability: true,
             color_choice: None,
@@ -730,6 +746,51 @@ mod tests {
         assert_eq!(json["mana_abilities"][0]["source"], "4");
         let json = serde_json::to_value(WireShape::from(&shape(Vec::new()))).unwrap();
         assert!(json.get("mana_abilities").is_none(), "{json}");
+    }
+
+    // CR 602.2b, 700.2a
+    #[test]
+    fn a_modal_activate_entry_lists_its_range_and_slots_per_mode() {
+        let slot = TargetSlot {
+            candidates: vec![Target::Object(ObjectId(9))],
+            min: 1,
+            max: Some(1),
+            x_dependent: false,
+        };
+        let entry = |modes, targets| {
+            Entry::Activate(ActivateEntry {
+                source: ObjectId(4),
+                ability_index: 1,
+                modes,
+                targets,
+                x: false,
+                mana_ability: false,
+                color_choice: None,
+            })
+        };
+        let range = ModeRange {
+            mode_count: 2,
+            min: 1,
+            max: 1,
+            repeatable: false,
+            chosen_by_opponent: false,
+            pawprint_weights: None,
+            solo_only: Vec::new(),
+        };
+        let modal = entry(
+            Some(range),
+            EntryTargets::PerMode(vec![vec![slot.clone()], Vec::new()]),
+        );
+        let json = serde_json::to_value(WireEntry::from(&modal)).unwrap();
+        assert_eq!(json["modes"]["mode_count"], 2);
+        assert_eq!(json["targets"], serde_json::json!([]));
+        assert_eq!(json["mode_targets"][0][0]["candidates"][0]["id"], "9");
+        assert_eq!(json["mode_targets"][1], serde_json::json!([]));
+        let plain = entry(None, EntryTargets::Fixed(vec![slot]));
+        let json = serde_json::to_value(WireEntry::from(&plain)).unwrap();
+        assert!(json.get("modes").is_none(), "{json}");
+        assert!(json.get("mode_targets").is_none(), "{json}");
+        assert_eq!(json["targets"][0]["min"], 1);
     }
 
     #[test]

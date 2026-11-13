@@ -208,6 +208,7 @@ fn damage_ability_with_lifelink_source_gains_its_controller_life() {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![Target::Player(p1)],
                 chosen_colors: Vec::new(),
                 x_value: None,

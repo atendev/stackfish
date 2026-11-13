@@ -4,7 +4,7 @@ use crate::layers::effective_characteristics;
 use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
-use crate::types::card::{CardTypeSet, SupertypeSet};
+use crate::types::card::{CardTypeSet, ModeChoice, SupertypeSet};
 use crate::types::cost::{AdditionalCost, CostSpec};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -16,13 +16,19 @@ use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::attach::find_ability;
-use super::legality::{has_summoning_sickness, is_sorcery_speed, validate_targets};
+use super::cast::unpack_script_effect;
+use super::legality::{
+    announced_modes_in_order, combine_chosen_modes, has_summoning_sickness, is_sorcery_speed,
+    validate_targets,
+};
 use super::{
     CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
     Validated,
 };
 
 /// What `apply_activate_ability` needs, all settled by `validate_activate_ability`.
+// Always boxed in `Validated::ActivateAbility`, so the size gap costs nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum ActivatePlan {
     /// CR 605.3b: a mana ability with no cost resolves at once.
@@ -50,6 +56,8 @@ pub(crate) enum ActivatePlan {
         effect: Option<AbilityEffect>,
         cost: CostSpec,
         ability_index: u32,
+        /// In printed order. Empty for a non-modal ability.
+        chosen_modes: Vec<u32>,
     },
 }
 
@@ -60,6 +68,7 @@ pub(super) fn validate_activate_ability(
     actor: PlayerId,
     source: ObjectId,
     ability_index: u32,
+    modes: Vec<u32>,
     targets: Vec<Target>,
     chosen_colors: Vec<Color>,
     x_value: Option<u32>,
@@ -93,10 +102,48 @@ pub(super) fn validate_activate_ability(
             "ability is not an activated ability".to_string(),
         ));
     }
-    let effect = ability.effect.clone();
     let cost = ability.cost.clone();
-    let operation = ability.operation;
-    let target_requirement = ability.target.clone();
+    // CR 602.2b, 700.2a
+    // A modal ability announces its modes in this action, before its targets
+    // (CR 601.2b comes before 601.2c), and the chosen modes supply the target
+    // requirement and effect.
+    let (target_requirement, effect, operation, chosen_modes) = if ability.modes.is_empty() {
+        if !modes.is_empty() {
+            return Err(Rejected::IllegalAction(
+                "this ability isn't modal - no modes to choose".to_string(),
+            ));
+        }
+        (
+            ability.target.clone(),
+            ability.effect.clone(),
+            ability.operation,
+            Vec::new(),
+        )
+    } else {
+        match ability.mode_choice {
+            // TODO: opponent-chosen modes for an activated ability (CR 700.2e)
+            ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) => {
+                return Err(Rejected::IllegalAction(
+                    "an activated ability whose modes another player chooses isn't supported yet"
+                        .to_string(),
+                ));
+            }
+            // CR 700.2i
+            ModeChoice::PawprintBudget(_) => {
+                return Err(Rejected::IllegalAction(
+                    "a pawprint budget belongs to a modal spell, not an activated ability"
+                        .to_string(),
+                ));
+            }
+            _ => {}
+        }
+        let chosen = announced_modes_in_order(&ability.modes, ability.mode_choice, &modes)
+            .map_err(Rejected::IllegalAction)?;
+        let (target_requirement, effect) =
+            combine_chosen_modes(&ability.modes, &chosen).map_err(Rejected::IllegalAction)?;
+        let (operation, effect) = unpack_script_effect(effect, ability.operation);
+        (target_requirement, effect, operation, chosen)
+    };
 
     // CR 602.1/112.6
     // Abilities on permanents work only on the battlefield, except Cycling
@@ -338,12 +385,12 @@ pub(super) fn validate_activate_ability(
         | Some(AbilityEffect::Bite)
         // CR 608.2c: several effects in one ability, run in order.
         | Some(AbilityEffect::Chain { .. })
-        // CR 700.2b
-        // Listed for exhaustiveness only, because RegisteredAbility has no modes field.
+        // CR 700.2a
+        // Two or more chosen modes of a modal ability, combined above.
         | Some(AbilityEffect::Modal { .. })
-        // Script comes only from a plain spell's CardDefinition.effect, which CastSpell
-        // unpacks before the push, so an ability never has this shape. Listed for
-        // exhaustiveness only.
+        // A function, the ability's own or a chosen mode's, sits in `operation`, so
+        // an ability never reaches here with this shape. Listed for exhaustiveness
+        // only.
         | Some(AbilityEffect::Script(_))
         // CR 702.79a/702.93a
         // Meaningful only on a Dies-triggered ability, and no card grants Persist or
@@ -416,6 +463,7 @@ pub(super) fn validate_activate_ability(
                 effect: non_mana_effect,
                 cost,
                 ability_index,
+                chosen_modes,
             })))
         }
     }
@@ -499,6 +547,7 @@ pub(super) fn apply_activate_ability(
             effect,
             cost,
             ability_index,
+            chosen_modes,
         } => {
             let ability_text =
                 find_ability(state, source, ability_index).and_then(|a| a.text.clone());
@@ -509,8 +558,7 @@ pub(super) fn apply_activate_ability(
                 source,
                 source_owner,
                 actor,
-                // TODO: no modes on activated abilities, because RegisteredAbility has no modes field (CR 700.2b)
-                Vec::new(),
+                chosen_modes,
                 targets,
                 target_requirement,
                 x_value,

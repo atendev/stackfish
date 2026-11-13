@@ -142,6 +142,7 @@ fn try_play_land_and_activate(p1_life: i32, target: Target) -> (Engine, Result<(
         kind: PlayerActionKind::ActivateAbility {
             source: new_land_id,
             ability_index: 0,
+            modes: Vec::new(),
             targets: vec![target],
             chosen_colors: Vec::new(),
             x_value: None,

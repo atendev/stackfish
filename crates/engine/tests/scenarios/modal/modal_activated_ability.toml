@@ -1,0 +1,156 @@
+# CR 602.2b, 700.2a: a scripted activated ability declares its modes with :SetModes, and
+# activate_ability announces the chosen mode and that mode's targets in one action. Each
+# activation runs only its chosen mode, and a selection the modes do not allow is refused.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "totem"
+name = "Test Modal Totem"
+types = ["Artifact"]
+script = """
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:SetModes(Game.ModeChoice.Exactly(1), {
+        {
+            target = { type = "object", card_types = { "Creature" }, count = 1 },
+            operation = Game.Ops.Damage(2),
+        },
+        { operation = Game.Ops.GainLife(3) },
+    })
+    e:Register()
+end
+return s
+"""
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "totem"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+# Solo game, so the turn 1 draw step runs and needs a card (CR 103.8a, 704.5b).
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "totem"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "totem"
+equals = "battlefield"
+
+# Exactly one mode, so two are refused, and a target needs the mode that owns it.
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "totem"
+ability_index = 0
+modes = [0, 1]
+targets = ["bear"]
+expect_error = true
+
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "totem"
+ability_index = 0
+modes = [1]
+targets = ["bear"]
+expect_error = true
+
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "totem"
+ability_index = 0
+modes = [1]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_life"
+player = 0
+equals = 23
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
+
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "totem"
+ability_index = 0
+modes = [0]
+targets = ["bear"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_life"
+player = 0
+equals = 23

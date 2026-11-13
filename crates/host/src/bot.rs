@@ -704,14 +704,23 @@ impl Bot {
     /// Modes and targets for a cast entry or `may_cast` options: both carry
     /// `modes` (absent when not modal) and `targets` in the same form.
     fn announce(&mut self, entry: &Value) -> Option<(Vec<u64>, Vec<Value>)> {
+        self.announce_from(
+            entry,
+            &entry["targets"]["slots"],
+            &entry["targets"]["modes"],
+        )
+    }
+
+    /// Picks modes from `entry["modes"]` when present, then targets from the
+    /// chosen modes' `per_mode` slots, or from `fixed` when not modal.
+    fn announce_from(
+        &mut self,
+        entry: &Value,
+        fixed: &Value,
+        per_mode: &Value,
+    ) -> Option<(Vec<u64>, Vec<Value>)> {
         let (modes, slots): (Vec<u64>, Vec<Value>) = match entry["modes"].as_object() {
-            None => (
-                Vec::new(),
-                entry["targets"]["slots"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default(),
-            ),
+            None => (Vec::new(), fixed.as_array().cloned().unwrap_or_default()),
             Some(range) => {
                 let modes = self.modes(
                     &range["mode_count"],
@@ -719,7 +728,7 @@ impl Bot {
                     &range["max"],
                     range.get("solo_only").unwrap_or(&Value::Null),
                 );
-                let per_mode = entry["targets"]["modes"].as_array()?;
+                let per_mode = per_mode.as_array()?;
                 let slots = modes
                     .iter()
                     .flat_map(|m| {
@@ -756,9 +765,11 @@ impl Bot {
         json!({ "kind": "may_cast", "cast": cast })
     }
 
+    // CR 602.2b, 700.2a
+    // A modal ability lists its slots per mode under `mode_targets`.
     fn activate(&mut self, entry: &Value) -> Option<Value> {
-        let slots = entry["targets"].as_array().cloned().unwrap_or_default();
-        let targets = self.slot_targets(&slots)?;
+        let (modes, targets) =
+            self.announce_from(entry, &entry["targets"], &entry["mode_targets"])?;
         let chosen_colors: Vec<Value> = match entry["color_choice"].as_object() {
             None => Vec::new(),
             Some(choice) => {
@@ -778,6 +789,7 @@ impl Bot {
             "kind": "activate_ability",
             "source": entry["source"],
             "ability_index": entry["ability_index"],
+            "modes": modes,
             "targets": targets,
             "chosen_colors": chosen_colors,
             "x_value": x_value,
@@ -1016,6 +1028,43 @@ mod tests {
     }
 
     // CR 702.22c
+    // CR 602.2b, 700.2a
+    #[test]
+    fn a_modal_activation_announces_one_mode_and_only_its_targets() {
+        let target = json!({ "kind": "object", "id": "9" });
+        let entry = json!({
+            "kind": "activate",
+            "source": "4",
+            "ability_index": 0,
+            "modes": { "mode_count": 2, "min": 1, "max": 1, "repeatable": false,
+                       "chosen_by_opponent": false },
+            "targets": [],
+            "mode_targets": [
+                [{ "candidates": [target], "min": 1, "max": 1 }],
+                [],
+            ],
+            "x": false,
+            "mana_ability": false,
+        });
+        let mut seen = [false, false];
+        for seed in 0..20 {
+            let action = Bot::new(seed).activate(&entry).expect("a legal activation");
+            assert_eq!(action["kind"], "activate_ability");
+            match action["modes"].as_array().unwrap().as_slice() {
+                [mode] if mode == 0 => {
+                    seen[0] = true;
+                    assert_eq!(action["targets"], json!([target]));
+                }
+                [mode] if mode == 1 => {
+                    seen[1] = true;
+                    assert_eq!(action["targets"], json!([]));
+                }
+                other => panic!("expected one mode, got {other:?}"),
+            }
+        }
+        assert_eq!(seen, [true, true]);
+    }
+
     #[test]
     fn a_band_answer_is_no_bands_or_one_pair_of_listed_attackers() {
         let decision = json!({ "shape": "declare_bands", "attackers": ["1", "2", "3"] });

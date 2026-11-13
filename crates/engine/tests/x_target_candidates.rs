@@ -329,14 +329,18 @@ fn an_activated_ability_with_an_x_cost_lists_the_superset_and_rechecks() {
         panic!("the ability is not listed: {entries:?}");
     };
     assert!(activate.x);
-    assert_eq!(activate.targets[0].candidates, all_spells());
-    assert!(activate.targets[0].x_dependent);
+    let EntryTargets::Fixed(slots) = &activate.targets else {
+        panic!("a non-modal ability lists fixed slots");
+    };
+    assert_eq!(slots[0].candidates, all_spells());
+    assert!(slots[0].x_dependent);
 
     let activate_with = |engine: &mut Engine, x_value: u32| {
         let decision = engine.open_decision().expect("a Decision is open");
         let kind = PlayerActionKind::ActivateAbility {
             source: ObjectId(7),
             ability_index: 0,
+            modes: Vec::new(),
             targets: vec![Target::Object(ObjectId(3))],
             chosen_colors: Vec::new(),
             x_value: Some(x_value),

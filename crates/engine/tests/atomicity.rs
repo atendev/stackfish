@@ -107,6 +107,7 @@ fn activate(source: ObjectId) -> PlayerActionKind {
     PlayerActionKind::ActivateAbility {
         source,
         ability_index: 0,
+        modes: Vec::new(),
         targets: Vec::new(),
         chosen_colors: Vec::new(),
         x_value: None,
@@ -539,6 +540,7 @@ fn activate_an_ability_index_that_does_not_exist_is_rejected() {
         PlayerActionKind::ActivateAbility {
             source,
             ability_index: 4,
+            modes: Vec::new(),
             targets: Vec::new(),
             chosen_colors: Vec::new(),
             x_value: None,
@@ -572,6 +574,7 @@ fn activate_with_the_wrong_arguments_is_rejected() {
     let with_targets = PlayerActionKind::ActivateAbility {
         source,
         ability_index: 0,
+        modes: Vec::new(),
         targets: vec![Target::Player(P1)],
         chosen_colors: Vec::new(),
         x_value: None,
@@ -584,6 +587,7 @@ fn activate_with_the_wrong_arguments_is_rejected() {
     let with_colors = PlayerActionKind::ActivateAbility {
         source,
         ability_index: 0,
+        modes: Vec::new(),
         targets: Vec::new(),
         chosen_colors: vec![Color::Red],
         x_value: None,
@@ -592,6 +596,7 @@ fn activate_with_the_wrong_arguments_is_rejected() {
     let with_x = PlayerActionKind::ActivateAbility {
         source,
         ability_index: 0,
+        modes: Vec::new(),
         targets: Vec::new(),
         chosen_colors: Vec::new(),
         x_value: Some(1),
@@ -612,6 +617,7 @@ fn activate_a_color_choice_with_the_wrong_colors_is_rejected() {
             PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: colors.clone(),
                 x_value: None,
@@ -675,6 +681,7 @@ fn activate_a_targeted_ability_with_a_bad_target_is_rejected() {
     let bad = PlayerActionKind::ActivateAbility {
         source,
         ability_index: 0,
+        modes: Vec::new(),
         targets: vec![Target::Object(ObjectId(555))],
         chosen_colors: Vec::new(),
         x_value: None,
@@ -797,6 +804,7 @@ fn another_action_during_a_payment_is_rejected_without_touching_it() {
     let missing = PlayerActionKind::ActivateAbility {
         source: forest,
         ability_index: 9,
+        modes: Vec::new(),
         targets: Vec::new(),
         chosen_colors: Vec::new(),
         x_value: None,

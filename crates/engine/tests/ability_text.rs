@@ -129,6 +129,7 @@ fn activate(engine: &mut Engine) {
             kind: PlayerActionKind::ActivateAbility {
                 source: SOURCE,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

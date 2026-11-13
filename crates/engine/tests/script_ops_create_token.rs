@@ -381,6 +381,7 @@ fn treasure_ability_adds_chosen_color_mana_when_activated() {
             kind: PlayerActionKind::ActivateAbility {
                 source: token_id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: vec![Color::Blue],
                 x_value: None,
@@ -765,6 +766,7 @@ fn clue_ability_draws_a_card_when_activated() {
             kind: PlayerActionKind::ActivateAbility {
                 source: token_id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -867,6 +869,7 @@ fn food_ability_gains_life_when_activated() {
             kind: PlayerActionKind::ActivateAbility {
                 source: token_id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -982,6 +985,7 @@ fn clue_ability_cannot_be_paid_by_sacrificing_a_different_artifact() {
             kind: PlayerActionKind::ActivateAbility {
                 source: clue_id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

@@ -71,6 +71,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -101,6 +102,7 @@ fn try_activate(
         kind: PlayerActionKind::ActivateAbility {
             source,
             ability_index: 0,
+            modes: Vec::new(),
             targets,
             chosen_colors: Vec::new(),
             x_value: None,
@@ -256,6 +258,7 @@ fn reject_when_actor_does_not_hold_priority() {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -278,6 +281,7 @@ fn reject_nonexistent_ability_index() {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 1,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -379,6 +383,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
             kind: PlayerActionKind::ActivateAbility {
                 source: source_a,
                 ability_index: 1,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

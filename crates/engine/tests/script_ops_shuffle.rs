@@ -304,6 +304,7 @@ fn shuffle_ability_works_the_same_as_a_shuffle_spell() {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

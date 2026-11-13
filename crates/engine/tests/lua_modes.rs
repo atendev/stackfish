@@ -688,3 +688,331 @@ return s
         );
     }
 }
+
+fn activated_script(choice: &str, modes: &str) -> String {
+    format!(
+        r#"
+local s = {{}}
+function s.register_abilities(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:SetModes({choice}, {modes})
+    e:Register()
+end
+return s
+"#
+    )
+}
+
+/// A land in play whose script registered a modal activated ability, beside a creature each.
+fn activated_engine(script: &str, with_creatures: bool) -> Engine {
+    let mut engine = land_engine(script);
+    if with_creatures {
+        let state = engine.state_mut();
+        put_on_battlefield(state, permanent(MINE, creature(2, 3, 3), P0));
+        put_on_battlefield(state, permanent(THEIRS, creature(3, 2, 4), P1));
+    }
+    play_land(&mut engine);
+    engine
+}
+
+/// The played land, which is a new object on the battlefield (CR 400.7).
+fn land_id(engine: &Engine) -> ObjectId {
+    let battlefield = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
+    *battlefield
+        .contents
+        .iter()
+        .find(|&&id| engine.state().objects[&id].definition.name == "Test Modal")
+        .expect("the land is on the battlefield")
+}
+
+fn activate(engine: &mut Engine, modes: Vec<u32>, targets: Vec<Target>) -> Result<(), String> {
+    let source = land_id(engine);
+    engine
+        .submit_action(PlayerAction {
+            player: P0,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                modes,
+                targets,
+                chosen_colors: Vec::new(),
+                x_value: None,
+            },
+        })
+        .map_err(|e| format!("{e:?}"))
+}
+
+fn activate_and_resolve(engine: &mut Engine, modes: Vec<u32>, targets: Vec<Target>) {
+    activate(engine, modes, targets).expect("the activation is legal");
+    pay_free_and_drain(engine);
+    pass_both_and_drain(engine, P0, P1);
+}
+
+fn activate_entry(engine: &Engine) -> Option<stackfish_engine::decision::ActivateEntry> {
+    let source = land_id(engine);
+    engine
+        .legal_actions()
+        .into_iter()
+        .find_map(|entry| match entry {
+            stackfish_engine::decision::Entry::Activate(entry) if entry.source == source => {
+                Some(entry)
+            }
+            _ => None,
+        })
+}
+
+#[test]
+fn a_modal_activated_ability_announces_its_mode_and_targets_in_the_activation() {
+    // CR 602.2b
+    let script = activated_script("Game.ModeChoice.Exactly(1)", DAMAGE_OR_LIFE);
+    let mut engine = activated_engine(&script, false);
+    activate_and_resolve(&mut engine, vec![0], vec![Target::Player(P1)]);
+    assert_eq!((life(&engine, P0), life(&engine, P1)), (20, 18));
+    let mut engine = activated_engine(&script, false);
+    activate_and_resolve(&mut engine, vec![1], Vec::new());
+    assert_eq!((life(&engine, P0), life(&engine, P1)), (23, 20));
+}
+
+#[test]
+fn a_modal_activation_records_its_modes_on_the_stack_in_printed_order() {
+    // CR 608.2c
+    let script = activated_script("Game.ModeChoice.Exactly(2)", DAMAGE_OR_LIFE);
+    let mut engine = activated_engine(&script, false);
+    activate(&mut engine, vec![1, 0], vec![Target::Player(P1)]).expect("a legal activation");
+    drain(&mut engine);
+    let top = engine
+        .state()
+        .stack
+        .last()
+        .expect("the ability is on the stack");
+    assert_eq!(top.chosen_modes, vec![0, 1]);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, P0, P1);
+    assert_eq!((life(&engine, P0), life(&engine, P1)), (23, 18));
+}
+
+#[test]
+fn a_function_mode_and_a_chain_mode_resolve_alone_on_an_activated_ability() {
+    let script = activated_script(
+        "Game.ModeChoice.UpTo(2)",
+        r#"{
+            { operation = function(c, controller) return Game.Ops.GainLife(4) end },
+            { operation = Game.Ops.Chain(Game.Ops.GainLife(2), Game.Ops.GainLife(3)) },
+            { operation = Game.Ops.GainLife(1) },
+        }"#,
+    );
+    for (mode, expected) in [(0, 24), (1, 25)] {
+        let mut engine = activated_engine(&script, false);
+        activate_and_resolve(&mut engine, vec![mode], Vec::new());
+        assert_eq!(life(&engine, P0), expected, "mode {mode}");
+    }
+    let mut engine = activated_engine(&script, false);
+    assert!(activate(&mut engine, vec![0, 2], Vec::new()).is_err());
+    assert!(activate(&mut engine, vec![1, 2], Vec::new()).is_err());
+}
+
+#[test]
+fn an_activation_refuses_a_selection_its_modes_do_not_allow() {
+    // CR 700.2a, 700.2d
+    let script = activated_script("Game.ModeChoice.Exactly(1)", DAMAGE_OR_LIFE);
+    let mut engine = activated_engine(&script, false);
+    for (modes, targets) in [
+        (Vec::new(), Vec::new()),
+        (vec![0, 1], vec![Target::Player(P1)]),
+        (vec![2], Vec::new()),
+        (vec![1], vec![Target::Player(P1)]),
+    ] {
+        assert!(
+            activate(&mut engine, modes.clone(), targets).is_err(),
+            "{modes:?}"
+        );
+    }
+    let repeat = activated_script("Game.ModeChoice.UpTo(2)", DAMAGE_OR_LIFE);
+    let mut engine = activated_engine(&repeat, false);
+    assert!(activate(&mut engine, vec![1, 1], Vec::new()).is_err());
+}
+
+#[test]
+fn an_activation_with_modes_on_a_non_modal_ability_is_refused() {
+    let script = r#"
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:SetOperation(Game.Ops.GainLife(1))
+    e:Register()
+end
+return s
+"#;
+    let mut engine = activated_engine(script, false);
+    let message = activate(&mut engine, vec![0], Vec::new()).unwrap_err();
+    assert!(message.contains("isn't modal"), "{message}");
+}
+
+#[test]
+fn the_activate_entry_lists_the_mode_range_and_targets_per_mode() {
+    // CR 700.2a
+    let script = activated_script(
+        "Game.ModeChoice.Exactly(1)",
+        r#"{
+            { target = { type = "object", card_types = { "Creature" }, count = 1 },
+              operation = Game.Ops.Damage(1) },
+            { operation = Game.Ops.GainLife(2) },
+        }"#,
+    );
+    let engine = activated_engine(&script, true);
+    let entry = activate_entry(&engine).expect("the ability is listed");
+    let range = entry.modes.expect("a modal ability lists its range");
+    assert_eq!((range.mode_count, range.min, range.max), (2, 1, 1));
+    let stackfish_engine::decision::EntryTargets::PerMode(per_mode) = entry.targets else {
+        panic!("expected per-mode slots");
+    };
+    assert_eq!(per_mode[0].len(), 1);
+    assert!(per_mode[0][0].candidates.contains(&Target::Object(THEIRS)));
+    assert!(per_mode[1].is_empty());
+}
+
+#[test]
+fn a_modal_ability_with_no_mode_whose_targets_exist_is_not_listed() {
+    // CR 700.2a
+    let creature_target = r#"target = { type = "object", card_types = { "Creature" }, count = 1 }"#;
+    let script = activated_script(
+        "Game.ModeChoice.Exactly(1)",
+        &format!(
+            "{{ {{ {creature_target}, operation = Game.Ops.Damage(1) }}, \
+               {{ {creature_target}, operation = Game.Ops.Tap }} }}"
+        ),
+    );
+    let engine = activated_engine(&script, false);
+    assert!(activate_entry(&engine).is_none());
+    let engine = activated_engine(&script, true);
+    assert!(activate_entry(&engine).is_some());
+}
+
+#[test]
+fn activated_mode_load_errors() {
+    let two = "{ { operation = Game.Ops.GainLife(1) }, { operation = Game.Ops.GainLife(2) } }";
+    let with = |extra: &str| {
+        format!(
+            r#"
+local s = {{}}
+function s.register_abilities(c)
+    local e = Game.CreateActivatedAbility(c)
+    {extra}
+    e:Register()
+end
+return s
+"#
+        )
+    };
+    let modes = format!("e:SetModes(Game.ModeChoice.Exactly(1), {two})");
+    let cases: Vec<(String, &str)> = vec![
+        (
+            activated_script("Game.ModeChoice.ExactlyChosenByOpponent(1)", two),
+            "SetModes: an activated ability's modes can't be chosen by an opponent",
+        ),
+        (
+            activated_script("Game.ModeChoice.UpToChosenByOpponent(1)", two),
+            "SetModes: an activated ability's modes can't be chosen by an opponent",
+        ),
+        (
+            activated_script("Game.ModeChoice.PawprintBudget(2)", two),
+            "PawprintBudget is only for a spell",
+        ),
+        (
+            activated_script(
+                "Game.ModeChoice.Exactly(1)",
+                "{ { operation = Game.Ops.GainLife(1), cost = Game.Costs.Life(1) }, { operation = Game.Ops.GainLife(2) } }",
+            ),
+            "SetModes mode 1: a per-mode cost is only for a spell",
+        ),
+        (
+            activated_script(
+                "Game.ModeChoice.Exactly(1)",
+                "{ { operation = Game.Ops.GainLife(1) }, { operation = Game.Ops.GainLife(2), pawprint = 1 } }",
+            ),
+            "SetModes mode 2: pawprint is only for a spell",
+        ),
+        (
+            activated_script(
+                "Game.ModeChoice.Exactly(1)",
+                r#"{ { operation = Game.Ops.GainLife(1) }, { operation = Game.Ops.AddMana("G") } }"#,
+            ),
+            "SetModes mode 2: an activated ability's mode can't add mana",
+        ),
+        (
+            activated_script(
+                "Game.ModeChoice.Exactly(1)",
+                r#"{ { operation = Game.Ops.AddManaChoice("WUBRG", 1) }, { operation = Game.Ops.GainLife(2) } }"#,
+            ),
+            "SetModes mode 1: an activated ability's mode can't add mana",
+        ),
+        (
+            activated_script(
+                "Game.ModeChoice.Exactly(1)",
+                "{ { operation = Game.Ops.GainLife(1) } }",
+            ),
+            "SetModes: a modal ability needs at least two modes",
+        ),
+        (
+            with(&format!(
+                "e:SetOperation(Game.Ops.GainLife(1))\n    {modes}"
+            )),
+            "both SetOperation() and SetModes()",
+        ),
+        (
+            with(&format!(
+                "e:SetTarget({{ type = \"player\" }})\n    {modes}"
+            )),
+            "both SetTarget() and SetModes()",
+        ),
+        (
+            with("e:AddCost(Game.Costs.TapSelf)"),
+            "no SetOperation() or SetModes() - an activated ability needs an operation",
+        ),
+    ];
+    for (script, expected) in cases {
+        let message = register_error(&script);
+        assert!(
+            message.contains(expected),
+            "expected {expected:?} in {message:?}"
+        );
+    }
+}
+
+#[test]
+fn a_priority_answer_checks_an_activations_modes_against_the_entry() {
+    // CR 700.2a
+    use stackfish_engine::decision::{Answer, RejectionCode, Reply};
+    let script = activated_script("Game.ModeChoice.Exactly(1)", DAMAGE_OR_LIFE);
+    let mut engine = activated_engine(&script, false);
+    let source = land_id(&engine);
+    let answer = |engine: &mut Engine, modes: Vec<u32>, targets: Vec<Target>| {
+        let decision = engine.open_decision().expect("a Decision is open");
+        engine.answer(
+            P0,
+            Answer {
+                decision: decision.id,
+                reply: Reply::Action(PlayerAction {
+                    player: P0,
+                    kind: PlayerActionKind::ActivateAbility {
+                        source,
+                        ability_index: 0,
+                        modes,
+                        targets,
+                        chosen_colors: Vec::new(),
+                        x_value: None,
+                    },
+                }),
+            },
+        )
+    };
+    for (modes, targets) in [
+        (vec![2], Vec::new()),
+        (vec![1], vec![Target::Player(P1)]),
+        (vec![0, 1], vec![Target::Player(P1)]),
+    ] {
+        let rejection = answer(&mut engine, modes.clone(), targets).unwrap_err();
+        assert_eq!(rejection.code, RejectionCode::InvalidChoice, "{modes:?}");
+    }
+    answer(&mut engine, vec![0], vec![Target::Player(P1)]).expect("a listed activation");
+}

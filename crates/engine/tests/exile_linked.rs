@@ -95,6 +95,7 @@ fn activate(engine: &mut Engine) {
             kind: PlayerActionKind::ActivateAbility {
                 source: SOURCE,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![Target::Object(BEAR)],
                 chosen_colors: Vec::new(),
                 x_value: None,

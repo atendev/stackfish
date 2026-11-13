@@ -427,6 +427,7 @@ fn a_grant_from_an_activated_ability_takes_the_permanent_as_its_source() {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

@@ -16,8 +16,8 @@ use crate::types::zone::ZoneKind;
 
 use super::attach::{non_eliminated_players, remap_abilities};
 use super::legality::{
-    ZoneCastSource, can_cast_now, cast_zone_source, combine_chosen_modes, has_own_flash,
-    validate_targets,
+    ZoneCastSource, announced_modes_in_order, can_cast_now, cast_zone_source, combine_chosen_modes,
+    has_own_flash, validate_targets,
 };
 use super::{
     CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected,
@@ -280,41 +280,21 @@ pub(super) fn validate_cast_spell(
     } else {
         // CR 700.2a
         // Never zero, even for an UpTo spell (ModeChoice::bounds already floors it).
-        let (min, max, repeatable) = object.definition.mode_choice.bounds();
-        let chosen_count = modes.len() as u32;
-        if chosen_count < min || chosen_count > max {
-            return Err(Rejected::IllegalAction(format!(
-                "this modal spell requires choosing between {min} and {max} mode(s), got {chosen_count}"
-            )));
-        }
-        if !repeatable {
-            let mut seen_modes = HashSet::new();
-            for &m in &modes {
-                if !seen_modes.insert(m) {
-                    return Err(Rejected::IllegalAction(
-                        "the same mode can't be chosen more than once".to_string(),
-                    ));
-                }
-            }
-        }
-        // CR 700.2
-        // Chosen modes' effects happen in printed order, not the order the player
-        // listed them.
-        let mut chosen_indices = modes.clone();
-        chosen_indices.sort_unstable();
-        let mut chosen_modes = Vec::with_capacity(chosen_indices.len());
-        for &idx in &chosen_indices {
-            let mode =
-                object.definition.modes.get(idx as usize).ok_or_else(|| {
-                    Rejected::IllegalAction("no such mode on this card".to_string())
-                })?;
-            chosen_modes.push(mode);
-        }
+        let chosen_indices = announced_modes_in_order(
+            &object.definition.modes,
+            object.definition.mode_choice,
+            &modes,
+        )
+        .map_err(Rejected::IllegalAction)?;
         // CR 700.2h
         // Every chosen mode's additional cost, whether one or several modes were chosen.
-        let mode_additional_costs: Vec<AdditionalCost> = chosen_modes
+        let mode_additional_costs: Vec<AdditionalCost> = chosen_indices
             .iter()
-            .filter_map(|m| m.additional_cost.clone())
+            .filter_map(|&idx| {
+                object.definition.modes[idx as usize]
+                    .additional_cost
+                    .clone()
+            })
             .collect();
         // CR 700.2c/d
         // A single mode passes through bare. Two or more combine into one

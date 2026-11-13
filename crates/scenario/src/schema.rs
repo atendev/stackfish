@@ -393,6 +393,9 @@ pub enum ActionSpec {
         player: u32,
         source: String,
         ability_index: u32,
+        /// Chosen mode indices for a modal ability. CR 700.2a
+        #[serde(default)]
+        modes: Vec<u32>,
         #[serde(default)]
         targets: Vec<TargetSpec>,
         /// One WUBRG letter per mana chosen, for an "any color" ability. CR 605
@@ -521,6 +524,7 @@ impl ActionSpec {
                 player,
                 source,
                 ability_index,
+                modes,
                 targets,
                 chosen_colors,
                 x_value,
@@ -532,7 +536,7 @@ impl ActionSpec {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
-                    "activate_ability(player={player}, source={source:?}, ability_index={ability_index}, targets=[{targets}], chosen_colors={chosen_colors:?}, x_value={x_value:?}, auto_pay={auto_pay})"
+                    "activate_ability(player={player}, source={source:?}, ability_index={ability_index}, modes={modes:?}, targets=[{targets}], chosen_colors={chosen_colors:?}, x_value={x_value:?}, auto_pay={auto_pay})"
                 )
             }
             ActionSpec::TapForMana { player, source } => {
