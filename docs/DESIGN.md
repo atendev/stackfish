@@ -275,7 +275,9 @@ REPL yet), and `crates/engine/tests/` (real `cargo test` integration tests over 
 `tests/scenarios/`). Scenarios build `GameState` via direct struct literals rather than the
 engine's own constructors, so setup/assertion-only scenarios already run for real regardless of
 implementation progress; actions that hit unimplemented engine code report as such rather than
-failing the run. See `docs/implementation/00-overview.md` for the Phase 4 section and
+failing the run. A built state's battlefield permanents never entered, so the harness calls
+`Engine::run_battlefield_card_scripts` once after `Engine::new` to register their scripted
+abilities without an entry event. See `docs/implementation/00-overview.md` for the Phase 4 section and
 `docs/implementation/index.md` for the rest of the decision log.
 
 ## Status
