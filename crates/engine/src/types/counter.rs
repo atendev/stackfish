@@ -9,6 +9,8 @@ pub enum CounterKind {
     Energy,
     Experience,
     Charge,
+    /// CR 122.1d: an untap attempt removes one instead of untapping.
+    Stun,
     Custom(String),
 }
 

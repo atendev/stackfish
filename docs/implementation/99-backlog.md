@@ -14,12 +14,12 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 4. Remaining `legal_actions` gaps (ticket 031). Done: target candidates that mention X, a `DeclareBands` Decision, mana abilities through a Payment Decision, and `Target::Ability` candidates for script picks (see `17-legal-actions.md`). Timing grants ("as though it had flash") are built as timing permissions (see `35-timing-permissions.md`).
 5. Done: late join, replay and wire versioning. Tickets 020 (decision), 021 (Seat snapshot), 022 (replay export and card-data version), 023 (`v` bump and outbox bound) and 028 (`HashMap` ordering audit) are closed.
 6. Merged from `phase5/condition-events`: Lua conditions see damage, life, tap/untap, counter, attack, block and mill events, and seven new `Game.Conditions.*` tags ship. See `10-triggers.md`, "Condition events". Still open: `Each*` siblings of the new tags.
-7. Modal builders in Lua. Merged from `phase5/lua-modal-spells-triggers`: `s.modes()` for spells and `:SetModes` for triggered abilities (ticket 114). See `39-lua-modes.md`. Still open: modal activated abilities in `commands/activate.rs` and `:SetModes` on the activated builder.
+7. Modal builders in Lua. `s.modes()` for spells and `:SetModes` for triggered abilities (ticket 114, merged), and `:SetModes` for activated abilities with modes announced in `ActivateAbility` (ticket 115, `phase5/lua-modal-activated`). See `39-lua-modes.md`. Still open: opponent-chosen activated modes (CR 700.2e).
 8. CR 601.2d division of damage or counters among targets, then subtype and exclusion keys on `DestroyAll` filters.
-9. Merged from `phase5/revealed-face-down-producers`: ticket 027, `Revealed` from a revealing search and from amplify, the free-text event rule in `DESIGN.md`, and the `ScriptError` redaction. `face_down` has no producer, since face-down mechanics are a design non-goal (item 12).
-10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target, stun counters and Condescend's X. CR 104.4b loop detection is merged (ticket 029, `30-loop-detection.md`), and so is Echo's control check (ticket 111).
+9. Merged from `phase5/revealed-face-down-producers`: ticket 027, `Revealed` from a revealing search and from amplify, the free-text event rule in `DESIGN.md`, and the `ScriptError` redaction. `face_down` has no producer, since the loader rejects the Manifest, Manifest dread and Cloak cards (item 12).
+10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target and Condescend's X. CR 104.4b loop detection is merged (ticket 029, `30-loop-detection.md`), and so is Echo's control check (ticket 111).
 11. Housekeeping, alongside the above: the live `todo!()` body in `ScriptRuntime::invoke_cost` (ticket 122 deletes it; the one in `commands/mod.rs` went away in ticket 035). Ticket 017 (stale notes and the `.plan/` commit policy) and the stale-prose pass over `docs/lua/` (ticket 110) are closed.
-12. Design non-goals (planeswalkers, battles, double-faced, split and flip cards, sagas, face-down permanents, team rules). If the card database holds any of these, the loader should skip or reject them explicitly before then.
+12. Design non-goals (double-faced, split and flip cards, team rules). The loader refuses planeswalkers, battles, sagas, Class cards and the Manifest, Manifest dread and Cloak producers with `CardLoadError::NonGoal`, and `MultiFace` refuses the flagged layouts. The 229 Morph, Megamorph and Disguise cards load, because only the optional face-down cast is missing, which is still unimplemented. Gaps that load anyway and play wrong: Ixidron-type cards with no keyword that turn a card face down (244 oracle-text candidates, 147 only exile a card face down), and the layouts the database does not flag as multi-face (meld, mutate, leveler, prototype, case, augment, host). Empty-string loyalty and defense parse as characteristic-defining values; fixing `parse_pt` moves the definition fingerprint of every card, so bump the fingerprint version in the same change.
 
 ## Live TODOs / unresolved gaps
 
@@ -129,8 +129,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   one, and the four "unsupported kind" rejection tests now use `Cascade` (a keyword ability's effect, not a
   card-text mode). Left open: a mode that owns `up_to` or `at_least` words next to other modes relies on the
   existing backtracking assignment of targets to words (it is not retested per mode); the scenario TOML still has
-  no field for a mode's own effect or target requirement; modal activated abilities (no modes in
-  `commands/activate.rs`); nothing is rejected at cast time any more except the non-mode kinds (`ForEachPlayer`,
+  no field for a mode's own effect or target requirement; nothing is rejected at cast time any more except the non-mode kinds (`ForEachPlayer`,
   `Cascade`, `MadnessCastOrDiscard`, `ReturnSelfWithCounter`, `AddMana*`, `Script`, a nested `Modal`).
 
 - **Modal unless-paid (`phase5/modal-unless-paid`)**: `UnlessPaid` joins `is_modal_resolvable`, for both consequences
@@ -151,8 +150,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Modal abilities (`phase5/modal-abilities`)**: `BecomeCopy` and `Attach` join `is_modal_resolvable`; `SacrificeSelf`,
   `Fight` and `Bite` were already in it. They act on the ability's own source permanent, so they only mean something on
   a modal triggered ability (a spell's source is not a permanent). The vehicle is a modal upkeep trigger
-  (`RegisteredAbility::modes`). **There is no modal activated ability**: `commands/activate.rs` has no modes (its CR
-  700.2b TODO is still open), so that is its own feature. No engine change was needed beyond the gate. Tests:
+  (`RegisteredAbility::modes`). Modal activated abilities came later (see `39-lua-modes.md`, "Activation"). No engine change was needed beyond the gate. Tests:
   `phase5_modal_abilities.rs` (11): sacrifice self before and after a synchronous mode, before a draw; a fight mode
   (the source and the target both take damage) and a bite mode (one-sided), each with `GainLife`; a fight followed by
   a draw (the damage is committed before the draw, checked by ledger order); a become-copy mode (`BecameCopy` logged,
@@ -384,8 +382,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   `object.controller`; only `untap_step` resolves the layered controller. A stale source id does nothing (CR
   400.7). Tapping never touches `CombatState` (CR 506.4b). Tests: `phase5_tap_untap_effects.rs` (22). Left open:
   no Lua `becomes tapped`/`becomes untapped` condition (events exist, `ConditionPrimitive` has none, CR
-  603.2e); no "would become tapped/untapped" replacement event and no stun counters (CR 122.1d, 614), so an
-  untap always succeeds; no "can't be tapped"/"doesn't untap" query (CR 614.17); `phased_out` not modeled; not
+  603.2e); stun counters (CR 122.1d) are the only untap replacement, applied in `Engine::attempt_untap`,
+  with no "would become tapped" event and no other "would become untapped" replacement (CR 614, 616.1); no "can't be tapped"/"doesn't untap" query (CR 614.17); `phased_out` not modeled; not
   usable as a mode of a multi-mode spell (`is_modal_resolvable` left unchanged). Test-harness note: this slice's
   "all effects don't target" test uses protection from everything because hexproof didn't exist yet; hexproof
   and shroud are real now (`phase5/hexproof-shroud`), and `phase5_hexproof_shroud.rs` has the `TapAll` cases.

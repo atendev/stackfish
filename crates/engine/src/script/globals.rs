@@ -1223,6 +1223,7 @@ pub(crate) fn bind_game_globals(
                 },
                 target: None,
                 operation: None,
+                modes: None,
                 function_zone: None,
                 text: None,
                 registry: Rc::clone(&registry),
@@ -1572,6 +1573,7 @@ pub(crate) fn bind_game_globals(
         ("Energy", CounterKind::Energy),
         ("Experience", CounterKind::Experience),
         ("Charge", CounterKind::Charge),
+        ("Stun", CounterKind::Stun),
     ] {
         counters.set(name, CounterTag::Known(kind))?;
     }

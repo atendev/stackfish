@@ -383,6 +383,7 @@ fn play_land_self_registered_activated_ability_can_be_activated_paid_and_resolve
             kind: PlayerActionKind::ActivateAbility {
                 source: new_land_id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -468,6 +469,7 @@ fn play_land_self_registered_activated_ability_with_mana_cost_can_be_activated_p
             kind: PlayerActionKind::ActivateAbility {
                 source: new_land_id,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

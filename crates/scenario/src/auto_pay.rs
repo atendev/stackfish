@@ -188,6 +188,7 @@ pub(crate) fn resolve_auto_pay(
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

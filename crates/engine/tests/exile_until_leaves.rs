@@ -276,6 +276,7 @@ fn activate(
             kind: PlayerActionKind::ActivateAbility {
                 source: ObjectId(source),
                 ability_index: index,
+                modes: Vec::new(),
                 targets,
                 chosen_colors: Vec::new(),
                 x_value: None,

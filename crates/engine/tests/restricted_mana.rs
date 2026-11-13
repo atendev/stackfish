@@ -353,6 +353,7 @@ fn restricted_mana_cannot_fund_an_activated_ability_cost() {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

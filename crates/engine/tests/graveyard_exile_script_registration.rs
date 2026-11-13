@@ -144,6 +144,7 @@ fn activate(engine: &mut Engine, source: ObjectId) {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -298,6 +299,7 @@ fn leaving_the_graveyard_drops_the_ability() {
             kind: PlayerActionKind::ActivateAbility {
                 source: user,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

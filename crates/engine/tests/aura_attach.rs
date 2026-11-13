@@ -476,6 +476,7 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
             kind: PlayerActionKind::ActivateAbility {
                 source: aura,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -500,6 +501,7 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
             kind: PlayerActionKind::ActivateAbility {
                 source: aura,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

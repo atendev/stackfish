@@ -51,7 +51,9 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   A `declare_blockers` Decision lists `blockers` (`{ blocker, attackers }`) and `min_blockers` (`{ attacker, count }`,
   the attackers that need more than one blocker, such as menace).
   An `action` reply carries only the four priority actions, because every other `PlayerActionKind` has a shape of its
-  own. A `payment` Decision also takes an `action` reply that activates one of its `mana_abilities`. A `declare_bands`
+  own. `activate_ability` takes an optional `modes` list. An `activate` entry adds `modes` (the range) and
+  `mode_targets` (slots per mode) only for a modal ability, whose `targets` list is then empty. Both are additive, so
+  `PROTOCOL_VERSION` stays 1. A `payment` Decision also takes an `action` reply that activates one of its `mana_abilities`. A `declare_bands`
   reply is `bands`, one list of attacker ids per band.
 - `ZoneChange`, `Cycled` and `MadnessExiled` carry last known information as `WireObjectSummary`: printed
   characteristics from the definition plus tapped, token, commander and counters. Layer effects are not applied.

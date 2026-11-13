@@ -392,6 +392,7 @@ pub(crate) fn parse_counter_kind(name: &str) -> CounterKind {
         "energy" => CounterKind::Energy,
         "experience" => CounterKind::Experience,
         "charge" => CounterKind::Charge,
+        "stun" => CounterKind::Stun,
         other => CounterKind::Custom(other.to_string()),
     }
 }
@@ -841,4 +842,15 @@ pub(crate) fn register_script_operation(engine: &mut Engine, object: ObjectId, s
         .unwrap_or_else(|| panic!("script operation registration: object {object:?} not found"))
         .definition
         .effect = effect;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // CR 122.1d
+    #[test]
+    fn stun_is_a_known_counter_name() {
+        assert_eq!(parse_counter_kind("stun"), CounterKind::Stun);
+    }
 }

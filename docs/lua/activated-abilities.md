@@ -34,7 +34,8 @@ cost — that distinction matters if you're later checking whether the ability h
 
 **`:SetOperation(value)`** — what activating the ability does. Same as
 [triggered abilities](triggered-abilities.md#methods) — a
-[`Game.Ops.*`](game-constants.md#gameops) tag or a custom function. Required.
+[`Game.Ops.*`](game-constants.md#gameops) tag or a custom function. Required unless the ability
+uses `:SetModes`.
 
 **`:SetTarget(value)`** — gives the ability a real target. See [Targeting](#targeting) below.
 Optional — omitting it keeps the ability targetless.
@@ -52,7 +53,11 @@ the card leaves, and can only be activated/triggers from there. Abilities that d
 the default — they never register for a card in the graveyard or exile, so an ETB trigger in the same
 script stays dormant there. Statics, replacement effects and modifiers accept it too (see their own pages).
 
-**`:Register()`** — finalizes and queues the ability. Requires `:SetOperation`.
+**`:SetModes(choice, modes)`** — CR 602.2b, 700.2a, a modal activated ability. See
+[modal activated abilities](#modal-activated-abilities) below.
+
+**`:Register()`** — finalizes and queues the ability. Requires exactly one of `:SetOperation` or
+`:SetModes`.
 
 ## Targeting
 
@@ -76,6 +81,41 @@ Every target word is exactly one target, with no "up to N". `:SetTarget` also ta
 tables for CR 601.2c's multi-word form, one word per entry in order, for example
 `a:SetTarget({ { type = "object", card_types = { "Creature" } }, { type = "player" } })`. Use
 [`Game.Ops.ChainEach`](game-constants.md#gameops) to give each operation its own word.
+
+## Modal activated abilities
+
+"{1}, {T}: Choose one —" uses `:SetModes` in place of `:SetOperation`:
+
+```lua
+local e = Game.CreateActivatedAbility(c)
+e:AddCost(Game.Costs.Mana("{1}"))
+e:AddCost(Game.Costs.TapSelf)
+e:SetModes(Game.ModeChoice.Exactly(1), {
+    {
+        target = { type = "object", card_types = { "Creature" }, count = 1 },
+        operation = Game.Ops.Damage(1),
+    },
+    { operation = Game.Ops.GainLife(2) },
+})
+e:Register()
+```
+
+`choice` is a [`Game.ModeChoice.*`](game-constants.md#gamemodechoice) value, and each mode is a
+`{ target = ..., operation = ... }` table, as on a [modal trigger](triggered-abilities.md#modal-triggered-abilities).
+The player announces the modes in the activation itself, beside the targets of the chosen modes
+(`ActivateAbility`'s `modes` field, CR 602.2b, 700.2a). There is no separate mode Decision. The
+priority entry lists the mode range and each mode's target slots, as a modal spell's cast entry does.
+
+`:SetTarget` beside `:SetModes` is an error, since each mode owns its targets. These are load errors
+on this builder:
+
+- `ExactlyChosenByOpponent` or `UpToChosenByOpponent`: another player choosing an activated
+  ability's modes isn't built (CR 700.2e).
+- A mode `cost` or `pawprint`, and `PawprintBudget`: those belong to a spell's `s.modes()`.
+- A mode whose operation is `Game.Ops.AddMana` or `AddManaChoice`: a mana ability can't be modal
+  (CR 605.1a, 605.3b).
+
+A function operation, a chain and a `ForEachPlayer` are solo-only modes, as on a spell.
 
 ## Worked example: Equip
 

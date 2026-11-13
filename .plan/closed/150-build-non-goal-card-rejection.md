@@ -3,7 +3,7 @@ id: 150
 title: Build non-goal card rejection in the loader
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: [112]
 claimed: false
 ---
@@ -27,4 +27,11 @@ Build what "Which non-goal cards the loader rejects" decided: `CardLoadError::No
 
 ## Resolution
 
-<Filled in at close.>
+The loader now rejects planeswalkers, battles, sagas, Class cards and the Manifest, Manifest dread and Cloak producers with `CardLoadError::NonGoal { name, kind }`. Built on `phase5/non-goal-card-rejection`, PR 3, CI green on 027a407. Audit: APPROVE in round 1.
+
+- `NonGoalKind` (Planeswalker, Battle, Saga, Class, FaceDownProducer) is public with a `Display`. The check runs in `build_definition` after `MultiFace` and `types_line::parse`, before keywords load, and the first match wins in that order.
+- Planeswalker and Battle come from the type bits. Saga and Class come from the subtype. Producers come from the `card_keywords` names, read through the same keyword query that `record_by_oracle_id` reuses.
+- The Class kind stays: a real Class card (`Enchantment — Class`) loaded before the change, since Class is a subtype. The `TypeLine` error text no longer lists Class.
+- Real database: 323 planeswalkers, 2 battles, 193 sagas, 38 Class cards and 71 producers are rejected (the other 2 of the 73 stop at `MultiFace` or `TypeLine`). `db-tests` ran 35 of 35 with no hard failures. The `carddb_source` and `real_card_bot` tests pass, and no `real_card_bot` deck holds a rejected card.
+- Morph, Megamorph, Disguise-only, meld and Ixidron cards still load. Backlog item 12 records the Ixidron gap, the unflagged layouts, and the empty-string loyalty and defense gap with a note to bump the definition fingerprint version when it is fixed.
+- Report: `.plan/assets/150-build-non-goal-card-rejection-report.md`.

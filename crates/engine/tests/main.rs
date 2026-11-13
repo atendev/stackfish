@@ -206,6 +206,7 @@ mod static_ability_duration;
 mod static_ability_self_registration;
 mod static_regeneration;
 mod strict_lua_validation;
+mod stun_counters;
 mod sunburst;
 mod tap_untap_effects;
 mod targeting_at_least_n;

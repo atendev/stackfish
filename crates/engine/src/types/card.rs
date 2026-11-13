@@ -161,7 +161,7 @@ bitflags! {
         /// activation, trigger scan and the CR 608.2b recheck) through
         /// `layers::effective_characteristics`, so granted and removed
         /// keywords count. It doesn't stop untargeted effects (CR 601.2c) or
-        /// detach an Aura or Equipment, unlike protection (CR 702.16d).
+        /// detach an Aura or Equipment, unlike protection (CR 702.16c, 702.16d).
         ///
         /// TODO: "hexproof from [quality]" needs a parameter, so it is not a plain bit (CR 702.11d-g)
         /// TODO: no hexproof on players, which have no keyword set here (CR 702.11c)
@@ -254,8 +254,8 @@ pub struct CardDefinition {
     /// Also covers pawprint budgets (CR 700.2i, `ModeChoice::PawprintBudget`),
     /// per-mode additional costs (CR 700.2h, `SpellMode::additional_cost`) and
     /// another player choosing (CR 700.2e, narrowly, see
-    /// `ModeChoice::ExactlyChosenByOpponent`).
-    /// TODO: CR 700.2b, a modal activated or triggered ability as opposed to a modal spell; `RegisteredAbility` has no `modes` field of its own
+    /// `ModeChoice::ExactlyChosenByOpponent`). A modal triggered or activated
+    /// ability keeps its own modes in `RegisteredAbility::modes`.
     pub modes: Vec<SpellMode>,
     /// How many of `modes` must be chosen. Set even when `modes` is empty,
     /// because `CardDefinition` has no `Default`.

@@ -24,8 +24,8 @@ pub struct TargetSlot {
     pub x_dependent: bool,
 }
 
-/// The target slots of a spell. A modal spell lists them per mode, because the
-/// chosen modes decide which slots apply.
+/// The target slots of a spell or ability. A modal one lists them per mode,
+/// because the chosen modes decide which slots apply.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum EntryTargets {
     /// Not modal: the same slots whatever the player announces.
@@ -35,7 +35,7 @@ pub enum EntryTargets {
     PerMode(Vec<Vec<TargetSlot>>),
 }
 
-/// How many modes a modal spell takes (CR 700.2).
+/// How many modes a modal spell or activated ability takes (CR 700.2).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ModeRange {
     pub mode_count: usize,
@@ -101,7 +101,10 @@ pub struct ActivateEntry {
     /// The ability's position among all abilities registered to `source`, as
     /// `PlayerActionKind::ActivateAbility::ability_index` expects.
     pub ability_index: u32,
-    pub targets: Vec<TargetSlot>,
+    /// `None` when the ability is not modal. A modal ability announces its
+    /// modes in the activation (CR 602.2b, 700.2a).
+    pub modes: Option<ModeRange>,
+    pub targets: EntryTargets,
     /// The activation cost has an `{X}`.
     pub x: bool,
     /// CR 605: a mana ability. A UI can fold these entries away. A player

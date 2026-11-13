@@ -18,7 +18,8 @@ Supports normal games of Magic, including Commander, for N players (not hardcode
   Stickers, Attractions, Dungeons.
 - No planeswalkers, Sagas, Battles, double-faced cards, split/flip/adventure cards, Class cards
   in the initial card-type implementation — but the data model and layer/effect systems must
-  leave room for them (stubbed type slots, not a wall).
+  leave room for them (stubbed type slots, not a wall). The card loader refuses planeswalkers,
+  Battles, Sagas, Class cards and Manifest, Manifest dread and Cloak cards with `CardLoadError::NonGoal`.
 - No netcode/matchmaking — that's host-application concern.
 - No card database tooling — card data (oracle text, costs, types, P/T, and a reference to or
   literal of the Lua script implementing the card) comes from an external, separately-maintained
@@ -184,11 +185,13 @@ original plan:
   whether a target is legal.
 - Mode declarations come from three places. A card definition built in Rust or a TOML fixture fills
   `CardDefinition::modes`. A spell's script fills it through `s.modes()`, read once per script by
-  `load_script_declarations` and only when the definition has no modes. A triggered ability's
-  script declares them with `:SetModes`, which fills `RegisteredAbility::modes`. One decoder
-  (`script::decode::decode_modes`) serves both script forms. A function mode packs its handle into
-  the mode's effect (`AbilityEffect::packed`), and `commands::unpack_script_effect` splits it back
-  when the spell or trigger goes on the stack.
+  `load_script_declarations` and only when the definition has no modes. A triggered or activated
+  ability's script declares them with `:SetModes`, which fills `RegisteredAbility::modes`. One
+  decoder (`script::decode::decode_modes`) serves every script form, and `ModeOwner` says which
+  per-kind refusals apply. A function mode packs its handle into the mode's effect
+  (`AbilityEffect::packed`), and `commands::unpack_script_effect` splits it back when the spell or
+  ability goes on the stack. An activated ability's modes are announced in `ActivateAbility`
+  itself (CR 602.2b), not in a separate Decision.
 
 ## Multiplayer / Commander
 
@@ -254,8 +257,8 @@ original plan:
       calls) — see `docs/implementation/05-script-bridge.md`'s script-coroutines slice and
       `docs/lua/targeting-and-choices.md`'s "Asking the player for a target mid-resolution". CR
       700.2's modal-spell cluster (a-i) is closed — see `99-backlog.md`'s Targeting entry. A
-      spell's `s.modes()` and a trigger's `:SetModes` declare modes from Lua. Still open: modal
-      activated abilities from Lua — see `docs/lua/not-available-yet.md`.
+      spell's `s.modes()` and the `:SetModes` of a trigger or activated ability declare modes from
+      Lua. Still open: opponent-chosen activated modes — see `docs/lua/not-available-yet.md`.
 - [ ] Snapshot/checkpoint strategy for the event ledger — replaying from event 0 every time you
       want state at event N works for v1, may need periodic snapshots later for performance. Not
       a v1 concern.

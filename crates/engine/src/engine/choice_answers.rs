@@ -151,7 +151,7 @@ impl Engine {
         {
             return Err(ScriptChoiceError::InvalidCandidate);
         }
-        // CR 702.16c: protection checks the resolving object's source, not the controller
+        // CR 702.16b: protection checks the resolving object's source, not the controller
         // or the stack id.
         // TODO: `SelectTarget` carries a bare filter, so "another target" can't be expressed (CR 115.4)
         // CR 202.3: no script builds a `mana_value` filter here, so `None` loses nothing.

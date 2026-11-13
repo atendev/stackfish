@@ -7,6 +7,7 @@ use crate::commands;
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement::{self, ReplacementOutcome};
 use crate::types::card::KeywordSet;
+use crate::types::counter::CounterKind;
 use crate::types::effect::EffectDuration;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -144,7 +145,7 @@ impl Engine {
     }
 
     /// CR 502.3: untaps what the active player controls.
-    // TODO: phasing (CR 502.1) and "doesn't untap" effects
+    // TODO: phasing (CR 502.1) and "doesn't untap" effects; a permanent that doesn't untap keeps its stun counter, since it makes no untap attempt
     fn untap_step(&mut self) -> Vec<GameEventKind> {
         let active = self.state.active_player;
         // CR 502.3: uses the effective controller, not the raw field.
@@ -168,13 +169,47 @@ impl Engine {
 
         let mut events = Vec::with_capacity(ids.len());
         for id in ids {
-            self.state
-                .object_mut(id)
-                .expect("id just collected from state.objects")
-                .tapped = false;
-            events.push(GameEventKind::Untapped { object: id });
+            self.attempt_untap(id, &mut events);
         }
         events
+    }
+
+    /// CR 701.26b, 122.1d: the one seam for an untap attempt on `id`, which the
+    /// caller has checked is a tapped battlefield permanent. A stun counter,
+    /// counting stun deltas already in `events`, replaces the untap with a
+    /// proposed removal of one counter (CR 614.6), so no `Untapped` is pushed.
+    // TODO: other would-untap replacements such as Bewitching Leechcraft and Edge of Malacol, ordered with stun (CR 616.1)
+    // TODO: no "would put counters" replacement, which must match only a positive amount (CR 614.16)
+    pub(super) fn attempt_untap(&mut self, id: ObjectId, events: &mut Vec<GameEventKind>) {
+        let Some(object) = self.state.object_mut(id) else {
+            return;
+        };
+        // CR 702.26b
+        if object.phased_out {
+            return;
+        }
+        let pending: i32 = events
+            .iter()
+            .filter_map(|event| match event {
+                GameEventKind::CounterAdded {
+                    object,
+                    kind: CounterKind::Stun,
+                    amount,
+                } if *object == id => Some(*amount),
+                _ => None,
+            })
+            .sum();
+        // CR 614.5: one attempt removes at most one counter.
+        if object.counters.count(&CounterKind::Stun) + pending > 0 {
+            events.push(GameEventKind::CounterAdded {
+                object: id,
+                kind: CounterKind::Stun,
+                amount: -1,
+            });
+            return;
+        }
+        object.tapped = false;
+        events.push(GameEventKind::Untapped { object: id });
     }
 
     /// CR 514: cleanup turn-based actions. Expires "until end of turn" effects

@@ -506,6 +506,7 @@ pub(crate) fn parse_counter_kind_name(name: &str) -> Result<CounterKind, ScriptE
         "Energy" => CounterKind::Energy,
         "Experience" => CounterKind::Experience,
         "Charge" => CounterKind::Charge,
+        "Stun" => CounterKind::Stun,
         other => {
             return Err(ScriptError::LoadError(format!(
                 "unknown counter kind '{other}' - use Game.Counter.Custom(...) for flavor counters"
@@ -1417,11 +1418,13 @@ pub(crate) fn check_chain_words(
 }
 
 /// Which declaration a mode list comes from. Per-mode costs and pawprints
-/// belong to casting (CR 700.2h, 700.2i), so only a spell accepts them.
+/// belong to casting (CR 700.2h, 700.2i), so only a spell accepts them. An
+/// activated ability also refuses another player's choice and mana modes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ModeOwner {
     Spell,
     Trigger,
+    Activated,
 }
 
 /// A `Game.ModeChoice.*(n)` value. Anything else is a load error.
@@ -1480,8 +1483,14 @@ pub(crate) fn decode_modes(
             "{context}: the mode choice asks for {n} modes but only {count} are declared"
         )));
     }
+    // TODO: opponent-chosen modes for an activated ability (CR 700.2e)
+    if by_opponent && owner == ModeOwner::Activated {
+        return Err(ScriptError::LoadError(format!(
+            "{context}: an activated ability's modes can't be chosen by an opponent yet"
+        )));
+    }
     let budget = matches!(choice, ModeChoice::PawprintBudget(_));
-    if budget && owner == ModeOwner::Trigger {
+    if budget && owner != ModeOwner::Spell {
         return Err(ScriptError::LoadError(format!(
             "{context}: Game.ModeChoice.PawprintBudget is only for a spell's modes()"
         )));
@@ -1512,6 +1521,18 @@ pub(crate) fn decode_modes(
             return Err(ScriptError::LoadError(format!("{at} has no operation")));
         }
         let (primitive, handle) = decode_operation_value(lua, registry, operation)?;
+        // CR 605.1a, 605.3b
+        // A mana mode would make the ability a mana ability, which never takes modes.
+        if owner == ModeOwner::Activated
+            && matches!(
+                primitive,
+                Some(AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. })
+            )
+        {
+            return Err(ScriptError::LoadError(format!(
+                "{at}: an activated ability's mode can't add mana"
+            )));
+        }
         let effect = AbilityEffect::packed(primitive, handle);
         check_chain_words(Some(&effect), target.as_ref()).map_err(|e| match e {
             ScriptError::LoadError(m) | ScriptError::RuntimeError(m) => {
@@ -1520,7 +1541,7 @@ pub(crate) fn decode_modes(
         })?;
         let cost = match entry.get::<_, Value>("cost").map_err(lua_load_err)? {
             Value::Nil => None,
-            _ if owner == ModeOwner::Trigger => {
+            _ if owner != ModeOwner::Spell => {
                 return Err(ScriptError::LoadError(format!(
                     "{at}: a per-mode cost is only for a spell's modes()"
                 )));
@@ -1537,7 +1558,7 @@ pub(crate) fn decode_modes(
         };
         let pawprint: Option<u32> = entry.get("pawprint").map_err(lua_load_err)?;
         let pawprint_weight = match (pawprint, budget) {
-            (Some(_), _) if owner == ModeOwner::Trigger => {
+            (Some(_), _) if owner != ModeOwner::Spell => {
                 return Err(ScriptError::LoadError(format!(
                     "{at}: pawprint is only for a spell's modes()"
                 )));

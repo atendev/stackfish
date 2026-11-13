@@ -71,7 +71,7 @@
 ---@field kind "counter_added"
 ---@field object ObjectId
 ---@field counter string  -- "PlusOnePlusOne", "Poison", ... or a custom counter's name
----@field amount integer
+---@field amount integer  -- negative for a removal, such as a stun counter replacing an untap
 
 ---@class PlayerCounterAddedEvent
 ---@field kind "player_counter_added"
@@ -330,7 +330,7 @@ function ActivatedAbilityBuilder:SetFunctionsFrom(zoneName) end
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetText(text) end
 
---- What this ability does when it resolves. Required before :Register().
+--- What this ability does when it resolves. Required before :Register() unless :SetModes is used.
 ---@param value GameOpsValue|OperationFn
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetOperation(value) end
@@ -340,7 +340,15 @@ function ActivatedAbilityBuilder:SetOperation(value) end
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetTarget(value) end
 
---- Finalizes and registers the ability. Requires :SetOperation.
+--- CR 602.2b, 700.2a: a modal activated ability. Replaces :SetOperation and :SetTarget, since each
+--- mode owns its targets and operation. The activation announces the modes. Modes take no `cost` or
+--- `pawprint`, can't add mana, and `choice` can't be PawprintBudget or *ChosenByOpponent.
+---@param choice ModeChoice
+---@param modes Mode[]
+---@return ActivatedAbilityBuilder
+function ActivatedAbilityBuilder:SetModes(choice, modes) end
+
+--- Finalizes and registers the ability. Requires exactly one of :SetOperation or :SetModes.
 function ActivatedAbilityBuilder:Register() end
 
 -- No :SetModes: a mana ability can't be modal here (CR 605.3b). Use AddManaChoice for a color choice.
@@ -637,6 +645,7 @@ function ZonePermissionBuilder:Register() end
 ---@field Energy GameCounterValue
 ---@field Experience GameCounterValue
 ---@field Charge GameCounterValue
+---@field Stun GameCounterValue  -- CR 122.1d; an untap attempt removes one instead
 ---@field Custom fun(name: string): GameCounterValue
 local GameCounterTable = {}
 
@@ -904,7 +913,7 @@ function GameOpsTable.Chain(...) end
 ---@return GameOpsValue
 function GameOpsTable.ChainEach(...) end
 
---- CR 122.1a. `counter` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
+--- CR 122.1a. `counter` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge"/"Stun") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
 ---@param counter CounterKind
 ---@param amount integer
 ---@return GameOpsValue

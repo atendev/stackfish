@@ -118,6 +118,7 @@ for flavor counters.
 | `Energy` | Energy counters. |
 | `Experience` | Experience counters. |
 | `Charge` | Charge counters. |
+| `Stun` | Stun counters (CR 122.1d). An untap attempt on a tapped permanent removes one instead of untapping it. |
 | `Custom(name)` | Factory for any other counter kind; `name` is the flavor counter's name. |
 
 ## `Game.Affected.*`
@@ -421,8 +422,10 @@ to `Game.Ops.Pump`/`Game.Ops.GainControl`/`Game.Ops.GrantTimingPermission`/`Game
 
 ## `Game.ModeChoice.*`
 
-The `choice` of a spell's [`s.modes()`](card-script-basics.md#writing-modes) or a trigger's
-[`:SetModes`](triggered-abilities.md#modal-triggered-abilities). Every one takes a count `n` of at
+The `choice` of a spell's [`s.modes()`](card-script-basics.md#writing-modes), a trigger's
+[`:SetModes`](triggered-abilities.md#modal-triggered-abilities) or an activated ability's
+[`:SetModes`](activated-abilities.md#modal-activated-abilities). An activated ability refuses
+`PawprintBudget` and the two `ChosenByOpponent` forms. Every one takes a count `n` of at
 least 1.
 
 | Name | Meaning |

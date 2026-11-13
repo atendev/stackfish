@@ -33,8 +33,12 @@ name.
   format itself still has no `[cards.alternative_costs]`/`buyback_cost` field, so a scenario
   fixture can't drive either without a script. Hybrid, Phyrexian, `{C}`, `{X}` and snow mana
   payment all work in the engine now (see [mana-abilities.md](mana-abilities.md#snow-mana)).
-- **No tap or untap replacements.** There is no replacement hook for "would become tapped/untapped"
-  and no stun counters (CR 122.1d), so an untap always succeeds.
+- **Stun is the only untap replacement.** Stun counters work (CR 122.1d): an untap attempt removes
+  one and the permanent stays tapped, with no `Untapped` event, so `BecomesUntapped` does not fire.
+  There is no "would become tapped" hook, and no other "would become untapped" replacement such as
+  Bewitching Leechcraft or Edge of Malacol. "Doesn't untap during your untap step" and "can't untap
+  more than N" effects (CR 502.3) are not supported either. A removal reaches a condition as
+  `counter_added` with a negative `amount`; there is no "counter removed" tag.
 - **No `Each*` versions of the newer event tags.** `BecomesTapped`, `BecomesUntapped`, `GainsLife`,
   `LosesLife`, `Attacks`, `Blocks` and `Mills` are about this permanent or you only. "Whenever a
   player loses life" or "whenever a creature attacks" needs a custom condition function reading
@@ -61,9 +65,10 @@ name.
   last known information (CR 608.2h). Either op can be one mode of a modal spell or trigger, with
   the mode's own `target` in one of the shapes above. A
   scenario TOML `[cards.target_requirement]` cannot declare two words (use the script array form).
-- **Modes have gaps.** A spell's `s.modes()` and a trigger's `:SetModes` work (see
-  [card-script-basics.md](card-script-basics.md#writing-modes)). Not available: modal activated
-  abilities, and so opponent-chosen activated modes (CR 700.2e); modal mana abilities (CR 605.3b);
+- **Modes have gaps.** A spell's `s.modes()` and the `:SetModes` of a trigger or activated ability
+  work (see [card-script-basics.md](card-script-basics.md#writing-modes) and
+  [activated-abilities.md](activated-abilities.md#modal-activated-abilities)). Not available:
+  opponent-chosen modes on an activated ability (CR 700.2e); modal mana abilities (CR 605.3b);
   a mana cost on one mode (CR 700.2h, only `Game.Costs.*` additional costs work); and mode text,
   since a host labels modes from the card text. A function operation, a `Chain` or `ChainEach`
   and a `ForEachPlayer` are solo-only modes: each can be the one chosen mode, but not join another.

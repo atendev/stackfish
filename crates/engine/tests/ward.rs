@@ -624,6 +624,7 @@ fn an_activated_ability_targeting_a_ward_permanent_triggers_ward_and_can_be_coun
             kind: PlayerActionKind::ActivateAbility {
                 source: pinger,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![Target::Object(bear)],
                 chosen_colors: Vec::new(),
                 x_value: None,
@@ -865,6 +866,7 @@ fn a_selecttargets_answer_checks_protection_against_the_abilitys_source_not_its_
             kind: PlayerActionKind::ActivateAbility {
                 source: land_on_battlefield,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
                 x_value: None,

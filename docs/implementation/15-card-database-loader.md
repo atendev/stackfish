@@ -34,8 +34,12 @@ This loader never derives game behavior from oracle text.
 - `cards.has_multiple_faces = 1` → hard `CardLoadError::MultiFace`. `card_faces` isn't touched at
   all this slice — DFC/split/flip/adventure are an explicit `DESIGN.md` non-goal.
 - A `type_line` word matching neither `CardTypeSet` nor `SupertypeSet` (Plane, Phenomenon, Scheme,
-  Vanguard, Conspiracy, Dungeon, Class — all casual-format non-goals) → hard `CardLoadError::TypeLine`,
+  Vanguard, Conspiracy, Dungeon — all casual-format non-goals) → hard `CardLoadError::TypeLine`,
   not a skip. Decided explicitly (asked, not assumed): a bulk import needs a signal, not a silent drop.
+- A planeswalker or battle type bit, a `Saga` or `Class` subtype, or a Manifest, Manifest dread or
+  Cloak row in `card_keywords` → hard `CardLoadError::NonGoal { name, kind }`, checked after
+  `types_line::parse` and before keywords load, first match wins in that order. Morph, Megamorph
+  and Disguise cards load face up. Ixidron-type cards and unflagged layouts load too; see backlog item 12.
 - `CardDefinition.definition_id: u64` ← FNV-1a 64-bit hash of `oracle_id`'s UTF-8 bytes. Decided
   explicitly over SQLite `rowid` (not stable across a DB rebuild) and over
   `std::collections::hash_map::DefaultHasher` (documented as not build-stable across Rust

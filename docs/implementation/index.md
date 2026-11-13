@@ -18,7 +18,7 @@ Compact reference for my own use. Each file covers one subsystem.
 - [12-coroutines](12-coroutines.md) — `Game.SelectTargets`, player targets, may abilities, modal spells, payment unwind
 - [13-commander-multiplayer](13-commander-multiplayer.md) — multiplayer defending player, elimination, commander tax/damage, color identity
 - [14-protection-attach](14-protection-attach.md) — protection qualities, auras, equipment, attach/evasion keywords, hexproof/shroud vs attachment
-- [15-card-database-loader](15-card-database-loader.md) — `stackfish-carddb`: SQLite external-card-DB connector, `ManaCost::parse`/type_line/keyword mapping, CDA script gap
+- [15-card-database-loader](15-card-database-loader.md) — `stackfish-carddb`: SQLite external-card-DB connector, `ManaCost::parse`/type_line/keyword mapping, CDA script gap, `NonGoal` rejection of planeswalkers, battles, sagas, Class cards and face-down producers
 - [16-decision-facade](16-decision-facade.md) — `decision` module: `Engine::open_decision`/`answer`, reply shapes, rejection codes, Decision ids
 - [17-legal-actions](17-legal-actions.md) — `Engine::legal_actions`/`legal_attackers`/`legal_blockers`/`pending_damage_splits`, entry types, combat Decisions, Answer checks
 - [18-host-session](18-host-session.md) — `crates/host`: `Session` over JSON bytes, `CardSource`, setup/format presets, wire mirror types, error codes, rejection text (ticket 032)
@@ -42,5 +42,6 @@ Compact reference for my own use. Each file covers one subsystem.
 - [36-zone-permissions](36-zone-permissions.md) — `ZonePermission`, `GameState.zone_permissions`, `can_cast_from_zone` and `can_play_land_from_zone` for the cast and land commands and both entry scans, `Game.CreateZonePermission`, the purges, Crucible of Worlds, library-top and linked-exile permissions, `GameState.exiled_with`, `Game.Ops.ExileLinked`, `library_top_visible_to` in the host, Future Sight, `BEHAVIOUR_REV` 8
 - [37-expiring-permissions](37-expiring-permissions.md) — `duration` on both permission structs, `source_bound` purges, `expire_permissions` in the three turn drains, `AbilityEffect::GrantTimingPermission`/`GrantZonePermission`, `Game.Ops.Grant*Permission`
 - [38-zone-permission-riders](38-zone-permission-riders.md) — `LeaveStackRider`, `StackObject.leave_stack_rider` and `leave_destination` at resolve, fizzle and counter, `ZonePermission.rider`, `cast_zone_source`, `ZonePermissionBuilder:SetRider`, the Kess scenario
-- [39-lua-modes](39-lua-modes.md) — `s.modes()`, `:SetModes` on triggers, `Game.ModeChoice.*`, `decode_modes`, handles from 1, `AbilityEffect::packed` and `unpack_script_effect`, solo-only function and chain modes, `BEHAVIOUR_REV` 10
+- [39-lua-modes](39-lua-modes.md) — `s.modes()`, `:SetModes` on triggers and activated abilities, modes in `ActivateAbility`, `Game.ModeChoice.*`, `decode_modes`, handles from 1, `AbilityEffect::packed` and `unpack_script_effect`, solo-only function and chain modes, `BEHAVIOUR_REV` 10
+- [40-stun-counters](40-stun-counters.md) — `CounterKind::Stun`, `Engine::attempt_untap` as the one untap seam for the untap step and `flip_tapped`, pending stun deltas, phased-out permanents skipped
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

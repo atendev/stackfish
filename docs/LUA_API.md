@@ -389,7 +389,7 @@ Use these with `:SetDuration` on static abilities or as the `duration` argument 
 
 ## `Game.ModeChoice.*`
 
-The `choice` of a spell's `s.modes()` or a trigger's `:SetModes`. Each takes a count `n` of at least 1. Only the repeatable forms and `PawprintBudget` may ask for more modes than are declared.
+The `choice` of a spell's `s.modes()` or the `:SetModes` of a trigger or activated ability. Each takes a count `n` of at least 1. Only the repeatable forms and `PawprintBudget` may ask for more modes than are declared.
 
 ```lua
 Game.ModeChoice.Exactly(n)                  -- CR 700.2a, "choose one", "choose two"
@@ -557,9 +557,12 @@ e:SetFunctionsFrom(zone)
 e:AddCost(game_costs_value)
 e:SetOperation(game_ops_value)
 e:SetTarget(target_spec)
+e:SetModes(mode_choice, { mode, mode, ... })
 e:SetText(text)
 e:Register()
 ```
+
+`:Register()` needs exactly one of `:SetOperation` or `:SetModes`, and `:SetTarget` beside `:SetModes` is an error. The activation announces the modes (CR 602.2b, 700.2a). A mode can't have a `cost` or `pawprint` or add mana, and `PawprintBudget` and the `ChosenByOpponent` forms are refused.
 
 ### `Game.CreateReplacementEffect`
 

@@ -282,6 +282,7 @@ fn sacrifice_activated_ability_also_works() {
             kind: PlayerActionKind::ActivateAbility {
                 source,
                 ability_index: 0,
+                modes: Vec::new(),
                 targets: vec![Target::Object(target)],
                 chosen_colors: Vec::new(),
                 x_value: None,

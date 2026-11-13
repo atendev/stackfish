@@ -9,7 +9,7 @@ use crate::decision::{
 };
 use crate::script::ScriptRuntime;
 use crate::types::ability::{AbilityEffect, AbilityKind};
-use crate::types::card::{CardDefinition, CardTypeSet, ModeChoice};
+use crate::types::card::{CardDefinition, CardTypeSet, ModeChoice, SpellMode};
 use crate::types::cost::{AdditionalCost, AlternativeCost};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
@@ -162,8 +162,27 @@ fn cast_modes_and_targets(
         );
         return slots_are_satisfiable(&slots).then_some((None, EntryTargets::Fixed(slots)));
     }
-    let per_mode: Vec<Vec<TargetSlot>> = definition
-        .modes
+    modal_modes_and_targets(
+        state,
+        script_runtime,
+        player,
+        card,
+        &definition.modes,
+        definition.mode_choice,
+    )
+}
+
+/// The mode range and per-mode target slots of a modal spell or activated
+/// ability, or `None` when no selection of modes has its targets (CR 700.2a).
+fn modal_modes_and_targets(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    player: PlayerId,
+    source: ObjectId,
+    modes: &[SpellMode],
+    mode_choice: ModeChoice,
+) -> Option<(Option<ModeRange>, EntryTargets)> {
+    let per_mode: Vec<Vec<TargetSlot>> = modes
         .iter()
         .map(|mode| {
             target_slots(
@@ -171,11 +190,11 @@ fn cast_modes_and_targets(
                 script_runtime,
                 mode.target_requirement.as_ref(),
                 player,
-                card,
+                source,
             )
         })
         .collect();
-    let range = mode_range(definition);
+    let range = mode_range(modes, mode_choice);
     let usable = per_mode
         .iter()
         .filter(|slots| slots_are_satisfiable(slots))
@@ -199,10 +218,10 @@ fn cast_modes_and_targets(
     listed.then_some((Some(range), EntryTargets::PerMode(per_mode)))
 }
 
-fn mode_range(definition: &CardDefinition) -> ModeRange {
-    let mode_count = definition.modes.len();
-    let (min, max, repeatable) = definition.mode_choice.bounds();
-    match definition.mode_choice {
+fn mode_range(modes: &[SpellMode], mode_choice: ModeChoice) -> ModeRange {
+    let mode_count = modes.len();
+    let (min, max, repeatable) = mode_choice.bounds();
+    match mode_choice {
         ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) => ModeRange {
             mode_count,
             min: 0,
@@ -210,7 +229,7 @@ fn mode_range(definition: &CardDefinition) -> ModeRange {
             repeatable: false,
             chosen_by_opponent: true,
             pawprint_weights: None,
-            solo_only: solo_only_modes(&definition.modes),
+            solo_only: solo_only_modes(modes),
         },
         ModeChoice::PawprintBudget(_) => ModeRange {
             mode_count,
@@ -218,14 +237,8 @@ fn mode_range(definition: &CardDefinition) -> ModeRange {
             max,
             repeatable: false,
             chosen_by_opponent: false,
-            pawprint_weights: Some(
-                definition
-                    .modes
-                    .iter()
-                    .map(|mode| mode.pawprint_weight)
-                    .collect(),
-            ),
-            solo_only: solo_only_modes(&definition.modes),
+            pawprint_weights: Some(modes.iter().map(|mode| mode.pawprint_weight).collect()),
+            solo_only: solo_only_modes(modes),
         },
         _ => ModeRange {
             mode_count,
@@ -234,7 +247,7 @@ fn mode_range(definition: &CardDefinition) -> ModeRange {
             repeatable,
             chosen_by_opponent: false,
             pawprint_weights: None,
-            solo_only: solo_only_modes(&definition.modes),
+            solo_only: solo_only_modes(modes),
         },
     }
 }
@@ -330,20 +343,43 @@ fn activate_entries(
             continue;
         }
 
-        let targets = if mana_ability {
-            Vec::new()
-        } else {
-            target_slots(
+        let (modes, targets) = if mana_ability {
+            (None, EntryTargets::Fixed(Vec::new()))
+        } else if ability.modes.is_empty() {
+            let slots = target_slots(
                 state,
                 script_runtime,
                 ability.target.as_ref(),
                 player,
                 ability.source,
-            )
+            );
+            if !slots_are_satisfiable(&slots) {
+                continue;
+            }
+            (None, EntryTargets::Fixed(slots))
+        } else {
+            // CR 700.2e, 700.2i
+            // `ActivateAbility` refuses these two choices, so they are not listed.
+            if matches!(
+                ability.mode_choice,
+                ModeChoice::ExactlyChosenByOpponent(_)
+                    | ModeChoice::UpToChosenByOpponent(_)
+                    | ModeChoice::PawprintBudget(_)
+            ) {
+                continue;
+            }
+            let Some(listed) = modal_modes_and_targets(
+                state,
+                script_runtime,
+                player,
+                ability.source,
+                &ability.modes,
+                ability.mode_choice,
+            ) else {
+                continue;
+            };
+            listed
         };
-        if !slots_are_satisfiable(&targets) {
-            continue;
-        }
         let color_choice = match &ability.effect {
             Some(AbilityEffect::AddManaChoice { count, choices }) => Some(ColorChoice {
                 count: *count,
@@ -363,6 +399,7 @@ fn activate_entries(
         entries.push(Entry::Activate(ActivateEntry {
             source: ability.source,
             ability_index,
+            modes,
             targets,
             x: cost
                 .and_then(|c| c.mana.as_ref())
