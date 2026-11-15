@@ -5,6 +5,7 @@ use crate::types::ability::{AbilityEffect, DelayedRefers};
 use crate::types::event::GameEventKind;
 use crate::types::game::{DelayedTrigger, DelayedWhen};
 use crate::types::ids::{EventId, ObjectId, Target};
+use crate::types::object::GameObject;
 use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
@@ -71,11 +72,14 @@ impl Engine {
                 recorded.push((id, object.zone));
             }
         }
+        // A spell whose earlier entry paused has already gone to its graveyard,
+        // so its snapshot comes from that move.
         let source_lki = self
             .state
             .object(top.source)
             .cloned()
-            .or_else(|| top.source_lki.clone());
+            .or_else(|| top.source_lki.clone())
+            .or_else(|| self.left_since(top.source, since));
         let id = self.state.allocate_ability_id();
         let created_after = EventId(self.state.next_event_id);
         self.state.delayed_triggers.push(DelayedTrigger {
@@ -89,6 +93,19 @@ impl Engine {
             created_after,
             triggered: false,
         });
+    }
+
+    /// The last known information of `id` if it changed zones since `since`.
+    fn left_since(&self, id: ObjectId, since: usize) -> Option<GameObject> {
+        self.state.ledger[since..]
+            .iter()
+            .find_map(|event| match &event.kind {
+                GameEventKind::ZoneChange {
+                    last_known_info: Some(lki),
+                    ..
+                } if lki.object_id == id => Some(lki.clone()),
+                _ => None,
+            })
     }
 
     /// CR 400.7j: the object `id` became when this resolution moved it to a
