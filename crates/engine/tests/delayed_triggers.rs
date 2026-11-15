@@ -711,7 +711,7 @@ fn a_delayed_trigger_is_ordered_with_other_end_step_triggers_in_apnap_order() {
     assert_eq!(stack[1].source, WATCHER);
 }
 
-// CR 800.4a, 800.4d
+// CR 800.4a
 #[test]
 fn a_leaving_players_rows_leave_with_them() {
     let mut state = state_at(Step::PostCombatMain);

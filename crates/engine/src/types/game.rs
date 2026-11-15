@@ -178,15 +178,21 @@ pub struct GameState {
 
 /// CR 603.7: a delayed triggered ability, made by `AbilityEffect::AtNextEndStep`
 /// and removed when it goes on the stack.
+// TODO: stated durations such as "this turn" and the controller's choice among simultaneous events (CR 603.7b)
+// TODO: delayed triggers made by a replacement effect, a static ability's special action or a resolve count (CR 603.7f, 603.7g, 603.7h)
+// TODO: show pending delayed triggers to players in the host view
 #[derive(Clone, PartialEq, Debug)]
 pub struct DelayedTrigger {
     /// The `PendingTrigger::ability` that finds this row after a pause.
     pub id: AbilityId,
     /// CR 603.7d, 603.7e: the resolving spell's or ability's source.
     pub source: ObjectId,
+    /// The source as it last existed, so the stack object keeps an owner and
+    /// a name after the source is gone.
     pub source_lki: Option<GameObject>,
     /// CR 603.7d, 603.7e: who controlled the resolving spell or ability.
     pub controller: PlayerId,
+    /// The event that triggers the row.
     pub when: DelayedWhen,
     /// One of the ops `script::globals` accepts for `AtNextEndStep`.
     pub effect: crate::types::ability::AbilityEffect,

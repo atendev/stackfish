@@ -510,7 +510,7 @@ pub(crate) fn bind_game_globals(
         Ok(OperationTag(AbilityEffect::Chain { entries, words: Some(words) }))
     })?;
     ops.set("ChainEach", chain_each)?;
-    // CR 603.7: `Game.Ops.AtNextEndStep(op, refers)` does `op` at the beginning of the next end step to the objects `refers` names: "targets", "self" or "entered". Only a Chain or ChainEach entry accepts it.
+    // CR 603.7: a separate tag type, so only the Chain and ChainEach entry decoder can take it.
     let at_next_end_step = lua.create_function(|_, (op, refers): (Value, String)| {
         let effect = match op {
             Value::UserData(ud) if ud.is::<OperationTag>() => ud.borrow::<OperationTag>()?.0.clone(),
