@@ -99,6 +99,26 @@ can't have a `cost` or `pawprint`, and `PawprintBudget` is refused: those belong
 `s.modes()` (see [card-script-basics.md](card-script-basics.md#writing-modes)). A function
 operation, a chain and a `ForEachPlayer` are solo-only modes, as on a spell.
 
+## Delayed triggered abilities
+
+A delayed triggered ability is made by a resolving spell or ability, not registered on a card
+(CR 603.7). Put `Game.Ops.AtNextEndStep(op, refers)` in a `Chain` or `ChainEach`:
+
+```lua
+-- "Return target creature card from your graveyard to the battlefield. Exile it at the
+-- beginning of the next end step."
+function s.operation()
+    return Game.Ops.Chain(
+        Game.Ops.ReturnToBattlefield(),
+        Game.Ops.AtNextEndStep(Game.Ops.Exile, "entered")
+    )
+end
+```
+
+It triggers once, at the beginning of the next end step, and acts only on objects still where
+they were when it was made. See [game-constants.md](game-constants.md) for `refers` and the load
+errors, and [not-available-yet.md](not-available-yet.md) for the other timings.
+
 ## What's not available on this builder
 
 - **No `:SetCost`.** Triggered abilities don't have activation costs (some do have their own

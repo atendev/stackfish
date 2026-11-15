@@ -206,6 +206,7 @@
 ---@class GameOpsSacrificeChosenValue : GameOpsValue  -- only SacrificeChosen results
 ---@class GameOpsDiscardChosenValue : GameOpsValue    -- only DiscardChosen results
 ---@class GameOpsCastSpellValue : GameOpsValue        -- only CastSpell results
+---@class GameOpsDelayedValue  -- only AtNextEndStep results; accepted only as a Chain or ChainEach entry
 ---@class GameCostsValue
 ---@class GameLayersValue
 ---@class GameEffectsValue
@@ -913,14 +914,24 @@ function GameOpsTable.DiscardRandom(filter, count) end
 function GameOpsTable.ForEachPlayer(x) end
 
 --- CR 608.2c, several operations in the order written. Every argument must be a called `Game.Ops.*` value that a mode of a modal spell could be. A nested `Chain`, a `ForEachPlayer`, `AddMana*`, a custom function and an empty list are load errors. All entries share the ability's one `:SetTarget` and ignore it when they don't use a target.
----@param ... GameOpsValue
+---@param ... GameOpsValue|GameOpsDelayedValue
 ---@return GameOpsValue
 function GameOpsTable.Chain(...) end
 
 --- CR 601.2c/608.2c, `Chain` where each entry owns `words` consecutive target words (0 acts on the controller). Counts must add up to the declared target words.
----@param ... { [1]: GameOpsValue, [2]: integer }
+---@param ... { [1]: GameOpsValue|GameOpsDelayedValue, [2]: integer }
 ---@return GameOpsValue
 function GameOpsTable.ChainEach(...) end
+
+--- CR 603.7, a delayed triggered ability made when the chain reaches this entry, triggering once at the beginning of the next end step.
+--- `op` is Exile, Sacrifice, Destroy, ReturnToHand or a called ReturnToBattlefield(...). `refers` names the objects it acts on:
+--- "targets" (the entry's targets, followed through a move this resolution made, CR 400.7j), "self" (the source) or "entered"
+--- (everything that entered the battlefield earlier in this resolution). It acts only on objects still in the zone they were in
+--- when it was made (CR 603.7c). Only valid as a Chain or ChainEach entry; alone, as a mode or inside ForEachPlayer it is a load error.
+---@param op GameOpsValue
+---@param refers "targets"|"self"|"entered"
+---@return GameOpsDelayedValue
+function GameOpsTable.AtNextEndStep(op, refers) end
 
 --- CR 122.1a. `counter` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge"/"Stun") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
 ---@param counter CounterKind

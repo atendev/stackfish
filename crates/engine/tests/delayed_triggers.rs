@@ -588,6 +588,11 @@ fn a_card_a_replacement_sent_elsewhere_did_not_enter() {
     pass_both(&mut engine);
     assert_eq!(bear_zones(&engine), vec![ZoneKind::Exile]);
     assert!(engine.state().delayed_triggers[0].refers.is_empty());
+    pass_to_end_step(&mut engine, 2);
+    assert_eq!(delayed_on_stack(&engine).len(), 1);
+    resolve_stack(&mut engine);
+    assert!(engine.state().stack.is_empty());
+    assert_eq!(bear_zones(&engine), vec![ZoneKind::Exile]);
 }
 
 // CR 701.21a
