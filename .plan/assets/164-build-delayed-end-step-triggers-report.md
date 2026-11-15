@@ -2,7 +2,7 @@
 
 Branch `phase5/delayed-end-step-triggers-3`, cut from the handoff commit `bfc11ec` because another worktree still holds `phase5/delayed-end-step-triggers-2`. Requirements: `164-build-delayed-end-step-triggers-requirements.md` (approved by the haiku auditor in round 2). Implementation note: `docs/implementation/42-delayed-triggers.md`.
 
-Gates: the repo CLAUDE.md loop ran (requirements report, haiku audit, `phase5/` branch, `tools/check.sh --full`, sonnet implementation audit). Its `AskUserQuestion` merge gate was skipped, because the wayfinder master merges. The two-round audit cap in CLAUDE.md gave way to the five-round cap in the user's global rules.
+Gates: the repo CLAUDE.md loop ran (requirements report, haiku audit, `phase5/` branch, `tools/check.sh --full`, sonnet implementation audit). The loop skipped its `AskUserQuestion` merge gate because the wayfinder master merges. The five-round cap in the user's global rules replaced the two-round audit cap in CLAUDE.md.
 
 ## Decisions
 
@@ -15,7 +15,7 @@ Gates: the repo CLAUDE.md loop ran (requirements report, haiku audit, `phase5/` 
 | 5 | How is the "as a mode" load error tested? | A mode test through `build_modes`; leave it out | A `build_modes` script whose first mode is `AtNextEndStep` fails with the "must be an entry of Game.Ops.Chain" error. | Implementer | Approved, implementation round 2 |
 | 6 | Can scenario fixtures reach the end step? | TOML fixtures; Rust tests only | TOML. `advance_to_step = "end"` and card-id tracking across zone changes make both the return-then-exile and the exile-then-return cases expressible. | Implementer | Approved, implementation round 2 |
 | 7 | Does a row with no referred objects resolve safely? | Leave it untested; run it through the end step | Run it through. The replacement test now resolves its empty row and checks that nothing moves, since each op acts only on the legal list. | Implementer | Approved, implementation round 2 |
-| 8 | Which TODOs go in code? | Docs only for some; all as `// TODO:` lines | All of them. The auditor found three only in docs (CR 603.7b durations, CR 603.7f-h, the host view); they now sit on `DelayedTrigger`. | Auditor, round 1 | Approved, implementation round 2 |
+| 8 | Which TODOs go in code? | Docs only for some; all as `// TODO:` lines | All of them. The auditor found three only in docs (CR 603.7b durations, CR 603.7f-h, the host view); they are now on `DelayedTrigger`. | Auditor, round 1 | Approved, implementation round 2 |
 | 9 | Is the push-time skip for a departed controller tested? | A three-player test; cite only CR 800.4a on the SBA test | The citation. In a two-player game the elimination ends the game before the end step, so the push skip cannot be reached there. It stays as a guard with no test. | Auditor's fallback, round 1 | Approved, implementation round 2 |
 | 10 | `BEHAVIOUR_REV` | Bump; keep 10 | Keep 10. The replay pin did not move. | Implementer | Approved, implementation round 2 |
 
