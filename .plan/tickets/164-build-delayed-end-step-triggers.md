@@ -27,3 +27,22 @@ Build `GameState.delayed_triggers`, a list of one-shot delayed triggered abiliti
 ## Resolution
 
 <Filled in at close.>
+
+## Handoff
+
+Branch `phase5/delayed-end-step-triggers`, implementation at `fcb5e00`. Requirements report `.plan/assets/164-build-delayed-end-step-triggers-requirements.md` approved by the haiku auditor in round 2 (no open objections). Implementation audit has not started.
+
+Done (builds, clippy clean, no tests yet):
+- `DelayedTrigger`, `DelayedWhen`, `GameState.delayed_triggers` (`types/game.rs`); `AbilityEffect::AtNextEndStep`, `DelayedRefers` (`types/ability.rs`).
+- Matching in `triggers::collect_triggers`, `triggered` marking in `resolve_collect_triggers_state`, push and row removal in `push_ordered_triggers` / `push_delayed_stack_object` (`triggers_pipeline.rs`).
+- `StackObject.delayed_refers`; resolution filter and row creation in `engine/resolve/delayed.rs`; chain loop and `ModalContinuation.since_ledger` in `resolve/modal.rs`.
+- `sba::remove_players_objects` purge, `loop_watch` fingerprint, `Sacrifice` TODO.
+- Lua `Game.Ops.AtNextEndStep` and `DelayedTag` (`script/globals.rs`, `tags.rs`, `decode.rs`).
+
+Left, in order:
+1. Tests 1-17 from the requirements report. No TOML action exists for trigger order, so tests 12 and 14 go in a Rust file `crates/engine/tests/delayed_triggers.rs` (add `mod` to `tests/main.rs`); copy helpers from `tests/chain_operations.rs`. Test 17 goes in `engine/loop_watch_tests.rs`. Add TOML fixtures under `tests/scenarios/delayed/` (Whip-style, flicker) using `advance_to_step`.
+2. Docs: `docs/lua/game-constants.md`, `triggered-abilities.md`, `not-available-yet.md`, `stubs/game.lua`, `docs/LUA_API.md`, `docs/DESIGN.md` data model, new `docs/implementation/42-delayed-triggers.md` plus index line, one backlog line in `99-backlog.md`.
+3. `tools/check.sh --full`, then the sonnet implementation audit (CLAUDE.md step 5).
+4. Decision report `.plan/assets/164-build-delayed-end-step-triggers-report.md`, unslop, commit, push, return PUSHED.
+
+Read first: the requirements report, then `resolve/delayed.rs` and `git show fcb5e00 --stat`.
