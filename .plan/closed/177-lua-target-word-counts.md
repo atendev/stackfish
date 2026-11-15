@@ -3,9 +3,9 @@ id: 177
 title: Let Lua target words take a count
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: [116]
-claimed: true
+claimed: false
 ---
 
 ## Question

@@ -99,6 +99,10 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 149 Lua key-error order and hash set algebra lint. The three Lua key checks name every bad key in byte-sorted order, `clippy.toml` refuses hash set algebra and `extract_if`, and the Lua docs forbid letting `pairs` order decide an outcome. Built by a wayfinder child. [closed/149-fix-lua-key-error-order.md](closed/149-fix-lua-key-error-order.md)
 - 118 Build battlefield setup card scripts. A scripted battlefield setup card registers its abilities once before the first step, with no enter event. The harness panics on a script failure and on a harness shortcut beside a script. Kess starts on the battlefield. Built by a wayfinder child. [closed/118-build-battlefield-setup-scripts.md](closed/118-build-battlefield-setup-scripts.md)
 - 116 Build divided damage and counters. `division` rides on `CastSpell` (madness and cascade included), `ActivateAbility` and the trigger-target answer, checked before any change. Each legal target gets its share and an illegal target's share is lost (CR 608.2b). Lua gets `Game.Ops.DividedDamage` and `DividedCounters`, but `:SetTarget` gives a Lua divided ability one target and `Game.Ops.CastSpell` passes no division, both TODOs. Arc Lightning joins the proof deck, and `BEHAVIOUR_REV` stays 10. Built by a wayfinder child. [closed/116-build-divided-damage-and-counters.md](closed/116-build-divided-damage-and-counters.md)
+- 177 Let Lua target words take a count. A `:SetTarget` table takes `count`, `up_to`, `at_least` and `exclude_source`, with `count` defaulting to 1, and mode tables already took a count. One decoder refuses `up_to` with `at_least`, `count = 0` without `at_least`, and a count on `"triggering"`, so a minimum above zero beside `up_to` is still 178. Built by a wayfinder child. [closed/177-lua-target-word-counts.md](closed/177-lua-target-word-counts.md)
+- 141 Build player hexproof and shroud. `Game.CreatePlayerKeywordModifier` gives `You`, `Opponent`, `Any` or `EnchantedPlayer` hexproof or shroud, enforced in the Player, PlayerScript and any-target player arms but not in attachment legality (CR 115.1b). "You" follows the source's current controller, and the hand modifiers share `PlayerAffected`. Protection on players is 181. Built by a wayfinder child. [closed/141-build-player-hexproof-and-shroud.md](closed/141-build-player-hexproof-and-shroud.md)
+- 164 Build delayed end-step triggers. `GameState.delayed_triggers` holds one-shot rows made by a `Game.Ops.AtNextEndStep(op, refers)` chain entry (CR 603.7). A row fires once at the next end step and acts only on objects still in their recorded zones (CR 603.7c). The skip for a departed controller has no test, since a two-player elimination ends the game first. Found 182 and 183. Built by a wayfinder child. [closed/164-build-delayed-end-step-triggers.md](closed/164-build-delayed-end-step-triggers.md)
+- 176 Triggered mana abilities. A new `ManaAbilityResolved` event with a `tapped` flag feeds `Game.Conditions.TappedForMana`. `Game.CreateTriggeredManaAbility` triggers split off at collection and resolve at once in registration order (CR 605.1b, 605.4a). A `ChooseManaColors` Decision picks colors, the Payment Decision is unchanged, the mana goes to the tapping player, and `Game.Ops.AddManaOfProducedType` is added. `PROTOCOL_VERSION` stays 1. The build is 179, and 180 holds stack triggers fired mid-payment. Grilled with the user. [closed/176-triggered-mana-abilities.md](closed/176-triggered-mana-abilities.md)
 
 ## Not yet specified
 
@@ -156,6 +160,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - Activation conditions the Lua snapshot cannot read: card types beyond creature, subtypes, colors, current power, spells cast this turn and creatures that died this turn (found by 127).
 - Chosen-count optional costs ("you may sacrifice one or more creatures", "tap any number"), where the effect reads how many were paid (found by 159).
 - A computed amount for `EntersWithCounters` in general, past the per-kick payload (found by 159).
+- Mana-production replacement effects such as Mana Reflection, Contamination and Pulse of Llanowar (CR 106.12b). 176 ruled them out of triggered mana abilities.
 
 ## Out of scope
 
@@ -172,7 +177,7 @@ Open tickets, unblocked and unclaimed. Tickets 089 to 111 were cut after 088 fro
 
 Decisions (HITL):
 
-- 176 Triggered mana abilities
+- None open.
 
 Builds and audits:
 
@@ -184,16 +189,18 @@ Builds and audits:
 - 125 Build conditional Timing permissions
 - 130 Build die and leave riders
 - 139 Build ward cost shapes
-- 141 Build player hexproof and shroud
 - 142 Build hexproof from
 - 143 Build static redirect recipients
 - 148 Build fight and bite target shapes
 - 151 Build spell additional costs
 - 152 One object pays one moving cost
 - 163 Build flash costs
-- 164 Build delayed end-step triggers
 - 172 Fix the CR 702.16 citation in a hexproof test assertion (AFK)
 - 173 Narrow the stale becomes-tapped and becomes-untapped TODOs (AFK)
 - 175 Resolve mana added by spells and stack abilities
-- 177 Let Lua target words take a count
 - 178 Add a minimum target count beside `up_to`
+- 179 Build triggered mana abilities
+- 180 Hold triggers fired during a payment until the cast finishes
+- 181 Build protection on players
+- 182 Finish a spell's later chain entries before its card goes to the graveyard
+- 183 Add the general control check to `resolve_sacrifice_effect`

@@ -3,9 +3,9 @@ id: 164
 title: Build delayed end-step triggers
 type: task
 mode: AFK
-status: open
+status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question
