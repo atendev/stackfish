@@ -26,23 +26,4 @@ Build `GameState.delayed_triggers`, a list of one-shot delayed triggered abiliti
 
 ## Resolution
 
-<Filled in at close.>
-
-## Handoff
-
-Branch `phase5/delayed-end-step-triggers-2` (the old worktree still holds `phase5/delayed-end-step-triggers`), work at `598b41e`. Requirements report `.plan/assets/164-build-delayed-end-step-triggers-requirements.md` approved by the haiku auditor in round 2. Implementation audit has not started (round 0).
-
-Done:
-- Implementation from `fcb5e00` (see its message).
-- `crates/engine/tests/delayed_triggers.rs`, 18 passing tests covering requirements tests 1-16, except the "as a mode" load error.
-- `resolve/delayed.rs`: a spell whose earlier chain entry paused is already in its graveyard when the row is made (its stack-to-graveyard `ZoneChange` lands before the reanimated bear's), so `source_lki` falls back to that move's last known info (`left_since`). Mention this in the decision report; consider surfacing a ticket for the spell moving before its later chain entries finish (CR 608.2n).
-
-Left, in order:
-1. Test 16 "as a mode": modes decode through `decode_operation_value`, which rejects `DelayedTag`. Add one test.
-2. Test 17 in `engine/loop_watch_tests.rs`: rows with different `id` and `created_after` fingerprint equal; no row, or `triggered: true`, differs.
-3. TOML fixtures under `tests/scenarios/delayed/` (Whip-style, flicker), if `docs/scenario_format.md` has a step to reach the end step. Otherwise state why in the report.
-4. Docs: `docs/lua/game-constants.md`, `triggered-abilities.md`, `not-available-yet.md`, `stubs/game.lua`, `docs/LUA_API.md`, `docs/DESIGN.md` data model, new `docs/implementation/42-delayed-triggers.md` plus index line, one line in `99-backlog.md`.
-5. `tools/check.sh --full`, then the sonnet implementation audit (CLAUDE.md step 5).
-6. Decision report `.plan/assets/164-build-delayed-end-step-triggers-report.md`, unslop, commit, push, return PUSHED.
-
-Read first: the requirements report, `tests/delayed_triggers.rs`, `resolve/delayed.rs`.
+Built on `phase5/delayed-end-step-triggers-3` (PR #9, CI green). `GameState.delayed_triggers` holds one-shot `DelayedTrigger` rows made by a `Game.Ops.AtNextEndStep(op, refers)` entry in `Chain` or `ChainEach` (CR 603.7). A row matches only end-step events after it was made (CR 603.7a, 513.2), triggers once (CR 603.7b), goes on the stack untargeted with that step's other triggers in APNAP order, and acts only on referred objects still in their recorded zones (CR 603.7c). `"targets"` follows a target an earlier entry moved to a public zone (CR 400.7j). The sonnet audit approved in round 2. The push-time skip for a departed controller has no test, because a two-player elimination ends the game first. Details: `.plan/assets/164-build-delayed-end-step-triggers-report.md` and `docs/implementation/42-delayed-triggers.md`.
