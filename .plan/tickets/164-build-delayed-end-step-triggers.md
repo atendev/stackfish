@@ -30,19 +30,19 @@ Build `GameState.delayed_triggers`, a list of one-shot delayed triggered abiliti
 
 ## Handoff
 
-Branch `phase5/delayed-end-step-triggers`, implementation at `fcb5e00`. Requirements report `.plan/assets/164-build-delayed-end-step-triggers-requirements.md` approved by the haiku auditor in round 2 (no open objections). Implementation audit has not started.
+Branch `phase5/delayed-end-step-triggers-2` (the old worktree still holds `phase5/delayed-end-step-triggers`), work at `598b41e`. Requirements report `.plan/assets/164-build-delayed-end-step-triggers-requirements.md` approved by the haiku auditor in round 2. Implementation audit has not started (round 0).
 
-Done (builds, clippy clean, no tests yet):
-- `DelayedTrigger`, `DelayedWhen`, `GameState.delayed_triggers` (`types/game.rs`); `AbilityEffect::AtNextEndStep`, `DelayedRefers` (`types/ability.rs`).
-- Matching in `triggers::collect_triggers`, `triggered` marking in `resolve_collect_triggers_state`, push and row removal in `push_ordered_triggers` / `push_delayed_stack_object` (`triggers_pipeline.rs`).
-- `StackObject.delayed_refers`; resolution filter and row creation in `engine/resolve/delayed.rs`; chain loop and `ModalContinuation.since_ledger` in `resolve/modal.rs`.
-- `sba::remove_players_objects` purge, `loop_watch` fingerprint, `Sacrifice` TODO.
-- Lua `Game.Ops.AtNextEndStep` and `DelayedTag` (`script/globals.rs`, `tags.rs`, `decode.rs`).
+Done:
+- Implementation from `fcb5e00` (see its message).
+- `crates/engine/tests/delayed_triggers.rs`, 18 passing tests covering requirements tests 1-16, except the "as a mode" load error.
+- `resolve/delayed.rs`: a spell whose earlier chain entry paused is already in its graveyard when the row is made (its stack-to-graveyard `ZoneChange` lands before the reanimated bear's), so `source_lki` falls back to that move's last known info (`left_since`). Mention this in the decision report; consider surfacing a ticket for the spell moving before its later chain entries finish (CR 608.2n).
 
 Left, in order:
-1. Tests 1-17 from the requirements report. No TOML action exists for trigger order, so tests 12 and 14 go in a Rust file `crates/engine/tests/delayed_triggers.rs` (add `mod` to `tests/main.rs`); copy helpers from `tests/chain_operations.rs`. Test 17 goes in `engine/loop_watch_tests.rs`. Add TOML fixtures under `tests/scenarios/delayed/` (Whip-style, flicker) using `advance_to_step`.
-2. Docs: `docs/lua/game-constants.md`, `triggered-abilities.md`, `not-available-yet.md`, `stubs/game.lua`, `docs/LUA_API.md`, `docs/DESIGN.md` data model, new `docs/implementation/42-delayed-triggers.md` plus index line, one backlog line in `99-backlog.md`.
-3. `tools/check.sh --full`, then the sonnet implementation audit (CLAUDE.md step 5).
-4. Decision report `.plan/assets/164-build-delayed-end-step-triggers-report.md`, unslop, commit, push, return PUSHED.
+1. Test 16 "as a mode": modes decode through `decode_operation_value`, which rejects `DelayedTag`. Add one test.
+2. Test 17 in `engine/loop_watch_tests.rs`: rows with different `id` and `created_after` fingerprint equal; no row, or `triggered: true`, differs.
+3. TOML fixtures under `tests/scenarios/delayed/` (Whip-style, flicker), if `docs/scenario_format.md` has a step to reach the end step. Otherwise state why in the report.
+4. Docs: `docs/lua/game-constants.md`, `triggered-abilities.md`, `not-available-yet.md`, `stubs/game.lua`, `docs/LUA_API.md`, `docs/DESIGN.md` data model, new `docs/implementation/42-delayed-triggers.md` plus index line, one line in `99-backlog.md`.
+5. `tools/check.sh --full`, then the sonnet implementation audit (CLAUDE.md step 5).
+6. Decision report `.plan/assets/164-build-delayed-end-step-triggers-report.md`, unslop, commit, push, return PUSHED.
 
-Read first: the requirements report, then `resolve/delayed.rs` and `git show fcb5e00 --stat`.
+Read first: the requirements report, `tests/delayed_triggers.rs`, `resolve/delayed.rs`.
