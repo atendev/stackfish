@@ -7,8 +7,8 @@ use std::rc::Rc;
 use mlua::{AnyUserData, Function, Lua, Table, Value};
 
 use crate::types::ability::{
-    AbilityEffect, ConditionPrimitive, CreatureTokenSpec, EntryControl, InterveningIfPrimitive,
-    NamedToken, SearchDestination, TokenSpec, UnlessPaidConsequence,
+    AbilityEffect, ConditionPrimitive, CreatureTokenSpec, DelayedRefers, EntryControl,
+    InterveningIfPrimitive, NamedToken, SearchDestination, TokenSpec, UnlessPaidConsequence,
 };
 use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, Subtype};
 use crate::types::cost::{AdditionalCost, CostModifierTarget, CostSpec, FilterController};
@@ -25,8 +25,8 @@ use crate::types::zone::ZoneKind;
 use super::builders::{
     ActivatedAbilityBuilder, CostModifierBuilder, DrawLimitModifierBuilder,
     HandRevealModifierBuilder, HandSizeModifierBuilder, LandPlayModifierBuilder,
-    ManaAbilityBuilder, ReplacementEffectBuilder, StaticAbilityBuilder, TimingPermissionBuilder,
-    TriggeredAbilityBuilder, ZonePermissionBuilder,
+    ManaAbilityBuilder, PlayerKeywordModifierBuilder, ReplacementEffectBuilder,
+    StaticAbilityBuilder, TimingPermissionBuilder, TriggeredAbilityBuilder, ZonePermissionBuilder,
 };
 use super::decode::{
     decode_copy_exceptions, decode_counter_arg, decode_creature_token_opts,
@@ -38,7 +38,7 @@ use super::decode::{
 };
 use super::tags::{
     AffectedTag, ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, CounterTag,
-    DurationTag, EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, FilterTag,
+    DelayedTag, DurationTag, EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, FilterTag,
     ForEachPlayerTag, HandSizeEffectTag, InterveningIfTag, LayerTag, ModeChoiceTag, OncePerTurnTag,
     OperationResultTag, OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, ResultItem,
     TokenTag, result_items,
@@ -510,6 +510,46 @@ pub(crate) fn bind_game_globals(
         Ok(OperationTag(AbilityEffect::Chain { entries, words: Some(words) }))
     })?;
     ops.set("ChainEach", chain_each)?;
+    // CR 603.7: a separate tag type, so only the Chain and ChainEach entry decoder can take it.
+    let at_next_end_step = lua.create_function(|_, (op, refers): (Value, String)| {
+        let effect = match op {
+            Value::UserData(ud) if ud.is::<OperationTag>() => ud.borrow::<OperationTag>()?.0.clone(),
+            other => {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Game.Ops.AtNextEndStep op must be a Game.Ops.* value, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        if !matches!(
+            effect,
+            AbilityEffect::Exile
+                | AbilityEffect::Sacrifice
+                | AbilityEffect::Destroy
+                | AbilityEffect::ReturnToHand
+                | AbilityEffect::ReturnToBattlefield { .. }
+        ) {
+            return Err(mlua::Error::RuntimeError(
+                "Game.Ops.AtNextEndStep op must be Exile, Sacrifice, Destroy, ReturnToHand or ReturnToBattlefield"
+                    .to_string(),
+            ));
+        }
+        let refers = match refers.as_str() {
+            "targets" => DelayedRefers::Targets,
+            "self" => DelayedRefers::SelfObject,
+            "entered" => DelayedRefers::Entered,
+            other => {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Game.Ops.AtNextEndStep refers must be \"targets\", \"self\" or \"entered\", got {other:?}"
+                )));
+            }
+        };
+        Ok(DelayedTag(AbilityEffect::AtNextEndStep {
+            effect: Box::new(effect),
+            refers,
+        }))
+    })?;
+    ops.set("AtNextEndStep", at_next_end_step)?;
     let counters = lua.create_function(|_, (counter, amount): (Value, i32)| {
         let kind = decode_counter_arg(counter).map_err(to_lua_err)?;
         Ok(OperationTag(AbilityEffect::Counters { kind, amount }))
@@ -1315,6 +1355,19 @@ pub(crate) fn bind_game_globals(
         })?
     };
 
+    let create_player_keyword_modifier = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(PlayerKeywordModifierBuilder {
+                source: ObjectId(source),
+                affected: None,
+                keyword: None,
+                function_zone: None,
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
     let create_draw_limit_modifier = {
         let registry = Rc::clone(&registry);
         lua.create_function(move |_, source: u64| {
@@ -1668,6 +1721,10 @@ pub(crate) fn bind_game_globals(
     game.set("CreateHandSizeModifier", create_hand_size_modifier)?;
     game.set("HandSizeEffects", hand_size_effects)?;
     game.set("CreateHandRevealModifier", create_hand_reveal_modifier)?;
+    game.set(
+        "CreatePlayerKeywordModifier",
+        create_player_keyword_modifier,
+    )?;
     game.set("CreateDrawLimitModifier", create_draw_limit_modifier)?;
     game.set("CreateLandPlayModifier", create_land_play_modifier)?;
     game.set("CreateTimingPermission", create_timing_permission)?;
@@ -1752,6 +1809,8 @@ fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(Ent
 /// non-operation value are load errors (see `AbilityEffect::Chain`).
 fn chain_entry(lua: &Lua, ctor: &str, position: usize, arg: Value) -> mlua::Result<AbilityEffect> {
     match arg {
+        // CR 603.7: checked by its constructor.
+        Value::UserData(ud) if ud.is::<DelayedTag>() => Ok(ud.borrow::<DelayedTag>()?.0.clone()),
         Value::UserData(ud) if ud.is::<OperationTag>() => {
             let effect = ud.borrow::<OperationTag>()?.0.clone();
             // TODO: divided amounts in function and chain operations (CR 601.2d)

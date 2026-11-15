@@ -90,6 +90,7 @@ pub(crate) fn fingerprint(state: &GameState) -> String {
         cost_modifiers,
         hand_size_modifiers,
         hand_reveal_modifiers,
+        player_keyword_modifiers,
         draw_limit_modifiers,
         land_play_modifiers,
         timing_permissions,
@@ -111,7 +112,24 @@ pub(crate) fn fingerprint(state: &GameState) -> String {
         exiled_with,
         pending_timing_bypass,
         pending_free_cast,
+        delayed_triggers,
     } = state;
+    // `created_after` reads `next_event_id`, which is left out above, and the row id
+    // names nothing a later state reads.
+    let delayed_rows: Vec<_> = delayed_triggers
+        .iter()
+        .map(|row| {
+            (
+                row.source,
+                &row.source_lki,
+                row.controller,
+                row.when,
+                &row.effect,
+                &row.refers,
+                row.triggered,
+            )
+        })
+        .collect();
     let ledger_reads: Vec<(PlayerId, u32, bool)> = turn_order
         .iter()
         .map(|&p| {
@@ -127,11 +145,11 @@ pub(crate) fn fingerprint(state: &GameState) -> String {
          {priority_player:?};{consecutive_passes:?};{lands_played_this_turn:?};{combat:?};\
          {last_active_turn_number:?};{objects:?};{zones:?};{stack:?};{continuous_effects:?};\
          {replacement_effects:?};{cost_modifiers:?};{hand_size_modifiers:?};\
-         {hand_reveal_modifiers:?};{draw_limit_modifiers:?};{land_play_modifiers:?};\
+         {hand_reveal_modifiers:?};{player_keyword_modifiers:?};{draw_limit_modifiers:?};{land_play_modifiers:?};\
          {timing_permissions:?};{zone_permissions:?};{abilities:?};{rng:?};{pending_step_skips:?};{once_per_turn_triggered:?};\
          {commander_return_offered:?};{linked_ability_generation:?};{script_ability_ids:?};\
          {ability_function_zones:?};{off_battlefield_scripts_run:?};{linked_exiles:?};{exiled_with:?};\
-         {pending_timing_bypass:?};{pending_free_cast:?};{ledger_reads:?}"
+         {pending_timing_bypass:?};{pending_free_cast:?};{delayed_rows:?};{ledger_reads:?}"
     );
     let relabeled = relabel(raw.as_bytes());
     let mut i = 0;

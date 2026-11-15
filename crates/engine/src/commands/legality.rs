@@ -10,7 +10,7 @@ use crate::types::cost::FilterController;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::object::GameObject;
-use crate::types::player::ZonePermissionKind;
+use crate::types::player::{PlayerKeyword, ZonePermissionKind};
 use crate::types::stack::{LeaveStackRider, StackEntryKind};
 use crate::types::target::{
     ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement,
@@ -333,7 +333,6 @@ fn target_has_protection_from(
 /// graveyard or a hexproof spell on the stack is still targetable.
 ///
 /// TODO: "hexproof from [quality]" is not modeled (CR 702.11d-g)
-/// TODO: players cannot have hexproof or shroud (CR 702.11c/702.18a)
 /// TODO: nothing consumes `ignored_keywords` here, so "can target as though it didn't have hexproof" is not expressible (CR 702.11e)
 /// TODO: no team model, so "opponent" means any other player
 fn target_blocked_by_hexproof_or_shroud(
@@ -354,6 +353,35 @@ fn target_blocked_by_hexproof_or_shroud(
     }
     keywords.contains(KeywordSet::SHROUD)
         || crate::layers::effective_controller(state, script_runtime, id) != caster
+}
+
+/// CR 702.11c, 702.18a: whether `player` cannot be chosen as a target by a
+/// spell or ability controlled by `caster`, because a `PlayerKeywordModifier`
+/// gives them hexproof or shroud. Shroud stops every `caster`, `player`
+/// included. Hexproof stops only another `caster`. "You" and "opponent" read
+/// the source's live controller, so a control change moves them (CR 109.5).
+///
+/// TODO: no team model, so "opponent" means any other player
+fn player_blocked_by_hexproof_or_shroud(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    player: PlayerId,
+    caster: PlayerId,
+) -> bool {
+    state.player_keyword_modifiers.iter().any(|m| {
+        let blocks_caster = match m.keyword {
+            PlayerKeyword::Shroud => true,
+            PlayerKeyword::Hexproof => caster != player,
+        };
+        // `effective_controller` panics on an unknown id, so a row whose source is
+        // gone falls back to its drain-time controller.
+        let controller = if state.object(m.source).is_some() {
+            crate::layers::effective_controller(state, script_runtime, m.source)
+        } else {
+            m.controller
+        };
+        blocks_caster && m.affected.applies_to(state, m.source, controller, player)
+    })
 }
 
 /// Full target legality for a spell or ability that targets (cast,
@@ -451,12 +479,16 @@ fn target_is_legal_impl(
             if state.player(pid).is_none() {
                 return false;
             }
-            match controller {
+            let matches_controller = match controller {
                 None => true,
                 Some(FilterController::You) => pid == caster,
                 Some(FilterController::Opponent) => pid != caster,
                 Some(FilterController::Any) => true,
-            }
+            };
+            // TODO: protection on players (CR 702.16b)
+            matches_controller
+                && !(enforce_targetability
+                    && player_blocked_by_hexproof_or_shroud(state, script_runtime, pid, caster))
         }
         TargetFilter::Object {
             card_types,
@@ -586,7 +618,12 @@ fn target_is_legal_impl(
         // CR 115.4: creature, player, planeswalker, or battle only - no
         // noncreature artifacts, no spells/abilities on the stack.
         TargetFilter::AnyTarget => match target {
-            Target::Player(pid) => state.player(pid).is_some(),
+            // TODO: protection on players (CR 702.16b)
+            Target::Player(pid) => {
+                state.player(pid).is_some()
+                    && !(enforce_targetability
+                        && player_blocked_by_hexproof_or_shroud(state, script_runtime, pid, caster))
+            }
             Target::Object(id) => {
                 let Some(obj) = state.object(id) else {
                     return false;
@@ -631,13 +668,18 @@ fn target_is_legal_impl(
                 .invoke_target_legal(*handle, state, id, source, caster)
                 .unwrap_or(false)
         }
-        // The player-candidate twin of `Script`: no protection check, because
-        // player-side protection is not modeled, plus the script predicate.
+        // The player-candidate twin of `Script`, with the script predicate run last.
+        // TODO: protection on players (CR 702.16b)
         TargetFilter::PlayerScript(handle) => {
             let Target::Player(pid) = target else {
                 return false;
             };
             if state.player(pid).is_none() {
+                return false;
+            }
+            if enforce_targetability
+                && player_blocked_by_hexproof_or_shroud(state, script_runtime, pid, caster)
+            {
                 return false;
             }
             script_runtime
@@ -1661,6 +1703,7 @@ mod tests {
             cost_modifiers: Vec::new(),
             hand_size_modifiers: Vec::new(),
             hand_reveal_modifiers: Vec::new(),
+            player_keyword_modifiers: Vec::new(),
             draw_limit_modifiers: Vec::new(),
             land_play_modifiers: Vec::new(),
             timing_permissions: Vec::new(),
@@ -1685,6 +1728,7 @@ mod tests {
             exiled_with: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
+            delayed_triggers: Vec::new(),
         }
     }
 

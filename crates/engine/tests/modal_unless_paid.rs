@@ -141,6 +141,7 @@ fn push_victim_spell(state: &mut GameState) {
         division: Vec::new(),
         ability_index: None,
         ability_text: None,
+        delayed_refers: Vec::new(),
         stack_id: VICTIM,
         kind: StackEntryKind::Spell,
         source: VICTIM,

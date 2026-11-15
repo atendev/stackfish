@@ -112,6 +112,7 @@ fn push_spell(state: &mut GameState, id: u64, mana_value: u32) {
         division: Vec::new(),
         ability_index: None,
         ability_text: None,
+        delayed_refers: Vec::new(),
         stack_id: id,
         kind: StackEntryKind::Spell,
         source: id,

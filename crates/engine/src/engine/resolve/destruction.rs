@@ -35,6 +35,7 @@ impl Engine {
         }
     }
 
+    // TODO: Sacrifice does not check that the resolving controller controls the target (CR 701.21a)
     pub(super) fn resolve_sacrifice_effect(
         &mut self,
         top: &StackObject,

@@ -48,13 +48,23 @@ name.
 - **Reanimation options are limited.** `Game.Ops.ReturnToBattlefield`/`ReturnAllToBattlefield` take
   only `control` (`"you"` or `"owner"`) and `tapped`. Not available: entering with an extra counter
   ("with a +1/+1 counter"), entering attacking or blocking (CR 508.4), "under target opponent's
-  control", a "may" return, and Zombify-style riders such as haste or "exile it at end of turn". A
+  control", a "may" return, and Zombify-style riders such as haste (exiling it at the next end step
+  is a `Game.Ops.AtNextEndStep` chain entry). A
   returned Clone, Devour or Amplify creature enters as itself with no choice, because those choices
   need a pause that isn't tied to a stack object. An Aura with two or more legal hosts stays in the
   graveyard because the controller's host choice (CR 303.4f) has no pause yet. The all-form enters
   its cards one after another, not as one simultaneous event. Hand and library sources are not
   supported. Persist and Undying use `Game.Ops.ReturnSelfWithCounter`, which still skips
   replacement checks and entry modifiers.
+- **Delayed triggers have one timing.** `Game.Ops.AtNextEndStep` makes a delayed trigger for the
+  beginning of the next end step only, and only as a `Chain` or `ChainEach` entry. Not available:
+  "at the beginning of your next upkeep", "your next end step", "at end of combat", "when that
+  creature dies or leaves the battlefield this turn", a stated duration on the trigger, and an op
+  other than exile, sacrifice, destroy, return to hand or return to the battlefield (CR 603.7b).
+  Delayed triggers made by a replacement effect, a static ability's special action or a resolve
+  count are missing (CR 603.7f, 603.7g, 603.7h). `"entered"` names every object that entered
+  during the resolution, so a chain can't act on only one of two entered groups. Players can't
+  see pending delayed triggers before they trigger. Encore, dash, blitz and mobilize are not built.
 - **Fight and bite have narrow target shapes.** `Game.Ops.Fight`/`Bite` work with a two-entry
   `s.target_requirement()` array, a `count = 2` entry (Fight only) or a single `count = 1` entry
   (the ability's source is the first creature). Not available: "fights up to one target creature"
@@ -80,10 +90,10 @@ name.
   instances aren't modeled — see [game-constants.md](game-constants.md#gamereplacementpayloads).
 - **Damage redirection only supports "to this permanent."** Redirecting to some other chosen
   target isn't available — see [replacement-effects.md](replacement-effects.md).
-- **Hexproof and Shroud work only on permanents, in their plain forms.** `"Hexproof"` and
-  `"Shroud"` are real keywords (see [game-constants.md](game-constants.md#supported-keyword-names-addkeywordremovekeywordignorekeyword)).
-  Not available: hexproof/shroud on a player ("You have hexproof"), "hexproof from [quality]",
-  and "can be the target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is
+- **Hexproof and Shroud have only their plain forms.** `"Hexproof"` and `"Shroud"` are real
+  keywords on permanents (see [game-constants.md](game-constants.md#supported-keyword-names-addkeywordremovekeywordignorekeyword)),
+  and a player gets them through [`Game.CreatePlayerKeywordModifier`](player-modifiers.md#gamecreateplayerkeywordmodifierc--cr-70211c-70218a).
+  Not available: "hexproof from [quality]", protection on a player, and "can be the target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is
   accepted but nothing reads it). "Opponent" means any other player; there is no team model.
 - **Ward is `Game.RegisterWard(source, cost)`, not a keyword name.** It takes a cost, so it can't go
   through `AddKeyword`. Only a mana cost works: no "Ward—Pay N life", discard or sacrifice cost, and no

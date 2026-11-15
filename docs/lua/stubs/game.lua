@@ -125,6 +125,15 @@
 ---@field exclude_source? boolean         -- CR 115.4 "another target"
 ---@field filter? ScriptedTargetFn|PlayerPredicateFn  -- a function only, never a table; type = "player" takes the player predicate
 
+-- One :SetTarget word. Same keys as TargetRequirementTable, but `count` defaults to 1.
+---@class SetTargetTable : FilterTable
+---@field type? "object"|"player"|"any"|"ability"|"triggering"  -- default "object"; "triggering" takes no count keys
+---@field count? integer                  -- default 1, CR 601.2c; 0 needs at_least
+---@field up_to? boolean                  -- mutually exclusive with at_least
+---@field at_least? boolean
+---@field exclude_source? boolean         -- CR 115.4 "another target"
+---@field filter? ScriptedTargetFn|PlayerPredicateFn  -- a function only, never a table; type = "player" takes the player predicate
+
 ---@alias ScriptedTargetFn fun(object: ObjectId, source: ObjectId, controller: PlayerId, state: StateSnapshot): boolean
 ---@alias PlayerPredicateFn fun(player: PlayerId, source: ObjectId, controller: PlayerId, state: StateSnapshot): boolean
 ---@alias ConditionFn fun(source: ObjectId, controller: PlayerId, event: Event|nil, state: StateSnapshot): boolean
@@ -206,6 +215,7 @@
 ---@class GameOpsSacrificeChosenValue : GameOpsValue  -- only SacrificeChosen results
 ---@class GameOpsDiscardChosenValue : GameOpsValue    -- only DiscardChosen results
 ---@class GameOpsCastSpellValue : GameOpsValue        -- only CastSpell results
+---@class GameOpsDelayedValue  -- only AtNextEndStep results; accepted only as a Chain or ChainEach entry
 ---@class GameCostsValue
 ---@class GameLayersValue
 ---@class GameEffectsValue
@@ -252,7 +262,8 @@ function TriggeredAbilityBuilder:SetText(text) end
 function TriggeredAbilityBuilder:SetOperation(value) end
 
 --- One target word, or an array of values for CR 601.2c's multi-word form (one word per entry, in order). Omit ⇒ no target requirement.
----@param value FilterTable|ScriptedTargetFn|(FilterTable|ScriptedTargetFn)[]
+--- A table word takes `count`, `up_to`, `at_least` and `exclude_source`; a bare function is exactly one target.
+---@param value SetTargetTable|ScriptedTargetFn|(SetTargetTable|ScriptedTargetFn)[]
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetTarget(value) end
 
@@ -336,7 +347,8 @@ function ActivatedAbilityBuilder:SetText(text) end
 function ActivatedAbilityBuilder:SetOperation(value) end
 
 --- One target word when set, or an array of values for CR 601.2c's multi-word form (one word per entry, in order). Optional.
----@param value FilterTable|ScriptedTargetFn|{ type: "player", filter?: PlayerPredicateFn }|(FilterTable|ScriptedTargetFn)[]
+--- A table word takes `count`, `up_to`, `at_least` and `exclude_source`; a bare function is exactly one target.
+---@param value SetTargetTable|ScriptedTargetFn|(SetTargetTable|ScriptedTargetFn)[]
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetTarget(value) end
 
@@ -480,6 +492,32 @@ function HandRevealModifierBuilder:SetAffected(value) end
 --- Finalizes and registers the modifier. NOTE: nothing enforces this yet — the engine has no
 --- per-viewer visibility boundary for it to change (see docs/lua/player-modifiers.md).
 function HandRevealModifierBuilder:Register() end
+
+-------------------------------------------------------------------------------
+-- Game.CreatePlayerKeywordModifier(c) — CR 702.11c, 702.18a "you have hexproof" / "you have shroud."
+-------------------------------------------------------------------------------
+
+---@class PlayerKeywordModifierBuilder
+local PlayerKeywordModifierBuilder = {}
+
+--- Registers only while the source is in that zone (CR 113.6b); without it, only on the battlefield.
+---@param zoneName "Hand"|"Graveyard"|"Exile"
+---@return PlayerKeywordModifierBuilder
+function PlayerKeywordModifierBuilder:SetFunctionsFrom(zoneName) end
+
+--- Which player(s) this applies to. Required before :Register().
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent, .Any or .EnchantedPlayer
+---@return PlayerKeywordModifierBuilder
+function PlayerKeywordModifierBuilder:SetAffected(value) end
+
+--- The keyword the player gets. Required before :Register(). Any other name is an error.
+---@param name "Hexproof"|"Shroud"
+---@return PlayerKeywordModifierBuilder
+function PlayerKeywordModifierBuilder:SetKeyword(name) end
+
+--- Finalizes and registers the modifier. Hexproof stops the player's opponents' spells and
+--- abilities; shroud stops everyone's, the player's own included.
+function PlayerKeywordModifierBuilder:Register() end
 
 -------------------------------------------------------------------------------
 -- Game.CreateDrawLimitModifier(c) — CR 121.2b "can't draw more than N cards each turn."
@@ -913,14 +951,24 @@ function GameOpsTable.DiscardRandom(filter, count) end
 function GameOpsTable.ForEachPlayer(x) end
 
 --- CR 608.2c, several operations in the order written. Every argument must be a called `Game.Ops.*` value that a mode of a modal spell could be. A nested `Chain`, a `ForEachPlayer`, `AddMana*`, a custom function and an empty list are load errors. All entries share the ability's one `:SetTarget` and ignore it when they don't use a target.
----@param ... GameOpsValue
+---@param ... GameOpsValue|GameOpsDelayedValue
 ---@return GameOpsValue
 function GameOpsTable.Chain(...) end
 
 --- CR 601.2c/608.2c, `Chain` where each entry owns `words` consecutive target words (0 acts on the controller). Counts must add up to the declared target words.
----@param ... { [1]: GameOpsValue, [2]: integer }
+---@param ... { [1]: GameOpsValue|GameOpsDelayedValue, [2]: integer }
 ---@return GameOpsValue
 function GameOpsTable.ChainEach(...) end
+
+--- CR 603.7, a delayed triggered ability made when the chain reaches this entry, triggering once at the beginning of the next end step.
+--- `op` is Exile, Sacrifice, Destroy, ReturnToHand or a called ReturnToBattlefield(...). `refers` names the objects it acts on:
+--- "targets" (the entry's targets, followed through a move this resolution made, CR 400.7j), "self" (the source) or "entered"
+--- (everything that entered the battlefield earlier in this resolution). It acts only on objects still in the zone they were in
+--- when it was made (CR 603.7c). Only valid as a Chain or ChainEach entry; alone, as a mode or inside ForEachPlayer it is a load error.
+---@param op GameOpsValue
+---@param refers "targets"|"self"|"entered"
+---@return GameOpsDelayedValue
+function GameOpsTable.AtNextEndStep(op, refers) end
 
 --- CR 122.1a. `counter` is a counter kind name (e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge"/"Stun") or `Game.Counter.*`. Unknown plain strings raise a load error — use `Game.Counter.Custom("Name")` for flavor counters. Object targets only.
 ---@param counter CounterKind
@@ -1380,6 +1428,10 @@ function Game.CreateHandSizeModifier(c) end
 ---@param c ObjectId
 ---@return HandRevealModifierBuilder
 function Game.CreateHandRevealModifier(c) end
+
+---@param c ObjectId
+---@return PlayerKeywordModifierBuilder
+function Game.CreatePlayerKeywordModifier(c) end
 
 ---@param c ObjectId
 ---@return DrawLimitModifierBuilder

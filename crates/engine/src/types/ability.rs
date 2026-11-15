@@ -40,6 +40,19 @@ pub enum UnlessPaidConsequence {
     SacrificeSelf,
 }
 
+/// CR 603.7c: which objects an `AbilityEffect::AtNextEndStep` row acts on,
+/// read when the row is made.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DelayedRefers {
+    /// The legal object targets the chain entry sees. One an earlier entry
+    /// moved to a public zone is followed to its new object (CR 400.7j).
+    Targets,
+    /// The resolving spell's or ability's source.
+    SelfObject,
+    /// Every object put onto the battlefield since the resolution began.
+    Entered,
+}
+
 /// CR 110.2a: which player controls a permanent an effect puts onto the
 /// battlefield. `You` is the default ("under your control", the controller of
 /// the resolving spell or ability); `Owner` is "under its owner's control".
@@ -606,6 +619,19 @@ pub enum AbilityEffect {
     /// effect: None`). It is listed there only for exhaustiveness, like
     /// `Modal`.
     Script(ScriptHandle),
+    /// `Game.Ops.AtNextEndStep(op, refers)` (CR 603.7): makes a
+    /// `GameState::delayed_triggers` row that does `effect` to the `refers`
+    /// objects at the beginning of the next end step. Only a `Chain` entry,
+    /// because `"entered"` reads what the earlier entries moved.
+    // TODO: encore needs a delayed sacrifice of its tokens (CR 702.141a)
+    // TODO: dash needs a delayed return to hand (CR 702.109a)
+    // TODO: blitz needs a delayed sacrifice (CR 702.152a)
+    // TODO: mobilize needs a delayed sacrifice of its tokens (CR 702.181a)
+    // TODO: a chain that acts on only one of two entered groups
+    AtNextEndStep {
+        effect: Box<AbilityEffect>,
+        refers: DelayedRefers,
+    },
     /// CR 702.79a Persist and 702.93a Undying: "return it to the battlefield
     /// under its owner's control with a [-1/-1 | +1/+1] counter on it". Only
     /// meaningful on a `Dies`-triggered `RegisteredAbility`, whose
@@ -2191,6 +2217,7 @@ mod tests {
             cost_modifiers: Vec::new(),
             hand_size_modifiers: Vec::new(),
             hand_reveal_modifiers: Vec::new(),
+            player_keyword_modifiers: Vec::new(),
             draw_limit_modifiers: Vec::new(),
             land_play_modifiers: Vec::new(),
             timing_permissions: Vec::new(),
@@ -2215,6 +2242,7 @@ mod tests {
             exiled_with: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
+            delayed_triggers: Vec::new(),
         }
     }
 

@@ -219,6 +219,7 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
         hand_reveal_modifiers: Vec::new(),
+        player_keyword_modifiers: Vec::new(),
         draw_limit_modifiers: Vec::new(),
         land_play_modifiers: Vec::new(),
         timing_permissions: Vec::new(),
@@ -243,6 +244,7 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         exiled_with: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
+        delayed_triggers: Vec::new(),
     }
 }
 

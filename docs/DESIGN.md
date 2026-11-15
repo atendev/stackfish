@@ -161,7 +161,9 @@ original plan:
 - Zone *order* lives in exactly one place (the zone container), never duplicated onto the object
   itself.
 - Standing player-level grants live in their own lists on `GameState` and not in the layers:
-  `land_play_modifiers` and the other player modifiers, `timing_permissions` (when a player may
+  `land_play_modifiers` and the other player modifiers (`player_keyword_modifiers` gives a player
+  hexproof or shroud, read by `target_is_legal`, since a player has no characteristics for layer 6
+  to change), `timing_permissions` (when a player may
   cast) and `zone_permissions` (which zone a player may play or cast from, including the top of a
   library and cards exiled with a source). Each is purged by source in `retire_object` and
   `remap_abilities`, except a Timed permission from a resolving effect, which carries a
@@ -172,6 +174,13 @@ original plan:
   cast, and `StackObject::leave_destination` is the one reader at resolve, fizzle and counter. See
   `docs/implementation/35-timing-permissions.md`, `36-zone-permissions.md`,
   `37-expiring-permissions.md` and `38-zone-permission-riders.md`.
+- Delayed triggered abilities live in `GameState.delayed_triggers`, one `DelayedTrigger` row each,
+  made by a resolving `Game.Ops.AtNextEndStep` chain entry (CR 603.7). A row records its source,
+  controller, effect, the objects it refers to with their zones, and the event id it was made at.
+  `collect_triggers` matches it only against later events and marks it `triggered`, the trigger
+  push removes it, and resolution acts only on referred objects still in their recorded zones
+  (`StackObject.delayed_refers`). `retire_object` never touches rows; a leaving player's rows go
+  in `remove_players_objects`. See `docs/implementation/42-delayed-triggers.md`.
 - `PlayerAction -> EngineCommand -> GameEvent` pipeline, per the adaptation doc, unchanged — see
   `docs/implementation/01-pipeline.md` for why `EngineCommand` doesn't decompose into a lower command tier.
 

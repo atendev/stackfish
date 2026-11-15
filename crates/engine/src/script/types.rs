@@ -13,8 +13,8 @@ use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::player::{
-    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, TimingPermission,
-    ZonePermission,
+    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier,
+    PlayerKeywordModifier, TimingPermission, ZonePermission,
 };
 use crate::types::target::TargetFilter;
 
@@ -181,6 +181,11 @@ pub(crate) struct ScriptRegistry {
     /// placeholders.
     pub(crate) pending_hand_reveal_modifiers:
         Vec<(HandRevealModifier, Option<crate::types::zone::ZoneKind>)>,
+    /// For `Game.CreatePlayerKeywordModifier`'s builder (CR 702.11c, 702.18a),
+    /// drained into `GameState.player_keyword_modifiers`, with the same
+    /// placeholders.
+    pub(crate) pending_player_keyword_modifiers:
+        Vec<(PlayerKeywordModifier, Option<crate::types::zone::ZoneKind>)>,
     /// For `Game.CreateDrawLimitModifier`'s builder (CR 121.2b), drained into
     /// `GameState.draw_limit_modifiers`, with the same placeholders.
     pub(crate) pending_draw_limit_modifiers:
