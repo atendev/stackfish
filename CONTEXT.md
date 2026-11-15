@@ -160,6 +160,14 @@ _Avoid_: Cost target, cost object
 The branch a player announces for an "A or B" additional cost, such as "discard a card or pay 3 life". It is announced with the spell or ability, like X, so the Payment Decision only ever asks for one branch. It is not an alternative cost, which replaces the mana cost.
 _Avoid_: Cost mode, optional cost
 
+**Triggered mana ability**:
+A triggered ability with no target that could add mana and triggers from an activated mana ability or from mana being added (CR 605.1b). The engine supports only the first trigger source, through the "tapped for mana" condition. It never goes on the stack and resolves right after the mana ability that triggered it (CR 605.4a). Lua declares it with `Game.CreateTriggeredManaAbility`. A trigger on the same event that deals damage or targets is an ordinary triggered ability (CR 605.5a). Mana Reflection is a replacement effect, not one of these (CR 106.12b).
+_Avoid_: Mana trigger, extra-mana effect
+
+**Tapped for mana**:
+An activated mana ability that taps its own source as a cost resolved and produced mana (CR 106.12, 106.12a). The cost is either `TapSelf` or the no-cost shape, which always taps. The engine marks it with a `ManaAbilityResolved` event whose `tapped` flag is set, so the condition never guesses from a `Tapped` and a `ManaAdded` side by side.
+_Avoid_: Mana tap, tapped and added
+
 ## Relationships
 
 - A **Session** runs exactly one game and has one or more **Seats**
