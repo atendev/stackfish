@@ -77,7 +77,9 @@ script stays dormant there. Statics, replacement effects and modifiers accept it
    controller, state) -> bool }`, the player-candidate version of (2). A bare `{ type = "player" }`
    with no `filter` key still works as an ordinary unfiltered player target.
 
-Every target word is exactly one target, with no "up to N". `:SetTarget` also takes an array of filter
+A table takes `s.target_requirement()`'s count keys (`count`, `up_to`, `at_least`,
+`exclude_source`), and `count` defaults to 1, so `{ type = "object", count = 2, up_to = true }` is "up
+to two target permanents". A bare function is exactly one target. `:SetTarget` also takes an array of filter
 tables for CR 601.2c's multi-word form, one word per entry in order, for example
 `a:SetTarget({ { type = "object", card_types = { "Creature" } }, { type = "player" } })`. Use
 [`Game.Ops.ChainEach`](game-constants.md#gameops) to give each operation its own word.

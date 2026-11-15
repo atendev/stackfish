@@ -125,6 +125,15 @@
 ---@field exclude_source? boolean         -- CR 115.4 "another target"
 ---@field filter? ScriptedTargetFn|PlayerPredicateFn  -- a function only, never a table; type = "player" takes the player predicate
 
+-- One :SetTarget word. Same keys as TargetRequirementTable, but `count` defaults to 1.
+---@class SetTargetTable : FilterTable
+---@field type? "object"|"player"|"any"|"ability"|"triggering"  -- default "object"; "triggering" takes no count keys
+---@field count? integer                  -- default 1, CR 601.2c; 0 needs at_least
+---@field up_to? boolean                  -- mutually exclusive with at_least
+---@field at_least? boolean
+---@field exclude_source? boolean         -- CR 115.4 "another target"
+---@field filter? ScriptedTargetFn|PlayerPredicateFn  -- a function only, never a table; type = "player" takes the player predicate
+
 ---@alias ScriptedTargetFn fun(object: ObjectId, source: ObjectId, controller: PlayerId, state: StateSnapshot): boolean
 ---@alias PlayerPredicateFn fun(player: PlayerId, source: ObjectId, controller: PlayerId, state: StateSnapshot): boolean
 ---@alias ConditionFn fun(source: ObjectId, controller: PlayerId, event: Event|nil, state: StateSnapshot): boolean
@@ -252,7 +261,8 @@ function TriggeredAbilityBuilder:SetText(text) end
 function TriggeredAbilityBuilder:SetOperation(value) end
 
 --- One target word, or an array of values for CR 601.2c's multi-word form (one word per entry, in order). Omit ⇒ no target requirement.
----@param value FilterTable|ScriptedTargetFn|(FilterTable|ScriptedTargetFn)[]
+--- A table word takes `count`, `up_to`, `at_least` and `exclude_source`; a bare function is exactly one target.
+---@param value SetTargetTable|ScriptedTargetFn|(SetTargetTable|ScriptedTargetFn)[]
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetTarget(value) end
 
@@ -336,7 +346,8 @@ function ActivatedAbilityBuilder:SetText(text) end
 function ActivatedAbilityBuilder:SetOperation(value) end
 
 --- One target word when set, or an array of values for CR 601.2c's multi-word form (one word per entry, in order). Optional.
----@param value FilterTable|ScriptedTargetFn|{ type: "player", filter?: PlayerPredicateFn }|(FilterTable|ScriptedTargetFn)[]
+--- A table word takes `count`, `up_to`, `at_least` and `exclude_source`; a bare function is exactly one target.
+---@param value SetTargetTable|ScriptedTargetFn|(SetTargetTable|ScriptedTargetFn)[]
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetTarget(value) end
 
