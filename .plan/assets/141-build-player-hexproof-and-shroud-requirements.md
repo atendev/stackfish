@@ -78,7 +78,7 @@ New file `crates/engine/tests/player_hexproof_shroud.rs`:
 5. `Opponent` and `Any` affect the right players. Under `Any` hexproof, each player can still target themselves (CR 702.11c).
 6. `EnchantedPlayer`: only the player the source Aura is attached to has it.
 7. `AnyTarget`: the player branch is blocked by hexproof for an opponent.
-8. `PlayerScript`: blocked, and the script predicate is not consulted.
+8. `PlayerScript`: blocked even when the script predicate returns `true`. That the predicate runs after the block is visible only in the code, because a skipped predicate and a `false` one look the same from outside.
 9. Aura spell at a player: casting an enchant-player Aura at an opponent with hexproof is rejected. The CR 608.2b recheck: the Aura spell targets a player, the player then gains hexproof (modifier pushed onto the state) before resolution, and the Aura goes to the graveyard without attaching.
 10. Attached Aura stays: an Aura attached to a player who gains shroud is not removed by the CR 704.5m SBA, because the Aura permanent does not target (CR 115.1b).
 11. Source leaves the battlefield: the modifier is purged and targeting works again.
