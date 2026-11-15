@@ -493,6 +493,32 @@ function HandRevealModifierBuilder:SetAffected(value) end
 function HandRevealModifierBuilder:Register() end
 
 -------------------------------------------------------------------------------
+-- Game.CreatePlayerKeywordModifier(c) — CR 702.11c, 702.18a "you have hexproof" / "you have shroud."
+-------------------------------------------------------------------------------
+
+---@class PlayerKeywordModifierBuilder
+local PlayerKeywordModifierBuilder = {}
+
+--- Registers only while the source is in that zone (CR 113.6b); without it, only on the battlefield.
+---@param zoneName "Hand"|"Graveyard"|"Exile"
+---@return PlayerKeywordModifierBuilder
+function PlayerKeywordModifierBuilder:SetFunctionsFrom(zoneName) end
+
+--- Which player(s) this applies to. Required before :Register().
+---@param value GameAffectedValue  -- Game.Affected.You, .Opponent, .Any or .EnchantedPlayer
+---@return PlayerKeywordModifierBuilder
+function PlayerKeywordModifierBuilder:SetAffected(value) end
+
+--- The keyword the player gets. Required before :Register(). Any other name is an error.
+---@param name "Hexproof"|"Shroud"
+---@return PlayerKeywordModifierBuilder
+function PlayerKeywordModifierBuilder:SetKeyword(name) end
+
+--- Finalizes and registers the modifier. Hexproof stops the player's opponents' spells and
+--- abilities; shroud stops everyone's, the player's own included.
+function PlayerKeywordModifierBuilder:Register() end
+
+-------------------------------------------------------------------------------
 -- Game.CreateDrawLimitModifier(c) — CR 121.2b "can't draw more than N cards each turn."
 -------------------------------------------------------------------------------
 
@@ -1391,6 +1417,10 @@ function Game.CreateHandSizeModifier(c) end
 ---@param c ObjectId
 ---@return HandRevealModifierBuilder
 function Game.CreateHandRevealModifier(c) end
+
+---@param c ObjectId
+---@return PlayerKeywordModifierBuilder
+function Game.CreatePlayerKeywordModifier(c) end
 
 ---@param c ObjectId
 ---@return DrawLimitModifierBuilder

@@ -150,6 +150,7 @@ mod permission_expiry;
 mod persist_undying;
 mod play_land;
 mod player_elimination;
+mod player_hexproof_shroud;
 mod player_target_script_filter;
 mod pregame;
 mod protection_as_replacement;

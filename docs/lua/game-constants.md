@@ -137,7 +137,7 @@ something to it, and anything else is a load error.
 | `EnchantedPlayer` | player | CR 303.4m, the player this Aura is attached to. |
 
 Player tags go to the [player modifiers](player-modifiers.md): `Game.CreateHandSizeModifier`,
-`CreateHandRevealModifier`, `CreateDrawLimitModifier`, `CreateLandPlayModifier`, `CreateTimingPermission`
+`CreateHandRevealModifier`, `CreatePlayerKeywordModifier`, `CreateDrawLimitModifier`, `CreateLandPlayModifier`, `CreateTimingPermission`
 and `CreateZonePermission`. The draw limit and land play modifiers and the timing and zone permissions
 reject `EnchantedPlayer` at `:SetAffected`, and the zone permission rejects it at `:SetOwner` too. A zone
 permission's `:SetRider` takes the name `"ExileInstead"` or `"ExileInsteadOfGraveyard"` (CR 608.2n). An object tag given to a player
@@ -392,9 +392,10 @@ works, and `RemoveKeyword("Hexproof")` or `RemoveAllAbilities` turns it off. The
 permanents on the battlefield. They don't stop anything that doesn't target (`DestroyAll`, `TapAll`,
 `ExileAll`, `ReturnAllToHand`, `ReturnAllToBattlefield`, the `*Self` forms; CR 601.2c). They also don't make an attached Aura
 or Equipment fall off, and they don't stop an Aura from entering the battlefield attached to a
-permanent: attaching that way isn't targeting. Protection does (CR 702.16c, 702.16d). Not modeled:
-hexproof/shroud on a player (CR 702.11c), "hexproof from [quality]" (CR 702.11d), and "can be the
-target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is stored but nothing reads
+permanent: attaching that way isn't targeting. Protection does (CR 702.16c, 702.16d). A player gets
+hexproof or shroud through [`Game.CreatePlayerKeywordModifier`](player-modifiers.md#gamecreateplayerkeywordmodifierc--cr-70211c-70218a).
+Not modeled: "hexproof from [quality]" (CR 702.11d) and "can be the target as though it didn't
+have hexproof" (`IgnoreKeyword("Hexproof")` is stored but nothing reads
 it yet).
 
 `Ward` isn't in the list: it needs a "becomes the target" trigger and a cost, so it can't be a

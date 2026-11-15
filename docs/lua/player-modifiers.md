@@ -3,9 +3,9 @@
 [← index](index.md)
 
 Static effects that change a *player's* rules rather than an object's characteristics: hand size,
-hand visibility, draw limits, land plays, and flash timing. Each has its own constructor and enforcement
-point — they are not CR 613 layer effects, so they don't go through
-[`Game.CreateStaticAbility`](static-abilities.md). All five follow the same shape:
+hand visibility, hexproof and shroud, draw limits, land plays, and flash timing. Each has its own
+constructor and enforcement point — they are not CR 613 layer effects, so they don't go through
+[`Game.CreateStaticAbility`](static-abilities.md). All of them follow the same shape:
 
 ```lua
 local m = Game.CreateXModifier(c)
@@ -35,7 +35,7 @@ filter table:
 | `Game.Affected.You` | the source's controller |
 | `Game.Affected.Opponent` | each opponent of the source's controller |
 | `Game.Affected.Any` | every player |
-| `Game.Affected.EnchantedPlayer` | the player this Aura is attached to (CR 303.4m). Hand size and hand reveal only; the draw limit and land play modifiers reject it at `:SetAffected`. |
+| `Game.Affected.EnchantedPlayer` | the player this Aura is attached to (CR 303.4m). Hand size, hand reveal and player keywords only; the draw limit and land play modifiers reject it at `:SetAffected`. |
 
 An object tag (`Self`, `Enchanted`, `EnchantedPlayerControls`) given to a player modifier is a load error.
 
@@ -79,6 +79,30 @@ m:Register()
 > **Not enforced.** The modifier registers and is queryable, but nothing in the engine consumes
 > it: there is no per-viewer visibility boundary yet, and card summaries never encode hand
 > contents for anyone. Registering it today changes no behavior.
+
+## `Game.CreatePlayerKeywordModifier(c)` — CR 702.11c, 702.18a
+
+"You have hexproof" or "You have shroud". `:SetKeyword(name)` is required and takes `"Hexproof"` or
+`"Shroud"`; any other name is a load error. A player has no characteristics, so `AddKeyword` can't
+give a player a keyword. This builder is the only way.
+
+```lua
+-- Leyline of Sanctity: You have hexproof.
+local m = Game.CreatePlayerKeywordModifier(c)
+m:SetAffected(Game.Affected.You)
+m:SetKeyword("Hexproof")
+m:Register()
+```
+
+Enforced wherever a spell or ability picks a player target: casting, activating, putting a trigger
+on the stack, and the recheck when it resolves. Hexproof stops only spells and abilities the
+player's opponents control. Shroud stops everyone, the player included. "You" and "opponent" follow
+the source's current controller. An Aura cast at a player is targeted and is stopped, but an Aura
+already attached to a player stays when the player gains hexproof or shroud, because an Aura
+permanent doesn't target (CR 115.1b).
+
+"You and permanents you control have hexproof" is two registrations: this modifier, and a static
+ability that adds `"Hexproof"` to your permanents.
 
 ## `Game.CreateDrawLimitModifier(c)` — CR 121.2b
 

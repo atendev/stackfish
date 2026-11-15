@@ -145,6 +145,7 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
         hand_reveal_modifiers: Vec::new(),
+        player_keyword_modifiers: Vec::new(),
         draw_limit_modifiers: Vec::new(),
         land_play_modifiers: Vec::new(),
         timing_permissions: Vec::new(),

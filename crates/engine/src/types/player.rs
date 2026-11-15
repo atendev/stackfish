@@ -110,16 +110,40 @@ pub enum HandSizeEffect {
     SetTo(u32),
 }
 
-/// CR 402.2, 303.4m: which players a `HandSizeModifier` affects.
-/// `EnchantedPlayer` resolves against `source`'s live `attached_to_player`.
-/// It is a sibling of `FilterController` because that is the CR 108.4
+/// CR 109.5, 303.4m: which players a hand size, hand reveal or player keyword
+/// modifier affects. `EnchantedPlayer` resolves against `source`'s live
+/// `attached_to_player`. It sits beside `FilterController` because that is the
 /// you/opponent/any vocabulary, unrelated to attachment (as with
 /// `AffectedFilter::EnchantedOnly`).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum HandSizeAffected {
+pub enum PlayerAffected {
     Filter(FilterController),
     EnchantedPlayer,
 }
+
+impl PlayerAffected {
+    /// Whether `player` is affected by a modifier from `source` whose "you" is
+    /// `controller`.
+    pub fn applies_to(
+        self,
+        state: &GameState,
+        source: ObjectId,
+        controller: PlayerId,
+        player: PlayerId,
+    ) -> bool {
+        match self {
+            PlayerAffected::Filter(FilterController::You) => player == controller,
+            PlayerAffected::Filter(FilterController::Opponent) => player != controller,
+            PlayerAffected::Filter(FilterController::Any) => true,
+            PlayerAffected::EnchantedPlayer => state
+                .object(source)
+                .is_some_and(|o| o.attached_to_player == Some(player)),
+        }
+    }
+}
+
+/// CR 402.2, 303.4m: which players a `HandSizeModifier` affects.
+pub type HandSizeAffected = PlayerAffected;
 
 /// CR 402.2: a static maximum-hand-size effect. Not a CR 613 layer, because
 /// hand size is not a characteristic (as with `CostModifier`). `controller` is
@@ -146,14 +170,7 @@ pub fn effective_max_hand_size(
 ) -> Option<u32> {
     let winner = modifiers
         .iter()
-        .filter(|m| match m.affected {
-            HandSizeAffected::Filter(FilterController::You) => player == m.controller,
-            HandSizeAffected::Filter(FilterController::Opponent) => player != m.controller,
-            HandSizeAffected::Filter(FilterController::Any) => true,
-            HandSizeAffected::EnchantedPlayer => state
-                .object(m.source)
-                .is_some_and(|o| o.attached_to_player == Some(player)),
-        })
+        .filter(|m| m.affected.applies_to(state, m.source, m.controller, player))
         .max_by_key(|m| m.timestamp.0);
     match winner {
         Some(m) => match m.effect {
@@ -165,14 +182,7 @@ pub fn effective_max_hand_size(
 }
 
 /// CR 701.20, 701.18c, 303.4m: which players a `HandRevealModifier` affects.
-/// A separate type from `HandSizeAffected` despite the same shape, because
-/// they serve unrelated rules. Extract a shared type if a third mechanism
-/// needs it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum HandRevealAffected {
-    Filter(FilterController),
-    EnchantedPlayer,
-}
+pub type HandRevealAffected = PlayerAffected;
 
 /// CR 701.20a, 701.18c: a static "plays with hand revealed" effect, such as
 /// Telepathy (CR 701.20c). Not a CR 613 layer. It has no `effect` field,
@@ -200,14 +210,32 @@ pub fn is_hand_revealed(
     modifiers: &[HandRevealModifier],
     player: PlayerId,
 ) -> bool {
-    modifiers.iter().any(|m| match m.affected {
-        HandRevealAffected::Filter(FilterController::You) => player == m.controller,
-        HandRevealAffected::Filter(FilterController::Opponent) => player != m.controller,
-        HandRevealAffected::Filter(FilterController::Any) => true,
-        HandRevealAffected::EnchantedPlayer => state
-            .object(m.source)
-            .is_some_and(|o| o.attached_to_player == Some(player)),
-    })
+    modifiers
+        .iter()
+        .any(|m| m.affected.applies_to(state, m.source, m.controller, player))
+}
+
+/// CR 702.11c, 702.18a: the keywords a player can have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayerKeyword {
+    Hexproof,
+    Shroud,
+}
+
+/// CR 702.11c, 702.18a: a static "you have hexproof" or "you have shroud"
+/// effect (Leyline of Sanctity, True Believer). Not a CR 613 layer, because a
+/// player has no characteristics. `commands::target_is_legal` enforces it, and
+/// `controller` is only the drain-time stamp: the check reads the source's
+/// live controller, so a control change moves the "you" (CR 109.5).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerKeywordModifier {
+    pub source: ObjectId,
+    pub controller: PlayerId,
+    pub affected: PlayerAffected,
+    pub keyword: PlayerKeyword,
+    /// Kept for consistency with `HandRevealModifier::timestamp`. Instances
+    /// are redundant (CR 702.11h, 702.18b), so nothing breaks ties.
+    pub timestamp: SequenceNo,
 }
 
 /// CR 121.2b: which players a `DrawLimitModifier` affects. Only `Filter`,

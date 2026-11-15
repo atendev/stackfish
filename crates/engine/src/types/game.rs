@@ -8,8 +8,8 @@ use crate::types::event::GameEvent;
 use crate::types::ids::{AbilityId, EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
 use crate::types::player::{
-    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, PlayerState,
-    TimingPermission, ZonePermission,
+    DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier,
+    PlayerKeywordModifier, PlayerState, TimingPermission, ZonePermission,
 };
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
@@ -80,6 +80,9 @@ pub struct GameState {
     /// CR 701.20a, 701.18c: "plays with hand revealed" effects. See
     /// `HandRevealModifier`. Nothing enforces them yet.
     pub hand_reveal_modifiers: Vec<HandRevealModifier>,
+    /// CR 702.11c, 702.18a: "you have hexproof" and "you have shroud" effects.
+    /// See `PlayerKeywordModifier`. Read by `commands::target_is_legal`.
+    pub player_keyword_modifiers: Vec<PlayerKeywordModifier>,
     /// CR 121.2b: draw-limit effects. See `DrawLimitModifier`.
     pub draw_limit_modifiers: Vec<DrawLimitModifier>,
     /// CR 305.2: "play an additional land" effects, summed instead of taking
@@ -305,6 +308,7 @@ mod tests {
             cost_modifiers: Vec::new(),
             hand_size_modifiers: Vec::new(),
             hand_reveal_modifiers: Vec::new(),
+            player_keyword_modifiers: Vec::new(),
             draw_limit_modifiers: Vec::new(),
             land_play_modifiers: Vec::new(),
             timing_permissions: Vec::new(),

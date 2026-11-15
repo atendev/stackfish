@@ -22,8 +22,8 @@ use crate::types::effect::{
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::player::{
     DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
-    HandSizeModifier, LandPlayAffected, LandPlayModifier, TimingPermission, ZonePermission,
-    ZonePermissionKind,
+    HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerAffected, PlayerKeyword,
+    PlayerKeywordModifier, TimingPermission, ZonePermission, ZonePermissionKind,
 };
 use crate::types::stack::LeaveStackRider;
 use crate::types::target::TargetSpec;
@@ -1142,6 +1142,84 @@ impl UserData for HandRevealModifierBuilder {
                 // Placeholder, stamped by `run_card_script`'s drain step.
                 timestamp: SequenceNo(0),
             }, this.function_zone));
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreatePlayerKeywordModifier(c)`'s return value (CR 702.11c,
+/// 702.18a), mirroring `HandSizeModifierBuilder` with `:SetKeyword` as its
+/// magnitude setter. A player has no characteristics, so this and not
+/// `AddKeyword` is how a player gets hexproof or shroud.
+pub(crate) struct PlayerKeywordModifierBuilder {
+    pub(crate) source: ObjectId,
+    pub(crate) affected: Option<PlayerAffected>,
+    pub(crate) keyword: Option<PlayerKeyword>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
+    pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for PlayerKeywordModifierBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
+        methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
+            this.affected = Some(
+                match decode_player_affected(value, "a player keyword modifier")? {
+                    AffectedTag::EnchantedPlayer => PlayerAffected::EnchantedPlayer,
+                    tag => PlayerAffected::Filter(reject_enchanted_player(
+                        tag,
+                        "a player keyword modifier",
+                    )?),
+                },
+            );
+            Ok(())
+        });
+        methods.add_method_mut("SetKeyword", |_, this, name: String| {
+            this.keyword = Some(match name.as_str() {
+                "Hexproof" => PlayerKeyword::Hexproof,
+                "Shroud" => PlayerKeyword::Shroud,
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "a player keyword modifier can't grant {other:?} - :SetKeyword takes \"Hexproof\" or \"Shroud\""
+                    )));
+                }
+            });
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let affected = this.affected.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetAffected() - a player keyword modifier needs to \
+                     know which player(s) it affects"
+                        .to_string(),
+                )
+            })?;
+            let keyword = this.keyword.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetKeyword() - a player keyword modifier needs a \
+                     keyword"
+                        .to_string(),
+                )
+            })?;
+            this.registry
+                .borrow_mut()
+                .pending_player_keyword_modifiers
+                .push((
+                    PlayerKeywordModifier {
+                        source: this.source,
+                        // Placeholder, stamped by `run_card_script`'s drain step.
+                        controller: PlayerId(0),
+                        affected,
+                        keyword,
+                        // Placeholder, stamped by `run_card_script`'s drain step.
+                        timestamp: SequenceNo(0),
+                    },
+                    this.function_zone,
+                ));
             Ok(())
         });
     }
