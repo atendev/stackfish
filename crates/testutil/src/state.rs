@@ -57,6 +57,7 @@ pub fn two_player_state(zones: Vec<Zone>) -> GameState {
         exiled_with: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
+        delayed_triggers: Vec::new(),
     }
 }
 
@@ -119,6 +120,7 @@ pub fn single_player_state(player: PlayerId, zones: Vec<Zone>) -> GameState {
         exiled_with: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
+        delayed_triggers: Vec::new(),
     }
 }
 

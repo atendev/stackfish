@@ -1,0 +1,102 @@
+# CR 603.7, 603.7c: a sorcery returns a creature card from p0's graveyard and
+# makes a delayed trigger that exiles the creature that entered. The creature
+# stays on the battlefield through combat and is exiled once the trigger
+# resolves in the end step.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "whip"
+name = "Test Brief Reanimation"
+types = ["Sorcery"]
+script = """
+local s = {}
+function s.operation()
+    return Game.Ops.Chain(
+        Game.Ops.ReturnToBattlefield(),
+        Game.Ops.AtNextEndStep(Game.Ops.Exile, "entered")
+    )
+end
+function s.register_abilities(c)
+end
+return s
+"""
+
+[cards.target_requirement]
+filter = "object"
+card_types = ["Creature"]
+zone = "graveyard"
+count = 1
+
+[[setup]]
+player = 0
+zone = "graveyard"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "whip"
+
+[[steps]]
+type = "advance_to_step"
+step = "pre_combat_main"
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "whip"
+targets = ["bear"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
+
+[[steps]]
+type = "advance_to_step"
+step = "end"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "exile"

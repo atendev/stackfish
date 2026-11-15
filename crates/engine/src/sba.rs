@@ -252,6 +252,11 @@ fn remove_players_objects(state: &mut GameState, player: PlayerId) -> Vec<GameEv
         });
     }
 
+    // CR 800.4a: delayed triggers the player controls leave with them.
+    state
+        .delayed_triggers
+        .retain(|row| row.controller != player);
+
     // CR 800.4a: a spell goes with its owner; stack objects not represented by cards
     // (abilities) go with their controller.
     let stack_ids: Vec<ObjectId> = state

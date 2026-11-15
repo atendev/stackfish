@@ -17,8 +17,9 @@ use crate::types::target::{
 use crate::types::zone::ZoneKind;
 
 use super::tags::{
-    AffectedTag, ConditionTag, CostComponent, CostTag, CounterTag, EffectPrimitiveTag, FilterTag,
-    ForEachPlayerTag, InterveningIfTag, LayerTag, ModeChoiceTag, OncePerTurnTag, OperationTag,
+    AffectedTag, ConditionTag, CostComponent, CostTag, CounterTag, DelayedTag, EffectPrimitiveTag,
+    FilterTag, ForEachPlayerTag, InterveningIfTag, LayerTag, ModeChoiceTag, OncePerTurnTag,
+    OperationTag,
 };
 use super::types::{ScriptChoiceRequest, ScriptError, ScriptRegistry};
 
@@ -118,6 +119,11 @@ pub(crate) fn decode_operation_value(
                 )),
             }
         }
+        Value::UserData(ref ud) if ud.is::<DelayedTag>() => Err(ScriptError::LoadError(
+            "Game.Ops.AtNextEndStep must be an entry of Game.Ops.Chain, as in \
+             Game.Ops.Chain(op, Game.Ops.AtNextEndStep(...))"
+                .to_string(),
+        )),
         Value::UserData(ud) => {
             let tag: OperationTag = ud
                 .borrow::<OperationTag>()

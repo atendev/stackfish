@@ -197,6 +197,7 @@ impl Engine {
             exiled_with: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
+            delayed_triggers: Vec::new(),
         };
 
         let mut engine = Engine {

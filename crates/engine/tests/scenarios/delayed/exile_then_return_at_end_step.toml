@@ -1,0 +1,100 @@
+# CR 400.7j, 603.7c: a sorcery exiles target creature and returns it at the
+# beginning of the next end step. The delayed trigger follows the card into
+# exile, so it finds the card there and returns it.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "flicker"
+name = "Test Delayed Flicker"
+types = ["Sorcery"]
+script = """
+local s = {}
+function s.operation()
+    return Game.Ops.Chain(
+        Game.Ops.Exile,
+        Game.Ops.AtNextEndStep(Game.Ops.ReturnToBattlefield(), "targets")
+    )
+end
+function s.register_abilities(c)
+end
+return s
+"""
+
+[cards.target_requirement]
+filter = "object"
+card_types = ["Creature"]
+count = 1
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "flicker"
+
+[[steps]]
+type = "advance_to_step"
+step = "pre_combat_main"
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "flicker"
+targets = ["bear"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "exile"
+
+[[steps]]
+type = "advance_to_step"
+step = "end"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "exile"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"

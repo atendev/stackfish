@@ -26,4 +26,4 @@ Build `GameState.delayed_triggers`, a list of one-shot delayed triggered abiliti
 
 ## Resolution
 
-<Filled in at close.>
+Built on `phase5/delayed-end-step-triggers-3` (PR #9, CI green). `GameState.delayed_triggers` holds one-shot `DelayedTrigger` rows made by a `Game.Ops.AtNextEndStep(op, refers)` entry in `Chain` or `ChainEach` (CR 603.7). A row matches only end-step events after it was made (CR 603.7a, 513.2), triggers once (CR 603.7b), goes on the stack untargeted with that step's other triggers in APNAP order, and acts only on referred objects still in their recorded zones (CR 603.7c). `"targets"` follows a target an earlier entry moved to a public zone (CR 400.7j). The sonnet audit approved in round 2. The push-time skip for a departed controller has no test, because a two-player elimination ends the game first. Details: `.plan/assets/164-build-delayed-end-step-triggers-report.md` and `docs/implementation/42-delayed-triggers.md`.

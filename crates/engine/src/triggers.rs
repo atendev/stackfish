@@ -54,6 +54,7 @@ pub fn collect_triggers(
         .iter()
         .any(|a| a.kind == AbilityKind::Triggered)
         && departed.is_empty()
+        && state.delayed_triggers.is_empty()
     {
         // No triggered ability exists, so there is nothing to match.
         return (Vec::new(), Vec::new());
@@ -240,6 +241,22 @@ pub fn collect_triggers(
                 ability: ability.id,
                 once_per_turn,
                 triggering_stack: triggering_stack_of(&event.kind),
+            });
+        }
+    }
+
+    // CR 603.7a, 603.7b: a row matches only events after it was made, and only once.
+    for row in &state.delayed_triggers {
+        if !row.triggered
+            && event.event_id.0 >= row.created_after.0
+            && row.when.matches(&event.kind)
+        {
+            pending.push(PendingTrigger {
+                source: row.source,
+                controller: row.controller,
+                ability: row.id,
+                once_per_turn: false,
+                triggering_stack: None,
             });
         }
     }

@@ -724,6 +724,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> InitialState {
         exiled_with: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
+        delayed_triggers: Vec::new(),
     };
 
     (

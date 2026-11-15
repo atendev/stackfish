@@ -15,6 +15,7 @@ use crate::types::zone::ZoneKind;
 
 mod cascade;
 mod counter;
+mod delayed;
 mod destruction;
 mod direct_effects;
 mod discard;
@@ -29,6 +30,7 @@ mod tokens;
 
 use super::{Engine, ProcessState, StepStatus};
 
+pub(in crate::engine) use delayed::delayed_ability_text;
 pub(in crate::engine) use modal::ModalContinuation;
 
 impl Engine {
@@ -90,6 +92,8 @@ impl Engine {
             )
         };
         let legal_targets: Vec<Target> = match &top.target_requirement {
+            // CR 603.7c: a delayed ability targets nothing, so it never fizzles.
+            _ if !top.delayed_refers.is_empty() => self.delayed_targets_still_there(&top),
             Some(TargetSpec::Primitive(req)) => top
                 .targets
                 .iter()
@@ -299,6 +303,9 @@ impl Engine {
                 modal_chunk_legals,
                 events,
             ),
+            // CR 603.7: the chain loop makes the row, since it needs the ledger
+            // position the resolution began at. Load rejects it anywhere else.
+            Some(AbilityEffect::AtNextEndStep { .. }) => ControlFlow::Continue(events),
             Some(AbilityEffect::GainLife(amount)) => {
                 self.resolve_gain_life_effect(top, *amount, events)
             }

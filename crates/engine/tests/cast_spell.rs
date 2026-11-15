@@ -337,6 +337,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
         division: Vec::new(),
         ability_index: None,
         ability_text: None,
+        delayed_refers: Vec::new(),
         stack_id: already_on_stack,
         kind: StackEntryKind::Spell,
         source: already_on_stack,

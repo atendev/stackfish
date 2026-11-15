@@ -29,6 +29,9 @@ pub(in crate::engine) struct ModalContinuation {
     shared_legal: Option<Vec<Target>>,
     /// Index of the next mode to run.
     next: usize,
+    /// The ledger length when the resolution began, which an
+    /// `AtNextEndStep` entry reads after a pause (CR 603.7).
+    since_ledger: usize,
 }
 
 impl ModalContinuation {
@@ -119,6 +122,7 @@ impl Engine {
         modal_chunk_shares: &[Vec<u32>],
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let since_ledger = self.resolution_since_ledger();
         self.resolve_modal_from(
             top,
             effects,
@@ -127,8 +131,15 @@ impl Engine {
             modal_chunk_shares,
             None,
             0,
+            since_ledger,
             events,
         )
+    }
+
+    fn resolution_since_ledger(&self) -> usize {
+        self.pipeline_context
+            .as_ref()
+            .map_or(self.state.ledger.len(), |context| context.since_ledger)
     }
 
     /// CR 608.2c — `AbilityEffect::Chain`: every entry runs in order.
@@ -145,6 +156,7 @@ impl Engine {
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let effects: Vec<Option<AbilityEffect>> = entries.iter().cloned().map(Some).collect();
+        let since_ledger = self.resolution_since_ledger();
         match words {
             None => self.resolve_modal_from(
                 top,
@@ -154,6 +166,7 @@ impl Engine {
                 &[],
                 Some(legal_targets),
                 0,
+                since_ledger,
                 events,
             ),
             Some(words) => {
@@ -168,7 +181,17 @@ impl Engine {
                     }
                     _ => modal_chunk_legals,
                 };
-                self.resolve_modal_from(top, &effects, words, chunks, &[], None, 0, events)
+                self.resolve_modal_from(
+                    top,
+                    &effects,
+                    words,
+                    chunks,
+                    &[],
+                    None,
+                    0,
+                    since_ledger,
+                    events,
+                )
             }
         }
     }
@@ -183,6 +206,7 @@ impl Engine {
         shares: &[Vec<u32>],
         shared_legal: Option<&[Target]>,
         start: usize,
+        since_ledger: usize,
         mut events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         for index in start..effects.len() {
@@ -207,6 +231,7 @@ impl Engine {
                 shares: shares.to_vec(),
                 shared_legal: shared_legal.map(<[Target]>::to_vec),
                 next,
+                since_ledger,
             };
 
             // Earlier modes' proposed events (damage, counters) have to land
@@ -222,6 +247,16 @@ impl Engine {
                     checked: Vec::new(),
                 };
                 return ControlFlow::Break(StepStatus::Progressed);
+            }
+
+            // CR 603.7a: made here, after every earlier entry's events landed.
+            if let AbilityEffect::AtNextEndStep {
+                effect: delayed,
+                refers,
+            } = effect
+            {
+                self.create_delayed_trigger(top, &legal, delayed, *refers, since_ledger);
+                continue;
             }
 
             let has_later_mode = effects[index + 1..].iter().any(Option::is_some);
@@ -267,6 +302,7 @@ impl Engine {
             shares,
             shared_legal,
             next,
+            since_ledger,
         } = continuation;
         match self.resolve_modal_from(
             &top,
@@ -276,6 +312,7 @@ impl Engine {
             &shares,
             shared_legal.as_deref(),
             next,
+            since_ledger,
             Vec::new(),
         ) {
             ControlFlow::Break(status) => status,

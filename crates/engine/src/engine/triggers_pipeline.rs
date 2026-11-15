@@ -9,7 +9,8 @@ use crate::triggers::{self, PendingTrigger};
 use crate::types::ability::AbilityEffect;
 use crate::types::card::ModeChoice;
 use crate::types::event::{GameEvent, GameEventKind};
-use crate::types::ids::{ObjectId, PlayerId, Target};
+use crate::types::game::DelayedTrigger;
+use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::target::{TargetFilter, TargetSpec};
 
@@ -134,6 +135,15 @@ impl Engine {
                 if trigger.once_per_turn {
                     self.state.once_per_turn_triggered.insert(trigger.ability);
                 }
+                // CR 603.7b
+                if let Some(row) = self
+                    .state
+                    .delayed_triggers
+                    .iter_mut()
+                    .find(|row| row.id == trigger.ability)
+                {
+                    row.triggered = true;
+                }
             }
             pending.extend(matches);
             script_errors.extend(errors);
@@ -191,6 +201,20 @@ impl Engine {
         mut remaining: VecDeque<PendingTrigger>,
     ) -> StepStatus {
         while let Some(trigger) = remaining.pop_front() {
+            // CR 603.7b: a delayed row leaves the list as it goes on the stack.
+            if let Some(index) = self
+                .state
+                .delayed_triggers
+                .iter()
+                .position(|row| row.id == trigger.ability)
+            {
+                let row = self.state.delayed_triggers.remove(index);
+                // CR 800.4a, 800.4d
+                if commands::non_eliminated_players(&self.state).contains(&row.controller) {
+                    self.push_delayed_stack_object(row);
+                }
+                continue;
+            }
             // CR 603.10: a dies or leaves trigger's source is gone from `abilities`, so
             // fall back to the departed stash.
             let ability =
@@ -388,6 +412,53 @@ impl Engine {
         if self.state.ledger.len() > ledger_before && self.recollect_triggers_since.is_none() {
             self.recollect_triggers_since = Some(ledger_before);
         }
+    }
+
+    /// CR 603.7c: a delayed ability does not target, so `targets` only names
+    /// what it refers to and no `BecameTarget` is logged.
+    fn push_delayed_stack_object(&mut self, row: DelayedTrigger) {
+        let stack_id = self.state.allocate_object_id();
+        // CR 800.4a: an ability's owner is its source's owner.
+        let owner = self
+            .state
+            .object(row.source)
+            .or(row.source_lki.as_ref())
+            .map_or(row.controller, |o| o.owner);
+        let targets = row
+            .refers
+            .iter()
+            .map(|&(id, _)| Target::Object(id))
+            .collect();
+        let ability_text = super::resolve::delayed_ability_text(&row.effect);
+        let mut entry = StackObject::new(
+            stack_id,
+            StackEntryKind::TriggeredAbility,
+            row.source,
+            owner,
+            row.controller,
+            Vec::new(),
+            targets,
+            None,
+            None,
+            None,
+            false,
+            false,
+            ScriptHandle(0),
+            Some(row.effect),
+            None,
+            None,
+            row.source_lki,
+        );
+        entry.ability_text = Some(ability_text);
+        entry.delayed_refers = row.refers;
+        self.state.stack.push(entry);
+        let event_id = self.state.allocate_event_id();
+        let sequence_no = self.state.allocate_sequence_no();
+        self.state.ledger.push(GameEvent::new(
+            event_id,
+            sequence_no,
+            GameEventKind::StackObjectPushed { stack_id },
+        ));
     }
 
     /// The effect a trigger target pause feeds: the chosen modes' combined

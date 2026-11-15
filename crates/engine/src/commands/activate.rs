@@ -389,6 +389,8 @@ pub(super) fn validate_activate_ability(
         | Some(AbilityEffect::Bite)
         // CR 608.2c: several effects in one ability, run in order.
         | Some(AbilityEffect::Chain { .. })
+        // Only ever a `Chain` entry, so never an ability's whole effect.
+        | Some(AbilityEffect::AtNextEndStep { .. })
         // CR 700.2a
         // Two or more chosen modes of a modal ability, combined above.
         | Some(AbilityEffect::Modal { .. })

@@ -170,6 +170,7 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         exiled_with: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
+        delayed_triggers: Vec::new(),
     }
 }
 

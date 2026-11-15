@@ -60,6 +60,7 @@ mod cycling_triggers;
 mod damage_dealt_triggers;
 mod db_scripts_smoke;
 mod decision_answer_facade;
+mod delayed_triggers;
 mod destroy_ordering_choice;
 mod devour;
 mod devour_amplify_search_entry;

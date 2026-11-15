@@ -289,10 +289,11 @@ Game.Ops.Cascade
 ```lua
 Game.Ops.Chain(a, b, ...)
 Game.Ops.ChainEach({ op, words }, ...)
+Game.Ops.AtNextEndStep(op, refers)
 Game.Ops.ForEachPlayer(x)
 ```
 
-`Chain` runs several operations in order. `ChainEach` assigns target words to entries. `ForEachPlayer` takes a function or a bare `SacrificeRandom`, `DiscardRandom`, `Mill`, or `LoseLife` value.
+`Chain` runs several operations in order. `ChainEach` assigns target words to entries. `AtNextEndStep` is a `Chain` or `ChainEach` entry that makes a delayed trigger doing `op` (`Exile`, `Sacrifice`, `Destroy`, `ReturnToHand` or `ReturnToBattlefield`) at the beginning of the next end step, to `refers`: `"targets"`, `"self"` or `"entered"` (CR 603.7). `ForEachPlayer` takes a function or a bare `SacrificeRandom`, `DiscardRandom`, `Mill`, or `LoseLife` value.
 
 ### Mid-resolution choices
 

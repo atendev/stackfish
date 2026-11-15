@@ -144,6 +144,7 @@ fn all_pass_with_nonempty_stack_resolves_top_instead_of_advancing_step() {
         division: Vec::new(),
         ability_index: None,
         ability_text: None,
+        delayed_refers: Vec::new(),
         stack_id,
         kind: StackEntryKind::Spell,
         source: stack_id,

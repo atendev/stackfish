@@ -309,6 +309,7 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
         division: Vec::new(),
         ability_index: None,
         ability_text: None,
+        delayed_refers: Vec::new(),
         stack_id: already_on_stack,
         kind: StackEntryKind::Spell,
         source: already_on_stack,
