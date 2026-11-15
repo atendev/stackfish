@@ -272,3 +272,37 @@ fn the_fingerprint_sees_a_permission_duration() {
         });
     assert_ne!(fingerprint(&fixed), fingerprint(&timed));
 }
+
+#[test]
+fn the_fingerprint_sees_delayed_rows_but_not_their_ids() {
+    // CR 104.4b, 603.7
+    let row = crate::types::game::DelayedTrigger {
+        id: AbilityId(7),
+        source: ObjectId(5),
+        source_lki: None,
+        controller: P0,
+        when: crate::types::game::DelayedWhen::NextEndStep,
+        effect: crate::types::ability::AbilityEffect::Exile,
+        refers: vec![(ObjectId(5), crate::types::zone::ZoneKind::Battlefield)],
+        created_after: EventId(3),
+        triggered: false,
+    };
+    let mut a = two_players();
+    a.delayed_triggers.push(row.clone());
+    let mut b = two_players();
+    b.delayed_triggers.push(crate::types::game::DelayedTrigger {
+        id: AbilityId(40),
+        created_after: EventId(90),
+        ..row.clone()
+    });
+    let mut triggered = two_players();
+    triggered
+        .delayed_triggers
+        .push(crate::types::game::DelayedTrigger {
+            triggered: true,
+            ..row
+        });
+    assert_eq!(fingerprint(&a), fingerprint(&b));
+    assert_ne!(fingerprint(&a), fingerprint(&two_players()));
+    assert_ne!(fingerprint(&a), fingerprint(&triggered));
+}

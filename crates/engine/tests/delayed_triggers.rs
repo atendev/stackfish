@@ -793,6 +793,29 @@ fn at_next_end_step_outside_a_chain_is_a_load_error() {
         decode(r#"Game.Ops.ForEachPlayer(Game.Ops.AtNextEndStep(Game.Ops.Exile, "self"))"#)
             .expect_err("inside ForEachPlayer");
     assert!(nested.contains("ForEachPlayer expects"), "{nested}");
+    let as_mode = ScriptRuntime::new()
+        .build_modes(
+            r#"
+local s = {}
+function s.modes()
+    return {
+        choice = Game.ModeChoice.Exactly(1),
+        modes = {
+            { operation = Game.Ops.AtNextEndStep(Game.Ops.Exile, "self") },
+            { operation = Game.Ops.GainLife(3) },
+        },
+    }
+end
+return s
+"#,
+        )
+        .map(|_| ())
+        .expect_err("as a mode");
+    let as_mode = format!("{as_mode:?}");
+    assert!(
+        as_mode.contains("must be an entry of Game.Ops.Chain"),
+        "{as_mode}"
+    );
 }
 
 // CR 603.7
