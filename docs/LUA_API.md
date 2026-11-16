@@ -191,6 +191,7 @@ Game.Ops.ExileSelf
 Game.Ops.ExileAll(filter, zone?)
 Game.Ops.ExileUntilSourceLeaves
 Game.Ops.ExileLinked
+Game.Ops.ExileTopLinked(n)
 Game.Ops.Regenerate
 ```
 
@@ -523,6 +524,7 @@ p:SetAffected(game_affected_value)
 p:SetZone("Graveyard" | "Exile" | "Library")
 p:SetFromLibraryTop()
 p:SetLinked()
+p:SetExiledByThisEffect()
 p:SetRevealTop()
 p:SetKind("PlayLand" | "Cast")
 p:SetOwner(game_affected_value)
@@ -531,7 +533,7 @@ p:SetRider("ExileInstead" | "ExileInsteadOfGraveyard")
 p:Register()
 ```
 
-`:SetRider` needs `:SetKind("Cast")`. See [lua/player-modifiers.md](lua/player-modifiers.md).
+`:SetRider` needs `:SetKind("Cast")`. `:SetExiledByThisEffect` needs a grant (`Game.Ops.GrantZonePermission`), `:SetZone("Exile")` and no `:SetLinked`. See [lua/player-modifiers.md](lua/player-modifiers.md).
 
 ### `Game.HandSizeEffects.*`
 

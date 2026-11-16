@@ -31,8 +31,10 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - Conditional flash, "as though it were a main phase" and instant-speed equip are not built.
   - `Permanent`, `WhileConditionHolds` and "until the source leaves" durations are refused for a grant (CR 611.2b).
 - **Zone permissions (`phase5/zone-permissions`)**: see `36-zone-permissions.md`. Open items:
-  - A Timed linked grant matches nothing once its source leaves, so a spell's impulse draw has no exile link
-    (CR 607.2a).
+  - A Timed `:SetLinked()` grant matches nothing once its source leaves (CR 607.2a). An impulse draw uses
+    `:SetExiledByThisEffect()` instead (`36-zone-permissions.md`).
+  - "Until the end of your next turn" has no `EffectDuration`, so Light Up the Stage cannot be built (CR 400.7j).
+    `ExileTopLinked` has no per-player form inside `ForEachPlayer` and exiles face up.
   - Leave-stack riders are built (see `38-zone-permission-riders.md`). Open: "if it would die or leave exile this way"
     riders, battlefield-side exile such as unearth, and a rider on a permanent spell's battlefield entry.
   - A player choice between matching permissions (CR 601.2) and once-per-turn permission limits are not built.
@@ -40,8 +42,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - Face-down linked cards are never offered (CR 601.3f), since nothing makes a card face down yet.
   - Revealing the top applies only to permissions, not the stand-alone "play with the top card revealed" effect
     (CR 401.5). Decided in ticket 094 (library top views and a `LibraryTopShown` event), and the build is ticket 119.
-  - Linked records do not cover cards exiled by a replaced source copy, and `ExileLinked` has no untargeted or
-    library form (CR 607.2a).
+  - Linked records do not cover cards exiled by a replaced source copy, and `ExileLinked` has no untargeted
+    form (CR 607.2a).
 - **Delayed triggers (`phase5/delayed-end-step-triggers`)**: see `42-delayed-triggers.md`. Open items: timings other than the next end step, stated durations and the CR 603.7b simultaneous-event choice, CR 603.7f-h, a chain acting on one of two entered groups, showing pending rows to players, the general CR 701.21a control check in `resolve_sacrifice_effect`, encore, dash, blitz and mobilize, and a spell card that reaches its graveyard before its later chain entries finish (CR 608.2n).
 - **Chain operations (`phase5/chain-operations`, `phase5/chain-per-entry-targets`)**: see `25-chain-operations.md`. Open items:
   - A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode

@@ -634,6 +634,12 @@ function ZonePermissionBuilder:SetFromLibraryTop() end
 ---@return ZonePermissionBuilder
 function ZonePermissionBuilder:SetLinked() end
 
+--- CR 400.7j: opens only the cards the earlier Game.Ops.ExileTopLinked in the same Game.Ops.Chain exiled.
+--- Needs SetZone("Exile") and a grant through Game.Ops.GrantZonePermission, so :Register() refuses it. An
+--- error with :SetLinked(). The cards are copied when the grant resolves, and a card that leaves exile drops out.
+---@return ZonePermissionBuilder
+function ZonePermissionBuilder:SetExiledByThisEffect() end
+
 --- CR 401.5: every player sees the top card :SetFromLibraryTop() opens ("play with the top
 --- card of your library revealed"). Needs :SetFromLibraryTop().
 ---@return ZonePermissionBuilder
@@ -888,6 +894,13 @@ GameOpsTable.ExileUntilSourceLeaves = nil
 --- exile or the source leaves the battlefield.
 ---@type GameOpsValue
 GameOpsTable.ExileLinked = nil
+
+--- CR 400.7j: "exile the top `n` cards of your library" face up, for a grant later in the same chain to open
+--- with :SetExiledByThisEffect(). The player is the controller unless the ability declares a player target, as
+--- for Mill. A short library exiles what it has, and an empty one exiles nothing without losing the game.
+---@param n integer
+---@return GameOpsValue
+function GameOpsTable.ExileTopLinked(n) end
 
 --- CR 110.2a/400.7: "return target creature card from a graveyard to the battlefield". Declare the target with a
 --- `zone = "Graveyard"` (or "Exile") filter. Replacement-checked, then the card enters as a new object with its
