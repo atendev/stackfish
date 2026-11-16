@@ -103,6 +103,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 141 Build player hexproof and shroud. `Game.CreatePlayerKeywordModifier` gives `You`, `Opponent`, `Any` or `EnchantedPlayer` hexproof or shroud, enforced in the Player, PlayerScript and any-target player arms but not in attachment legality (CR 115.1b). "You" follows the source's current controller, and the hand modifiers share `PlayerAffected`. Protection on players is 181. Built by a wayfinder child. [closed/141-build-player-hexproof-and-shroud.md](closed/141-build-player-hexproof-and-shroud.md)
 - 164 Build delayed end-step triggers. `GameState.delayed_triggers` holds one-shot rows made by a `Game.Ops.AtNextEndStep(op, refers)` chain entry (CR 603.7). A row fires once at the next end step and acts only on objects still in their recorded zones (CR 603.7c). The skip for a departed controller has no test, since a two-player elimination ends the game first. Found 182 and 183. Built by a wayfinder child. [closed/164-build-delayed-end-step-triggers.md](closed/164-build-delayed-end-step-triggers.md)
 - 176 Triggered mana abilities. A new `ManaAbilityResolved` event with a `tapped` flag feeds `Game.Conditions.TappedForMana`. `Game.CreateTriggeredManaAbility` triggers split off at collection and resolve at once in registration order (CR 605.1b, 605.4a). A `ChooseManaColors` Decision picks colors, the Payment Decision is unchanged, the mana goes to the tapping player, and `Game.Ops.AddManaOfProducedType` is added. `PROTOCOL_VERSION` stays 1. The build is 179, and 180 holds stack triggers fired mid-payment. Grilled with the user. [closed/176-triggered-mana-abilities.md](closed/176-triggered-mana-abilities.md)
+- 117 Build effect-owned exile links. `ZonePermission.linked` is `ExileLink { None, Source, Cards }`, and `Game.Ops.ExileTopLinked(n)` plus `:SetExiledByThisEffect()` build an impulse draw (Act on Impulse) from `exiled_this_resolution`, cleared at resolve start and at the `StackObjectResolved` and `Fizzled` commits. A `Cards` row ignores `owners` and loses a card that changes zones. No proof-game change. [closed/117-build-effect-owned-exile-links.md]
 
 ## Not yet specified
 
@@ -181,7 +182,6 @@ Decisions (HITL):
 
 Builds and audits:
 
-- 117 Build effect-owned exile links and a library-top `ExileLinked`
 - 119 Build library top views and the shown-top event
 - 120 Build scenario assertions and fixture fields
 - 122 Delete `invoke_cost` and the unpayable `Other` cost
