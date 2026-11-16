@@ -21,7 +21,7 @@ A resolving spell or ability can grant a timing or zone permission for a stated 
 
 ## Linked grants
 
-`ExileLinked` records links only under a battlefield source, and a link ends when its source moves. A Timed linked grant from a permanent that stays matches its cards. One from a spell matches nothing, which is a TODO on `ZonePermission::linked` (CR 607.2a). A spell's impulse draw uses an `ExileLink::Cards` row instead, filled from `exiled_this_resolution` at resolution, so it survives its source and expires with its `duration` (CR 400.7j).
+`ExileLinked` records links only under a battlefield source, and a link ends when its source moves. A Timed linked grant from a permanent that stays matches its cards. One from a spell matches nothing (CR 607.2a). A spell's impulse draw uses an `ExileLink::Cards` row instead, filled from `exiled_this_resolution` at resolution, so it survives its source and expires with its `duration` (CR 400.7j).
 
 ## Lua
 

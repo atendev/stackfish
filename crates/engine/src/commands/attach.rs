@@ -90,8 +90,8 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     state.land_play_modifiers.retain(|m| m.source != old_id);
 }
 
-/// CR 400.7: a card that changes zones is a new object, so a `Cards` permission
-/// stops naming it. An emptied row stays until its duration and matches nothing.
+/// CR 400.7: a `Cards` permission stops naming a card that changes zones. An
+/// emptied row stays until its duration and matches nothing.
 fn prune_linked_cards(state: &mut GameState, old_id: ObjectId) {
     for permission in &mut state.zone_permissions {
         if let ExileLink::Cards(ids) = &mut permission.linked {

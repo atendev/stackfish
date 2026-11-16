@@ -262,7 +262,8 @@ pub(crate) enum ScriptedZoneMoveKind {
     /// CR 607.2a: `Exile` that also records each card landing in exile in
     /// `GameState::exiled_with` under `source`, while `source` is still on the
     /// battlefield. Every card landing in exile is also listed in
-    /// `GameState::exiled_this_resolution` under `stack_id` (CR 400.7j).
+    /// `GameState::exiled_this_resolution` under `stack_id` (CR 400.7j). It also
+    /// takes library cards, for `ExileTopLinked`.
     ExileLinked {
         source: ObjectId,
         stack_id: ObjectId,

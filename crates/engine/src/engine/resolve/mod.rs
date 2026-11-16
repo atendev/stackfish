@@ -362,7 +362,8 @@ impl Engine {
             Some(AbilityEffect::ExileLinked) => {
                 self.resolve_exile_linked_effect(top, legal_targets, events)
             }
-            // CR 400.7j: the controller, or the first legal player target.
+            // CR 400.7j
+            // The controller, or the first legal player target.
             Some(AbilityEffect::ExileTopLinked(amount)) => {
                 self.resolve_exile_top_linked_effect(top, legal_targets, *amount, events)
             }

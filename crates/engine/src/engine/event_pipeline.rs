@@ -75,7 +75,8 @@ impl Engine {
             if modal_resume && matches!(kind, GameEventKind::StackObjectResolved { .. }) {
                 continue;
             }
-            // CR 400.7j: a chain's intermediate `StackObjectResolved` was skipped above.
+            // CR 400.7j
+            // A chain's intermediate `StackObjectResolved` was skipped above.
             if matches!(
                 kind,
                 GameEventKind::StackObjectResolved { .. } | GameEventKind::Fizzled { .. }

@@ -309,6 +309,7 @@ pub enum AbilityEffect {
     /// `:SetExiledByThisEffect()` later in the same chain copies.
     // TODO: ExileTopLinked inside ForEachPlayer (CR 607.2a)
     // TODO: face-down exile of the top cards (CR 601.3f)
+    // TODO: impulse draw until the end of your next turn has no EffectDuration (CR 611.2a)
     ExileTopLinked(u32),
     /// `Game.Ops.ReturnToBattlefield(opts?)`: "return target creature card
     /// from a graveyard to the battlefield" (Reanimate, Zombify, Unburial

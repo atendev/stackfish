@@ -314,8 +314,11 @@ fn a_player_target_exiles_their_library_and_the_controller_plays_the_cards() {
 fn a_card_that_leaves_exile_and_returns_is_not_covered() {
     let mut engine = resolve(state_with(impulse(3, None)), Vec::new());
     let sorcery = in_exile(&engine, "Top Sorcery").unwrap();
+    assert!(cards_of(&engine, 1).contains(&sorcery));
     try_cast_spell(&mut engine, P0, sorcery, Vec::new()).unwrap();
     pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, P0, P1);
+    assert!(!cards_of(&engine, 1).contains(&sorcery));
     let mut state = engine.state().clone();
     let returned = ObjectId(300);
     state.objects.insert(
@@ -334,6 +337,10 @@ fn a_card_that_leaves_exile_and_returns_is_not_covered() {
         .push_back(returned);
     let engine = Engine::new(state);
     assert!(!can_cast(&engine, returned));
+    assert!(can_cast(
+        &engine,
+        in_exile(&engine, "Third Sorcery").unwrap()
+    ));
 }
 
 // CR 400.7j

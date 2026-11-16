@@ -426,7 +426,8 @@ impl Engine {
             controller: top.controller,
             ..permission.clone()
         };
-        // CR 400.7j: only `:SetExiledByThisEffect()` leaves a grant's list empty.
+        // CR 400.7j
+        // Only `:SetExiledByThisEffect()` leaves a grant's list empty.
         if let ExileLink::Cards(ids) = &mut permission.linked {
             ids.extend(
                 self.state

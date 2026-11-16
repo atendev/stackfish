@@ -294,7 +294,7 @@ duration (Light Up the Stage), no per-player form inside `ForEachPlayer`, and th
   card needs it.
 - Conditional flash (CR 601.3d), "as though it were a main phase", and instant-speed equip.
 - `Permanent`, `WhileConditionHolds` and "until the source leaves" durations for a grant (CR 611.2b).
-- Impulse draw from a spell: a linked Timed grant matches nothing once its source leaves (CR 607.2a).
+- Impulse draw until the end of your next turn (Light Up the Stage), per player inside `ForEachPlayer`, and face down (CR 400.7j, 601.3f).
 - Face-down linked cards (never offered, CR 601.3f), the
   stand-alone "play with the top card of your library revealed" effect without a permission
   (CR 401.5).
