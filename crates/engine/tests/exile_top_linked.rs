@@ -233,6 +233,7 @@ fn act_on_impulse_covers_exactly_the_three_exiled_cards() {
             kind: PlayerActionKind::PlayLand { card: land },
         })
         .expect("a land from among the exiled cards");
+    drain(&mut engine);
     try_cast_spell(&mut engine, P0, sorcery, Vec::new()).expect("a spell from among them");
     pay_free_and_drain(&mut engine);
     assert!(!can_cast(&engine, sorcery));
@@ -267,6 +268,8 @@ fn the_scratch_list_is_empty_whenever_a_player_has_priority() {
 #[test]
 fn a_card_a_replacement_sends_elsewhere_is_not_covered() {
     let mut state = state_with(impulse(3, None));
+    let redirect = definition(99, "Test Redirect", CardTypeSet::ENCHANTMENT);
+    put(&mut state, 99, redirect, P0, ZoneKind::Battlefield);
     state.replacement_effects.push(ReplacementEffect {
         source: ObjectId(99),
         spec: ReplacementSpec::Primitive {
