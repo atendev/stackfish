@@ -253,6 +253,38 @@ may build it with any id, such as `Game.CreateTimingPermission(0)`.
 A `:SetLinked()` grant still needs its source on the battlefield to keep its links, so one from a
 spell matches nothing.
 
+### Impulse draw — CR 400.7j
+
+"Exile the top three cards of your library. Until end of turn, you may play those cards" is a
+`Game.Ops.Chain` of `Game.Ops.ExileTopLinked(3)` and one grant per kind. A grant built with
+`:SetExiledByThisEffect()` covers exactly the cards the chain exiled before it, with `:SetZone("Exile")`
+required and `:SetLinked()` and `:Register()` refused. `:SetOwner` is ignored, since the cards are named.
+A card that is played, cast, or leaves exile drops out, and one that comes back is a new object (CR 400.7).
+
+```lua
+function s.operation()
+    local land = Game.CreateZonePermission(0)
+    land:SetAffected(Game.Affected.You)
+    land:SetZone("Exile")
+    land:SetKind("PlayLand")
+    land:SetExiledByThisEffect()
+    local cast = Game.CreateZonePermission(0)
+    cast:SetAffected(Game.Affected.You)
+    cast:SetZone("Exile")
+    cast:SetKind("Cast")
+    cast:SetExiledByThisEffect()
+    return Game.Ops.Chain(
+        Game.Ops.ExileTopLinked(3),
+        Game.Ops.GrantZonePermission(land, Game.Durations.UntilEndOfTurn),
+        Game.Ops.GrantZonePermission(cast, Game.Durations.UntilEndOfTurn)
+    )
+end
+```
+
+A card a replacement effect sends elsewhere is not covered. When the source is on the battlefield, each
+exiled card is also recorded as exiled with it (CR 607.2a). TODO: "until the end of your next turn" has no
+duration (Light Up the Stage), no per-player form inside `ForEachPlayer`, and the cards are not face down.
+
 ## Not modeled
 
 - Hand-reveal enforcement (above).
@@ -262,7 +294,7 @@ spell matches nothing.
   card needs it.
 - Conditional flash (CR 601.3d), "as though it were a main phase", and instant-speed equip.
 - `Permanent`, `WhileConditionHolds` and "until the source leaves" durations for a grant (CR 611.2b).
-- Impulse draw from a spell: a linked Timed grant matches nothing once its source leaves (CR 607.2a).
+- Impulse draw until the end of your next turn (Light Up the Stage), per player inside `ForEachPlayer`, and face down (CR 400.7j, 601.3f).
 - Face-down linked cards (never offered, CR 601.3f), the
   stand-alone "play with the top card of your library revealed" effect without a permission
   (CR 401.5).

@@ -263,6 +263,11 @@ pub(crate) fn bind_game_globals(
     // CR 701.17a: mill `n` cards. The player is the controller unless the ability declares a player target (`s.target_requirement()`).
     let mill = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::Mill(n))))?;
     ops.set("Mill", mill)?;
+    // CR 400.7j: exile the top `n` cards face up, linked to the resolving effect for a
+    // later `:SetExiledByThisEffect()` grant. Player selection as for Mill.
+    let exile_top_linked =
+        lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::ExileTopLinked(n))))?;
+    ops.set("ExileTopLinked", exile_top_linked)?;
     // CR 119.3: same player selection as Mill. A negative `n` is a Lua error;
     // use `GainLife` for signed amounts.
     let lose_life =
@@ -606,7 +611,7 @@ pub(crate) fn bind_game_globals(
         lua.create_function(|_, (builder, duration): (AnyUserData, AnyUserData)| {
             let mut permission = builder
                 .borrow::<ZonePermissionBuilder>()?
-                .build("Game.Ops.GrantZonePermission")?;
+                .build("Game.Ops.GrantZonePermission", true)?;
             permission.duration = timed_grant_duration(&duration, "GrantZonePermission")?;
             Ok(OperationTag(AbilityEffect::GrantZonePermission(Box::new(
                 permission,
@@ -1419,6 +1424,7 @@ pub(crate) fn bind_game_globals(
                 cards: None,
                 library_top: false,
                 linked: false,
+                exiled_by_this_effect: false,
                 reveals_top: false,
                 rider: None,
                 function_zone: None,

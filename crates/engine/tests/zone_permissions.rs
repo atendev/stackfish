@@ -83,7 +83,7 @@ fn with_permission(
         kind,
         cards: FilterSpec::ANY,
         library_top: false,
-        linked: false,
+        linked: ExileLink::None,
         reveals_top: false,
         duration: EffectDuration::WhileSourceOnBattlefield,
         rider: None,
@@ -454,7 +454,7 @@ fn with_linked_permission(state: GameState) -> GameState {
         ZoneKind::Exile,
         FilterController::Any,
     );
-    state.zone_permissions[0].linked = true;
+    state.zone_permissions[0].linked = ExileLink::Source;
     state
 }
 

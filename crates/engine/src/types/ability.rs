@@ -300,8 +300,17 @@ pub enum AbilityEffect {
     /// exiled card in `GameState::exiled_with` under the ability's source so a
     /// `linked` `ZonePermission` can open it. Source zones are `Exile`'s. No
     /// link is recorded when the source left the battlefield first.
-    // TODO: ExileLinked has no untargeted or library form (CR 607.2a)
+    // TODO: ExileLinked has no untargeted battlefield form (CR 607.2a)
     ExileLinked,
+    /// `Game.Ops.ExileTopLinked(n)` (CR 400.7j): the affected player's top `n`
+    /// library cards go face up to exile, as `Mill` picks its player. A short
+    /// library exiles what it has and an empty one nothing. They are listed in
+    /// `GameState::exiled_this_resolution`, which a grant built with
+    /// `:SetExiledByThisEffect()` later in the same chain copies.
+    // TODO: ExileTopLinked inside ForEachPlayer (CR 607.2a)
+    // TODO: face-down exile of the top cards (CR 601.3f)
+    // TODO: impulse draw until the end of your next turn has no EffectDuration (CR 611.2a)
+    ExileTopLinked(u32),
     /// `Game.Ops.ReturnToBattlefield(opts?)`: "return target creature card
     /// from a graveyard to the battlefield" (Reanimate, Zombify, Unburial
     /// Rites). Every legal object target moves through
@@ -2240,6 +2249,7 @@ mod tests {
             off_battlefield_scripts_run: std::collections::HashSet::new(),
             linked_exiles: Vec::new(),
             exiled_with: Vec::new(),
+            exiled_this_resolution: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
             delayed_triggers: Vec::new(),

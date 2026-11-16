@@ -161,6 +161,10 @@ pub struct GameState {
     /// `commands::retire_object` drops an entry when either object leaves.
     // TODO: linked records do not cover cards exiled by a replaced source copy (CR 607.2a)
     pub exiled_with: Vec<LinkedExile>,
+    /// CR 400.7j: cards the resolving stack object exiled, `source` being its
+    /// `stack_id`. Cleared when a resolution starts and ends, so it is empty
+    /// whenever a player has priority. A `Cards` permission copies it.
+    pub exiled_this_resolution: Vec<LinkedExile>,
     /// CR 702.35b, 601.3: one-shot timing waiver, set before
     /// `Engine::submit_madness_cast` queues its `CastSpell` and consumed by the
     /// sorcery-speed gate in `commands::cast::execute_cast_spell`. A side
@@ -385,6 +389,7 @@ mod tests {
             off_battlefield_scripts_run: std::collections::HashSet::new(),
             linked_exiles: Vec::new(),
             exiled_with: Vec::new(),
+            exiled_this_resolution: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
             delayed_triggers: Vec::new(),

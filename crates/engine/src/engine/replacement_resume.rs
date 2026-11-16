@@ -773,18 +773,25 @@ impl Engine {
                         exiled: new_id,
                     });
                 }
-                // CR 607.2a
-                if let ScriptedZoneMoveKind::ExileLinked { source } = kind
+                if let ScriptedZoneMoveKind::ExileLinked { source, stack_id } = kind
                     && to == ZoneKind::Exile
-                    && self
+                {
+                    // CR 400.7j
+                    self.state.exiled_this_resolution.push(LinkedExile {
+                        source: stack_id,
+                        exiled: new_id,
+                    });
+                    // CR 607.2a
+                    if self
                         .state
                         .object(source)
                         .is_some_and(|o| o.zone == ZoneKind::Battlefield)
-                {
-                    self.state.exiled_with.push(LinkedExile {
-                        source,
-                        exiled: new_id,
-                    });
+                    {
+                        self.state.exiled_with.push(LinkedExile {
+                            source,
+                            exiled: new_id,
+                        });
+                    }
                 }
 
                 let event_id = self.state.allocate_event_id();

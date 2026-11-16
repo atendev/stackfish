@@ -1,0 +1,189 @@
+# CR 400.7j: Act on Impulse exiles the top three cards of its controller's library, and the
+# controller may play those cards this turn but no others. The real card lasts until the end of
+# your next turn; the engine has no such duration yet, so this fixture uses this turn.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "impulse"
+name = "Act on Impulse"
+types = ["Sorcery"]
+script = """
+local s = {}
+function s.operation()
+    local land = Game.CreateZonePermission(0)
+    land:SetAffected(Game.Affected.You)
+    land:SetZone("Exile")
+    land:SetKind("PlayLand")
+    land:SetExiledByThisEffect()
+    local cast = Game.CreateZonePermission(0)
+    cast:SetAffected(Game.Affected.You)
+    cast:SetZone("Exile")
+    cast:SetKind("Cast")
+    cast:SetExiledByThisEffect()
+    return Game.Ops.Chain(
+        Game.Ops.ExileTopLinked(3),
+        Game.Ops.GrantZonePermission(land, Game.Durations.UntilEndOfTurn),
+        Game.Ops.GrantZonePermission(cast, Game.Durations.UntilEndOfTurn)
+    )
+end
+function s.register_abilities(c)
+end
+return s
+"""
+
+[[cards]]
+key = "drawn"
+name = "Drawn Land"
+types = ["Land"]
+
+[[cards]]
+key = "top_land"
+name = "Exiled Land"
+types = ["Land"]
+
+[[cards]]
+key = "top_sorcery"
+name = "Exiled Sorcery"
+types = ["Sorcery"]
+
+[[cards]]
+key = "top_bear"
+name = "Exiled Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "deep"
+name = "Deep Land"
+types = ["Land"]
+
+[[cards]]
+key = "stray"
+name = "Stray Sorcery"
+types = ["Sorcery"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "impulse"
+
+# Solo game, so the turn 1 draw step runs and takes the first library card (CR 103.8a, 704.5b).
+[[setup]]
+player = 0
+zone = "library"
+card = "drawn"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "top_land"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "top_sorcery"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "top_bear"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "deep"
+
+[[setup]]
+player = 0
+zone = "exile"
+card = "stray"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "impulse"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "top_land"
+equals = "exile"
+
+[[steps]]
+type = "assert_object_zone"
+card = "top_bear"
+equals = "exile"
+
+[[steps]]
+type = "assert_object_zone"
+card = "deep"
+equals = "library"
+
+[[steps]]
+type = "play_land"
+player = 0
+card = "stray"
+expect_error = true
+
+[[steps]]
+type = "play_land"
+player = 0
+card = "top_land"
+
+[[steps]]
+type = "assert_object_zone"
+card = "top_land"
+equals = "battlefield"
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "stray"
+expect_error = true
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "top_sorcery"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "top_sorcery"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "stray"
+equals = "exile"

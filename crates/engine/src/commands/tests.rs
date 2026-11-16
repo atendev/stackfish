@@ -15,9 +15,9 @@ use crate::types::game::{GameState, LinkedExile};
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo};
 use crate::types::mana::ManaPool;
 use crate::types::player::{
-    DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
-    HandSizeEffect, HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerState,
-    TimingPermission, ZonePermission, ZonePermissionKind,
+    DrawLimitAffected, DrawLimitModifier, ExileLink, HandRevealAffected, HandRevealModifier,
+    HandSizeAffected, HandSizeEffect, HandSizeModifier, LandPlayAffected, LandPlayModifier,
+    PlayerState, TimingPermission, ZonePermission, ZonePermissionKind,
 };
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
@@ -79,6 +79,7 @@ fn minimal_state() -> GameState {
         off_battlefield_scripts_run: std::collections::HashSet::new(),
         linked_exiles: Vec::new(),
         exiled_with: Vec::new(),
+        exiled_this_resolution: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
         delayed_triggers: Vec::new(),
@@ -217,7 +218,7 @@ fn dummy_zone_permission(source: ObjectId) -> ZonePermission {
         kind: ZonePermissionKind::PlayLand,
         cards: FilterSpec::ANY,
         library_top: false,
-        linked: false,
+        linked: ExileLink::None,
         reveals_top: false,
         duration: EffectDuration::WhileSourceOnBattlefield,
         rider: None,
@@ -270,6 +271,33 @@ fn remap_abilities_drops_links_to_a_moved_source_or_exiled_card() {
             source: ObjectId(2),
             exiled: ObjectId(6),
         }]
+    );
+}
+
+fn cards_permission(ids: &[u64]) -> ZonePermission {
+    ZonePermission {
+        zone: ZoneKind::Exile,
+        linked: ExileLink::Cards(ids.iter().map(|id| ObjectId(*id)).collect()),
+        ..dummy_zone_permission(ObjectId(1))
+    }
+}
+
+// CR 400.7
+#[test]
+fn both_purges_prune_a_moved_card_from_a_cards_permission() {
+    let mut state = minimal_state();
+    state.zone_permissions.push(cards_permission(&[5, 6, 7]));
+    retire_object(&mut state, ObjectId(5));
+    remap_abilities(&mut state, ObjectId(7), ObjectId(8));
+    assert_eq!(
+        state.zone_permissions[0].linked,
+        ExileLink::Cards(vec![ObjectId(6)])
+    );
+    retire_object(&mut state, ObjectId(6));
+    assert_eq!(
+        state.zone_permissions[0].linked,
+        ExileLink::Cards(Vec::new()),
+        "an emptied row stays until its duration"
     );
 }
 

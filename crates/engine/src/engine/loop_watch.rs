@@ -110,6 +110,8 @@ pub(crate) fn fingerprint(state: &GameState) -> String {
         off_battlefield_scripts_run,
         linked_exiles,
         exiled_with,
+        // Empty whenever a player has priority, so it never differs between loop iterations.
+        exiled_this_resolution: _,
         pending_timing_bypass,
         pending_free_cast,
         delayed_triggers,

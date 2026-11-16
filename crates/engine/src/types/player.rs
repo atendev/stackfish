@@ -362,6 +362,20 @@ pub enum ZonePermissionKind {
     Cast,
 }
 
+/// Which cards in exile a `ZonePermission` covers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ExileLink {
+    /// Every card in the zone, subject to the other fields.
+    #[default]
+    None,
+    /// CR 607.2a: cards in `GameState.exiled_with` under the row's `source`.
+    Source,
+    /// CR 400.7j: exactly these cards, named by the effect that exiled them. A
+    /// grant built with `:SetExiledByThisEffect()` carries an empty list until
+    /// its resolution fills it in, so a stored row only ever loses ids.
+    Cards(Vec<ObjectId>),
+}
+
 /// CR 601.3, 305.1: a "you may play lands from your graveyard" effect, static
 /// (Crucible of Worlds) or a Timed grant. It answers where a card may come
 /// from, and `TimingPermission` answers when. `commands::can_cast_from_zone` and
@@ -386,10 +400,8 @@ pub struct ZonePermission {
     /// CR 401.5: only the top card of its owner's library matches, found
     /// again at every check. Set only with zone `Library`.
     pub library_top: bool,
-    /// CR 607.2a: only cards in `GameState.exiled_with` under `source` match.
-    /// Set only with zone `Exile`.
-    // TODO: a Timed linked grant matches nothing once its source leaves, so a spell's impulse draw has no exile link (CR 607.2a)
-    pub linked: bool,
+    /// Which exiled cards match. Set only with zone `Exile`.
+    pub linked: ExileLink,
     /// CR 401.5: every player sees the top card `library_top` opens, not just
     /// the players it affects.
     pub reveals_top: bool,
@@ -416,15 +428,22 @@ impl ZonePermission {
 
     /// Whether `card` is one this permission opens, whoever acts on it.
     fn covers(&self, state: &GameState, card: &GameObject) -> bool {
+        // The ids of a `Cards` row already name the cards, so `owners` would only
+        // block an opponent's card the effect exiled.
+        let owner_ok = matches!(self.linked, ExileLink::Cards(_))
+            || relative(self.owners, card.owner, self.controller);
         self.zone == card.zone
-            && relative(self.owners, card.owner, self.controller)
+            && owner_ok
             && self.cards.matches(card, card.owner, self.controller)
             && (!self.library_top || is_top_of_library(state, card))
-            && (!self.linked
-                || state
+            && match &self.linked {
+                ExileLink::None => true,
+                ExileLink::Source => state
                     .exiled_with
                     .iter()
-                    .any(|link| link.source == self.source && link.exiled == card.object_id))
+                    .any(|link| link.source == self.source && link.exiled == card.object_id),
+                ExileLink::Cards(ids) => ids.contains(&card.object_id),
+            }
     }
 }
 

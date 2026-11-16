@@ -71,7 +71,7 @@ fn a_script_registers_a_graveyard_land_permission() {
             kind: ZonePermissionKind::PlayLand,
             cards: FilterSpec::ANY,
             library_top: false,
-            linked: false,
+            linked: ExileLink::None,
             reveals_top: false,
             duration: EffectDuration::WhileSourceOnBattlefield,
             rider: None,
@@ -162,7 +162,9 @@ fn a_script_registers_a_revealed_library_top_permission() {
         panic!("one permission, got {:?}", state.zone_permissions);
     };
     assert_eq!(permission.zone, ZoneKind::Library);
-    assert!(permission.library_top && permission.reveals_top && !permission.linked);
+    assert!(
+        permission.library_top && permission.reveals_top && permission.linked == ExileLink::None
+    );
 }
 
 // CR 607.2a
@@ -178,7 +180,11 @@ fn a_script_registers_a_linked_exile_permission() {
     let [permission] = state.zone_permissions.as_slice() else {
         panic!("one permission, got {:?}", state.zone_permissions);
     };
-    assert!(permission.linked && !permission.library_top && !permission.reveals_top);
+    assert!(
+        permission.linked == ExileLink::Source
+            && !permission.library_top
+            && !permission.reveals_top
+    );
 }
 
 #[test]

@@ -168,7 +168,8 @@ original plan:
   library and cards exiled with a source). Each is purged by source in `retire_object` and
   `remap_abilities`, except a Timed permission from a resolving effect, which carries a
   `duration` and expires in the turn drains instead. "Exiled with" links live in `exiled_with`, apart from the `linked_exiles`
-  "until it leaves" returns, and end when either object moves. A revealed library top reaches a
+  "until it leaves" returns, and end when either object moves. An impulse draw's grant names its cards
+  in an `ExileLink::Cards` row, filled from the per-resolution `exiled_this_resolution` list. A revealed library top reaches a
   Seat through `library_top_visible_to`, read at check time. A spell's leave-stack rider
   (flashback's exile, or one a zone permission supplies) is copied onto its `StackObject` at
   cast, and `StackObject::leave_destination` is the one reader at resolve, fizzle and counter. See
