@@ -1379,6 +1379,7 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::ExileAll { .. }
             | AbilityEffect::ExileUntilSourceLeaves
             | AbilityEffect::ExileLinked
+            | AbilityEffect::ExileTopLinked(_)
             | AbilityEffect::ReturnToHand
             | AbilityEffect::ReturnSelfToHand
             | AbilityEffect::ReturnAllToHand { .. }
@@ -1556,6 +1557,7 @@ pub(crate) fn combine_chosen_modes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ExileLink;
     use crate::types::ability::AbilityEffect;
     use crate::types::card::{
         CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SpellMode,
@@ -1726,6 +1728,7 @@ mod tests {
             off_battlefield_scripts_run: std::collections::HashSet::new(),
             linked_exiles: Vec::new(),
             exiled_with: Vec::new(),
+            exiled_this_resolution: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
             delayed_triggers: Vec::new(),
@@ -1935,7 +1938,7 @@ mod tests {
             kind,
             cards: FilterSpec::ANY,
             library_top: false,
-            linked: false,
+            linked: ExileLink::None,
             reveals_top: false,
             duration: EffectDuration::WhileSourceOnBattlefield,
             rider: None,

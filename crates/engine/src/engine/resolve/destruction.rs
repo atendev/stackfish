@@ -175,7 +175,10 @@ impl Engine {
             })
             .collect();
         self.process_state = self.continue_scripted_zone_move(
-            ScriptedZoneMoveKind::ExileLinked { source: top.source },
+            ScriptedZoneMoveKind::ExileLinked {
+                source: top.source,
+                stack_id: top.stack_id,
+            },
             targets,
             ScriptedZoneMoveThen::StackResolution {
                 stack_id: top.stack_id,

@@ -802,7 +802,7 @@ mod tests {
                 kind: stackfish_engine::ZonePermissionKind::Cast,
                 cards: stackfish_engine::FilterSpec::ANY,
                 library_top: true,
-                linked: false,
+                linked: stackfish_engine::ExileLink::None,
                 reveals_top,
                 duration: stackfish_engine::EffectDuration::WhileSourceOnBattlefield,
                 rider: None,

@@ -334,6 +334,7 @@ pub(super) fn validate_activate_ability(
         | Some(AbilityEffect::Exile)
         | Some(AbilityEffect::ExileUntilSourceLeaves)
         | Some(AbilityEffect::ExileLinked)
+        | Some(AbilityEffect::ExileTopLinked(_))
         | Some(AbilityEffect::ReturnToHand)
         | Some(AbilityEffect::ReturnSelfToHand)
         | Some(AbilityEffect::ReturnAllToHand { .. })

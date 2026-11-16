@@ -13,7 +13,7 @@ use crate::types::effect::{
 };
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, Target};
-use crate::types::player::{TimingPermission, ZonePermission};
+use crate::types::player::{ExileLink, TimingPermission, ZonePermission};
 use crate::types::stack::StackObject;
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -421,11 +421,22 @@ impl Engine {
         permission: &ZonePermission,
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        self.state.zone_permissions.push(ZonePermission {
+        let mut permission = ZonePermission {
             source: top.source,
             controller: top.controller,
             ..permission.clone()
-        });
+        };
+        // CR 400.7j: only `:SetExiledByThisEffect()` leaves a grant's list empty.
+        if let ExileLink::Cards(ids) = &mut permission.linked {
+            ids.extend(
+                self.state
+                    .exiled_this_resolution
+                    .iter()
+                    .filter(|link| link.source == top.stack_id)
+                    .map(|link| link.exiled),
+            );
+        }
+        self.state.zone_permissions.push(permission);
         ControlFlow::Continue(events)
     }
 

@@ -78,6 +78,33 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
+    /// CR 400.7j: the top `min(n, library size)` cards of the affected player,
+    /// exiled face up. Exiling is not drawing, so an empty library never loses.
+    pub(super) fn resolve_exile_top_linked_effect(
+        &mut self,
+        top: &StackObject,
+        legal_targets: &[Target],
+        amount: u32,
+        events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let Some(player) = affected_player(top, legal_targets) else {
+            return ControlFlow::Continue(events);
+        };
+        let ids = self.top_of_library_ids(player, amount);
+        self.process_state = self.continue_scripted_zone_move(
+            ScriptedZoneMoveKind::ExileLinked {
+                source: top.source,
+                stack_id: top.stack_id,
+            },
+            ids,
+            ScriptedZoneMoveThen::StackResolution {
+                stack_id: top.stack_id,
+            },
+            events,
+        );
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
     /// The first `n` cards of `player`'s library, top first; fewer if the
     /// library is smaller (CR 701.17b).
     pub(in crate::engine) fn top_of_library_ids(

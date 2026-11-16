@@ -37,7 +37,7 @@ fn zone_template(duration: EffectDuration) -> ZonePermission {
         kind: ZonePermissionKind::PlayLand,
         cards: FilterSpec::ANY,
         library_top: false,
-        linked: false,
+        linked: ExileLink::None,
         reveals_top: false,
         duration,
         rider: None,
@@ -236,7 +236,7 @@ fn a_timed_linked_grant_from_a_spell_matches_nothing() {
     let engine = resolve_grant(grant_zone(ZonePermission {
         zone: ZoneKind::Exile,
         kind: ZonePermissionKind::Cast,
-        linked: true,
+        linked: ExileLink::Source,
         ..zone_template(EffectDuration::UntilEndOfTurn)
     }));
     let mut state = engine.state().clone();
@@ -285,7 +285,7 @@ fn a_timed_linked_grant_matches_while_its_source_stays() {
         controller: P0,
         zone: ZoneKind::Exile,
         kind: ZonePermissionKind::Cast,
-        linked: true,
+        linked: ExileLink::Source,
         ..zone_template(EffectDuration::UntilEndOfTurn)
     });
     assert!(has_zone_permission(

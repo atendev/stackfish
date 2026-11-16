@@ -21,9 +21,9 @@ use crate::types::effect::{
 };
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::player::{
-    DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected,
-    HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerAffected, PlayerKeyword,
-    PlayerKeywordModifier, TimingPermission, ZonePermission, ZonePermissionKind,
+    DrawLimitAffected, DrawLimitModifier, ExileLink, HandRevealAffected, HandRevealModifier,
+    HandSizeAffected, HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerAffected,
+    PlayerKeyword, PlayerKeywordModifier, TimingPermission, ZonePermission, ZonePermissionKind,
 };
 use crate::types::stack::LeaveStackRider;
 use crate::types::target::TargetSpec;
@@ -1428,6 +1428,7 @@ pub(crate) struct ZonePermissionBuilder {
     pub(crate) cards: Option<FilterSpec>,
     pub(crate) library_top: bool,
     pub(crate) linked: bool,
+    pub(crate) exiled_by_this_effect: bool,
     pub(crate) reveals_top: bool,
     pub(crate) rider: Option<LeaveStackRider>,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
@@ -1464,6 +1465,10 @@ impl UserData for ZonePermissionBuilder {
         });
         methods.add_method_mut("SetLinked", |_, this, ()| {
             this.linked = true;
+            Ok(())
+        });
+        methods.add_method_mut("SetExiledByThisEffect", |_, this, ()| {
+            this.exiled_by_this_effect = true;
             Ok(())
         });
         methods.add_method_mut("SetRevealTop", |_, this, ()| {
@@ -1510,7 +1515,7 @@ impl UserData for ZonePermissionBuilder {
             ))),
         });
         methods.add_method_mut("Register", |_, this, ()| {
-            let permission = this.build("Register()")?;
+            let permission = this.build("Register()", false)?;
             this.registry
                 .borrow_mut()
                 .pending_zone_permissions
@@ -1523,7 +1528,14 @@ impl UserData for ZonePermissionBuilder {
 impl ZonePermissionBuilder {
     /// As `TimingPermissionBuilder::build`, for `:Register` and
     /// `Game.Ops.GrantZonePermission`.
-    pub(crate) fn build(&self, call: &str) -> mlua::Result<ZonePermission> {
+    ///
+    /// `allow_this_effect` is true only for a grant, which has a resolution to take
+    /// `:SetExiledByThisEffect()`'s cards from.
+    pub(crate) fn build(
+        &self,
+        call: &str,
+        allow_this_effect: bool,
+    ) -> mlua::Result<ZonePermission> {
         let missing = |setter: &str| {
             mlua::Error::RuntimeError(format!(
                 "{call} called with no {setter}() - a zone permission needs it"
@@ -1543,6 +1555,17 @@ impl ZonePermissionBuilder {
         if self.linked && zone != ZoneKind::Exile {
             return refuse("SetLinked() needs SetZone(\"Exile\")");
         }
+        if self.exiled_by_this_effect {
+            if !allow_this_effect {
+                return refuse("SetExiledByThisEffect() needs a resolving effect, not Register()");
+            }
+            if self.linked {
+                return refuse("SetExiledByThisEffect() and SetLinked() exclude each other");
+            }
+            if zone != ZoneKind::Exile {
+                return refuse("SetExiledByThisEffect() needs SetZone(\"Exile\")");
+            }
+        }
         if self.reveals_top && !self.library_top {
             return refuse("SetRevealTop() needs SetFromLibraryTop()");
         }
@@ -1559,7 +1582,13 @@ impl ZonePermissionBuilder {
             kind,
             cards: self.cards.clone().unwrap_or(FilterSpec::ANY),
             library_top: self.library_top,
-            linked: self.linked,
+            linked: if self.linked {
+                ExileLink::Source
+            } else if self.exiled_by_this_effect {
+                ExileLink::Cards(Vec::new())
+            } else {
+                ExileLink::None
+            },
             reveals_top: self.reveals_top,
             duration: EffectDuration::WhileSourceOnBattlefield,
             rider: self.rider,

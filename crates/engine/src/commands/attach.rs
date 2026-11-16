@@ -8,6 +8,7 @@ use crate::types::ability::{AbilityEffect, ConditionPrimitive, ConditionSpec, Co
 use crate::types::card::{CardDefinition, CardTypeSet, ModeChoice};
 use crate::types::game::GameState;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
+use crate::types::player::ExileLink;
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
@@ -75,6 +76,7 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     state
         .exiled_with
         .retain(|link| link.source != old_id && link.exiled != old_id);
+    prune_linked_cards(state, old_id);
     // CR 611.3b, 400.7
     // A modifier has no duration, so every row keyed to the old id ends. A cast
     // fixes its cost before this call, so a card's own reduction still applies.
@@ -86,6 +88,16 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
         .retain(|m| m.source != old_id);
     state.draw_limit_modifiers.retain(|m| m.source != old_id);
     state.land_play_modifiers.retain(|m| m.source != old_id);
+}
+
+/// CR 400.7: a card that changes zones is a new object, so a `Cards` permission
+/// stops naming it. An emptied row stays until its duration and matches nothing.
+fn prune_linked_cards(state: &mut GameState, old_id: ObjectId) {
+    for permission in &mut state.zone_permissions {
+        if let ExileLink::Cards(ids) = &mut permission.linked {
+            ids.retain(|id| *id != old_id);
+        }
+    }
 }
 
 /// CR 707.2a: removes every `RegisteredAbility`, `ContinuousEffect` and
@@ -476,6 +488,7 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     state
         .exiled_with
         .retain(|link| link.source != old_id && link.exiled != old_id);
+    prune_linked_cards(state, old_id);
     departed_triggered
 }
 

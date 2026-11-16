@@ -75,6 +75,13 @@ impl Engine {
             if modal_resume && matches!(kind, GameEventKind::StackObjectResolved { .. }) {
                 continue;
             }
+            // CR 400.7j: a chain's intermediate `StackObjectResolved` was skipped above.
+            if matches!(
+                kind,
+                GameEventKind::StackObjectResolved { .. } | GameEventKind::Fizzled { .. }
+            ) {
+                self.state.exiled_this_resolution.clear();
+            }
             // CR 510.2: damage is applied only now that replacements have settled
             // its final amount and target.
             let applied = if let GameEventKind::DamageDealt {

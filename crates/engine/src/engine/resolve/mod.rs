@@ -58,6 +58,7 @@ impl Engine {
         }
         // A leftover continuation from an unfinished resolution must not resume into this one.
         self.modal_continuation = None;
+        self.state.exiled_this_resolution.clear();
         let Some(mut top) = self.state.stack.pop() else {
             // Defensive: the all-pass check saw a non-empty stack.
             self.process_state = ProcessState::PriorityWindow;
@@ -360,6 +361,10 @@ impl Engine {
             // CR 607.2a
             Some(AbilityEffect::ExileLinked) => {
                 self.resolve_exile_linked_effect(top, legal_targets, events)
+            }
+            // CR 400.7j: the controller, or the first legal player target.
+            Some(AbilityEffect::ExileTopLinked(amount)) => {
+                self.resolve_exile_top_linked_effect(top, legal_targets, *amount, events)
             }
             // CR 400.3
             Some(AbilityEffect::ReturnToHand) => {

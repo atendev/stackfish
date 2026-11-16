@@ -261,9 +261,11 @@ pub(crate) enum ScriptedZoneMoveKind {
     },
     /// CR 607.2a: `Exile` that also records each card landing in exile in
     /// `GameState::exiled_with` under `source`, while `source` is still on the
-    /// battlefield.
+    /// battlefield. Every card landing in exile is also listed in
+    /// `GameState::exiled_this_resolution` under `stack_id` (CR 400.7j).
     ExileLinked {
         source: ObjectId,
+        stack_id: ObjectId,
     },
 }
 
@@ -272,9 +274,13 @@ impl ScriptedZoneMoveKind {
     /// take the zone the target actually sits in.
     pub(in crate::engine) fn accepts_source_zone(self, zone: ZoneKind) -> bool {
         match self {
-            ScriptedZoneMoveKind::Exile | ScriptedZoneMoveKind::ExileLinked { .. } => {
+            ScriptedZoneMoveKind::Exile => {
                 matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard)
             }
+            ScriptedZoneMoveKind::ExileLinked { .. } => matches!(
+                zone,
+                ZoneKind::Battlefield | ZoneKind::Graveyard | ZoneKind::Library
+            ),
             ScriptedZoneMoveKind::Bounce => {
                 matches!(
                     zone,
